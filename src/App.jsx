@@ -239,13 +239,23 @@ const HUC_STATUS_COLOR = {
 };
 
 // ─── PROFIT MARGIN CONFIG ────────────────────────────────────────────────────
-// All pricing targets 30% gross profit margin
-// Client price = partner cost ÷ (1 - 0.30)
-const PROFIT_MARGIN = 0.30;
+// Have Us Clean pay structure:
+//   Partner earns 65% of the client price (pre-tax)
+//   Company keeps 35% of the client price (gross profit)
+//   This replaces the old hourly-cost model
+const PARTNER_SHARE = 0.65;  // partner gets 65% of job revenue
+const COMPANY_SHARE = 0.35;  // company keeps 35%
+const PROFIT_MARGIN = 0.35;  // used for markup display
+
+// Given a client price, calculate partner pay
+const partnerPayFromPrice = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
+// Given a client price, calculate company profit
+const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
+// Legacy markup helper (still used for commercial)
 const markupFactor = (cost) => Math.ceil(cost / (1 - PROFIT_MARGIN));
 
-// Partner hourly rates — region-aware (set from active region config)
-const PARTNER_COST_PER_HOUR = 24; // fallback; overridden per-region in quote engine
+// Partner hourly rates — only used as a fallback estimate for hours calculation
+const PARTNER_COST_PER_HOUR = 24;
 
 // Residential: cost-based → sqft + beds + baths drives labor hours → price for 30% margin
 // sqft tiers for sanity check / cross-reference
@@ -313,10 +323,10 @@ const initPartners = [
 ];
 
 const initJobs = [
-  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:"2026-04-03", time:"9:00 AM",  partnerId:1, status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:75, profit:135, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:"2026-04-17", region:"ON" },
-  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:"2026-04-03", time:"1:00 PM",  partnerId:3, status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:96, profit:224, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
-  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:"2026-04-04", time:"10:00 AM", partnerId:2, status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:46, profit:134, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:"2026-04-11", region:"ON" },
-  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:"2026-04-02", time:"8:00 AM",  partnerId:1, status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:125, profit:325, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
+  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:"2026-04-03", time:"9:00 AM",  partnerId:1, status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:"2026-04-17", region:"ON" },
+  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:"2026-04-03", time:"1:00 PM",  partnerId:3, status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
+  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:"2026-04-04", time:"10:00 AM", partnerId:2, status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:"2026-04-11", region:"ON" },
+  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:"2026-04-02", time:"8:00 AM",  partnerId:1, status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
 ];
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
@@ -425,8 +435,8 @@ function calcResQuote(f, region = ACTIVE_REGION) {
   const taxAmount = preTaxTotal * taxRate;
   const finalTotal = preTaxTotal + taxAmount;
 
-  const partnerPay = Math.round(totalCost);
-  const profit = Math.round(preTaxTotal - totalCost);
+  const partnerPay = partnerPayFromPrice(preTaxTotal);
+  const profit = companyProfitFromPrice(preTaxTotal);
   const margin = preTaxTotal > 0 ? ((profit / preTaxTotal) * 100).toFixed(1) : "0";
 
   // Frequency pricing variants (for email / quote display)
@@ -464,12 +474,12 @@ function calcComQuote(f, region = ACTIVE_REGION) {
   const taxAmount = preTaxTotal * taxRate;
   const finalTotal = preTaxTotal + taxAmount;
 
-  const profit = Math.round(preTaxTotal - totalCost);
+  const profit = companyProfitFromPrice(preTaxTotal);
   const margin = preTaxTotal > 0 ? ((profit/preTaxTotal)*100).toFixed(1) : "0";
   const visitsPerMonth = f.frequency==="Daily"?22:f.frequency==="Weekly"?4:f.frequency==="Bi-Weekly"?2:1;
   const monthly = finalTotal * visitsPerMonth;
   const contract = monthly * (f.contractMonths||1);
-  return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:Math.round(totalCost), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
+  return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:partnerPayFromPrice(preTaxTotal), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
 }
 
 function ProfitBadge({ margin }) {
@@ -515,11 +525,11 @@ function QuoteBox({ q, type = "res" }) {
 
       <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:12 }}>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
-          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PARTNER COST</div>
-          <div style={{ fontSize:18, fontWeight:800, color:C.red }}>{f(q.partnerPay)}</div>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PARTNER PAY (65%)</div>
+          <div style={{ fontSize:18, fontWeight:800, color:C.blue }}>{f(q.partnerPay)}</div>
         </div>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
-          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>YOUR PROFIT</div>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>COMPANY (35%)</div>
           <div style={{ fontSize:18, fontWeight:800, color:C.gold }}>{f(q.profit)}</div>
         </div>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
@@ -1194,11 +1204,32 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
 
   const bookLead = (lead) => {
     const q = calcResQuote(lead, region);
-    const newJob = { id:Date.now(), client:lead.name, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, status:"scheduled", hours:Math.ceil(q.serviceHours), upsells:lead.addons.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null, region:region.id };
-    setJobs(js=>[...js,newJob]);
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"Booked",workOrder:newJob.id,bookedDate:new Date().toLocaleDateString()}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"Booked"});
-    alert("✅ Work order created and added to Jobs tab!");
+    const newJob = {
+      id: Date.now(),
+      client: lead.name,
+      address: lead.address,
+      type: lead.serviceType,
+      date: lead.preferredDate || new Date().toISOString().split("T")[0],
+      time: lead.preferredTime || "9:00 AM",
+      partnerId: partners[0]?.id || 1,
+      status: "scheduled",
+      hours: Math.ceil(q.serviceHours),
+      upsells: lead.addons.map(id => RES_ADDONS.find(x => x.id === id)?.label).filter(Boolean),
+      beforePics: [], afterPics: [], summary: "",
+      clientPrice: Math.round(q.total),
+      partnerPay: q.partnerPay,
+      profit: q.profit,
+      checkIn: null, checkOut: null,
+      checkInCoords: null, checkOutCoords: null,
+      recurring: lead.frequency,
+      nextDate: null,
+      region: region.id,
+      notes: lead.notes || "",
+    };
+    setJobs(js => [...js, newJob]);
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
+    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
+    alert(`✅ Job booked! Added to Jobs tab.\n\nClient: ${newJob.client}\nDate: ${newJob.date}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} (65%)\nCompany: ${region.currencySymbol}${newJob.profit} (35%)`);
   };
 
   const confirmPayment = (lead) => {
@@ -3387,51 +3418,87 @@ function Partners({ partners, setPartners, jobs }) {
 // ─── PAY ─────────────────────────────────────────────────────────────────────
 function Pay({ partners, jobs }) {
   const completedJobs = jobs.filter(j => j.status === "completed");
-  const pendingJobs = jobs.filter(j => j.status !== "completed");
+  const pendingJobs   = jobs.filter(j => j.status !== "completed" && j.status !== "scheduled" ? false : j.status === "scheduled");
+  const allActiveJobs = jobs.filter(j => j.status !== "completed");
+
+  // Always calculate partnerPay as 65% of clientPrice if not already set correctly
+  const getPartnerPay = (job) => {
+    if (job.partnerPay && job.clientPrice && Math.abs(job.partnerPay - job.clientPrice * 0.65) < 5) return job.partnerPay;
+    return partnerPayFromPrice(job.clientPrice || 0);
+  };
+
+  const totalEarned  = completedJobs.reduce((a, b) => a + getPartnerPay(b), 0);
+  const totalPending = allActiveJobs.reduce((a, b) => a + getPartnerPay(b), 0);
+  const totalRevenue = jobs.reduce((a, b) => a + (b.clientPrice || 0), 0);
+  const companyTotal = jobs.reduce((a, b) => a + companyProfitFromPrice(b.clientPrice || 0), 0);
 
   return (
     <div>
-      <div style={styles.h2}>Partner Pay</div>
-      <div style={styles.grid3}>
-        <StatCard label="Total Earned (All Time)" value={`$${completedJobs.reduce((a,b)=>a+(b.partnerPay||b.pay||0),0)}`} icon="💵" color={C.accent} />
-        <StatCard label="Pending Pay" value={`$${pendingJobs.reduce((a,b)=>a+(b.partnerPay||b.pay||0),0)}`} icon="⏳" color={C.gold} />
-        <StatCard label="Partners Paid" value={partners.filter(p=>p.jobsDone>0).length} icon="✅" color={C.blue} />
+      <div style={S.h2}>💰 Partner Pay</div>
+      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:18 }}>
+        Pay structure: <strong style={{ color:C.blue }}>Partner 65%</strong> · <strong style={{ color:C.gold }}>Company 35%</strong> of each job's client price
       </div>
-      <div style={{ ...styles.divider }} />
-      <div style={styles.h3}>Pay Breakdown by Partner</div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+
+      <div style={S.grid4}>
+        <StatCard label="Total Revenue"      value={`$${totalRevenue.toLocaleString()}`}  icon="💵" color={C.accent} />
+        <StatCard label="Partner Pay (Total)" value={`$${totalEarned.toLocaleString()}`}   icon="👥" color={C.blue}   sub="completed jobs" />
+        <StatCard label="Pending Pay"         value={`$${totalPending.toLocaleString()}`}  icon="⏳" color={C.gold}   sub="scheduled jobs" />
+        <StatCard label="Company Kept"        value={`$${companyTotal.toLocaleString()}`}  icon="🏢" color={C.accent} sub="35% of all jobs" />
+      </div>
+
+      <div style={S.divider} />
+      <div style={S.h3}>Pay Breakdown by Partner</div>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {partners.map(p => {
-          const pJobs = jobs.filter(j => j.partnerId === p.id);
-          const earned = pJobs.filter(j => j.status === "completed").reduce((a, b) => a + b.pay, 0);
-          const pending = pJobs.filter(j => j.status !== "completed").reduce((a, b) => a + (b.partnerPay||b.pay||0), 0);
+          const pJobs      = jobs.filter(j => j.partnerId === p.id);
+          const pCompleted = pJobs.filter(j => j.status === "completed");
+          const pPending   = pJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
+          const earned     = pCompleted.reduce((a, b) => a + getPartnerPay(b), 0);
+          const pending    = pPending.reduce((a, b) => a + getPartnerPay(b), 0);
+          const totalRev   = pJobs.reduce((a, b) => a + (b.clientPrice || 0), 0);
+
           return (
-            <div key={p.id} style={styles.card}>
-              <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-                <div style={styles.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
-                  <div style={{ fontSize: 13, color: C.muted }}>${p.payRate}/hr · {pJobs.length} total jobs</div>
+            <div key={p.id} style={S.card}>
+              <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", marginBottom:14 }}>
+                <div style={S.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>{p.name}</div>
+                  <div style={{ fontSize:13, color:C.muted }}>{pJobs.length} jobs · ${totalRev.toLocaleString()} total client revenue</div>
                 </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 800, fontSize: 22, color: C.gold }}>${pending} <span style={{ fontSize: 12, fontWeight: 600, color: C.muted }}>DUE</span></div>
-                  <div style={{ fontSize: 13, color: C.muted }}>${earned} earned all-time</div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontWeight:800, fontSize:22, color:C.gold }}>${pending.toLocaleString()} <span style={{ fontSize:12, fontWeight:600, color:C.muted }}>DUE</span></div>
+                  <div style={{ fontSize:13, color:C.muted }}>${earned.toLocaleString()} paid all-time</div>
+                  <div style={{ fontSize:11, color:C.blue, marginTop:2 }}>65% of each job</div>
                 </div>
               </div>
-              <div style={{ marginTop: 14 }}>
-                <div style={styles.label}>Recent Jobs</div>
-                {pJobs.slice(-3).map(job => (
-                  <div key={job.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 0", borderBottom: `1px solid ${C.border}` }}>
-                    <div>
-                      <div style={{ fontSize: 14, fontWeight: 600 }}>{job.client}</div>
-                      <div style={{ fontSize: 12, color: C.muted }}>{job.date} · {job.type}</div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <div style={styles.badge(job.status === "completed" ? "green" : "gold")}>{job.status}</div>
-                      <div style={{ fontWeight: 700, color: C.accent }}>${job.partnerPay||job.pay||0}</div>
-                    </div>
-                  </div>
-                ))}
-              </div>
+
+              {/* Per-job breakdown */}
+              {pJobs.length > 0 && (
+                <div>
+                  <div style={S.label}>Jobs</div>
+                  {pJobs.slice(-5).reverse().map(job => {
+                    const pay = getPartnerPay(job);
+                    const statusColor = job.status==="completed" ? C.accent : job.status==="in-progress" ? C.gold : C.blue;
+                    return (
+                      <div key={job.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
+                        <div>
+                          <div style={{ fontSize:14, fontWeight:600 }}>{job.client}</div>
+                          <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type}</div>
+                        </div>
+                        <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
+                          <div style={{ textAlign:"right" }}>
+                            <div style={{ fontWeight:800, color:C.blue }}>${pay}</div>
+                            <div style={{ fontSize:10, color:C.dim }}>of ${job.clientPrice||0}</div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+              {pJobs.length === 0 && <div style={{ fontSize:13, color:C.muted }}>No jobs yet.</div>}
             </div>
           );
         })}
