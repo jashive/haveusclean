@@ -336,7 +336,7 @@ const S = {
   badge: (color) => ({ display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:color==="green"?C.accentDim:color==="gold"?C.goldDim:color==="red"?C.redDim:color==="purple"?C.purpleDim:C.blueDim, color:color==="green"?C.accent:color==="gold"?C.gold:color==="red"?C.red:color==="purple"?C.purple:C.blue }),
   input: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 13px", color:C.text, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" },
   select: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 13px", color:C.text, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit", cursor:"pointer" },
-  btn: (v="primary") => ({ padding:v==="sm"?"7px 14px":"10px 20px", borderRadius:9, border:"none", cursor:"pointer", fontWeight:700, fontSize:v==="sm"?13:14, transition:"all 0.15s", background:v==="primary"?C.accent:v==="danger"?C.red:v==="gold"?C.gold:v==="purple"?C.purple:C.card, color:v==="primary"||v==="danger"||v==="gold"||v==="purple"?"#0A0F1E":C.muted, border:v==="ghost"?`1px solid ${C.border}`:"none" }),
+  btn: (v="primary") => ({ padding:v==="sm"?"7px 14px":"10px 20px", borderRadius:9, cursor:"pointer", fontWeight:700, fontSize:v==="sm"?13:14, transition:"all 0.15s", background:v==="primary"?C.accent:v==="danger"?C.red:v==="gold"?C.gold:v==="purple"?C.purple:C.card, color:v==="primary"||v==="danger"||v==="gold"||v==="purple"?"#0A0F1E":C.muted, border:v==="ghost"?`1px solid ${C.border}`:"none" }),
   avatar: (color) => ({ width:38, height:38, borderRadius:"50%", background:color||`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:14, color:"#fff", flexShrink:0 }),
   divider: { height:1, background:C.border, margin:"18px 0" },
   statCard: (color) => ({ background:C.card, borderRadius:13, border:`1px solid ${C.border}`, padding:"18px 20px", borderLeft:`4px solid ${color}` }),
@@ -1243,7 +1243,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
           const col = s === "All" ? C.muted : HUC_STATUS_COLOR[s];
           const active = filterStatus === s;
           return (
-            <button key={s} onClick={()=>setFilterStatus(s)} style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontSize:12, fontWeight:700, background:active?`${col}22`:C.surface, color:active?col:C.muted, border:`1px solid ${active?col:C.border}` }}>
+            <button key={s} onClick={()=>setFilterStatus(s)} style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700, background:active?`${col}22`:C.surface, color:active?col:C.muted, border:`1px solid ${active?col:C.border}` }}>
               {s} {count > 0 && <span style={{ marginLeft:4, background:`${col}33`, borderRadius:20, padding:"1px 7px", fontSize:11 }}>{count}</span>}
             </button>
           );
@@ -3960,7 +3960,7 @@ function Onboarding({ partners, setPartners }) {
           {/* Category filter */}
           <div style={{ display:"flex", gap:6, marginBottom:16, flexWrap:"wrap" }}>
             {categories.map(c => (
-              <button key={c} style={{ padding:"5px 14px", borderRadius:20, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, background:libraryFilter===c?C.accentDim:C.surface, color:libraryFilter===c?C.accent:C.muted, border:`1px solid ${libraryFilter===c?C.accent:C.border}` }} onClick={() => setLibraryFilter(c)}>{c}</button>
+              <button key={c} style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600, background:libraryFilter===c?C.accentDim:C.surface, color:libraryFilter===c?C.accent:C.muted, border:`1px solid ${libraryFilter===c?C.accent:C.border}` }} onClick={() => setLibraryFilter(c)}>{c}</button>
             ))}
           </div>
 
