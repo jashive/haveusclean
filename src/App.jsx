@@ -1183,22 +1183,73 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status:"New", assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
 
-  // Generate HUC email template from operating system
+  // Build the full quote email
   const buildEmail = (lead, q) => {
     const pkg = HUC_PACKAGES[lead.serviceType];
     const addonList = lead.addons.map(id => RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
-    const f = (n) => `CA$${Math.round(n).toLocaleString()}`;
-    return {
-      subject: `Your Detailed Quote — ${BRAND.businessName}`,
-      body: `Hi ${lead.name},\n\nThank you for reaching out to us for your cleaning needs.\n\nBased on the details provided, here is your custom quote:\n\nService: ${lead.serviceType}\nFrequency: ${lead.frequency}\nProperty: ${lead.dwellingType} — ${lead.dwellingSize}${lead.sqft ? ` (${lead.sqft} sqft)` : ""}\nLocation: ${lead.address}\n\n${addonList.length > 0 ? `Selected Add-Ons:\n${addonList.map(a=>`- ${a}`).join("\n")}\n\n` : ""}Total Price: ${f(q.preTaxTotal)}${q.taxRate > 0 ? ` + ${(q.taxRate*100).toFixed(0)}% HST = ${f(q.total)}` : ""}\n\n${q.freq_prices ? `Recurring Options:\n- Weekly: ${f(q.freq_prices["Weekly"])}/visit\n- Bi-Weekly: ${f(q.freq_prices["Bi-Weekly"])}/visit\n- Monthly: ${f(q.freq_prices["Monthly"])}/visit\n\n` : ""}What's Included:\n${pkg ? pkg.includes.map(i=>`• ${i}`).join("\n") : ""}\n\nIf everything looks good, simply reply to this email and we'll get your service scheduled right away.\n\nWe look forward to working with you!\n\nBest regards,\nHave Us Clean\n${BRAND.supportEmail}`,
-    };
+    const addonPrices = lead.addons.map(id => {
+      const ao = RES_ADDONS.find(x=>x.id===id);
+      return ao ? `- ${ao.label}: CA$${ao.priceRange[0]}–$${ao.priceRange[1]}` : null;
+    }).filter(Boolean);
+    const cur = region.id === "ON" ? "CA$" : "$";
+    const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
+
+    const subject = `Your Cleaning Quote — ${BRAND.businessName}`;
+
+    const body = [
+      `Hi ${lead.name || "there"},`,
+      ``,
+      `Thank you for reaching out to Have Us Clean! Based on the details you provided, here is your custom quote:`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `SERVICE DETAILS`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Service:    ${lead.serviceType}`,
+      `Property:   ${lead.dwellingType}${lead.dwellingSize ? ` — ${lead.dwellingSize}` : ""}`,
+      `Address:    ${lead.address}`,
+      `Frequency:  ${lead.frequency}`,
+      lead.beds ? `Bedrooms:   ${lead.beds}  |  Bathrooms: ${lead.baths}` : "",
+      lead.sqft ? `Est. Size:  ${lead.sqft} sqft` : "",
+      ``,
+      addonList.length > 0 ? `ADD-ONS SELECTED:` : "",
+      ...addonPrices,
+      addonList.length > 0 ? `` : "",
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `PRICING`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `${lead.frequency} Price:  ${f(q.preTaxTotal)}${q.taxRate > 0 ? ` + ${(q.taxRate*100).toFixed(0)}% HST = ${f(q.total)}` : ""}`,
+      ``,
+      q.freq_prices ? `RECURRING OPTIONS (save with regular service):` : "",
+      q.freq_prices ? `  Weekly:     ${f(q.freq_prices["Weekly"])}/visit` : "",
+      q.freq_prices ? `  Bi-Weekly:  ${f(q.freq_prices["Bi-Weekly"])}/visit` : "",
+      q.freq_prices ? `  Monthly:    ${f(q.freq_prices["Monthly"])}/visit` : "",
+      q.freq_prices ? `` : "",
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `WHAT'S INCLUDED`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      ...(pkg ? pkg.includes.map(i => `✓ ${i}`) : []),
+      ``,
+      `If everything looks good, simply reply to this email and we will get your service scheduled right away.`,
+      ``,
+      lead.preferredDate ? `Your preferred date: ${lead.preferredDate}${lead.preferredTime ? ` at ${lead.preferredTime}` : ""}` : "",
+      lead.preferredDate ? `` : "",
+      `We look forward to working with you!`,
+      ``,
+      `Best regards,`,
+      `Have Us Clean`,
+      `📧 ${BRAND.supportEmail}`,
+      `🌐 haveusclean.com`,
+    ].filter(l => l !== null && l !== undefined).join("\n");
+
+    return { subject, body };
   };
 
   const sendQuote = (lead) => {
     const q = calcResQuote(lead, region);
     const email = buildEmail(lead, q);
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"Quoted",quotedDate:new Date().toLocaleDateString()}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"Quoted"});
+    // Mark as Quoted
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Quoted", quotedDate:new Date().toLocaleDateString() } : l));
+    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Quoted" }));
     setShowEmail({ lead, q, ...email });
   };
 
@@ -1427,23 +1478,95 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
         </Modal>
       )}
 
-      {/* Email Preview Modal */}
+      {/* Email Send Modal */}
       {showEmail && (
-        <Modal title="📧 Quote Email Preview" onClose={()=>setShowEmail(null)} wide>
+        <Modal title="📧 Send Quote Email" onClose={()=>setShowEmail(null)} wide>
           <div>
-            <div style={{ marginBottom:10 }}>
-              <div style={S.label}>To</div>
-              <div style={{ fontWeight:700, fontSize:14 }}>{showEmail.lead.email}</div>
+            {/* Status banner */}
+            <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:20 }}>✅</span>
+              <div>
+                <div style={{ fontWeight:700, color:C.accent, fontSize:14 }}>Lead marked as Quoted</div>
+                <div style={{ fontSize:12, color:C.muted }}>Now send the email using one of the options below</div>
+              </div>
             </div>
-            <div style={{ marginBottom:10 }}>
-              <div style={S.label}>Subject</div>
-              <div style={{ fontWeight:700, fontSize:14 }}>{showEmail.subject}</div>
+
+            {/* To / Subject */}
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+              <div>
+                <div style={S.label}>To</div>
+                <div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700, color:C.text }}>
+                  {showEmail.lead.email || <span style={{ color:C.red }}>⚠️ No email on file</span>}
+                </div>
+              </div>
+              <div>
+                <div style={S.label}>Subject</div>
+                <div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:13, color:C.muted }}>{showEmail.subject}</div>
+              </div>
             </div>
-            <div style={{ marginBottom:14 }}>
-              <div style={S.label}>Body</div>
-              <div style={{ background:C.surface, borderRadius:10, padding:14, fontSize:13, color:C.muted, lineHeight:1.8, whiteSpace:"pre-line" }}>{showEmail.body}</div>
+
+            {/* Email body preview */}
+            <div style={{ marginBottom:18 }}>
+              <div style={S.label}>Email Preview</div>
+              <div style={{ background:C.surface, borderRadius:10, padding:16, fontSize:13, color:C.muted, lineHeight:1.9, whiteSpace:"pre-line", maxHeight:280, overflowY:"auto", border:`1px solid ${C.border}` }}>
+                {showEmail.body}
+              </div>
             </div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>{ navigator.clipboard?.writeText(showEmail.body); alert("Email body copied to clipboard! ✅"); }}>📋 Copy Email Body</button>
+
+            {/* Send options */}
+            <div style={S.label}>Send Options</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+
+              {/* Option 1 — Open Gmail */}
+              <a
+                href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(showEmail.lead.email || "")}&su=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ ...S.btn("primary"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
+              >
+                <span style={{ fontSize:20 }}>📨</span>
+                <div style={{ textAlign:"left" }}>
+                  <div style={{ fontWeight:800 }}>Open in Gmail</div>
+                  <div style={{ fontSize:11, opacity:0.8 }}>Opens Gmail with quote pre-filled — just hit Send</div>
+                </div>
+              </a>
+
+              {/* Option 2 — mailto (default email app) */}
+              <a
+                href={`mailto:${showEmail.lead.email || ""}?subject=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
+                style={{ ...S.btn("ghost"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
+              >
+                <span style={{ fontSize:20 }}>📱</span>
+                <div style={{ textAlign:"left" }}>
+                  <div style={{ fontWeight:800 }}>Open in Mail App</div>
+                  <div style={{ fontSize:11, color:C.dim }}>Opens your default email app (iPhone Mail, Outlook, etc.)</div>
+                </div>
+              </a>
+
+              {/* Option 3 — Copy body */}
+              <button
+                style={{ ...S.btn("ghost"), display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
+                onClick={() => {
+                  navigator.clipboard?.writeText(showEmail.body);
+                  alert("✅ Email body copied! Paste it into any email app.");
+                }}
+              >
+                <span style={{ fontSize:20 }}>📋</span>
+                <div style={{ textAlign:"left" }}>
+                  <div style={{ fontWeight:800 }}>Copy Email Body</div>
+                  <div style={{ fontSize:11, color:C.dim }}>Copy and paste into any email manually</div>
+                </div>
+              </button>
+
+            </div>
+
+            {/* Quote summary strip */}
+            <div style={{ marginTop:18, background:C.bg, borderRadius:10, padding:"12px 16px", display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10, fontSize:13 }}>
+              <div><span style={{ color:C.muted }}>Client: </span><strong>{showEmail.lead.name}</strong></div>
+              <div><span style={{ color:C.muted }}>Service: </span><strong>{showEmail.lead.serviceType}</strong></div>
+              <div><span style={{ color:C.muted }}>Total: </span><strong style={{ color:C.accent }}>{region.currencySymbol}{Math.round(showEmail.q.total).toLocaleString()}</strong></div>
+              <div><span style={{ color:C.muted }}>Partner Pay: </span><strong style={{ color:C.blue }}>{region.currencySymbol}{showEmail.q.partnerPay}</strong></div>
+            </div>
           </div>
         </Modal>
       )}
@@ -1458,13 +1581,48 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   ]);
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
+  const [showEmail, setShowEmail] = useState(null);
   const [form, setForm] = useState({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
 
   const sendQuote = (lead) => {
     const q = calcComQuote(lead, region);
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"quoted"}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"quoted"});
-    alert(`✅ Proposal sent to ${lead.email}! $${q.total.toFixed(2)}/visit · ${q.margin}% margin`);
+    const pkg = lead.serviceType;
+    const addonList = lead.addons.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
+    const cur = region.id === "ON" ? "CA$" : "$";
+    const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
+    const subject = `Commercial Cleaning Proposal — ${BRAND.businessName}`;
+    const body = [
+      `Hi ${lead.contactName || "there"},`,
+      ``,
+      `Thank you for considering Have Us Clean for your commercial cleaning needs. Here is your custom proposal:`,
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `PROPOSAL DETAILS`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Business:   ${lead.bizName}`,
+      `Service:    ${pkg}`,
+      `Address:    ${lead.address}`,
+      `Size:       ${lead.sqft?.toLocaleString()} sqft · ${lead.floors} floor(s)`,
+      `Frequency:  ${lead.frequency}`,
+      addonList.length > 0 ? `Add-Ons:    ${addonList.join(", ")}` : "",
+      ``,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `PRICING`,
+      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `Per Visit:      ${f(q.total)}${q.taxRate > 0 ? ` (incl. ${(q.taxRate*100).toFixed(0)}% HST)` : ""}`,
+      `Monthly Est.:   ${f(q.monthly)}`,
+      lead.contractMonths > 1 ? `Contract Value: ${f(q.contract)} (${lead.contractMonths} months)` : "",
+      ``,
+      `To move forward, please reply to this email or call us directly.`,
+      ``,
+      `Best regards,`,
+      `Have Us Clean`,
+      `📧 ${BRAND.supportEmail}`,
+    ].filter(l => l !== null && l !== undefined).join("\n");
+
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"quoted" } : l));
+    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"quoted" }));
+    setShowEmail({ lead, q, subject, body, isCommercial: true });
   };
   const bookLead = (lead) => {
     const q = calcComQuote(lead, region);
@@ -1583,11 +1741,48 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
           ); })()}
         </Modal>
       )}
+      {/* Commercial Email Modal */}
+      {showEmail && (
+        <Modal title="📧 Send Commercial Proposal" onClose={()=>setShowEmail(null)} wide>
+          <div>
+            <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:10 }}>
+              <span style={{ fontSize:20 }}>✅</span>
+              <div>
+                <div style={{ fontWeight:700, color:C.accent, fontSize:14 }}>Lead marked as Quoted</div>
+                <div style={{ fontSize:12, color:C.muted }}>Send the proposal using one of the options below</div>
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+              <div><div style={S.label}>To</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700 }}>{showEmail.lead.email}</div></div>
+              <div><div style={S.label}>Subject</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:13, color:C.muted }}>{showEmail.subject}</div></div>
+            </div>
+            <div style={{ marginBottom:18 }}>
+              <div style={S.label}>Proposal Preview</div>
+              <div style={{ background:C.surface, borderRadius:10, padding:16, fontSize:13, color:C.muted, lineHeight:1.9, whiteSpace:"pre-line", maxHeight:260, overflowY:"auto", border:`1px solid ${C.border}` }}>{showEmail.body}</div>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(showEmail.lead.email||"")}&su=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`} target="_blank" rel="noopener noreferrer"
+                style={{ ...S.btn("primary"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
+                <span style={{ fontSize:20 }}>📨</span>
+                <div><div style={{ fontWeight:800 }}>Open in Gmail</div><div style={{ fontSize:11, opacity:0.8 }}>Pre-filled and ready to send</div></div>
+              </a>
+              <a href={`mailto:${showEmail.lead.email||""}?subject=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
+                style={{ ...S.btn("ghost"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
+                <span style={{ fontSize:20 }}>📱</span>
+                <div><div style={{ fontWeight:800 }}>Open in Mail App</div><div style={{ fontSize:11, color:C.dim }}>Opens your default email app</div></div>
+              </a>
+              <button style={{ ...S.btn("ghost"), display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}
+                onClick={() => { navigator.clipboard?.writeText(showEmail.body); alert("✅ Proposal copied to clipboard!"); }}>
+                <span style={{ fontSize:20 }}>📋</span>
+                <div><div style={{ fontWeight:800 }}>Copy Proposal Body</div><div style={{ fontSize:11, color:C.dim }}>Paste into any email manually</div></div>
+              </button>
+            </div>
+          </div>
+        </Modal>
+      )}
     </div>
   );
 }
-
-// ─── REGION SWITCHER ─────────────────────────────────────────────────────────
 function RegionSwitcher({ activeRegion, setActiveRegion }) {
   return (
     <div style={{ display:"flex", gap:4, alignItems:"center" }}>
