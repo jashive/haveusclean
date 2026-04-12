@@ -9,7 +9,7 @@ const BRAND = {
   color: "#00D4AA",
   logoMark: "🧹",
   supportEmail: "haveusclean@gmail.com",
-  website: "https://haveusclean.com",
+  website: "https://haveusclean.ca",
   businessName: "Have Us Clean",
   market: "Toronto & GTA",
   position: "Mid-market",
@@ -585,7 +585,7 @@ function StripePayments({ jobs, partners }) {
             <div style={{ fontSize:34 }}>💳</div>
             <div>
               <div style={{ fontWeight:800, fontSize:17 }}>Stripe Connect</div>
-              <div style={{ fontSize:13, color:connected?C.accent:C.gold, fontWeight:700 }}>{connected?"✅ Connected — CleanPro Services":"⚠️ Not Connected"}</div>
+              <div style={{ fontSize:13, color:connected?C.accent:C.gold, fontWeight:700 }}>{connected?"✅ Connected — Have Us Clean Services":"⚠️ Not Connected"}</div>
               <div style={{ fontSize:12, color:C.muted }}>2.9% + $0.30 per transaction</div>
             </div>
           </div>
@@ -1170,12 +1170,18 @@ function WhiteLabel() {
 }
 
 // ─── RESIDENTIAL LEADS — Have Us Clean ───────────────────────────────────────
-function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
-  const [leads, setLeads] = useState([
-    { id:1, name:"Sarah M.", email:"sarah.m@email.com", phone:"(416) 555-2201", address:"88 Maple Dr, North York ON", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:850, serviceType:"Full Home Clean", addons:["oven","fridge"], frequency:"Bi-Weekly", preferredDate:"2026-04-10", preferredTime:"9:00 AM", notes:"Has a cat. Please use unscented products.", status:"Quoted", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false },
-    { id:2, name:"David K.", email:"davidk@email.com", phone:"(416) 555-3310", address:"12 Oakridge Rd, Mississauga ON", dwellingType:"Detached House", dwellingSize:"Medium", beds:3, baths:2, sqft:1800, serviceType:"Deep Clean", addons:[], frequency:"One-Time", preferredDate:"2026-04-14", preferredTime:"10:00 AM", notes:"First-time client. Has been quoted before.", status:"Follow Up", assignedTo:"", followUpDate:"2026-04-10", jobNotes:"Emailed quote Apr 3. Following up.", workOrder:null, paymentConfirmed:false },
-    { id:3, name:"Priya S.", email:"priya@email.com", phone:"(416) 555-4410", address:"44 Lakeshore Blvd, Toronto ON", dwellingType:"Semi / Townhouse", dwellingSize:"Large", beds:4, baths:3, sqft:2200, serviceType:"Move-In / Move-Out", addons:["cabinets","carpet"], frequency:"One-Time", preferredDate:"2026-04-12", preferredTime:"8:00 AM", notes:"Empty unit. Move-out clean.", status:"New", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false },
-  ]);
+const SAMPLE_RES_LEADS = [
+  { id:1, name:"Sarah M.", email:"sarah.m@email.com", phone:"(416) 555-2201", address:"88 Maple Dr, North York ON", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:850, serviceType:"Full Home Clean", addons:["oven","fridge"], frequency:"Bi-Weekly", preferredDate:"2026-04-10", preferredTime:"9:00 AM", notes:"Has a cat. Please use unscented products.", status:"Quoted", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T10:00:00Z" },
+  { id:2, name:"David K.", email:"davidk@email.com", phone:"(416) 555-3310", address:"12 Oakridge Rd, Mississauga ON", dwellingType:"Detached House", dwellingSize:"Medium", beds:3, baths:2, sqft:1800, serviceType:"Deep Clean", addons:[], frequency:"One-Time", preferredDate:"2026-04-14", preferredTime:"10:00 AM", notes:"First-time client.", status:"Follow Up", assignedTo:"", followUpDate:"2026-04-10", jobNotes:"Emailed quote Apr 3. Following up.", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T11:00:00Z" },
+  { id:3, name:"Priya S.", email:"priya@email.com", phone:"(416) 555-4410", address:"44 Lakeshore Blvd, Toronto ON", dwellingType:"Semi / Townhouse", dwellingSize:"Large", beds:4, baths:3, sqft:2200, serviceType:"Move-In / Move-Out", addons:["cabinets","carpet"], frequency:"One-Time", preferredDate:"2026-04-12", preferredTime:"8:00 AM", notes:"Empty unit. Move-out clean.", status:"New", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:"2026-04-02T09:00:00Z" },
+];
+
+function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads }) {
+  // Use lifted state; seed with sample data if empty
+  const leads = resLeads.length > 0 ? resLeads : SAMPLE_RES_LEADS;
+  const setLeads = (updater) => {
+    setResLeads(typeof updater === "function" ? updater(leads) : updater);
+  };
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
   const [showEmail, setShowEmail] = useState(null);
@@ -1238,7 +1244,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       `Best regards,`,
       `Have Us Clean`,
       `📧 ${BRAND.supportEmail}`,
-      `🌐 haveusclean.com`,
+      `🌐 haveusclean.ca`,
     ].filter(l => l !== null && l !== undefined).join("\n");
 
     return { subject, body };
@@ -1294,7 +1300,9 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   };
 
   const submitForm = () => {
-    setLeads(ls=>[...ls,{...form,id:Date.now(),workOrder:null,paymentConfirmed:false,quotedDate:"",bookedDate:""}]);
+    const newLead = { ...form, id:Date.now(), status:"New", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:new Date().toISOString() };
+    setLeads(ls => [...ls, newLead]);
+    setFilterStatus("All"); // reset to All so new lead is visible immediately
     setShowForm(false);
     setForm(emptyForm);
   };
@@ -1928,7 +1936,7 @@ function TaxCompliance({ region }) {
                 </thead>
                 <tbody>
                   {[
-                    ["Phoenix",    "5.6%","0.7%","3.0%","8.6%",  "Most common for CleanPro AZ ops"],
+                    ["Phoenix",    "5.6%","0.7%","3.0%","8.6%",  "Most common for Have Us Clean AZ ops"],
                     ["Scottsdale", "5.6%","0.7%","1.75%","8.05%","Lower city rate"],
                     ["Tempe",      "5.6%","0.7%","1.8%","8.1%",  ""],
                     ["Mesa",       "5.6%","0.7%","2.0%","8.3%",  ""],
@@ -2090,7 +2098,7 @@ function TaxCompliance({ region }) {
           <div style={{ ...S.card, marginTop:18 }}>
             <div style={S.h3}>💱 Currency Note</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-              All Ontario jobs are quoted and billed in <strong style={{ color:C.text }}>Canadian Dollars (CAD)</strong> with HST added. All Arizona jobs are quoted and billed in <strong style={{ color:C.text }}>US Dollars (USD)</strong> with no service tax. The CleanPro app automatically handles formatting and tax rules per region. Exchange rate management (for cross-border reporting) should be handled through your accounting software.
+              All Ontario jobs are quoted and billed in <strong style={{ color:C.text }}>Canadian Dollars (CAD)</strong> with HST added. All Arizona jobs are quoted and billed in <strong style={{ color:C.text }}>US Dollars (USD)</strong> with no service tax. The Have Us Clean app automatically handles formatting and tax rules per region. Exchange rate management (for cross-border reporting) should be handled through your accounting software.
             </div>
           </div>
         </div>
@@ -2297,12 +2305,357 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
   );
 }
 
+// ─── CLIENT VIEW ──────────────────────────────────────────────────────────────
+// What clients see — their upcoming job, quote history, and how to contact HUC
+function ClientView({ jobs, resLeads, region, setTab }) {
+  const [searchName, setSearchName] = useState("");
+  const [selectedClient, setSelectedClient] = useState(null);
+
+  // Build client list from real jobs + leads
+  const allNames = [...new Set([
+    ...jobs.map(j => j.client),
+    ...(resLeads||[]).map(l => l.name),
+  ])].filter(Boolean);
+
+  const filtered = searchName.trim()
+    ? allNames.filter(n => n.toLowerCase().includes(searchName.toLowerCase()))
+    : allNames;
+
+  const getClientData = (name) => {
+    const clientJobs  = jobs.filter(j => j.client === name);
+    const clientLeads = (resLeads||[]).filter(l => l.name === name);
+    const lead = clientLeads[clientLeads.length - 1];
+    return { clientJobs, clientLeads, lead };
+  };
+
+  if (selectedClient) {
+    const { clientJobs, clientLeads, lead } = getClientData(selectedClient);
+    const upcomingJobs = clientJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
+    const completedJobs = clientJobs.filter(j => j.status === "completed");
+    const activeQuote = clientLeads.filter(l => ["Quoted","Follow Up"].includes(l.status)).slice(-1)[0];
+    const cur = region?.currencySymbol || "$";
+
+    return (
+      <div>
+        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => setSelectedClient(null)}>← All Clients</button>
+
+        {/* Client header */}
+        <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.accent}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
+            <div style={{ width:52, height:52, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24 }}>🏠</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:800, fontSize:22 }}>{selectedClient}</div>
+              {lead?.email && <div style={{ fontSize:13, color:C.muted }}>📧 {lead.email}</div>}
+              {lead?.address && <div style={{ fontSize:13, color:C.muted }}>📍 {lead.address}</div>}
+            </div>
+          </div>
+        </div>
+
+        {/* Upcoming jobs */}
+        {upcomingJobs.length > 0 && (
+          <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.accent}` }}>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>📅 Upcoming Service</div>
+            {upcomingJobs.map(job => (
+              <div key={job.id} style={{ padding:"12px 0", borderBottom:`1px solid ${C.border}` }}>
+                <div style={{ fontWeight:700, fontSize:16 }}>{job.type}</div>
+                <div style={{ fontSize:14, color:C.muted, marginTop:4 }}>📅 {job.date} at {job.time}</div>
+                <div style={{ fontSize:14, color:C.muted }}>📍 {job.address}</div>
+                {job.upsells?.length > 0 && <div style={{ fontSize:13, color:C.gold, marginTop:4 }}>+ Add-ons: {job.upsells.join(", ")}</div>}
+                <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap" }}>
+                  <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.accentDim, color:C.accent }}>{job.status === "in-progress" ? "🔄 In Progress" : "✅ Confirmed"}</span>
+                  <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.surface, color:C.muted }}>{cur}{(job.clientPrice||0).toLocaleString()}</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Active quote */}
+        {activeQuote && (
+          <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.gold }}>📄 Your Quote</div>
+            <div style={{ fontSize:14, color:C.muted }}>Service: <strong style={{ color:C.text }}>{activeQuote.serviceType}</strong></div>
+            <div style={{ fontSize:14, color:C.muted }}>Property: <strong style={{ color:C.text }}>{activeQuote.dwellingType} — {activeQuote.dwellingSize}</strong></div>
+            <div style={{ fontSize:14, color:C.muted }}>Frequency: <strong style={{ color:C.text }}>{activeQuote.frequency}</strong></div>
+            {activeQuote.addons?.length > 0 && (
+              <div style={{ fontSize:14, color:C.muted }}>Add-ons: <strong style={{ color:C.text }}>{activeQuote.addons.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</strong></div>
+            )}
+            <div style={{ marginTop:14, padding:"12px 16px", background:C.surface, borderRadius:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <span style={{ fontSize:13, color:C.muted }}>Quote Total</span>
+              <span style={{ fontSize:22, fontWeight:800, color:C.gold }}>{cur}{Math.round(calcResQuote(activeQuote, region||ACTIVE_REGION).total).toLocaleString()}</span>
+            </div>
+            <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
+              <a href={`mailto:${BRAND.supportEmail}?subject=Booking Confirmation — ${activeQuote.serviceType}&body=Hi Have Us Clean,%0A%0AI'd like to confirm my booking for ${activeQuote.serviceType}.%0A%0AThanks!`}
+                style={{ ...S.btn("primary"), textDecoration:"none", flex:1, textAlign:"center" }}>
+                ✅ Accept & Book
+              </a>
+              <a href={`mailto:${BRAND.supportEmail}?subject=Question about my quote`}
+                style={{ ...S.btn("ghost"), textDecoration:"none", flex:1, textAlign:"center" }}>
+                💬 Ask a Question
+              </a>
+            </div>
+          </div>
+        )}
+
+        {/* Job history */}
+        {completedJobs.length > 0 && (
+          <div style={S.card}>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>🧹 Service History</div>
+            {completedJobs.slice().reverse().map(job => (
+              <div key={job.id} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{job.type}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>Completed ✅</span>
+                  <div style={{ fontSize:13, fontWeight:700, color:C.accent, marginTop:2 }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Contact */}
+        <div style={{ ...S.card, marginTop:18, textAlign:"center" }}>
+          <div style={{ fontWeight:700, fontSize:15, marginBottom:10 }}>Need anything?</div>
+          <div style={{ fontSize:13, color:C.muted, marginBottom:14 }}>Reach us anytime at <strong style={{ color:C.accent }}>{BRAND.supportEmail}</strong></div>
+          <a href={`mailto:${BRAND.supportEmail}`} style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block" }}>✉️ Email Have Us Clean</a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={S.h2}>📲 Client View</div>
+      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:18 }}>
+        This is what your clients experience. Share your Vercel URL with clients so they can view their upcoming jobs and quotes.
+      </div>
+
+      {/* Info banner */}
+      <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.blue}` }}>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:8, color:C.blue }}>🌐 How to share with clients</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
+          Share your live URL (<strong style={{ color:C.text }}>haveusclean.ca</strong> (or your Vercel URL while setting up)) with any client. When they open it, they search their name to see their upcoming service, active quote, and service history. No login required — search by name.
+        </div>
+      </div>
+
+      {/* Search */}
+      <div style={{ marginBottom:18 }}>
+        <input
+          style={{ ...S.input, fontSize:16 }}
+          placeholder="🔍 Search client name..."
+          value={searchName}
+          onChange={e => setSearchName(e.target.value)}
+        />
+      </div>
+
+      {filtered.length === 0 && (
+        <div style={{ ...S.card, textAlign:"center", padding:40 }}>
+          <div style={{ fontSize:36, marginBottom:12 }}>📭</div>
+          <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>No clients found</div>
+          <div style={{ color:C.muted, fontSize:13, marginBottom:20 }}>Add leads in the Quotes tab first — clients appear here automatically.</div>
+          <button style={S.btn("primary")} onClick={() => setTab("res")}>Go to Quotes →</button>
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {filtered.map(name => {
+          const { clientJobs, clientLeads } = getClientData(name);
+          const upcoming = clientJobs.find(j => j.status === "scheduled");
+          const hasQuote = clientLeads.some(l => ["Quoted","Follow Up"].includes(l.status));
+          return (
+            <div key={name} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedClient(name)}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                  <div style={{ width:40, height:40, borderRadius:10, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🏠</div>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:15 }}>{name}</div>
+                    <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
+                      {upcoming && <span style={S.badge("green")}>📅 {upcoming.date}</span>}
+                      {hasQuote && <span style={S.badge("gold")}>📄 Quote ready</span>}
+                      {clientJobs.filter(j=>j.status==="completed").length > 0 && <span style={S.badge("blue")}>{clientJobs.filter(j=>j.status==="completed").length} completed</span>}
+                    </div>
+                  </div>
+                </div>
+                <span style={{ color:C.muted, fontSize:20 }}>›</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ─── PARTNER VIEW ─────────────────────────────────────────────────────────────
+// What partners see — their schedule, jobs to complete, check-in actions
+function PartnerView({ jobs, partners, region }) {
+  const [selectedPartner, setSelectedPartner] = useState(null);
+  const today = new Date().toISOString().split("T")[0];
+  const cur = region?.currencySymbol || "$";
+
+  if (selectedPartner) {
+    const partner = partners.find(p => p.id === selectedPartner);
+    if (!partner) return null;
+    const myJobs = jobs.filter(j => j.partnerId === partner.id);
+    const todayJobs = myJobs.filter(j => j.date === today);
+    const upcomingJobs = myJobs.filter(j => j.status === "scheduled" && j.date >= today).sort((a,b) => a.date.localeCompare(b.date));
+    const completedJobs = myJobs.filter(j => j.status === "completed");
+    const totalEarned = completedJobs.reduce((a,b) => a + (b.partnerPay||0), 0);
+    const pendingPay = myJobs.filter(j => j.status === "scheduled" || j.status === "in-progress").reduce((a,b) => a + (b.partnerPay||0), 0);
+
+    return (
+      <div>
+        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => setSelectedPartner(null)}>← All Partners</button>
+
+        {/* Partner header */}
+        <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.gold}` }}>
+          <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap", marginBottom:14 }}>
+            <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:800, fontSize:22 }}>{partner.name}</div>
+              <div style={{ fontSize:13, color:C.muted }}>{partner.email} · {partner.phone}</div>
+              <span style={S.badge(partner.status==="active"?"green":"gold")}>{partner.status}</span>
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10 }}>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>TODAY</div>
+              <div style={{ fontSize:24, fontWeight:800, color:C.gold }}>{todayJobs.length}</div>
+              <div style={{ fontSize:11, color:C.muted }}>jobs</div>
+            </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PENDING PAY</div>
+              <div style={{ fontSize:24, fontWeight:800, color:C.blue }}>{cur}{pendingPay}</div>
+            </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>TOTAL EARNED</div>
+              <div style={{ fontSize:24, fontWeight:800, color:C.accent }}>{cur}{totalEarned}</div>
+            </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>JOBS DONE</div>
+              <div style={{ fontSize:24, fontWeight:800, color:C.accent }}>{completedJobs.length}</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Today's jobs */}
+        {todayJobs.length > 0 && (
+          <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
+            <div style={{ fontWeight:800, fontSize:16, color:C.gold, marginBottom:14 }}>📅 Today's Jobs</div>
+            {todayJobs.map(job => {
+              const statusColor = job.status==="in-progress" ? C.gold : job.status==="completed" ? C.accent : C.blue;
+              return (
+                <div key={job.id} style={{ padding:"14px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8 }}>
+                    <div>
+                      <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
+                      <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type}</div>
+                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
+                      <div style={{ fontWeight:800, fontSize:18, color:C.blue, marginTop:4 }}>{cur}{job.partnerPay || 0}</div>
+                      <div style={{ fontSize:10, color:C.dim }}>your pay (65%)</div>
+                    </div>
+                  </div>
+                  {/* RAG reminder */}
+                  <div style={{ marginTop:10, background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, color:C.muted }}>
+                    🎨 <strong>RAG System:</strong> 🔴 Toilets · 🟡 Sinks/Mirrors · 🟢 Kitchen · 🔵 General
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+        {todayJobs.length === 0 && (
+          <div style={{ ...S.card, marginBottom:18, textAlign:"center", padding:30 }}>
+            <div style={{ fontSize:32, marginBottom:8 }}>🎉</div>
+            <div style={{ fontWeight:700, fontSize:16 }}>No jobs today</div>
+            <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Enjoy your day off!</div>
+          </div>
+        )}
+
+        {/* Upcoming jobs */}
+        {upcomingJobs.filter(j => j.date !== today).length > 0 && (
+          <div style={S.card}>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>📆 Upcoming Jobs</div>
+            {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => (
+              <div key={job.id} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{job.client}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.time} · {job.type}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>📍 {job.address}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontWeight:700, color:C.blue }}>{cur}{job.partnerPay||0}</div>
+                  <div style={{ fontSize:10, color:C.dim }}>your pay</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={S.h2}>📋 Partner View</div>
+      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:20 }}>
+        Select a partner to see exactly what they see — their schedule, today's jobs, and pay.
+      </div>
+
+      {/* Sharing tip */}
+      <div style={{ ...S.card, marginBottom:20, borderLeft:`4px solid ${C.gold}` }}>
+        <div style={{ fontWeight:700, fontSize:14, color:C.gold, marginBottom:6 }}>📱 How to share with partners</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
+          Share your Vercel URL with partners. When they open it, they go to <strong style={{ color:C.text }}>👥 Team → 📋 Partner View</strong> and tap their name to see their schedule. No login needed right now — a proper partner login system is coming in the next update.
+        </div>
+      </div>
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {partners.map(partner => {
+          const myJobs = jobs.filter(j => j.partnerId === partner.id);
+          const todayCount = myJobs.filter(j => j.date === today).length;
+          const upcomingCount = myJobs.filter(j => j.status === "scheduled" && j.date >= today).length;
+          const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a+(b.partnerPay||0), 0);
+          return (
+            <div key={partner.id} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedPartner(partner.id)}>
+              <div style={{ display:"flex", alignItems:"center", gap:12, justifyContent:"space-between" }}>
+                <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                  <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
+                  <div>
+                    <div style={{ fontWeight:700, fontSize:15 }}>{partner.name}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>{partner.region} · {partner.status}</div>
+                    <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
+                      {todayCount > 0 && <span style={S.badge("gold")}>📅 {todayCount} today</span>}
+                      {upcomingCount > 0 && <span style={S.badge("blue")}>{upcomingCount} upcoming</span>}
+                      {pendingPay > 0 && <span style={S.badge("green")}>{cur}{pendingPay} pending pay</span>}
+                      {!partner.onboarded && <span style={S.badge("red")}>⚠️ Not onboarded</span>}
+                    </div>
+                  </div>
+                </div>
+                <span style={{ color:C.muted, fontSize:20 }}>›</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
+  const [resLeads, setResLeads] = useState([]); // lifted up — shared between Quotes + Portal
 
   // ── DB state ──
   const [dbStatus, setDbStatus] = useState("loading"); // loading | synced | saving | error
@@ -2325,18 +2678,20 @@ export default function App() {
 
     async function loadAll() {
       try {
-        const [savedJobs, savedPartners, savedRegion, log] = await Promise.all([
+        const [savedJobs, savedPartners, savedRegion, log, savedResLeads] = await Promise.all([
           dbGet(DB_KEYS.jobs),
           dbGet(DB_KEYS.partners),
           dbGet(DB_KEYS.region),
           dbGet(DB_KEYS.activity),
+          dbGet(DB_KEYS.leadsRes),
         ]);
 
         if (cancelled) return;
-        if (savedJobs)     setJobs(savedJobs);
-        if (savedPartners) setPartners(savedPartners);
+        if (savedJobs)      setJobs(savedJobs);
+        if (savedPartners)  setPartners(savedPartners);
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
-        if (log)           setActivityLog(log);
+        if (log)            setActivityLog(log);
+        if (savedResLeads)  setResLeads(savedResLeads);
         setDbStatus(hasArtifactStorage || hasLocalStorage ? "synced" : "local");
       } catch {
         if (!cancelled) setDbStatus("local");
@@ -2367,6 +2722,12 @@ export default function App() {
     if (isLoading) return;
     dbSet(DB_KEYS.partners, partners);
   }, [partners, isLoading]);
+
+  // ── Auto-save resLeads ──
+  useEffect(() => {
+    if (isLoading) return;
+    dbSet(DB_KEYS.leadsRes, resLeads);
+  }, [resLeads, isLoading]);
 
   // ── Save region preference ──
   useEffect(() => {
@@ -2417,6 +2778,7 @@ export default function App() {
     ]);
     setJobs(initJobs);
     setPartners(initPartners);
+    setResLeads([]);
     setActivityLog([]);
     await logActivity("SYSTEM_RESET", "All data reset to demo defaults");
     setLastSaved(new Date().toLocaleTimeString());
@@ -2437,7 +2799,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `cleanpro-backup-${new Date().toISOString().split("T")[0]}.json`;
+    a.download = `haveusclean-backup-${new Date().toISOString().split("T")[0]}.json`;
     a.click();
     URL.revokeObjectURL(url);
     logActivity("EXPORT", `Full data export downloaded`);
@@ -2477,14 +2839,16 @@ export default function App() {
       { id:"qb",         label:"💚 QuickBooks",    desc:"Accounting sync" },
     ]},
     { id:"clients",  label:"🌐 Clients", color: C.blue, tabs:[
-      { id:"portal",     label:"🌐 Client Portal", desc:"Quotes, invoices & reviews" },
-      { id:"sms",        label:"📱 SMS Reminders", desc:"Automated messaging" },
-      { id:"marketing",  label:"📣 Marketing",     desc:"30-day content system" },
+      { id:"portal",      label:"🌐 Client Portal",  desc:"Quotes, invoices & reviews" },
+      { id:"clientview",  label:"📲 Client View",    desc:"What your clients see" },
+      { id:"sms",         label:"📱 SMS Reminders",  desc:"Automated messaging" },
+      { id:"marketing",   label:"📣 Marketing",      desc:"30-day content system" },
     ]},
     { id:"team",     label:"👥 Team", color: C.gold, tabs:[
-      { id:"partners",   label:"👥 Partners",      desc:"Partner profiles & availability" },
-      { id:"onboarding", label:"🎓 Onboarding",    desc:"Training & certification" },
-      { id:"ai",         label:"🗓️ AI Scheduling", desc:"AI-powered schedule optimizer" },
+      { id:"partners",    label:"👥 Partners",       desc:"Partner profiles & availability" },
+      { id:"partnerview", label:"📋 Partner View",   desc:"What your partners see" },
+      { id:"onboarding",  label:"🎓 Onboarding",     desc:"Training & certification" },
+      { id:"ai",          label:"🗓️ AI Scheduling",  desc:"AI-powered schedule optimizer" },
     ]},
     { id:"biz",      label:"📊 Business", color: C.muted, tabs:[
       { id:"tax",        label: activeRegion.id==="ON" ? "🇨🇦 HST / Tax" : "🇺🇸 TPT / Tax", desc:"Tax rules & compliance" },
@@ -2624,7 +2988,7 @@ export default function App() {
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
-        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
+        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
@@ -2635,10 +2999,12 @@ export default function App() {
         {tab==="pay"            && <Pay               partners={regionPartners} jobs={regionJobs} />}
         {tab==="stripe"         && <StripePayments    jobs={regionJobs}     partners={regionPartners} />}
         {tab==="qb"             && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
-        {tab==="portal"         && <ClientPortal      jobs={regionJobs} />}
+        {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="sms"            && <SMSReminders      jobs={regionJobs} />}
         {tab==="marketing"      && <MarketingHub      region={activeRegion} />}
         {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} />}
+        {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="tax"            && <TaxCompliance     region={activeRegion} />}
@@ -3722,7 +4088,7 @@ const RAG_COLORS = [
 const TRAINING_MODULES = [
   {
     id: 1,
-    title: "Welcome & CleanPro Standards",
+    title: "Welcome & Have Us Clean Standards",
     icon: "🏠",
     duration: "8 min read",
     category: "Foundations",
@@ -3734,7 +4100,7 @@ const TRAINING_MODULES = [
     keyPoints: [
       "Always arrive 5 minutes early — being on time is being late",
       "Wear your uniform at all times during the job",
-      "Greet clients warmly — you represent the CleanPro brand",
+      "Greet clients warmly — you represent the Have Us Clean brand",
       "Never use a client's personal products, food, or belongings",
       "If something is fragile or valuable, clean around it or ask the client",
       "Lock up and confirm with client before leaving every job",
@@ -3916,7 +4282,7 @@ const TRAINING_MODULES = [
       "Write your end-of-job summary — mention anything unusual",
       "GPS Check-Out when you leave — closes the job",
     ],
-    content: `The CleanPro app is your digital work order, time clock, and quality record all in one. Using it properly protects you if there's ever a dispute with a client, and it ensures you get paid accurately for every minute and every upsell.\n\nTHE JOB WORKFLOW:\n1. Receive job notification → check details (address, time, client notes)\n2. Navigate to address via Directions button\n3. GPS Check-In on arrival → takes your location as proof\n4. Take BEFORE photos — every room, every questionable surface\n5. Clean according to your checklist\n6. Log any upsells you discussed with the client\n7. Take AFTER photos — every area you cleaned\n8. Write a brief summary: what was done, any issues, client feedback\n9. GPS Check-Out — job is complete`,
+    content: `The Have Us Clean app is your digital work order, time clock, and quality record all in one. Using it properly protects you if there's ever a dispute with a client, and it ensures you get paid accurately for every minute and every upsell.\n\nTHE JOB WORKFLOW:\n1. Receive job notification → check details (address, time, client notes)\n2. Navigate to address via Directions button\n3. GPS Check-In on arrival → takes your location as proof\n4. Take BEFORE photos — every room, every questionable surface\n5. Clean according to your checklist\n6. Log any upsells you discussed with the client\n7. Take AFTER photos — every area you cleaned\n8. Write a brief summary: what was done, any issues, client feedback\n9. GPS Check-Out — job is complete`,
     quiz: [
       { q: "Why do we take before photos before starting a clean?", a: "To document the condition of the home before you touched anything. If a client later claims something was broken or damaged, your before photos prove it was already in that condition." },
     ],
@@ -4675,7 +5041,7 @@ function SWOTAnalysis() {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <div style={styles.h2}>SWOT Analysis — CleanPro vs. Industry</div>
+        <div style={styles.h2}>SWOT Analysis — Have Us Clean vs. Industry</div>
         <div style={{ color: C.muted, fontSize: 14, maxWidth: 700 }}>
           Benchmarked against Housecall Pro, Jobber, ZenMaid, Connecteam, Swept, ServiceTitan, and Field Promax — the top cleaning business platforms of 2025.
         </div>
@@ -4731,12 +5097,12 @@ function SWOTAnalysis() {
 
       {/* Summary Scorecard */}
       <div style={{ ...styles.card, marginTop: 28 }}>
-        <div style={styles.h3}>📊 Competitive Scorecard — CleanPro vs. Leaders</div>
+        <div style={styles.h3}>📊 Competitive Scorecard — Have Us Clean vs. Leaders</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 560 }}>
             <thead>
               <tr style={{ borderBottom: `2px solid ${C.border}` }}>
-                {["Feature","CleanPro","Housecall Pro","Jobber","ZenMaid","Connecteam"].map((h, i) => (
+                {["Feature","Have Us Clean","Housecall Pro","Jobber","ZenMaid","Connecteam"].map((h, i) => (
                   <th key={h} style={{ padding: "10px 12px", textAlign: i === 0 ? "left" : "center", color: i === 1 ? C.accent : C.muted, fontWeight: 700, fontSize: 12, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
                 ))}
               </tr>
@@ -4775,292 +5141,198 @@ function SWOTAnalysis() {
 
 
 
-// ─── CLIENT PORTAL ───────────────────────────────────────────────────────────
-const MOCK_CLIENTS = [
-  { id: 1, name: "Sarah & Tom Wilson", email: "sarah.wilson@email.com", phone: "555-2201", type: "residential", address: "88 Maple Dr, Austin TX", joinDate: "2025-11-14", totalSpent: 847, status: "active", nextJob: { date: "2026-04-10", time: "9:00 AM", type: "Deep Clean" }, jobHistory: [
-    { date: "2026-03-20", type: "Bi-Weekly Clean", amount: 212, status: "paid", rating: 5, review: "Absolutely spotless! Maria was incredible." },
-    { date: "2026-03-06", type: "Bi-Weekly Clean", amount: 212, status: "paid", rating: 5, review: "" },
-    { date: "2026-02-20", type: "Deep Clean", amount: 423, status: "paid", rating: 4, review: "Great job overall." },
-  ]},
-  { id: 2, name: "Apex Financial Group", email: "ltorres@apexfin.com", phone: "555-8801", type: "commercial", address: "1200 Commerce Blvd, Suite 400", joinDate: "2026-01-03", totalSpent: 3240, status: "active", nextJob: { date: "2026-04-07", time: "6:00 AM", type: "Office Clean" }, jobHistory: [
-    { date: "2026-04-01", type: "Weekly Office Clean", amount: 540, status: "paid", rating: 5, review: "Building manager complimented the team." },
-    { date: "2026-03-25", type: "Weekly Office Clean", amount: 540, status: "paid", rating: 4, review: "" },
-    { date: "2026-03-18", type: "Weekly Office Clean", amount: 540, status: "invoiced", rating: 0, review: "" },
-  ]},
-  { id: 3, name: "Michael Green", email: "mgreen@email.com", phone: "555-3310", type: "residential", address: "12 Pine Circle, Austin TX", joinDate: "2026-02-20", totalSpent: 280, status: "active", nextJob: { date: "2026-04-08", time: "2:00 PM", type: "Standard Clean" }, jobHistory: [
-    { date: "2026-03-25", type: "Weekly Clean", amount: 140, status: "paid", rating: 5, review: "James is super thorough!" },
-    { date: "2026-03-18", type: "Weekly Clean", amount: 140, status: "paid", rating: 5, review: "" },
-  ]},
-];
-
-function StarRating({ rating, onRate }) {
-  return (
-    <div style={{ display: "flex", gap: 4 }}>
-      {[1,2,3,4,5].map(s => (
-        <span key={s} onClick={() => onRate && onRate(s)} style={{ fontSize: 18, cursor: onRate ? "pointer" : "default", color: s <= rating ? C.gold : C.dim }}>★</span>
-      ))}
-    </div>
-  );
-}
-
-function ClientPortal({ jobs }) {
-  const [clients, setClients] = useState(MOCK_CLIENTS);
+// ─── CLIENT PORTAL ────────────────────────────────────────────────────────────
+function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab }) {
   const [selectedClient, setSelectedClient] = useState(null);
-  const [portalView, setPortalView] = useState("list"); // list | client
-  const [activeClientTab, setActiveClientTab] = useState("overview");
-  const [newRating, setNewRating] = useState(0);
-  const [newReview, setNewReview] = useState("");
   const [filterType, setFilterType] = useState("all");
 
-  const filtered = filterType === "all" ? clients : clients.filter(c => c.type === filterType);
+  // Build unified client list from real jobs + leads
+  const allClientNames = [...new Set([
+    ...jobs.map(j => j.client),
+    ...(resLeads || []).map(l => l.name),
+  ])].filter(Boolean);
 
-  const openClient = (client) => { setSelectedClient(client); setPortalView("client"); setActiveClientTab("overview"); setNewRating(0); setNewReview(""); };
+  const clients = allClientNames.map(name => {
+    const clientJobs  = jobs.filter(j => j.client === name);
+    const clientLeads = (resLeads || []).filter(l => l.name === name);
+    const latestLead  = clientLeads[clientLeads.length - 1];
+    const email = latestLead?.email || clientJobs[0]?.email || "";
+    const phone = latestLead?.phone || "";
+    const address = latestLead?.address || clientJobs[0]?.address || "";
+    const totalSpent  = clientJobs.filter(j => j.status === "completed").reduce((a, b) => a + (b.clientPrice || 0), 0);
+    const nextJob     = clientJobs.find(j => j.status === "scheduled");
+    const latestQuote = clientLeads.filter(l => ["Quoted","Follow Up","Booked"].includes(l.status)).slice(-1)[0];
+    const type = clientLeads[0]?.dwellingType ? "residential" : "residential";
 
-  const submitReview = (clientId, jobIdx) => {
-    if (!newRating) return;
-    setClients(cs => cs.map(c => {
-      if (c.id !== clientId) return c;
-      const newHistory = [...c.jobHistory];
-      newHistory[jobIdx] = { ...newHistory[jobIdx], rating: newRating, review: newReview };
-      return { ...c, jobHistory: newHistory };
-    }));
-    setSelectedClient(c => ({ ...c, jobHistory: c.jobHistory.map((j,i) => i===jobIdx ? { ...j, rating: newRating, review: newReview } : j) }));
-    setNewRating(0); setNewReview("");
-    alert("⭐ Review submitted! Thank you.");
-  };
+    return { name, email, phone, address, type, totalSpent, clientJobs, clientLeads, nextJob, latestQuote };
+  });
 
-  const totalRevenue = clients.reduce((a,b) => a + b.totalSpent, 0);
-  const avgRating = (() => {
-    const all = clients.flatMap(c => c.jobHistory.filter(j => j.rating > 0).map(j => j.rating));
-    return all.length ? (all.reduce((a,b)=>a+b,0)/all.length).toFixed(1) : "—";
-  })();
+  const filtered = filterType === "all" ? clients
+    : filterType === "active" ? clients.filter(c => c.nextJob || c.latestQuote)
+    : clients.filter(c => c.totalSpent > 0);
 
-  if (portalView === "client" && selectedClient) {
+  const totalRevenue = clients.reduce((a, b) => a + b.totalSpent, 0);
+  const activeClients = clients.filter(c => c.nextJob || c.latestQuote).length;
+
+  if (selectedClient) {
     const c = selectedClient;
+    const quotedLeads = c.clientLeads.filter(l => l.status !== "Lost");
     return (
       <div>
-        <button style={{ ...styles.btn("ghost"), marginBottom: 20, fontSize: 13 }} onClick={() => setPortalView("list")}>← Back to All Clients</button>
-        <div style={{ ...styles.card, marginBottom: 20 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-            <div style={{ ...styles.avatar(c.type==="commercial"?"linear-gradient(135deg,#3B82F6,#8B5CF6)":"linear-gradient(135deg,#00D4AA,#0088FF)"), width: 56, height: 56, fontSize: 20 }}>
-              {c.type === "commercial" ? "🏢" : "🏠"}
+        <button style={{ ...S.btn("ghost"), marginBottom:20, fontSize:13 }} onClick={() => setSelectedClient(null)}>← Back to All Clients</button>
+
+        {/* Client header */}
+        <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
+          <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap", marginBottom:16 }}>
+            <div style={{ width:56, height:56, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>🏠</div>
+            <div style={{ flex:1 }}>
+              <div style={{ fontWeight:800, fontSize:22 }}>{c.name}</div>
+              {c.email && <div style={{ fontSize:13, color:C.muted }}>📧 {c.email}</div>}
+              {c.phone && <div style={{ fontSize:13, color:C.muted }}>📞 {c.phone}</div>}
+              {c.address && <div style={{ fontSize:13, color:C.muted }}>📍 {c.address}</div>}
             </div>
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: 20 }}>{c.name}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>📧 {c.email} · 📞 {c.phone}</div>
-              <div style={{ fontSize: 13, color: C.muted }}>📍 {c.address}</div>
-              <div style={{ marginTop: 6, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <span style={styles.badge(c.type==="commercial"?"blue":"green")}>{c.type}</span>
-                <span style={styles.badge("green")}>Active Client</span>
-                <span style={{ fontSize: 12, color: C.muted }}>Member since {c.joinDate}</span>
+            <div style={{ textAlign:"right" }}>
+              <div style={{ fontWeight:800, fontSize:28, color:C.accent }}>{region?.currencySymbol || "$"}{c.totalSpent.toLocaleString()}</div>
+              <div style={{ fontSize:12, color:C.muted }}>lifetime spend</div>
+            </div>
+          </div>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))", gap:10 }}>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>TOTAL JOBS</div>
+              <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>{c.clientJobs.length}</div>
+            </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>COMPLETED</div>
+              <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>{c.clientJobs.filter(j=>j.status==="completed").length}</div>
+            </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>QUOTES</div>
+              <div style={{ fontSize:22, fontWeight:800, color:C.gold }}>{quotedLeads.length}</div>
+            </div>
+            {c.nextJob && (
+              <div style={{ background:C.accentDim, borderRadius:10, padding:"10px 14px", textAlign:"center", border:`1px solid ${C.accent}44` }}>
+                <div style={{ fontSize:11, color:C.accent, fontWeight:700 }}>NEXT JOB</div>
+                <div style={{ fontSize:14, fontWeight:800, color:C.accent }}>{c.nextJob.date}</div>
+                <div style={{ fontSize:11, color:C.muted }}>{c.nextJob.type}</div>
               </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <div style={{ fontWeight: 800, fontSize: 26, color: C.accent }}>${c.totalSpent.toLocaleString()}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>total lifetime spend</div>
-            </div>
+            )}
           </div>
         </div>
 
-        {/* Client Sub-tabs */}
-        <div style={{ display: "flex", gap: 6, marginBottom: 20, flexWrap: "wrap" }}>
-          {["overview","history","quotes","invoices","portal"].map(t => (
-            <button key={t} style={styles.navBtn(activeClientTab===t)} onClick={()=>setActiveClientTab(t)}>
-              {t==="overview"?"📋 Overview":t==="history"?"🕐 History":t==="quotes"?"📄 Quotes":t==="invoices"?"💳 Invoices":"🌐 Client Portal Link"}
-            </button>
-          ))}
-        </div>
-
-        {activeClientTab === "overview" && (
-          <div>
-            <div style={styles.grid3}>
-              <div style={styles.statCard(C.accent)}>
-                <div style={{ fontSize: 22 }}>📅</div>
-                <div style={{ fontWeight: 800, fontSize: 20, color: C.accent }}>{c.nextJob?.date || "TBD"}</div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Next Appointment</div>
-                <div style={{ fontSize: 12, color: C.muted }}>{c.nextJob?.time} · {c.nextJob?.type}</div>
-              </div>
-              <div style={styles.statCard(C.blue)}>
-                <div style={{ fontSize: 22 }}>🧹</div>
-                <div style={{ fontWeight: 800, fontSize: 20, color: C.blue }}>{c.jobHistory.length}</div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Total Jobs</div>
-                <div style={{ fontSize: 12, color: C.muted }}>completed</div>
-              </div>
-              <div style={styles.statCard(C.gold)}>
-                <div style={{ fontSize: 22 }}>⭐</div>
-                <div style={{ fontWeight: 800, fontSize: 20, color: C.gold }}>
-                  {c.jobHistory.filter(j=>j.rating>0).length ? (c.jobHistory.filter(j=>j.rating>0).reduce((a,b)=>a+b.rating,0)/c.jobHistory.filter(j=>j.rating>0).length).toFixed(1) : "—"}
-                </div>
-                <div style={{ fontSize: 13, fontWeight: 600 }}>Avg Rating</div>
-              </div>
+        {/* Quotes / Lead history */}
+        {quotedLeads.length > 0 && (
+          <div style={{ ...S.card, marginBottom:20 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+              <div style={S.h3}>📄 Quote History</div>
+              <button style={S.btn("sm")} onClick={() => setTab("res")}>+ New Quote</button>
             </div>
-            <div style={{ marginTop: 20, ...styles.card }}>
-              <div style={styles.h3}>📨 Send Client Message</div>
-              <div style={{ display: "flex", gap: 8, marginBottom: 10, flexWrap: "wrap" }}>
-                {["Appointment Reminder","Quote Follow-Up","Payment Receipt","Thank You Note"].map(t => (
-                  <button key={t} style={{ ...styles.btn("ghost"), fontSize: 12 }} onClick={()=>alert(`"${t}" sent to ${c.email} ✅`)}>📤 {t}</button>
-                ))}
-              </div>
-              <div style={{ fontSize: 12, color: C.muted }}>Clicking any message above simulates sending to {c.email}</div>
-            </div>
-          </div>
-        )}
-
-        {activeClientTab === "history" && (
-          <div>
-            <div style={styles.h3}>Job History</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-              {c.jobHistory.map((job, i) => (
-                <div key={i} style={styles.card}>
-                  <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-                    <div>
-                      <div style={{ fontWeight: 700, fontSize: 15 }}>{job.type}</div>
-                      <div style={{ fontSize: 13, color: C.muted }}>📅 {job.date}</div>
-                      {job.rating > 0 && <StarRating rating={job.rating} />}
-                      {job.review && <div style={{ fontSize: 13, color: C.muted, marginTop: 4, fontStyle: "italic" }}>"{job.review}"</div>}
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.amount}</div>
-                      <div style={styles.badge(job.status==="paid"?"green":"gold")}>{job.status}</div>
-                    </div>
-                  </div>
-                  {job.rating === 0 && (
-                    <div style={{ marginTop: 14, paddingTop: 14, borderTop: `1px solid ${C.border}` }}>
-                      <div style={styles.label}>Leave a Review</div>
-                      <StarRating rating={newRating} onRate={setNewRating} />
-                      <input style={{ ...styles.input, marginTop: 8 }} placeholder="Write a review (optional)..." value={newReview} onChange={e=>setNewReview(e.target.value)} />
-                      <button style={{ ...styles.btn("primary"), marginTop: 8 }} onClick={() => submitReview(c.id, i)}>Submit Review</button>
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {activeClientTab === "quotes" && (
-          <div>
-            <div style={styles.h3}>Quotes & Proposals</div>
-            {[{ id:"Q-2026-004", date:"2026-03-28", desc:"Spring Deep Clean + Carpet Steam", amount:423, status:"approved" },
-              { id:"Q-2026-007", date:"2026-04-01", desc:"Move-In Clean Quote", amount:265, status:"pending" }].map(q => (
-              <div key={q.id} style={{ ...styles.card, marginBottom: 12 }}>
-                <div style={{ display: "flex", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+            {quotedLeads.map(lead => {
+              const q = calcResQuote(lead, region || ACTIVE_REGION);
+              const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
+              return (
+                <div key={lead.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
                   <div>
-                    <div style={{ fontWeight: 700, fontSize: 15 }}>{q.desc}</div>
-                    <div style={{ fontSize: 12, color: C.muted }}>Quote #{q.id} · Sent {q.date}</div>
+                    <div style={{ fontWeight:700, fontSize:14 }}>{lead.serviceType}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>{lead.dwellingType} · {lead.frequency} · {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ""}</div>
+                    {lead.addons?.length > 0 && <div style={{ fontSize:11, color:C.dim }}>+ {lead.addons.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</div>}
                   </div>
-                  <div style={{ textAlign: "right" }}>
-                    <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${q.amount}</div>
-                    <span style={styles.badge(q.status==="approved"?"green":"gold")}>{q.status}</span>
+                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                    <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontWeight:800, color:C.accent }}>{region?.currencySymbol || "$"}{Math.round(q.total).toLocaleString()}</div>
+                      {lead.quotedDate && <div style={{ fontSize:10, color:C.dim }}>Quoted {lead.quotedDate}</div>}
+                    </div>
                   </div>
                 </div>
-                {q.status === "pending" && (
-                  <div style={{ marginTop: 10, display: "flex", gap: 8 }}>
-                    <button style={styles.btn("primary")} onClick={()=>alert("Quote approved! ✅")}>✅ Approve Quote</button>
-                    <button style={styles.btn("ghost")} onClick={()=>alert("Decline noted.")}>Decline</button>
-                  </div>
-                )}
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
-        {activeClientTab === "invoices" && (
-          <div>
-            <div style={styles.h3}>Invoices & Payments</div>
-            {c.jobHistory.map((job, i) => (
-              <div key={i} style={{ ...styles.cardSm, marginBottom: 10, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+        {/* Job history */}
+        <div style={S.card}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+            <div style={S.h3}>🧹 Job History</div>
+            <button style={S.btn("sm")} onClick={() => setTab("jobs")}>View All Jobs</button>
+          </div>
+          {c.clientJobs.length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No jobs yet — book a quote to create the first job.</div>}
+          {c.clientJobs.slice().reverse().map(job => {
+            const partner = partners?.find(p => p.id === job.partnerId);
+            const statusColor = job.status==="completed" ? C.accent : job.status==="in-progress" ? C.gold : C.blue;
+            return (
+              <div key={job.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
                 <div>
-                  <div style={{ fontWeight: 700 }}>INV-{2026000+i+1} · {job.type}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{job.date}</div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{job.type}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.time}{partner ? ` · ${partner.name}` : ""}</div>
+                  {job.upsells?.length > 0 && <div style={{ fontSize:11, color:C.gold }}>+ {job.upsells.join(", ")}</div>}
+                  {job.summary && <div style={{ fontSize:11, color:C.muted, marginTop:2, fontStyle:"italic" }}>"{job.summary}"</div>}
                 </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                  <span style={{ fontWeight: 800, color: C.accent }}>${job.amount}</span>
-                  <span style={styles.badge(job.status==="paid"?"green":"gold")}>{job.status}</span>
-                  {job.status !== "paid" && <button style={styles.btn("sm")} onClick={()=>alert("Payment processed! 💳")}>Pay Now</button>}
+                <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+                  <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
+                  <div style={{ fontWeight:800, color:C.accent }}>{region?.currencySymbol || "$"}{(job.clientPrice||0).toLocaleString()}</div>
                 </div>
               </div>
-            ))}
-            <div style={{ ...styles.card, marginTop: 16, textAlign: "center" }}>
-              <div style={{ fontSize: 13, color: C.muted, marginBottom: 8 }}>Total Lifetime Payments</div>
-              <div style={{ fontSize: 32, fontWeight: 800, color: C.accent }}>${c.totalSpent.toLocaleString()}</div>
-            </div>
-          </div>
-        )}
-
-        {activeClientTab === "portal" && (
-          <div style={styles.card}>
-            <div style={styles.h3}>🌐 Client Self-Service Portal</div>
-            <div style={{ background: C.surface, borderRadius: 12, padding: 20, marginBottom: 16 }}>
-              <div style={styles.label}>Shareable Client Portal Link</div>
-              <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginTop: 6 }}>
-                <div style={{ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", fontSize: 13, color: C.muted, fontFamily: "monospace", wordBreak: "break-all" }}>
-                  https://cleanpro.app/portal/{c.email.split("@")[0]}-{c.id}
-                </div>
-                <button style={styles.btn("primary")} onClick={()=>{ navigator.clipboard?.writeText(`https://cleanpro.app/portal/${c.email.split("@")[0]}-${c.id}`); alert("Link copied! ✅"); }}>
-                  📋 Copy Link
-                </button>
-              </div>
-              <div style={{ fontSize: 12, color: C.muted, marginTop: 8 }}>Send this link to {c.name} so they can view upcoming appointments, approve quotes, and pay invoices 24/7.</div>
-            </div>
-            <div style={styles.label}>Portal Capabilities</div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 8 }}>
-              {[
-                ["✅","View upcoming appointments","Active"],
-                ["✅","Approve or decline quotes","Active"],
-                ["✅","Pay outstanding invoices","Active"],
-                ["✅","View job history & before/after photos","Active"],
-                ["✅","Submit reviews","Active"],
-                ["🔜","Request additional cleanings","Coming Soon"],
-                ["🔜","Update contact info","Coming Soon"],
-              ].map(([icon,label,status],i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 13, padding: "6px 0", borderBottom: `1px solid ${C.border}` }}>
-                  <span>{icon} {label}</span>
-                  <span style={{ color: status === "Active" ? C.accent : C.muted, fontWeight: 600, fontSize: 11 }}>{status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+            );
+          })}
+        </div>
       </div>
     );
   }
 
-  // Client list view
   return (
     <div>
-      <div style={styles.h2}>🌐 Client Portal</div>
-      <div style={styles.grid3}>
-        <StatCard label="Total Clients" value={clients.length} icon="👤" color={C.blue} />
-        <StatCard label="Total Revenue" value={`$${totalRevenue.toLocaleString()}`} icon="💵" color={C.accent} />
-        <StatCard label="Avg Rating" value={avgRating} icon="⭐" color={C.gold} sub="across all reviews" />
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={S.h2}>🌐 Client Portal</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Live data from Quotes + Jobs — updates automatically</div>
+        </div>
+        <button style={S.btn("primary")} onClick={() => setTab("res")}>+ New Quote</button>
       </div>
-      <div style={styles.divider} />
-      <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
-        {["all","residential","commercial"].map(f => (
-          <button key={f} style={styles.navBtn(filterType===f)} onClick={()=>setFilterType(f)}>
-            {f==="all"?"All Clients":f==="residential"?"🏠 Residential":"🏢 Commercial"}
-          </button>
+
+      <div style={S.grid4}>
+        <StatCard label="Total Clients"   value={clients.length}         icon="👤" color={C.accent} />
+        <StatCard label="Active"          value={activeClients}          icon="✅" color={C.blue}   />
+        <StatCard label="Total Revenue"   value={`$${totalRevenue.toLocaleString()}`} icon="💰" color={C.gold} />
+        <StatCard label="Quoted / Active" value={clients.filter(c=>c.latestQuote).length} icon="📄" color={C.accent} />
+      </div>
+
+      <div style={S.divider} />
+
+      {/* Filter */}
+      <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
+        {[["all","All Clients"],["active","Active"],["history","Has Job History"]].map(([val,label]) => (
+          <button key={val} style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700, background:filterType===val?C.accentDim:C.surface, color:filterType===val?C.accent:C.muted, border:`1px solid ${filterType===val?C.accent:C.border}` }} onClick={() => setFilterType(val)}>{label}</button>
         ))}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-        {filtered.map(client => (
-          <div key={client.id} style={{ ...styles.card, cursor: "pointer" }} onClick={() => openClient(client)}>
-            <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
-              <div style={{ ...styles.avatar(client.type==="commercial"?"linear-gradient(135deg,#3B82F6,#8B5CF6)":"linear-gradient(135deg,#00D4AA,#0088FF)"), width: 48, height: 48, fontSize: 18 }}>
-                {client.type==="commercial"?"🏢":"🏠"}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{client.name}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>{client.email} · {client.phone}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>📅 Next: {client.nextJob?.date} — {client.nextJob?.type}</div>
-              </div>
-              <div style={{ textAlign: "right" }}>
-                <div style={{ fontWeight: 800, fontSize: 20, color: C.accent }}>${client.totalSpent.toLocaleString()}</div>
-                <div style={{ fontSize: 12, color: C.muted }}>lifetime spend</div>
-                <div style={{ marginTop: 4 }}>
-                  <StarRating rating={Math.round(client.jobHistory.filter(j=>j.rating>0).reduce((a,b,_,arr)=>a+b.rating/arr.length,0))} />
+
+      {clients.length === 0 && (
+        <div style={{ ...S.card, textAlign:"center", padding:40 }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>📭</div>
+          <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No clients yet</div>
+          <div style={{ color:C.muted, fontSize:14, marginBottom:20 }}>Add your first lead in the Quotes tab — it will appear here automatically.</div>
+          <button style={S.btn("primary")} onClick={() => setTab("res")}>Go to Quotes →</button>
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+        {filtered.map(c => (
+          <div key={c.name} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedClient(c)}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                <div style={{ width:44, height:44, borderRadius:12, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🏠</div>
+                <div>
+                  <div style={{ fontWeight:800, fontSize:16 }}>{c.name}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{c.email || "No email"} · {c.address || "No address"}</div>
+                  <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
+                    {c.nextJob && <span style={S.badge("green")}>📅 Next: {c.nextJob.date}</span>}
+                    {c.latestQuote && <span style={S.badge("gold")}>📄 {c.latestQuote.status}</span>}
+                    {c.clientJobs.length > 0 && <span style={S.badge("blue")}>{c.clientJobs.length} job{c.clientJobs.length!==1?"s":""}</span>}
+                  </div>
                 </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ fontWeight:800, fontSize:22, color:C.accent }}>${c.totalSpent.toLocaleString()}</div>
+                <div style={{ fontSize:11, color:C.muted }}>lifetime</div>
               </div>
             </div>
           </div>
@@ -5069,8 +5341,6 @@ function ClientPortal({ jobs }) {
     </div>
   );
 }
-
-
 
 // ─── QUICKBOOKS SYNC ─────────────────────────────────────────────────────────
 function QuickBooksSync({ jobs, partners }) {
@@ -5138,7 +5408,7 @@ function QuickBooksSync({ jobs, partners }) {
             <div>
               <div style={{ fontWeight: 800, fontSize: 18 }}>QuickBooks Online</div>
               <div style={{ fontSize: 13, color: connected ? C.accent : C.gold, fontWeight: 700 }}>
-                {connected ? "✅ Connected — CleanPro Services LLC" : "⚠️ Not Connected"}
+                {connected ? "✅ Connected — Have Us Clean Services LLC" : "⚠️ Not Connected"}
               </div>
               {lastSync && <div style={{ fontSize: 12, color: C.muted }}>Last synced: {lastSync}</div>}
             </div>
