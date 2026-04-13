@@ -4201,9 +4201,9 @@ const TRAINING_MODULES = [
     category: "Foundations",
     badge: "Start Here",
     badgeColor: C.accent,
-    videoUrl: "https://www.youtube.com/results?search_query=professional+house+cleaning+business+standards+new+cleaner+training",
-    videoChannel: "Savvy Cleaner (Angela Brown) — Ask a House Cleaner",
-    videoTitle: "Professional Cleaning Standards for New Cleaners",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+like+a+pro+professional+cleaning+system",
+    videoChannel: "Clean My Space — Melissa Maker (Toronto, 2M subscribers)",
+    videoTitle: "How to Clean Like a Pro — The 3-Wave Professional System",
     keyPoints: [
       "Always arrive 5 minutes early — being on time is being late",
       "Wear your uniform at all times during the job",
@@ -4226,9 +4226,9 @@ const TRAINING_MODULES = [
     category: "Core Skills",
     badge: "Critical",
     badgeColor: C.red,
-    videoUrl: "https://www.youtube.com/results?search_query=color+coded+cleaning+microfiber+rags+cross+contamination+training",
-    videoChannel: "Imperial Dade / How To Clean Like A Pro",
-    videoTitle: "Color Coded Microfiber Rag System — Cross Contamination Training",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+microfiber+cloths+color+coded+cross+contamination",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "Colour-Coded Microfiber — No Cross Contamination",
     ragModule: true,
     keyPoints: [
       "🔴 Red = Toilets & urinals ONLY — never leaves the bathroom",
@@ -4254,9 +4254,9 @@ const TRAINING_MODULES = [
     category: "Core Skills",
     badge: "Pro Technique",
     badgeColor: C.blue,
-    videoUrl: "https://www.youtube.com/results?search_query=microfiber+cloth+wet+dry+technique+streak+free+cleaning+professional",
-    videoChannel: "How To Clean Like A Pro",
-    videoTitle: "Microfiber Wet vs Dry — Streak-Free Cleaning Technique",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+mirrors+windows+streak+free+microfiber",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "Streak-Free Mirrors & Glass — Wet Then Dry Microfiber Technique",
     keyPoints: [
       "Dry microfiber: use for dusting — the static charge grabs and traps particles",
       "Damp microfiber: use for grime, oils, dried residue — moisture activates capillary pull",
@@ -4291,9 +4291,9 @@ const TRAINING_MODULES = [
     category: "Core Skills",
     badge: "Hygiene",
     badgeColor: "#A78BFA",
-    videoUrl: "https://www.youtube.com/results?search_query=how+to+wash+microfiber+cleaning+cloths+professional+care",
-    videoChannel: "Savvy Cleaner / The Rag Company",
-    videoTitle: "How to Wash & Care for Microfiber Cleaning Rags",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+wash+microfiber+cloths+no+fabric+softener",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Wash Microfiber Cloths — What NOT to Do",
     keyPoints: [
       "Microfiber: cold/warm wash, gentle detergent, NO fabric softener, low heat dry",
       "Cotton rags: hot wash OK, NO fabric softener, high heat to sanitize",
@@ -4317,9 +4317,9 @@ const TRAINING_MODULES = [
     category: "Procedures",
     badge: "Full Walkthrough",
     badgeColor: C.gold,
-    videoUrl: "https://www.youtube.com/results?search_query=how+to+clean+house+professionally+room+by+room+step+by+step+training",
-    videoChannel: "Savvy Cleaner (Angela Brown) — 345K subscribers",
-    videoTitle: "Room-by-Room Professional House Cleaning Walkthrough",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+bathroom+professionally+fast+efficient",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean a Bathroom Fast & Professionally",
     keyPoints: [
       "Always work TOP → BOTTOM (dust falls down — clean it last)",
       "Always work BACK → FRONT (don't walk over cleaned areas)",
@@ -4350,9 +4350,9 @@ const TRAINING_MODULES = [
     category: "Safety",
     badge: "Required",
     badgeColor: C.red,
-    videoUrl: "https://www.youtube.com/results?search_query=cleaning+chemical+safety+training+OSHA+do+not+mix+bleach+ammonia",
-    videoChannel: "Savvy Cleaner / OSHA Training",
-    videoTitle: "Chemical Safety for Cleaning Professionals — What NOT to Mix",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+cleaning+products+you+should+never+mix+dangerous",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "Cleaning Products You Should NEVER Mix — Chemical Safety",
     keyPoints: [
       "NEVER mix bleach + ammonia — creates toxic chloramine gas",
       "NEVER mix bleach + vinegar — creates chlorine gas",
@@ -4377,8 +4377,8 @@ const TRAINING_MODULES = [
     badge: "App Training",
     badgeColor: C.accent,
     videoUrl: "https://www.youtube.com/results?search_query=cleaning+business+app+GPS+checkin+job+management+tutorial",
-    videoChannel: "CleanPro Internal Training (record your own walkthrough!)",
-    videoTitle: "Using the CleanPro App — GPS Check-In, Photos & Job Completion",
+    videoChannel: "Have Us Clean Internal Training — record your own 5-min phone video!",
+    videoTitle: "Using the Have Us Clean App — GPS Check-In, Photos & Job Completion",
     keyPoints: [
       "Check your schedule in the Jobs tab every morning",
       "GPS Check-In the moment you arrive — this starts your time log",
@@ -4402,9 +4402,9 @@ const TRAINING_MODULES = [
     category: "Sales",
     badge: "Earn More",
     badgeColor: C.gold,
-    videoUrl: "https://www.youtube.com/results?search_query=how+to+upsell+cleaning+services+clients+professional+house+cleaner",
-    videoChannel: "Savvy Cleaner (Angela Brown)",
-    videoTitle: "How to Upsell Cleaning Services Without Being Pushy",
+    videoUrl: "https://www.youtube.com/results?search_query=Angela+Brown+Savvy+Cleaner+how+to+upsell+cleaning+services+clients",
+    videoChannel: "Savvy Cleaner — Angela Brown (cleaning business specialist)",
+    videoTitle: "How to Upsell Cleaning Services Professionally",
     keyPoints: [
       "Upsells earn YOU more money — they're added to your job pay",
       "Always frame upsells as observations, not pressure",
@@ -4427,9 +4427,9 @@ const TRAINING_MODULES = [
     category: "Professionalism",
     badge: "Must Know",
     badgeColor: "#A78BFA",
-    videoUrl: "https://www.youtube.com/results?search_query=handling+client+complaints+house+cleaning+business+customer+service",
-    videoChannel: "Savvy Cleaner (Angela Brown)",
-    videoTitle: "Handling Client Complaints in Your Cleaning Business",
+    videoUrl: "https://www.youtube.com/results?search_query=Angela+Brown+Savvy+Cleaner+handling+unhappy+clients+complaints",
+    videoChannel: "Savvy Cleaner — Angela Brown",
+    videoTitle: "Handling Unhappy Clients in Your Cleaning Business",
     keyPoints: [
       "Stay calm — never argue or get defensive",
       "Apologize sincerely even if you're not sure it was your fault",
@@ -4442,6 +4442,341 @@ const TRAINING_MODULES = [
     content: `Client complaints feel personal, but they're a business moment. The way you handle a complaint has more impact on client retention than the original issue. Studies show clients who have a complaint handled well are more loyal than those who never had a problem at all.\n\nTHE COMPLAINT PROTOCOL:\n1. Listen fully — don't interrupt\n2. Apologize sincerely: "I'm really sorry to hear that. That's not the experience we want you to have."\n3. Take photos if any physical damage is claimed\n4. Say: "I'm going to contact my supervisor right now to make sure this gets resolved for you."\n5. Call/message supervisor immediately\n6. Log everything in the job summary in the app\n7. Follow up — your supervisor will handle resolution\n\nNEVER SAY: "That wasn't me / that was already there / you'll need to talk to someone else."`,
     quiz: [
       { q: "A client calls while you're still on-site and says you broke their vase. You didn't see it break. What do you do?", a: "Stay calm. Apologize. Take photos of the area. Do NOT argue or deny. Call your supervisor immediately. Write everything in your job summary. Never promise to pay for it yourself — let the company handle it." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 10: Inside Oven ──────────────────────────────────────────
+  {
+    id: 10,
+    title: "Add-On: Inside Oven Clean",
+    icon: "🔥",
+    duration: "12 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: "#FF6B6B",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+inside+oven+non+self+cleaning+professionally",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean a Non-Self-Cleaning Oven Like a Pro",
+    keyPoints: [
+      "Always check if oven is COOL before starting — never clean a hot oven",
+      "Remove racks first — soak in bathtub or sink with dishwasher tabs, 30+ min",
+      "Mix 4 parts baking soda : 1 part dish soap : 1 part water into a paste",
+      "Apply paste to all interior walls, floor, ceiling, and door — avoid heating elements and fans",
+      "Let sit 20–30 min minimum — dwell time does the work, not elbow grease",
+      "Scrub with damp Scotch-Brite pad, use a razor scraper on stubborn spots",
+      "Rinse with wet microfiber cloth, finish with vinegar wipe to cut residue",
+      "Glass door: use Bar Keepers Friend — do NOT take door apart (voids warranty)",
+      "Total time: 45–60 min for a standard oven",
+    ],
+    content: `The inside oven clean is one of our most popular and highest-valued add-ons. Done properly it takes about 45–60 minutes and leaves a result clients always photograph and talk about.
+
+BEFORE YOU START:
+✅ Confirm oven is completely cool
+✅ Remove everything from inside including racks
+✅ Put racks in bathtub or large sink covered with hot water + 2 dishwasher tabs
+✅ Pull out the oven drawer and vacuum underneath
+
+THE PASTE METHOD (best for heavy buildup):
+1. Mix: 4 tbsp baking soda + 1 tbsp dish soap + 1 tbsp water = thick paste
+2. Apply with your hands (gloves on) to ALL interior surfaces
+3. Avoid fans, coils, heating elements — mask with paper towel if needed
+4. Wait 20–30 minutes — resist scrubbing early
+5. Scrub with wet Scotch-Brite — use razor scraper on carbonised buildup
+6. Rinse thoroughly with wet microfiber (baking soda leaves white residue if not rinsed)
+7. Final wipe with vinegar-dampened cloth to cut any remaining grease
+
+DOOR GLASS:
+• Interior glass: Bar Keepers Friend + scrub pad, rinse clean
+• Between the panes: leave it — do not take door apart
+
+OVEN RACKS:
+• After 30+ min soak, scrub with steel pad — grease lifts easily
+• Rinse and dry before replacing`,
+    quiz: [
+      { q: "Client asks you to clean inside a hot oven — what do you say?", a: ""I need the oven to be fully cool before I can safely clean the interior. Could we do this one first before you use it today, or shall I start the rest of the job and come back to the oven last?" Never clean a hot oven." },
+      { q: "You apply the paste and go to scrub after 5 minutes. It's not working. Why?", a: "Dwell time is everything. The paste needs 20–30 minutes to penetrate and break down the grease. Going in too early means you're doing 10x the work. Always let it sit." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 11: Inside Fridge ─────────────────────────────────────────
+  {
+    id: 11,
+    title: "Add-On: Inside Fridge Clean",
+    icon: "🧊",
+    duration: "10 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: "#3B82F6",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+refrigerator+inside+shelves+drawers+efficiently",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean Your Fridge Inside — Fast & Efficiently",
+    keyPoints: [
+      "Ask client before starting: any food to keep? Any expired to toss?",
+      "Remove ALL shelves and drawers — wash separately in the sink",
+      "Green rag for all food-contact surfaces (food prep zone)",
+      "Warm water + small amount of dish soap — no bleach inside a fridge",
+      "Wipe top to bottom, back to front — don't forget the door seals",
+      "Dry completely before replacing contents — moisture causes mold",
+      "Deodorise with baking soda wipe on interior walls if there's odour",
+      "Replace shelves and drawers only when fully dry",
+    ],
+    content: `The inside fridge clean is a quick, high-impact add-on that clients love. Most people avoid cleaning their fridge because it means emptying it. You do that for them — that's the value.
+
+STEP BY STEP:
+1. Ask client: anything specific to keep? Remove all food — set aside on counter or cooler
+2. Remove all shelves and drawers and bring to sink
+3. Wash shelves and drawers: warm water + dish soap, rinse, set to air dry
+4. Inside fridge cavity: spray lightly with warm soapy water
+5. Use GREEN rag — wipe all interior walls, top to bottom, back to front
+6. Door seals: use a damp cloth and get into the grooves — this is where mold hides
+7. Vegetable drawers: scrub any residue — these get the worst buildup
+8. Deodorise: light wipe with baking soda paste on walls if there's smell
+9. Dry everything completely with a clean cloth
+10. Replace dry shelves and drawers, replace food
+
+IMPORTANT:
+❌ No bleach inside a fridge — food contact surface
+❌ Don't replace wet shelves — causes mould
+✅ Green rag only for all food surfaces`,
+    quiz: [
+      { q: "Which rag colour do you use inside the fridge and why?", a: "Green — the fridge is a food prep/food storage surface. Green rags are designated for kitchen food-contact surfaces. Never use red (restroom) or blue (general) inside a fridge." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 12: Inside Cabinets ───────────────────────────────────────
+  {
+    id: 12,
+    title: "Add-On: Inside Cabinets Clean",
+    icon: "🗄️",
+    duration: "10 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: "#A78BFA",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+kitchen+cabinets+inside+professionally",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean Inside Kitchen Cabinets",
+    keyPoints: [
+      "Only done on EMPTY cabinets — this is a move-in/move-out add-on typically",
+      "Remove any shelf liners first — discard old ones, client may want new",
+      "Green rag for kitchen cabinet interiors (food-contact zone)",
+      "Damp wipe all shelves, walls, corners, and door interiors",
+      "Pay attention to hinges and corners — crumbs hide here",
+      "Dry completely before replacing anything",
+      "Check for signs of pests or mould — report to supervisor immediately if found",
+      "Do NOT reorganise client belongings without permission",
+    ],
+    content: `Inside cabinets is most commonly requested on move-in/move-out jobs where the unit is empty. Occasionally recurring clients request it as a seasonal deep-clean add-on.
+
+WHEN IT APPLIES:
+• Move-In / Move-Out jobs — always offer this
+• Deep Clean add-on — client requests it seasonally
+• Only worth doing on EMPTY cabinets — don't move client belongings without permission
+
+STEP BY STEP:
+1. Remove old shelf liners if present — discard unless client says otherwise
+2. Vacuum out crumbs and debris with a hand vacuum or brush
+3. Green damp rag — wipe all shelf surfaces top to bottom
+4. Wipe interior walls of each cabinet, including the door interior
+5. Get into corners and around hinges — crumbs pack in here
+6. Wipe drawer interiors if included
+7. Dry with a clean dry cloth before replacing anything
+
+FLAGS TO REPORT:
+• Any sign of pest activity (droppings, damage)
+• Visible mould or water damage
+• Do NOT attempt to clean mould yourself — this is a supervisor call`,
+    quiz: [
+      { q: "You open a cabinet and notice what looks like mouse droppings. What do you do?", a: "Stop. Do not touch or clean it. Take a photo. Contact your supervisor immediately. This is a health hazard that requires a specialist — you are not equipped or insured to handle this. Be calm and professional when informing the client." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 13: Interior Windows ──────────────────────────────────────
+  {
+    id: 13,
+    title: "Add-On: Interior Window Wash",
+    icon: "🪟",
+    duration: "8 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: C.blue,
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+windows+streak+free+microfiber+inside",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean Windows Streak-Free Every Time",
+    keyPoints: [
+      "Blue rag ONLY for all glass surfaces",
+      "The two-step method: damp side first → dry side buff — no exceptions",
+      "Spray lightly onto cloth, NOT directly onto window (spraying onto glass causes drips)",
+      "Wipe in S-pattern or Z-pattern — never circular (circular = streaks)",
+      "Get sill and frame too — dust settles here and undoes your glass work",
+      "This is priced per window — count and confirm with client before starting",
+      "Screens: remove and scrub gently with soft brush if client requests",
+    ],
+    content: `Interior window washing is one of the cleanest, most visible results you can deliver. Clients see it every day. Get it streak-free and they'll book it every time.
+
+THE TWO-STEP METHOD:
+1. Lightly spray glass cleaner or water onto a DAMP blue microfiber cloth (not the glass)
+2. Wipe glass in a consistent S or Z pattern — top to bottom, side to side
+3. Immediately follow with a DRY blue microfiber cloth — buff in same pattern
+4. Check from an angle with light — if you see streaks, the second wipe wasn't dry enough
+
+WHY STREAKS HAPPEN:
+• Too much product — use less
+• Wiping in circles — wipe in straight lines
+• Not following up with a dry cloth
+• Using a cloth that has fabric softener residue — won't absorb
+
+SILL AND FRAME:
+• Dry blue rag: dust the sill first
+• Damp cloth: wipe down sill and frame
+• Don't let water sit on wood windowsills — dry immediately
+
+COUNTING WINDOWS:
+This add-on is priced per window. Before starting, do a quick count and confirm with client. If number is higher than quoted, message your supervisor before proceeding.`,
+    quiz: [
+      { q: "You clean a window and step back and see a streak. What caused it and how do you fix it?", a: "Most likely the dry-buff step was skipped or the cloth wasn't fully dry. Fix: take a fresh DRY blue microfiber cloth and buff the glass again in straight lines. If the streak persists, a tiny bit more cleaner on the damp pass, followed immediately by a thorough dry buff." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 14: Baseboards ────────────────────────────────────────────
+  {
+    id: 14,
+    title: "Add-On: Baseboards & Detail Clean",
+    icon: "📐",
+    duration: "8 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: C.gold,
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+baseboards+fast+efficiently+without+bending",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Clean Baseboards Fast Without Killing Your Back",
+    keyPoints: [
+      "Blue rag for baseboards — general low-risk surface",
+      "Dry first: run dry blue microfiber along top of baseboard to collect dust",
+      "Damp second: follow with damp blue cloth for sticky buildup and scuffs",
+      "Melissa Maker trick: wrap microfiber around a flat mop head — clean standing up",
+      "Work room by room, consistent direction — don't zig-zag",
+      "Pay attention to corners and behind doors — most partners miss these",
+      "White painted baseboards show everything — finish with dry buff to prevent watermarks",
+      "Deep Clean and Move-In/Out jobs: baseboards are always included in the scope",
+    ],
+    content: `Baseboards are one of the most-noticed details clients check after a clean. Most people don't do them themselves — so when you do them well, it stands out.
+
+THE TECHNIQUE:
+1. Dry blue microfiber: run along the full length of baseboard top-edge first — this grabs the dust layer
+2. Check for sticky buildup or scuffs — these need a damp pass
+3. Damp blue cloth: wipe full baseboard — top, face, and bottom edge
+4. White painted baseboards: follow with a dry cloth to prevent water marks
+5. Use a soft toothbrush for corner buildup (heavier detail jobs)
+
+MELISSA MAKER HACK — No bending required:
+Wrap a microfiber cloth around a flat mop head using an elastic band. Now you can clean the entire baseboard line standing up, room by room. Fast and no back pain.
+
+SCOPE:
+• Deep Clean: baseboards always included
+• Refresh / Full Home: spot-clean visible marks only
+• Move-In/Out: full baseboard scrub throughout
+• As a standalone add-on: full clean all rooms`,
+    quiz: [
+      { q: "What's the right order — damp first or dry first on baseboards, and why?", a: "Dry first. A dry microfiber cloth has static that grabs loose dust off the top of the baseboard. If you go damp first, you're turning all that dust into muddy smears that take longer to clean. Dry captures, damp finishes." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 15: Carpet Cleaning ───────────────────────────────────────
+  {
+    id: 15,
+    title: "Add-On: Carpet Cleaning",
+    icon: "🛋️",
+    duration: "10 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: C.accent,
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+remove+carpet+stains+professionally+without+machine",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Remove Carpet Stains Like a Pro",
+    keyPoints: [
+      "BLOT, never rub — rubbing spreads the stain and damages fibres",
+      "Work from the outside edge of the stain inward — never from the centre out",
+      "Cold water for protein stains (blood, food, pet) — hot water sets them permanently",
+      "Dish soap + cold water is your first line solution for most stains",
+      "For pet odour: enzyme cleaner only — regular cleaners mask smell, don't eliminate it",
+      "Always test any product on a hidden area first — carpet dye can lift",
+      "Do NOT over-wet carpet — excess moisture causes mould and subfloor damage",
+      "Heavy carpet steam: this requires professional equipment — quote accordingly",
+    ],
+    content: `Carpet cleaning ranges from spot treatment to full steam, depending on what's booked. Know which one you're doing before you start.
+
+SPOT TREATMENT (included in most jobs):
+1. Blot fresh stains immediately — never rub
+2. Apply cold water to a clean cloth — blot from outside in
+3. Mix 1 tsp dish soap + 1 cup cold water — blot onto stain
+4. Blot clean water to rinse — repeat until stain lifts
+5. Place a clean towel over the area and press firmly to absorb moisture
+
+COMMON STAINS:
+• Coffee / Tea: dish soap + cold water → blot → rinse
+• Red wine: cold water blot immediately → club soda → blot dry
+• Pet urine: enzyme cleaner ONLY — do not use regular cleaner (masks, doesn't neutralise)
+• Blood: cold water only — NEVER hot (sets permanently)
+• Grease: dish soap — grease-cutting formula works here
+
+STEAM CLEANING ADD-ON:
+This requires a rented or owned carpet steam machine. Time: 45–90 min depending on area. Always let client know carpet will be damp for 2–4 hours — plan schedule accordingly.
+
+WHEN TO FLAG:
+• Any stains that won't lift after 2 attempts — photograph and note in job summary
+• Carpet that smells of mould or is visibly damaged — do not attempt`,
+    quiz: [
+      { q: "A client has a fresh red wine spill on white carpet. What do you do first?", a: "Blot immediately with a clean white cloth — work from the outside of the stain inward. Use cold water. Never rub. Club soda can help lift the remaining colour. Do NOT use hot water or scrub. Speed and blotting are everything with red wine." },
+    ],
+  },
+
+  // ── ADD-ON MODULE 16: Pet Hair & Heavy Detail ────────────────────────────────
+  {
+    id: 16,
+    title: "Add-On: Pet Hair & Heavy Detail",
+    icon: "🐾",
+    duration: "10 min read",
+    category: "Add-Ons",
+    badge: "Paid Add-On",
+    badgeColor: "#FF8C42",
+    videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+remove+pet+hair+furniture+carpet+efficiently",
+    videoChannel: "Clean My Space — Melissa Maker",
+    videoTitle: "How to Remove Pet Hair from Everything",
+    keyPoints: [
+      "Vacuum first — always — before any wet cleaning on pet hair jobs",
+      "Rubber gloves trick: dampen rubber gloves, rub upholstery — hair balls up for easy removal",
+      "Squeegee on carpet: drags embedded pet hair to surface better than vacuum alone",
+      "Lint roller for upholstery surfaces and cushion edges",
+      "Pet hair in corners: vacuum crevice tool, then damp cloth to collect remainder",
+      "Enzyme cleaner for any pet accident odours — regular cleaner doesn't neutralise",
+      "Inform supervisor and note in job summary if pet hair is extreme (extra time needed)",
+      "Always wash your own rags separately after a pet hair job",
+    ],
+    content: `Pet hair and heavy detail is its own add-on because it adds significant time to a job. A home with 2 shedding dogs can add 45–90 minutes to a standard clean. Always flag scope before starting.
+
+TOOLS FOR PET HAIR:
+• Vacuum with pet attachment: first pass everywhere
+• Rubber gloves (damp): rub upholstery in one direction — hair balls up
+• Lint roller: cushion edges, throw pillows, fabric surfaces
+• Rubber squeegee on carpet: drag across carpet surface — lifts embedded hair
+• Damp microfiber: wipe hard surfaces (shelving, baseboards) — picks up fine hair
+
+FURNITURE SEQUENCE:
+1. Vacuum all cushions with pet attachment
+2. Remove cushions — vacuum underneath and the seat frame
+3. Damp rubber glove pass on fabric surfaces
+4. Lint roll edges and seams
+5. Replace cushions neatly
+
+PET ODOUR:
+• Enzyme cleaner only for spots of pet urine or accident — spray, let dwell 5 min, blot
+• Baking soda on carpet overnight (if pre-approved) removes general pet odour
+• Never use air freshener as a substitute — clients with allergies react to fragrance
+
+SCOPE FLAG:
+If you arrive and pet hair is extreme (multiple animals, long-haired breeds, months of buildup) — photograph and contact supervisor before starting. Extra time = extra charge.`,
+    quiz: [
+      { q: "You're vacuuming a sofa and pet hair just keeps moving around instead of being picked up. What technique helps?", a: "Dampen rubber gloves and rub the fabric in one direction — the friction and static pull the hair into clumps you can then pick up easily. A rubber squeegee also works on fabric surfaces. Vacuum after to collect the clumps." },
     ],
   },
 ];
@@ -4624,6 +4959,137 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
   );
 }
 
+// ─── ANIME GUIDE ─────────────────────────────────────────────────────────────
+const ANIME_GUIDE_TOPICS = [
+  { id:"start",   label:"🌸 Getting Started",      prompt:"Explain how to log into the Have Us Clean partner portal and what a new partner sees when they first open the app. Be welcoming and clear." },
+  { id:"jobs",    label:"📋 Your Jobs Tab",         prompt:"Explain how a partner finds their assigned jobs in the Have Us Clean app, how to read the job details, and what to check before heading to a job." },
+  { id:"gps",     label:"📍 GPS Check-In",          prompt:"Walk a partner through exactly how to GPS check-in when they arrive at a job and GPS check-out when they leave, and why it matters." },
+  { id:"photos",  label:"📸 Before & After Photos", prompt:"Explain the importance of taking before and after photos on every job, how to do it properly in the app, and what makes a good photo." },
+  { id:"upsells", label:"💰 Upsells & Add-Ons",    prompt:"Explain how to identify and offer upsells to clients during a job — things like inside oven, fridge, baseboards — and how to add them in the app without being pushy." },
+  { id:"complete",label:"✅ Completing a Job",      prompt:"Walk a partner through the full end-of-job process: final check, summary note, checkout, and what happens after the job is marked complete." },
+  { id:"pay",     label:"💵 Your Pay",              prompt:"Explain how partner pay works at Have Us Clean — 65% of each job's client price — how to view pending and earned pay in the app, and when pay is processed." },
+  { id:"rag",     label:"🎨 RAG Colour System",     prompt:"Explain the RAG (Red/Yellow/Green/Blue) microfibre colour-coding system used at Have Us Clean in a fun, memorable way a new partner won't forget." },
+  { id:"issues",  label:"🆘 Handling Problems",     prompt:"Explain what a partner should do if something goes wrong on a job — broken item, unhappy client, locked out, or running late — step by step using the Have Us Clean app." },
+];
+
+function AnimeGuide() {
+  const [selectedTopic, setSelectedTopic] = useState(null);
+  const [response, setResponse] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [expression, setExpression] = useState("idle");
+  const [history, setHistory] = useState([]);
+  const [followUp, setFollowUp] = useState("");
+  const bottomRef = useRef(null);
+
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [response, loading]);
+
+  const SYSTEM = `You are Yuki, a friendly anime-style AI training guide for Have Us Clean — a professional cleaning company in Toronto, Canada and Arizona, USA.
+Your job is to help new cleaning partners learn the Have Us Clean app and cleaning procedures.
+Personality: warm, encouraging, slightly anime-flavoured (use "Yosh!", "Ganbatte!" occasionally), clear numbered steps, emojis to aid scanning.
+Always reinforce: RAG colour system (🔴 red=toilets only, 🟡 yellow=sinks/mirrors, 🟢 green=kitchen, 🔵 blue=general/glass), partner pay = 65% of client price.
+Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning is skilled work.`;
+
+  const ask = async (prompt, isFollowUp = false) => {
+    setLoading(true); setExpression("loading"); setResponse("");
+    if (!isFollowUp) setHistory([]);
+    const msgs = [...(isFollowUp ? history : []), { role:"user", content: prompt }];
+    try {
+      const res = await fetch("/api/claude", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:600, system:SYSTEM, messages:msgs }),
+      });
+      const data = await res.json();
+      const text = data.content?.[0]?.text || "No response — check your API connection.";
+      setResponse(text); setExpression("talking");
+      setHistory([...msgs, { role:"assistant", content:text }]);
+    } catch {
+      setExpression("error");
+      setResponse("Connection error. Add ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.");
+    }
+    setLoading(false);
+  };
+
+  const handleFollowUp = () => {
+    if (!followUp.trim()) return;
+    const q = followUp; setFollowUp(""); ask(q, true);
+  };
+
+  const yukiEmoji = loading ? "💭" : expression === "error" ? "😅" : expression === "talking" ? "✨" : "🌸";
+  const idleBubble = "Hi! I'm Yuki, your Have Us Clean training guide! 🌸\nTap any topic below and I'll walk you through it step by step!\nYosh — let's learn! ✨";
+
+  return (
+    <div>
+      <div style={{ textAlign:"center", marginBottom:20 }}>
+        <div style={{ fontWeight:800, fontSize:22, background:"linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>🌸 Yuki — AI App Guide</div>
+        <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Your personal Have Us Clean training companion</div>
+      </div>
+
+      {/* Character card */}
+      <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#1a0533,#0D0B1E)", border:`1px solid #7C3AED55`, position:"relative", overflow:"hidden" }}>
+        <div style={{ position:"absolute", top:-50, right:-50, width:180, height:180, borderRadius:"50%", background:"#7C3AED0A" }} />
+        <div style={{ position:"absolute", bottom:-40, left:-40, width:140, height:140, borderRadius:"50%", background:"#A78BFA0A" }} />
+        <div style={{ display:"flex", gap:16, alignItems:"flex-start", position:"relative" }}>
+          {/* Avatar */}
+          <div style={{ flexShrink:0, textAlign:"center" }}>
+            <div style={{ width:88, height:88, borderRadius:22, background:"linear-gradient(135deg,#581c87,#7C3AED,#A78BFA)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:46, boxShadow:"0 0 28px #7C3AED77", border:"2px solid #A78BFA55" }}>
+              {yukiEmoji}
+            </div>
+            <div style={{ marginTop:6, fontWeight:800, fontSize:13, color:"#A78BFA" }}>Yuki</div>
+            <div style={{ fontSize:10, color:"#7C3AED99" }}>AI Guide ✨</div>
+          </div>
+          {/* Bubble */}
+          <div style={{ flex:1, background:"#7C3AED15", borderRadius:16, border:`1px solid #7C3AED44`, padding:"14px 16px", minHeight:76 }}>
+            {loading
+              ? <div style={{ color:"#A78BFA", fontSize:14, display:"flex", alignItems:"center", gap:8 }}>💭 <span>Thinking...</span></div>
+              : <div style={{ fontSize:13, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap" }}>{response || idleBubble}</div>
+            }
+          </div>
+        </div>
+        <div ref={bottomRef} />
+      </div>
+
+      {/* Topic buttons */}
+      <div style={{ marginBottom:16 }}>
+        <div style={S.label}>What do you want to learn?</div>
+        <div style={{ display:"flex", flexWrap:"wrap", gap:8, marginTop:8 }}>
+          {ANIME_GUIDE_TOPICS.map(t => (
+            <button key={t.id} disabled={loading}
+              style={{ padding:"8px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700, transition:"all 0.15s",
+                background: selectedTopic?.id===t.id ? "#7C3AED33" : C.surface,
+                color: selectedTopic?.id===t.id ? "#A78BFA" : C.muted,
+                border: `1px solid ${selectedTopic?.id===t.id ? "#7C3AED" : C.border}` }}
+              onClick={() => { setSelectedTopic(t); ask(t.prompt); }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Follow-up */}
+      {(response || loading) && (
+        <div style={{ ...S.card, background:"#080614", border:`1px solid #7C3AED33` }}>
+          <div style={S.label}>Ask Yuki a follow-up</div>
+          <div style={{ display:"flex", gap:8, marginTop:8 }}>
+            <input style={{ ...S.input, flex:1, background:"#1a0533", border:`1px solid #7C3AED55`, color:C.text }}
+              placeholder="e.g. What if the client isn't home when I arrive?"
+              value={followUp} onChange={e => setFollowUp(e.target.value)}
+              onKeyDown={e => e.key==="Enter" && handleFollowUp()} disabled={loading} />
+            <button style={{ ...S.btn("primary"), background:"#7C3AED", flexShrink:0 }} onClick={handleFollowUp} disabled={loading || !followUp.trim()}>Ask ✨</button>
+          </div>
+          {history.length >= 4 && (
+            <button style={{ ...S.btn("ghost"), fontSize:12, marginTop:10 }} onClick={() => { setHistory([]); setResponse(""); setExpression("idle"); setSelectedTopic(null); }}>🔄 Start fresh</button>
+          )}
+        </div>
+      )}
+
+      <div style={{ marginTop:14, fontSize:11, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
+        Yuki is powered by Claude AI · Requires ANTHROPIC_API_KEY in Vercel settings<br/>
+        Yuki knows the Have Us Clean app, RAG system, pay structure, and all service procedures
+      </div>
+    </div>
+  );
+}
+
 // ─── ONBOARDING COMPONENT ─────────────────────────────────────────────────────
 function Onboarding({ partners, setPartners }) {
   const [selectedPartner, setSelectedPartner] = useState(null);
@@ -4632,9 +5098,10 @@ function Onboarding({ partners, setPartners }) {
   const [activeQuiz, setActiveQuiz] = useState(null);
   const [quizAnswerVisible, setQuizAnswerVisible] = useState({});
   const [libraryFilter, setLibraryFilter] = useState("All");
+  const [showAnimeGuide, setShowAnimeGuide] = useState(false);
 
   const onboardingPartners = partners.filter(p => !p.onboarded);
-  const categories = ["All", ...new Set(TRAINING_MODULES.map(m => m.category))];
+  const categories = ["All", "Foundations", "Core Skills", "Procedure", "Safety", "Add-Ons"];
 
   const getProgress = (partnerId) => {
     const done = (completedModules[partnerId] || []).length;
@@ -4657,29 +5124,33 @@ function Onboarding({ partners, setPartners }) {
     ? TRAINING_MODULES
     : TRAINING_MODULES.filter(m => m.category === libraryFilter);
 
-
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
         <div style={S.h2}>🎓 Partner Onboarding & Training</div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          <button style={S.navBtn(!selectedPartner)} onClick={() => setSelectedPartner(null)}>📚 Training Library</button>
+          <button style={S.navBtn(!selectedPartner && !showAnimeGuide)} onClick={() => { setSelectedPartner(null); setShowAnimeGuide(false); }}>📚 Training Library</button>
+          <button style={{ ...S.navBtn(showAnimeGuide), background: showAnimeGuide ? "#7C3AED22" : "transparent", color: showAnimeGuide ? "#A78BFA" : C.muted, borderBottom: showAnimeGuide ? "2px solid #A78BFA" : "2px solid transparent" }} onClick={() => { setShowAnimeGuide(true); setSelectedPartner(null); }}>🌸 AI App Guide</button>
           {partners.map(p => (
-            <button key={p.id} style={S.navBtn(selectedPartner?.id === p.id)} onClick={() => setSelectedPartner(p)}>
+            <button key={p.id} style={S.navBtn(selectedPartner?.id === p.id)} onClick={() => { setSelectedPartner(p); setShowAnimeGuide(false); }}>
               {p.avatar} {p.name.split(" ")[0]} {p.onboarded ? "✅" : ""}
             </button>
           ))}
         </div>
       </div>
 
-      {onboardingPartners.length > 0 && (
+      {onboardingPartners.length > 0 && !showAnimeGuide && (
         <div style={{ background:C.goldDim, border:`1px solid ${C.gold}44`, borderRadius:12, padding:"12px 18px", marginBottom:18 }}>
           <div style={{ fontWeight:700, color:C.gold, marginBottom:2 }}>🔔 {onboardingPartners.length} partner(s) awaiting onboarding</div>
           <div style={{ fontSize:13, color:C.muted }}>{onboardingPartners.map(p => p.name).join(", ")} — click their name above to begin</div>
         </div>
       )}
 
-      {/* Stats */}
+      {/* AI Anime Guide */}
+      {showAnimeGuide && <AnimeGuide />}
+
+      {!showAnimeGuide && (
+      <div>
       <div style={S.grid4}>
         <StatCard label="Total Modules" value={TRAINING_MODULES.length} icon="📚" color={C.blue} />
         <StatCard label="Partners Onboarded" value={partners.filter(p=>p.onboarded).length} icon="✅" color={C.accent} />
@@ -4798,6 +5269,8 @@ function Onboarding({ partners, setPartners }) {
           quizAnswerVisible={quizAnswerVisible}
           setQuizAnswerVisible={setQuizAnswerVisible}
         />
+      )}
+    </div>
       )}
     </div>
   );
