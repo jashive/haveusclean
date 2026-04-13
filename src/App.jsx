@@ -4493,7 +4493,7 @@ OVEN RACKS:
 • After 30+ min soak, scrub with steel pad — grease lifts easily
 • Rinse and dry before replacing`,
     quiz: [
-      { q: "Client asks you to clean inside a hot oven — what do you say?", a: ""I need the oven to be fully cool before I can safely clean the interior. Could we do this one first before you use it today, or shall I start the rest of the job and come back to the oven last?" Never clean a hot oven." },
+      { q: "Client asks you to clean inside a hot oven — what do you say?", a: "Say: 'I need the oven to be fully cool before I can safely clean the interior. Can we do this one first, or shall I come back to the oven at the end?' Never clean a hot oven." },
       { q: "You apply the paste and go to scrub after 5 minutes. It's not working. Why?", a: "Dwell time is everything. The paste needs 20–30 minutes to penetrate and break down the grease. Going in too early means you're doing 10x the work. Always let it sit." },
     ],
   },
