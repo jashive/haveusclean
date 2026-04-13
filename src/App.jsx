@@ -5,7 +5,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 const BRAND = {
   name: "Have Us Clean",
   tagline: "Mid-Market Cleaning · Toronto & GTA",
-  version: "3.0.0",
+  version: "4.0.0",
   color: "#00D4AA",
   logoMark: "🧹",
   supportEmail: "haveusclean@gmail.com",
@@ -14,6 +14,57 @@ const BRAND = {
   market: "Toronto & GTA",
   position: "Mid-market",
 };
+
+
+// ─── WORK ORDER GENERATOR ─────────────────────────────────────────────────────
+// Auto-generates a structured work order when a lead is booked
+function generateWorkOrder(job, lead, partner) {
+  const addonTasks = (lead?.addons || job.upsells || []).map(id => {
+    const ao = RES_ADDONS.find(x => x.id === id);
+    const label = ao?.label || id;
+    const tasks = {
+      "Inside Fridge":          "Empty fridge contents → wipe all shelves and drawers with green rag → clean door seals → replace contents",
+      "Inside Oven":            "Remove oven racks → spray oven cleaner → let soak 10 min → scrub interior with green rag → wipe clean → replace racks",
+      "Inside Cabinets":        "Empty cabinet → wipe all interior surfaces with blue rag → clean door interiors → replace items neatly",
+      "Interior Windows":       "Blue damp rag on glass → buff dry immediately with dry blue rag → wipe sills and frames",
+      "Baseboards / Detail":    "Dry blue rag along all baseboards → damp follow-up on sticky buildup → check corners",
+      "Carpet Cleaning":        "Pre-treat stains → steam clean per carpet type → allow dry time before walking on",
+      "Pet Hair / Heavy Detail":"Use rubber gloves or lint roller on upholstery → vacuum twice with pet attachment → deodorise if needed",
+    };
+    return { label, instruction: tasks[label] || `Complete ${label} as per standard procedure` };
+  });
+
+  const roomChecklist = {
+    "Refresh Clean":           ["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
+    "Full Home Clean":         ["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
+    "Deep Clean":              ["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
+    "Move-In / Move-Out":      ["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances (oven, fridge if selected)","All surfaces, fixtures, floors","Check and clean inside closets"],
+    "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
+  };
+
+  const ragReminder = "🎨 RAG SYSTEM: 🔴 Red = Toilets ONLY · 🟡 Yellow = Sinks/Mirrors · 🟢 Green = Kitchen Surfaces · 🔵 Blue = General/Glass";
+
+  return {
+    id: `WO-${job.id}`,
+    jobId: job.id,
+    createdAt: new Date().toISOString(),
+    client: job.client,
+    address: job.address,
+    date: job.date,
+    time: job.time,
+    serviceType: job.type,
+    hours: job.hours,
+    partnerName: partner?.name || "Unassigned",
+    partnerPhone: partner?.phone || "",
+    clientNotes: lead?.notes || job.notes || "",
+    addons: addonTasks,
+    checklist: roomChecklist[job.type] || roomChecklist["Full Home Clean"],
+    ragReminder,
+    accessNotes: lead?.notes?.toLowerCase().includes("code") || lead?.notes?.toLowerCase().includes("access") ? lead.notes : "",
+    petNotes: lead?.notes?.toLowerCase().includes("dog") || lead?.notes?.toLowerCase().includes("cat") || lead?.notes?.toLowerCase().includes("pet") ? lead.notes : "",
+    status: "pending",
+  };
+}
 
 // ─── HAVE US CLEAN — SERVICE PACKAGES ────────────────────────────────────────
 // Sourced directly from HUC Operating System (ChatGPT export)
@@ -949,7 +1000,7 @@ Partners: ${JSON.stringify(partners.filter(p=>p.onboarded).map(p=>({id:p.id,name
 Return array of: [{jobId, jobClient, currentPartner, suggestedPartner, suggestedTime, reason, efficiencyGain}]
 Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:1000, messages:[{role:"user",content:prompt}] })
@@ -1261,14 +1312,16 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const bookLead = (lead) => {
     const q = calcResQuote(lead, region);
+    const assignedPartner = partners.find(p => p.onboarded) || partners[0];
+    const jobId = Date.now();
     const newJob = {
-      id: Date.now(),
+      id: jobId,
       client: lead.name,
       address: lead.address,
       type: lead.serviceType,
       date: lead.preferredDate || new Date().toISOString().split("T")[0],
       time: lead.preferredTime || "9:00 AM",
-      partnerId: partners[0]?.id || 1,
+      partnerId: assignedPartner?.id || 1,
       status: "scheduled",
       hours: Math.ceil(q.serviceHours),
       upsells: lead.addons.map(id => RES_ADDONS.find(x => x.id === id)?.label).filter(Boolean),
@@ -1282,11 +1335,12 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       nextDate: null,
       region: region.id,
       notes: lead.notes || "",
+      workOrder: generateWorkOrder({ id:jobId, client:lead.name, address:lead.address, type:lead.serviceType, date:lead.preferredDate||"TBD", time:lead.preferredTime||"9:00 AM", hours:Math.ceil(q.serviceHours), upsells:[] }, lead, assignedPartner),
     };
     setJobs(js => [...js, newJob]);
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
     if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
-    alert(`✅ Job booked! Added to Jobs tab.\n\nClient: ${newJob.client}\nDate: ${newJob.date}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} (65%)\nCompany: ${region.currencySymbol}${newJob.profit} (35%)`);
+    alert(`✅ Job booked + Work Order created!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nAssigned to: ${assignedPartner?.name || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} (65%)\n\nWork order is attached to this job in the Jobs tab.`);
   };
 
   const confirmPayment = (lead) => {
@@ -2308,19 +2362,31 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
 // ─── CLIENT VIEW ──────────────────────────────────────────────────────────────
 // What clients see — their upcoming job, quote history, and how to contact HUC
 function ClientView({ jobs, resLeads, region, setTab }) {
-  const [searchName, setSearchName] = useState("");
-  const [selectedClient, setSelectedClient] = useState(null);
+  const [emailInput, setEmailInput] = useState("");
+  const [authedClient, setAuthedClient] = useState(null);
+  const [loginError, setLoginError] = useState("");
+  const today = new Date().toISOString().split("T")[0];
 
-  // Build client list from real jobs + leads
-  const allNames = [...new Set([
-    ...jobs.map(j => j.client),
-    ...(resLeads||[]).map(l => l.name),
-  ])].filter(Boolean);
+  const handleLogin = () => {
+    const email = emailInput.trim().toLowerCase();
+    if (!email || !email.includes("@")) {
+      setLoginError("Please enter a valid email address.");
+      return;
+    }
+    // Find client by email in leads or jobs
+    const matchedLead = (resLeads||[]).find(l => l.email?.toLowerCase() === email);
+    const matchedJob  = jobs.find(j => j.email?.toLowerCase() === email);
+    const name = matchedLead?.name || matchedJob?.client;
 
-  const filtered = searchName.trim()
-    ? allNames.filter(n => n.toLowerCase().includes(searchName.toLowerCase()))
-    : allNames;
+    if (name) {
+      setAuthedClient({ email, name });
+      setLoginError("");
+    } else {
+      setLoginError("No account found with that email. Contact Have Us Clean if you need help.");
+    }
+  };
 
+  // Get data for the logged-in client
   const getClientData = (name) => {
     const clientJobs  = jobs.filter(j => j.client === name);
     const clientLeads = (resLeads||[]).filter(l => l.name === name);
@@ -2328,16 +2394,56 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     return { clientJobs, clientLeads, lead };
   };
 
-  if (selectedClient) {
-    const { clientJobs, clientLeads, lead } = getClientData(selectedClient);
-    const upcomingJobs = clientJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
-    const completedJobs = clientJobs.filter(j => j.status === "completed");
-    const activeQuote = clientLeads.filter(l => ["Quoted","Follow Up"].includes(l.status)).slice(-1)[0];
-    const cur = region?.currencySymbol || "$";
+  // Not logged in — show email login
+  if (!authedClient) {
+    return (
+      <div style={{ maxWidth:400, margin:"40px auto" }}>
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:52, marginBottom:12 }}>🧹</div>
+          <div style={{ fontWeight:800, fontSize:24 }}>Have Us Clean</div>
+          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Client Portal — Sign in to see your upcoming service</div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Your Email Address</div>
+          <input
+            style={{ ...S.input, fontSize:16, marginBottom:12 }}
+            type="email"
+            inputMode="email"
+            value={emailInput}
+            onChange={e => setEmailInput(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && handleLogin()}
+            placeholder="you@email.com"
+            autoFocus
+          />
+          {loginError && <div style={{ color:C.red, fontSize:13, marginBottom:10 }}>{loginError}</div>}
+          <button style={{ ...S.btn("primary"), width:"100%", fontSize:16, padding:"14px" }} onClick={handleLogin} disabled={!emailInput.trim()}>
+            Continue →
+          </button>
+          <div style={{ marginTop:16, fontSize:12, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
+            Use the email address you gave us when booking.<br/>
+            New client? <a href={`mailto:${BRAND.supportEmail}?subject=Booking Request`} style={{ color:C.accent }}>Contact us to get started</a>.
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Logged in — show client's own data only
+  const { clientJobs, clientLeads, lead } = getClientData(authedClient.name);
+  const upcomingJobs = clientJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
+  const completedJobs = clientJobs.filter(j => j.status === "completed");
+  const activeQuote = clientLeads.filter(l => ["Quoted","Follow Up"].includes(l.status)).slice(-1)[0];
+  const cur = region?.currencySymbol || "$";
+
+  if (true) {
+    const selectedClient = authedClient.name;
 
     return (
       <div>
-        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => setSelectedClient(null)}>← All Clients</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div style={{ fontSize:14, color:C.muted }}>👋 Hi, <strong style={{ color:C.text }}>{authedClient.name}</strong></div>
+          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setAuthedClient(null); setEmailInput(""); }}>🔒 Sign Out</button>
+        </div>
 
         {/* Client header */}
         <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.accent}` }}>
@@ -2425,90 +2531,138 @@ function ClientView({ jobs, resLeads, region, setTab }) {
       </div>
     );
   }
-
-  return (
-    <div>
-      <div style={S.h2}>📲 Client View</div>
-      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:18 }}>
-        This is what your clients experience. Share your Vercel URL with clients so they can view their upcoming jobs and quotes.
-      </div>
-
-      {/* Info banner */}
-      <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.blue}` }}>
-        <div style={{ fontWeight:800, fontSize:16, marginBottom:8, color:C.blue }}>🌐 How to share with clients</div>
-        <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-          Share your live URL (<strong style={{ color:C.text }}>haveusclean.ca</strong> (or your Vercel URL while setting up)) with any client. When they open it, they search their name to see their upcoming service, active quote, and service history. No login required — search by name.
-        </div>
-      </div>
-
-      {/* Search */}
-      <div style={{ marginBottom:18 }}>
-        <input
-          style={{ ...S.input, fontSize:16 }}
-          placeholder="🔍 Search client name..."
-          value={searchName}
-          onChange={e => setSearchName(e.target.value)}
-        />
-      </div>
-
-      {filtered.length === 0 && (
-        <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:36, marginBottom:12 }}>📭</div>
-          <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>No clients found</div>
-          <div style={{ color:C.muted, fontSize:13, marginBottom:20 }}>Add leads in the Quotes tab first — clients appear here automatically.</div>
-          <button style={S.btn("primary")} onClick={() => setTab("res")}>Go to Quotes →</button>
-        </div>
-      )}
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {filtered.map(name => {
-          const { clientJobs, clientLeads } = getClientData(name);
-          const upcoming = clientJobs.find(j => j.status === "scheduled");
-          const hasQuote = clientLeads.some(l => ["Quoted","Follow Up"].includes(l.status));
-          return (
-            <div key={name} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedClient(name)}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, justifyContent:"space-between" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                  <div style={{ width:40, height:40, borderRadius:10, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18 }}>🏠</div>
-                  <div>
-                    <div style={{ fontWeight:700, fontSize:15 }}>{name}</div>
-                    <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
-                      {upcoming && <span style={S.badge("green")}>📅 {upcoming.date}</span>}
-                      {hasQuote && <span style={S.badge("gold")}>📄 Quote ready</span>}
-                      {clientJobs.filter(j=>j.status==="completed").length > 0 && <span style={S.badge("blue")}>{clientJobs.filter(j=>j.status==="completed").length} completed</span>}
-                    </div>
-                  </div>
-                </div>
-                <span style={{ color:C.muted, fontSize:20 }}>›</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 // ─── PARTNER VIEW ─────────────────────────────────────────────────────────────
 // What partners see — their schedule, jobs to complete, check-in actions
 function PartnerView({ jobs, partners, region }) {
-  const [selectedPartner, setSelectedPartner] = useState(null);
+  const [pinInput, setPinInput] = useState("");
+  const [authedPartner, setAuthedPartner] = useState(null); // logged-in partner
+  const [pinError, setPinError] = useState("");
+  const [selectedPartner, setSelectedPartner] = useState(null); // admin selection
+  const [isAdminMode, setIsAdminMode] = useState(false);
   const today = new Date().toISOString().split("T")[0];
   const cur = region?.currencySymbol || "$";
 
-  if (selectedPartner) {
-    const partner = partners.find(p => p.id === selectedPartner);
-    if (!partner) return null;
-    const myJobs = jobs.filter(j => j.partnerId === partner.id);
-    const todayJobs = myJobs.filter(j => j.date === today);
-    const upcomingJobs = myJobs.filter(j => j.status === "scheduled" && j.date >= today).sort((a,b) => a.date.localeCompare(b.date));
-    const completedJobs = myJobs.filter(j => j.status === "completed");
-    const totalEarned = completedJobs.reduce((a,b) => a + (b.partnerPay||0), 0);
-    const pendingPay = myJobs.filter(j => j.status === "scheduled" || j.status === "in-progress").reduce((a,b) => a + (b.partnerPay||0), 0);
+  // Admin PIN — hardcoded for now, change to your own 6-digit code
+  const ADMIN_PIN = "000000";
+
+  const handlePinSubmit = () => {
+    if (pinInput === ADMIN_PIN) {
+      setIsAdminMode(true);
+      setAuthedPartner(null);
+      setPinError("");
+      return;
+    }
+    // Check partner PINs (last 4 of phone number by default)
+    const matched = partners.find(p => {
+      const defaultPin = p.phone?.replace(/\D/g, "").slice(-4) || "0000";
+      const customPin = p.pin || defaultPin;
+      return pinInput === customPin;
+    });
+    if (matched) {
+      setAuthedPartner(matched);
+      setPinError("");
+    } else {
+      setPinError("Incorrect PIN. Try the last 4 digits of your phone number.");
+      setPinInput("");
+    }
+  };
+
+  // Not logged in — show PIN screen
+  if (!authedPartner && !isAdminMode) {
+    return (
+      <div style={{ maxWidth:380, margin:"40px auto" }}>
+        <div style={{ textAlign:"center", marginBottom:28 }}>
+          <div style={{ fontSize:52, marginBottom:12 }}>🧹</div>
+          <div style={{ fontWeight:800, fontSize:24 }}>Have Us Clean</div>
+          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Partner Portal — Enter your PIN to continue</div>
+        </div>
+        <div style={S.card}>
+          <div style={S.label}>Your PIN</div>
+          <input
+            style={{ ...S.input, fontSize:28, letterSpacing:"0.3em", textAlign:"center", marginBottom:12 }}
+            type="password"
+            inputMode="numeric"
+            maxLength={6}
+            value={pinInput}
+            onChange={e => setPinInput(e.target.value.replace(/\D/g,""))}
+            onKeyDown={e => e.key === "Enter" && handlePinSubmit()}
+            placeholder="••••"
+            autoFocus
+          />
+          {pinError && <div style={{ color:C.red, fontSize:13, marginBottom:10, textAlign:"center" }}>{pinError}</div>}
+          <button style={{ ...S.btn("primary"), width:"100%", fontSize:16, padding:"14px" }} onClick={handlePinSubmit} disabled={pinInput.length < 4}>
+            Sign In →
+          </button>
+          <div style={{ marginTop:14, fontSize:12, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
+            Default PIN: last 4 digits of your phone number<br/>
+            Admin PIN: 000000 (change in Partners tab)
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── ADMIN MODE: show all partners ──
+  if (isAdminMode && !selectedPartner) {
+    return (
+      <div>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <div style={S.h2}>📋 Partner View <span style={{ fontSize:13, color:C.gold, fontWeight:600 }}>— Admin Mode</span></div>
+          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setPinInput(""); }}>🔒 Sign Out</button>
+        </div>
+        <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+          {partners.map(partner => {
+            const myJobs = jobs.filter(j => j.partnerId === partner.id);
+            const todayCount = myJobs.filter(j => j.date === today).length;
+            const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a+(b.partnerPay||0), 0);
+            return (
+              <div key={partner.id} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedPartner(partner.id)}>
+                <div style={{ display:"flex", alignItems:"center", gap:12, justifyContent:"space-between" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:12 }}>
+                    <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:15 }}>{partner.name}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>PIN: {partner.pin || partner.phone?.replace(/\D/g,"").slice(-4) || "0000"} · {partner.region}</div>
+                      <div style={{ display:"flex", gap:6, marginTop:4 }}>
+                        {todayCount > 0 && <span style={S.badge("gold")}>📅 {todayCount} today</span>}
+                        {pendingPay > 0 && <span style={S.badge("green")}>{cur}{pendingPay} pending</span>}
+                        {!partner.onboarded && <span style={S.badge("red")}>⚠️ Not onboarded</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <span style={{ color:C.muted, fontSize:20 }}>›</span>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+
+  // ── PARTNER or ADMIN viewing a specific partner ──
+  const viewingId = isAdminMode ? selectedPartner : authedPartner?.id;
+  const partner = partners.find(p => p.id === viewingId);
+  if (!partner) return null;
+
+  const myJobs = jobs.filter(j => j.partnerId === partner.id);
+  const todayJobs = myJobs.filter(j => j.date === today);
+  const upcomingJobs = myJobs.filter(j => j.status === "scheduled" && j.date >= today).sort((a,b) => a.date.localeCompare(b.date));
+  const completedJobs = myJobs.filter(j => j.status === "completed");
+  const totalEarned = completedJobs.reduce((a,b) => a + (b.partnerPay||0), 0);
+  const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a + (b.partnerPay||0), 0);
 
     return (
       <div>
-        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => setSelectedPartner(null)}>← All Partners</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          {isAdminMode
+            ? <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => setSelectedPartner(null)}>← All Partners</button>
+            : <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setAuthedPartner(null); setPinInput(""); }}>🔒 Sign Out</button>
+          }
+          {isAdminMode && <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setSelectedPartner(null); setPinInput(""); }}>🔒 Exit Admin</button>}
+        </div>
 
         {/* Partner header */}
         <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.gold}` }}>
@@ -2600,53 +2754,6 @@ function PartnerView({ jobs, partners, region }) {
         )}
       </div>
     );
-  }
-
-  return (
-    <div>
-      <div style={S.h2}>📋 Partner View</div>
-      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:20 }}>
-        Select a partner to see exactly what they see — their schedule, today's jobs, and pay.
-      </div>
-
-      {/* Sharing tip */}
-      <div style={{ ...S.card, marginBottom:20, borderLeft:`4px solid ${C.gold}` }}>
-        <div style={{ fontWeight:700, fontSize:14, color:C.gold, marginBottom:6 }}>📱 How to share with partners</div>
-        <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-          Share your Vercel URL with partners. When they open it, they go to <strong style={{ color:C.text }}>👥 Team → 📋 Partner View</strong> and tap their name to see their schedule. No login needed right now — a proper partner login system is coming in the next update.
-        </div>
-      </div>
-
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {partners.map(partner => {
-          const myJobs = jobs.filter(j => j.partnerId === partner.id);
-          const todayCount = myJobs.filter(j => j.date === today).length;
-          const upcomingCount = myJobs.filter(j => j.status === "scheduled" && j.date >= today).length;
-          const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a+(b.partnerPay||0), 0);
-          return (
-            <div key={partner.id} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedPartner(partner.id)}>
-              <div style={{ display:"flex", alignItems:"center", gap:12, justifyContent:"space-between" }}>
-                <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                  <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
-                  <div>
-                    <div style={{ fontWeight:700, fontSize:15 }}>{partner.name}</div>
-                    <div style={{ fontSize:12, color:C.muted }}>{partner.region} · {partner.status}</div>
-                    <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
-                      {todayCount > 0 && <span style={S.badge("gold")}>📅 {todayCount} today</span>}
-                      {upcomingCount > 0 && <span style={S.badge("blue")}>{upcomingCount} upcoming</span>}
-                      {pendingPay > 0 && <span style={S.badge("green")}>{cur}{pendingPay} pending pay</span>}
-                      {!partner.onboarded && <span style={S.badge("red")}>⚠️ Not onboarded</span>}
-                    </div>
-                  </div>
-                </div>
-                <span style={{ color:C.muted, fontSize:20 }}>›</span>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
@@ -3163,7 +3270,7 @@ function AgentPanel({ agent }) {
     setOutput("");
     const userMsg = input;
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3299,7 +3406,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
 `.trim();
 
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3457,7 +3564,7 @@ function MarketingHub({ region }) {
     setLoadingAI(true);
     setAiOutput("");
     try {
-      const res = await fetch("https://api.anthropic.com/v1/messages", {
+      const res = await fetch("/api/claude", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
