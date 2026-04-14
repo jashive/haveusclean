@@ -1220,6 +1220,508 @@ function WhiteLabel() {
   );
 }
 
+// ─── COLD OUTREACH ────────────────────────────────────────────────────────────
+// Reads from n8n Google Sheets pipeline. Leads have: lead_id, company, city,
+// market, segment, buyer_title, pain_point, first_offer, priority_score,
+// cold_email, follow_up_email, linkedin_note, call_opener, status, notes
+
+const COLD_STATUSES = ["New","Contacted","Follow Up","Meeting Booked","Won","Lost"];
+const COLD_STATUS_COLOR = {
+  "New":            C.blue,
+  "Contacted":      C.gold,
+  "Follow Up":      "#FF6B6B",
+  "Meeting Booked": C.accent,
+  "Won":            C.accent,
+  "Lost":           C.dim,
+};
+
+const SEGMENT_META = {
+  "Office":            { icon:"🏢", color:"#3B82F6", tone:"professional office management" },
+  "Medical":           { icon:"🏥", color:"#EF4444", tone:"medical / clinical environment" },
+  "Industrial-Office": { icon:"🏭", color:"#F59E0B", tone:"industrial facility operations" },
+  "Property Manager":  { icon:"🏘️", color:"#8B5CF6", tone:"property management / tenant services" },
+  "Dental":            { icon:"🦷", color:"#06B6D4", tone:"dental practice / patient environment" },
+};
+
+// Industry-aware email upgrade prompts
+const SEGMENT_EMAIL_CONTEXT = {
+  "Office": {
+    angle: "Staff productivity and first impressions for visiting clients",
+    hook: "A clean office signals professionalism to every client who walks through the door.",
+    cta: "a quick 15-minute walkthrough",
+  },
+  "Medical": {
+    angle: "Patient safety, infection control, and regulatory compliance",
+    hook: "Medical facilities require cleaning standards that go beyond typical office cleaning.",
+    cta: "a brief call to discuss your cleaning protocols",
+  },
+  "Industrial-Office": {
+    angle: "Minimal disruption to operations, after-hours flexibility",
+    hook: "We work around your schedule — nights, weekends, or between shifts.",
+    cta: "a short call to understand your facility schedule",
+  },
+  "Property Manager": {
+    angle: "Tenant satisfaction, common area presentation, contract reliability",
+    hook: "Tenants notice common areas. Consistent, reliable cleaning keeps them happy and renewing.",
+    cta: "a walkthrough of the common areas",
+  },
+  "Dental": {
+    angle: "Patient confidence, clinical cleanliness standards, operatory turnover",
+    hook: "Patients judge a practice by how clean it looks and smells the moment they walk in.",
+    cta: "a brief call to discuss your practice's cleaning needs",
+  },
+};
+
+// Generate upgraded industry-aware emails using Claude
+async function generateUpgradedOutreach(lead) {
+  const seg = SEGMENT_EMAIL_CONTEXT[lead.segment] || SEGMENT_EMAIL_CONTEXT["Office"];
+  const prompt = `You are writing cold outreach for Have Us Clean, a professional commercial cleaning company serving Ontario, Canada and Arizona, USA.
+
+Lead details:
+- Company: ${lead.company}
+- City: ${lead.city}, ${lead.market}
+- Segment: ${lead.segment}
+- Buyer Title: ${lead.buyer_title}
+- Pain Point: ${lead.pain_point}
+- First Offer: ${lead.first_offer}
+- Industry Angle: ${seg.angle}
+- Opening Hook: ${seg.hook}
+
+Write exactly these 4 sections with these exact labels. No JSON, no markdown:
+
+COLD_EMAIL:
+(Under 140 words. Professional, local, credible. ${seg.angle}. Mention ${seg.hook} naturally. Goal: book ${seg.cta}. Sign as Danae Misener, Have Us Clean. Include haveusclean.ca and 905-216-1397 naturally.)
+
+FOLLOW_UP_EMAIL:
+(Under 90 words. Reference the first email. Warm, not pushy. Same tone. Sign as Danae Misener, Have Us Clean.)
+
+LINKEDIN_NOTE:
+(Under 280 characters. First-person, direct, no fluff. Reference their industry specifically.)
+
+CALL_OPENER:
+(20-25 seconds spoken. Natural, confident. ${seg.tone} angle. Goal: get 10 minutes on calendar.)`;
+
+  const res = await fetch("/api/claude", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: "claude-sonnet-4-20250514",
+      max_tokens: 800,
+      messages: [{ role: "user", content: prompt }],
+    }),
+  });
+  const data = await res.json();
+  return data.content?.[0]?.text || "";
+}
+
+function parseOutreachSections(text) {
+  const extract = (label) => {
+    const re = new RegExp(`${label}:\\s*([\\s\\S]*?)(?=\\n[A-Z_]+:|$)`, "i");
+    const m = text.match(re);
+    return m ? m[1].trim() : "";
+  };
+  return {
+    cold_email:      extract("COLD_EMAIL"),
+    follow_up_email: extract("FOLLOW_UP_EMAIL"),
+    linkedin_note:   extract("LINKEDIN_NOTE"),
+    call_opener:     extract("CALL_OPENER"),
+  };
+}
+
+// Sample leads matching your n8n schema — replace with live sheet data
+const SAMPLE_COLD_LEADS = [
+  { lead_id:"ON-0101", company:"Brampton Medical Plaza", city:"Brampton", market:"Ontario", segment:"Medical", buyer_title:"Clinic Manager", pain_point:"High-traffic waiting areas need daily disinfection", first_offer:"medical office cleaning", priority_score:5, next_action:"Call clinic manager", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"New", owner:"Jason", notes:"" },
+  { lead_id:"ON-0201", company:"Mississauga Office Tower", city:"Mississauga", market:"Ontario", segment:"Office", buyer_title:"Property Manager", pain_point:"Common areas showing wear between current cleaning cycles", first_offer:"janitorial cleaning", priority_score:4, next_action:"Email property manager", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"New", owner:"Jason", notes:"" },
+  { lead_id:"AZ-0101", company:"Scottsdale Dental Group", city:"Scottsdale", market:"Arizona", segment:"Dental", buyer_title:"Practice Manager", pain_point:"Patient perception of cleanliness affects reviews", first_offer:"dental office cleaning", priority_score:5, next_action:"Send cold email", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Contacted", owner:"Jason", notes:"Called — left voicemail" },
+  { lead_id:"AZ-0201", company:"Phoenix Airpark Industrial", city:"Phoenix", market:"Arizona", segment:"Industrial-Office", buyer_title:"Facilities Director", pain_point:"After-hours cleaning needed without disrupting day shift", first_offer:"janitorial cleaning", priority_score:3, next_action:"LinkedIn outreach", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Follow Up", owner:"Jason", notes:"" },
+  { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
+];
+
+function ColdOutreach({ region }) {
+  const [leads, setLeads]               = useState(SAMPLE_COLD_LEADS);
+  const [viewLead, setViewLead]         = useState(null);
+  const [filterStatus, setFilterStatus] = useState("All");
+  const [filterSeg, setFilterSeg]       = useState("All");
+  const [filterMkt, setFilterMkt]       = useState("All");
+  const [upgrading, setUpgrading]       = useState(false);
+  const [upgradedContent, setUpgradedContent] = useState(null);
+  const [copied, setCopied]             = useState("");
+  const [showManual, setShowManual]     = useState(false);
+  const [loadingSheet, setLoadingSheet] = useState(false);
+  const [manualForm, setManualForm]     = useState({
+    company:"", city:"", market:"Ontario", segment:"Office",
+    buyer_title:"", pain_point:"", first_offer:"office cleaning",
+    priority_score:3, notes:""
+  });
+
+  const SHEET_ID = "1OwEbttCZsLhwV7wTMiF5LqnypiUshQ9r6tw1vhQPFiM";
+
+  // Filter leads
+  const filtered = leads.filter(l =>
+    (filterStatus === "All" || l.status === filterStatus) &&
+    (filterSeg    === "All" || l.segment === filterSeg) &&
+    (filterMkt    === "All" || l.market === filterMkt)
+  );
+
+  // Stats
+  const total     = leads.length;
+  const hot       = leads.filter(l => l.priority_score >= 4).length;
+  const booked    = leads.filter(l => l.status === "Meeting Booked").length;
+  const won       = leads.filter(l => l.status === "Won").length;
+  const contacted = leads.filter(l => l.status !== "New").length;
+  const convRate  = total > 0 ? Math.round((won / total) * 100) : 0;
+
+  const updateStatus = (id, status) => {
+    setLeads(ls => ls.map(l => l.id === id || l.lead_id === id ? { ...l, status } : l));
+    if (viewLead?.lead_id === id) setViewLead(v => ({ ...v, status }));
+  };
+
+  const updateNotes = (id, notes) => {
+    setLeads(ls => ls.map(l => l.lead_id === id ? { ...l, notes } : l));
+    if (viewLead?.lead_id === id) setViewLead(v => ({ ...v, notes }));
+  };
+
+  const copy = (text, key) => {
+    navigator.clipboard?.writeText(text);
+    setCopied(key);
+    setTimeout(() => setCopied(""), 2000);
+  };
+
+  // Upgrade outreach using Claude with industry-aware prompts
+  const upgradeOutreach = async (lead) => {
+    setUpgrading(true);
+    setUpgradedContent(null);
+    try {
+      const text = await generateUpgradedOutreach(lead);
+      const sections = parseOutreachSections(text);
+      setUpgradedContent(sections);
+      // Also save upgraded content back to lead
+      setLeads(ls => ls.map(l => l.lead_id === lead.lead_id ? { ...l, ...sections } : l));
+      setViewLead(v => ({ ...v, ...sections }));
+    } catch {
+      alert("Upgrade failed. Check your API connection.");
+    }
+    setUpgrading(false);
+  };
+
+  // LinkedIn search URL
+  const linkedinSearch = (lead) => {
+    const q = `${lead.buyer_title} ${lead.company}`;
+    return `https://www.linkedin.com/search/results/people/?keywords=${encodeURIComponent(q)}`;
+  };
+
+  // Add manual lead
+  const addManualLead = () => {
+    if (!manualForm.company.trim()) return;
+    const prefix = manualForm.market === "Arizona" ? "AZ" : "ON";
+    const num = String(leads.length + 1).padStart(4, "0");
+    const newLead = {
+      ...manualForm,
+      lead_id: `${prefix}-M${num}`,
+      status: "New",
+      owner: "Jason",
+      cold_email: "", follow_up_email: "", linkedin_note: "", call_opener: "",
+      source_lane: "Manual Entry",
+    };
+    setLeads(ls => [newLead, ...ls]);
+    setShowManual(false);
+    setManualForm({ company:"", city:"", market:"Ontario", segment:"Office", buyer_title:"", pain_point:"", first_offer:"office cleaning", priority_score:3, notes:"" });
+    setViewLead(newLead);
+  };
+
+  // Priority badge
+  const PriorityBadge = ({ score }) => {
+    const color = score >= 5 ? C.red : score >= 4 ? C.gold : score >= 3 ? C.blue : C.dim;
+    const label = score >= 5 ? "🔥 Hot" : score >= 4 ? "⚡ High" : score >= 3 ? "📋 Med" : "❄️ Low";
+    return <span style={{ padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:800, background:`${color}22`, color }}>{label} {score}/5</span>;
+  };
+
+  // ── LEAD DETAIL VIEW ──
+  if (viewLead) {
+    const seg = SEGMENT_META[viewLead.segment] || SEGMENT_META["Office"];
+    const hasOutreach = viewLead.cold_email || upgradedContent;
+    const outreach = upgradedContent || viewLead;
+    const statusColor = COLD_STATUS_COLOR[viewLead.status] || C.muted;
+
+    return (
+      <div>
+        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); }}>← All Leads</button>
+
+        {/* Lead header */}
+        <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${seg.color}` }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:12, marginBottom:14 }}>
+            <div style={{ display:"flex", gap:14, alignItems:"flex-start" }}>
+              <div style={{ width:52, height:52, borderRadius:14, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:`1px solid ${seg.color}44`, flexShrink:0 }}>{seg.icon}</div>
+              <div>
+                <div style={{ fontWeight:800, fontSize:22 }}>{viewLead.company}</div>
+                <div style={{ fontSize:14, color:C.muted }}>📍 {viewLead.city}, {viewLead.market} · {viewLead.segment}</div>
+                <div style={{ fontSize:13, color:C.muted }}>👤 {viewLead.buyer_title}</div>
+                <div style={{ fontSize:13, color:C.muted, marginTop:4, fontStyle:"italic" }}>"{viewLead.pain_point}"</div>
+              </div>
+            </div>
+            <div style={{ display:"flex", flexDirection:"column", gap:8, alignItems:"flex-end" }}>
+              <PriorityBadge score={viewLead.priority_score} />
+              <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{viewLead.status}</span>
+              <div style={{ fontSize:11, color:C.dim }}>{viewLead.lead_id}</div>
+            </div>
+          </div>
+
+          {/* Quick actions row */}
+          <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+            <a href={linkedinSearch(viewLead)} target="_blank" rel="noopener noreferrer"
+              style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, display:"flex", alignItems:"center", gap:6, padding:"8px 14px" }}>
+              🔗 Find on LinkedIn
+            </a>
+            {viewLead.phone && (
+              <a href={`tel:${viewLead.phone}`} style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, padding:"8px 14px" }}>📞 Call</a>
+            )}
+            <button style={{ ...S.btn("primary"), fontSize:12, padding:"8px 14px", background: upgrading ? C.dim : "#7C3AED" }}
+              onClick={() => upgradeOutreach(viewLead)} disabled={upgrading}>
+              {upgrading ? "✨ Upgrading..." : "✨ Upgrade Outreach with AI"}
+            </button>
+          </div>
+        </div>
+
+        {/* Status pipeline */}
+        <div style={{ ...S.card, marginBottom:18 }}>
+          <div style={S.label}>Pipeline Status</div>
+          <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:8 }}>
+            {COLD_STATUSES.map(s => {
+              const col = COLD_STATUS_COLOR[s];
+              const active = viewLead.status === s;
+              return (
+                <button key={s} onClick={() => updateStatus(viewLead.lead_id, s)}
+                  style={{ padding:"6px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700,
+                    background: active ? `${col}33` : C.surface,
+                    color: active ? col : C.muted,
+                    border: `1px solid ${active ? col : C.border}` }}>
+                  {active ? "● " : ""}{s}
+                </button>
+              );
+            })}
+          </div>
+          <div style={{ marginTop:12 }}>
+            <div style={S.label}>Notes</div>
+            <textarea style={{ ...S.input, minHeight:60, resize:"vertical", marginTop:4 }}
+              value={viewLead.notes || ""}
+              onChange={e => updateNotes(viewLead.lead_id, e.target.value)}
+              placeholder="Call notes, meeting outcome, follow-up date..." />
+          </div>
+        </div>
+
+        {/* Offer + next action */}
+        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:18 }}>
+          <div style={{ ...S.cardSm, borderLeft:`3px solid ${C.accent}` }}>
+            <div style={S.label}>First Offer</div>
+            <div style={{ fontWeight:700, fontSize:14, color:C.accent, marginTop:4 }}>{viewLead.first_offer}</div>
+          </div>
+          <div style={{ ...S.cardSm, borderLeft:`3px solid ${C.gold}` }}>
+            <div style={S.label}>Next Action</div>
+            <div style={{ fontWeight:700, fontSize:14, color:C.gold, marginTop:4 }}>{viewLead.next_action}</div>
+          </div>
+        </div>
+
+        {/* Outreach content */}
+        {upgradedContent && (
+          <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:C.accent, fontWeight:700 }}>
+            ✨ Outreach upgraded with AI — industry-aware messaging for {viewLead.segment}
+          </div>
+        )}
+
+        {[
+          { key:"cold_email",      label:"📧 Cold Email",       icon:"📋" },
+          { key:"follow_up_email", label:"📧 Follow-Up Email",   icon:"📋" },
+          { key:"linkedin_note",   label:"💼 LinkedIn Note",     icon:"📋" },
+          { key:"call_opener",     label:"📞 Call Opener Script", icon:"📋" },
+        ].map(({ key, label, icon }) => {
+          const val = outreach[key] || viewLead[key];
+          if (!val) return null;
+          const isEmail = key.includes("email");
+          return (
+            <div key={key} style={{ ...S.card, marginBottom:14 }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+                <div style={{ fontWeight:700, fontSize:14 }}>{label}</div>
+                <div style={{ display:"flex", gap:8 }}>
+                  {isEmail && (
+                    <a href={`https://mail.google.com/mail/?view=cm&su=${encodeURIComponent(`Commercial Cleaning — ${viewLead.company}`)}&body=${encodeURIComponent(val)}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>📨 Gmail</a>
+                  )}
+                  <button style={{ ...S.btn("sm"), background: copied===key ? C.accentDim : C.surface, color: copied===key ? C.accent : C.muted, fontSize:11 }}
+                    onClick={() => copy(val, key)}>
+                    {copied === key ? "✅ Copied!" : `${icon} Copy`}
+                  </button>
+                </div>
+              </div>
+              <div style={{ background:C.surface, borderRadius:10, padding:14, fontSize:13, color:C.muted, lineHeight:1.8, whiteSpace:"pre-wrap", maxHeight:220, overflowY:"auto", border:`1px solid ${C.border}` }}>
+                {val}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  // ── LIST VIEW ──
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={S.h2}>🎯 Cold Outreach Pipeline</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
+            Leads generated daily by your n8n AI agent · Ontario & Arizona
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={S.btn("ghost")} onClick={() => setLoadingSheet(true)} title="Sync from Google Sheet">
+            {loadingSheet ? "🔄 Syncing..." : "🔄 Sync Sheet"}
+          </button>
+          <button style={S.btn("primary")} onClick={() => setShowManual(true)}>+ Add Lead</button>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div style={S.grid4}>
+        <StatCard label="Total Pipeline"   value={total}     icon="🎯" color={C.blue}   />
+        <StatCard label="Hot Leads (4-5)"  value={hot}       icon="🔥" color={C.red}    />
+        <StatCard label="Meetings Booked"  value={booked}    icon="📅" color={C.accent} />
+        <StatCard label="Won"              value={won}       icon="🏆" color={C.gold}   sub={`${convRate}% conv.`} />
+      </div>
+
+      <div style={S.divider} />
+
+      {/* Sync info banner */}
+      <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.blue}`, padding:"12px 16px" }}>
+        <div style={{ fontWeight:700, color:C.blue, fontSize:14, marginBottom:4 }}>🔄 Connected to your n8n Google Sheet</div>
+        <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
+          Your n8n agent runs daily and appends new leads to sheet <strong style={{ color:C.text }}>1OwEbttCZsLhwV7wTMiF5LqnypiUshQ9r6tw1vhQPFiM</strong>.<br/>
+          Hit <strong style={{ color:C.text }}>Sync Sheet</strong> to pull the latest leads, or add manually with <strong style={{ color:C.text }}>+ Add Lead</strong>.<br/>
+          Click any lead → tap <strong style={{ color:"#A78BFA" }}>✨ Upgrade Outreach</strong> for industry-aware AI emails tailored to that segment.
+        </div>
+      </div>
+
+      {/* Filters */}
+      <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
+        {["All", ...COLD_STATUSES].map(s => {
+          const col = COLD_STATUS_COLOR[s] || C.accent;
+          const count = s === "All" ? leads.length : leads.filter(l => l.status === s).length;
+          const active = filterStatus === s;
+          return (
+            <button key={s} onClick={() => setFilterStatus(s)}
+              style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700,
+                background: active ? `${col}22` : C.surface,
+                color: active ? col : C.muted,
+                border: `1px solid ${active ? col : C.border}` }}>
+              {s} {count > 0 && <span style={{ marginLeft:4, background:`${col}33`, borderRadius:20, padding:"1px 7px", fontSize:11 }}>{count}</span>}
+            </button>
+          );
+        })}
+      </div>
+
+      <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
+        {["All", "Ontario", "Arizona"].map(m => (
+          <button key={m} onClick={() => setFilterMkt(m)}
+            style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
+              background: filterMkt===m ? C.accentDim : C.surface,
+              color: filterMkt===m ? C.accent : C.muted,
+              border: `1px solid ${filterMkt===m ? C.accent : C.border}` }}>
+            {m === "Ontario" ? "🇨🇦 Ontario" : m === "Arizona" ? "🇺🇸 Arizona" : "All Markets"}
+          </button>
+        ))}
+        {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => (
+          <button key={seg} onClick={() => setFilterSeg(seg)}
+            style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
+              background: filterSeg===seg ? C.accentDim : C.surface,
+              color: filterSeg===seg ? C.accent : C.muted,
+              border: `1px solid ${filterSeg===seg ? C.accent : C.border}` }}>
+            {SEGMENT_META[seg]?.icon || "📋"} {seg}
+          </button>
+        ))}
+      </div>
+
+      {/* Lead cards */}
+      {filtered.length === 0 && (
+        <div style={{ ...S.card, textAlign:"center", padding:40 }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>🎯</div>
+          <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No leads in this view</div>
+          <div style={{ color:C.muted, fontSize:14 }}>Your n8n agent adds new leads daily. Hit Sync Sheet or add one manually.</div>
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+        {filtered.map(lead => {
+          const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
+          const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
+          const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
+          return (
+            <div key={lead.lead_id} style={{ ...S.card, cursor:"pointer", borderLeft:`3px solid ${seg.color}` }}
+              onClick={() => { setViewLead(lead); setUpgradedContent(null); }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10 }}>
+                <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+                  <div style={{ width:40, height:40, borderRadius:10, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{seg.icon}</div>
+                  <div>
+                    <div style={{ fontWeight:800, fontSize:15 }}>{lead.company}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>📍 {lead.city} · 👤 {lead.buyer_title}</div>
+                    <div style={{ fontSize:12, color:C.dim, marginTop:2, fontStyle:"italic" }}>"{lead.pain_point}"</div>
+                    <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
+                      <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
+                      <PriorityBadge score={lead.priority_score} />
+                      {hasOutreach && <span style={S.badge("green")}>✉️ Outreach ready</span>}
+                      {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦 ON</span> : <span style={S.badge("gold")}>🇺🇸 AZ</span>}
+                    </div>
+                  </div>
+                </div>
+                <div style={{ textAlign:"right", fontSize:12, color:C.muted }}>
+                  <div style={{ fontWeight:700, color:C.text }}>{lead.lead_id}</div>
+                  <div style={{ marginTop:4 }}>{lead.first_offer}</div>
+                  {lead.notes && <div style={{ fontSize:11, color:C.dim, marginTop:4, maxWidth:160 }}>📝 {lead.notes.slice(0,40)}{lead.notes.length>40?"...":""}</div>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Manual add modal */}
+      {showManual && (
+        <Modal title="+ Add Lead Manually" onClose={() => setShowManual(false)} wide>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Company Name</div><input style={S.input} value={manualForm.company} onChange={e=>setManualForm({...manualForm,company:e.target.value})} placeholder="ABC Medical Centre" /></div>
+              <div><div style={S.label}>City</div><input style={S.input} value={manualForm.city} onChange={e=>setManualForm({...manualForm,city:e.target.value})} placeholder="Brampton" /></div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Market</div>
+                <select style={S.select} value={manualForm.market} onChange={e=>setManualForm({...manualForm,market:e.target.value})}>
+                  <option>Ontario</option><option>Arizona</option>
+                </select>
+              </div>
+              <div><div style={S.label}>Segment</div>
+                <select style={S.select} value={manualForm.segment} onChange={e=>setManualForm({...manualForm,segment:e.target.value})}>
+                  {["Office","Medical","Dental","Industrial-Office","Property Manager"].map(s=><option key={s}>{s}</option>)}
+                </select>
+              </div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Buyer Title</div><input style={S.input} value={manualForm.buyer_title} onChange={e=>setManualForm({...manualForm,buyer_title:e.target.value})} placeholder="Property Manager" /></div>
+              <div><div style={S.label}>Priority (1-5)</div>
+                <select style={S.select} value={manualForm.priority_score} onChange={e=>setManualForm({...manualForm,priority_score:parseInt(e.target.value)})}>
+                  {[1,2,3,4,5].map(n=><option key={n}>{n}</option>)}
+                </select>
+              </div>
+            </div>
+            <div><div style={S.label}>Pain Point</div><input style={S.input} value={manualForm.pain_point} onChange={e=>setManualForm({...manualForm,pain_point:e.target.value})} placeholder="Current cleaning inconsistent" /></div>
+            <div><div style={S.label}>First Offer</div><input style={S.input} value={manualForm.first_offer} onChange={e=>setManualForm({...manualForm,first_offer:e.target.value})} placeholder="office cleaning" /></div>
+            <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={manualForm.notes} onChange={e=>setManualForm({...manualForm,notes:e.target.value})} placeholder="How you found them, any context..." /></div>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManualLead} disabled={!manualForm.company.trim()}>💾 Add to Pipeline</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
 // ─── RESIDENTIAL LEADS — Have Us Clean ───────────────────────────────────────
 const SAMPLE_RES_LEADS = [
   { id:1, name:"Sarah M.", email:"sarah.m@email.com", phone:"(416) 555-2201", address:"88 Maple Dr, North York ON", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:850, serviceType:"Full Home Clean", addons:["oven","fridge"], frequency:"Bi-Weekly", preferredDate:"2026-04-10", preferredTime:"9:00 AM", notes:"Has a cat. Please use unscented products.", status:"Quoted", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T10:00:00Z" },
@@ -2931,6 +3433,7 @@ export default function App() {
     { id:"quotes",   label:"💬 Quotes", color: C.gold, tabs:[
       { id:"res",        label:"🏠 Residential",   desc:"Leads, quotes & booking" },
       { id:"com",        label:"🏢 Commercial",    desc:"Commercial proposals" },
+      { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
       { id:"agent_quote",    label:"💬 VA Quote",      desc:"Generate quotes with AI" },
@@ -3097,6 +3600,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
+        {tab==="cold"           && <ColdOutreach      region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
         {tab==="agent_workorder"&& <AgentPanel agent="WorkOrder_Agent" />}
@@ -5940,339 +6444,4 @@ function QuickBooksSync({ jobs, partners }) {
   });
 
   const toggleInvoice = (id) => setSelectedInvoices(s => s.includes(id) ? s.filter(x=>x!==id) : [...s, id]);
-  const selectAll = () => setSelectedInvoices(invoiceQueue.map(i=>i.id));
-
-  const connectQB = () => {
-    setSyncing(true);
-    setTimeout(() => {
-      setConnected(true);
-      setSyncing(false);
-      setSyncLog([{ time: new Date().toLocaleTimeString(), msg: "✅ Connected to QuickBooks Online — Company: CleanPro Services LLC", type:"success" }]);
-    }, 1800);
-  };
-
-  const runSync = () => {
-    if (!selectedInvoices.length) return alert("Select at least one invoice to sync.");
-    setSyncing(true);
-    const selected = invoiceQueue.filter(i => selectedInvoices.includes(i.id));
-    setTimeout(() => {
-      const newLogs = selected.map(inv => ({
-        time: new Date().toLocaleTimeString(),
-        msg: `✅ Synced ${inv.id} — ${inv.client} — $${inv.amount.toFixed(2)} → QuickBooks Invoices`,
-        type: "success"
-      }));
-      setSyncLog(l => [...newLogs, ...l]);
-      setLastSync(new Date().toLocaleTimeString());
-      setSelectedInvoices([]);
-      setSyncing(false);
-    }, 2000);
-  };
-
-  const exportCSV = () => {
-    const rows = ["Invoice ID,Client,Date,Job Type,Invoice Amount,Partner Pay,Partner"];
-    invoiceQueue.forEach(i => rows.push(`${i.id},"${i.client}",${i.date},"${i.type}",${(i.amount).toFixed(2)},${i.partnerPay.toFixed(2)},"${i.partnerName}"`));
-    const blob = new Blob([rows.join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href=url; a.download="cleanpro_invoices.csv"; a.click();
-  };
-
-  return (
-    <div>
-      <div style={styles.h2}>🔗 QuickBooks Integration</div>
-
-      {/* Connection Status */}
-      <div style={{ ...styles.card, marginBottom: 24, borderLeft: `4px solid ${connected ? C.accent : C.gold}` }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ fontSize: 36 }}>💚</div>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: 18 }}>QuickBooks Online</div>
-              <div style={{ fontSize: 13, color: connected ? C.accent : C.gold, fontWeight: 700 }}>
-                {connected ? "✅ Connected — Have Us Clean Services LLC" : "⚠️ Not Connected"}
-              </div>
-              {lastSync && <div style={{ fontSize: 12, color: C.muted }}>Last synced: {lastSync}</div>}
-            </div>
-          </div>
-          {!connected ? (
-            <button style={styles.btn("primary")} onClick={connectQB} disabled={syncing}>
-              {syncing ? "Connecting..." : "🔗 Connect QuickBooks"}
-            </button>
-          ) : (
-            <button style={{ ...styles.btn("ghost") }} onClick={() => { setConnected(false); setSyncLog([]); }}>Disconnect</button>
-          )}
-        </div>
-      </div>
-
-      {connected && (
-        <>
-          {/* Sync Options */}
-          <div style={styles.grid3}>
-            <StatCard label="Invoices Ready" value={invoiceQueue.length} icon="📄" color={C.blue} sub="completed jobs" />
-            <StatCard label="Total Invoice Value" value={`$${invoiceQueue.reduce((a,b)=>a+(b.amount),0).toFixed(0)}`} icon="💵" color={C.accent} />
-            <StatCard label="Partner Pay to Export" value={`$${invoiceQueue.reduce((a,b)=>a+b.partnerPay,0).toFixed(0)}`} icon="👥" color={C.gold} />
-          </div>
-
-          <div style={styles.divider} />
-
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
-            <div style={styles.h3}>Invoice Queue — Sync to QuickBooks</div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <button style={styles.btn("ghost")} onClick={selectAll}>Select All</button>
-              <button style={styles.btn("ghost")} onClick={exportCSV}>⬇ Export CSV</button>
-              <button style={styles.btn("primary")} onClick={runSync} disabled={syncing || !selectedInvoices.length}>
-                {syncing ? "Syncing..." : `🔄 Sync ${selectedInvoices.length || ""} to QB`}
-              </button>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {invoiceQueue.map(inv => (
-              <div key={inv.id} style={{ ...styles.cardSm, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", border: `1px solid ${selectedInvoices.includes(inv.id) ? C.accent : C.border}`, background: selectedInvoices.includes(inv.id) ? C.accentDim : C.card }}
-                onClick={() => toggleInvoice(inv.id)}>
-                <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${selectedInvoices.includes(inv.id)?C.accent:C.dim}`, background: selectedInvoices.includes(inv.id)?C.accent:"transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#0A0F1E", flexShrink: 0 }}>
-                  {selectedInvoices.includes(inv.id) ? "✓" : ""}
-                </div>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{inv.id} — {inv.client}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{inv.date} · {inv.type} · Partner: {inv.partnerName}</div>
-                </div>
-                <div style={{ textAlign: "right" }}>
-                  <div style={{ fontWeight: 800, color: C.accent }}>${inv.amount.toFixed(2)}</div>
-                  <div style={{ fontSize: 11, color: C.muted }}>Partner: ${inv.partnerPay.toFixed(2)}</div>
-                </div>
-              </div>
-            ))}
-          </div>
-
-          {/* What gets synced */}
-          <div style={{ ...styles.card, marginTop: 24 }}>
-            <div style={styles.h3}>📋 What Syncs to QuickBooks</div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
-              {[
-                ["📄","Customer Invoices","Job totals → QB Invoices"],
-                ["💸","Partner Expenses","Partner pay → QB Bills"],
-                ["👤","Client Records","New clients → QB Customers"],
-                ["🔄","Payment Status","Paid jobs → QB Payments"],
-                ["📊","Revenue Reports","Monthly summaries"],
-                ["🏷️","Job Categories","Service types → QB Items"],
-              ].map(([icon,title,sub]) => (
-                <div key={title} style={{ background: C.surface, borderRadius: 10, padding: "12px 14px" }}>
-                  <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{title}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{sub}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Sync Log */}
-          {syncLog.length > 0 && (
-            <div style={{ ...styles.card, marginTop: 20 }}>
-              <div style={styles.h3}>🕐 Sync Log</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                {syncLog.map((log, i) => (
-                  <div key={i} style={{ fontSize: 12, color: log.type==="success"?C.accent:C.red, fontFamily: "monospace", padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
-                    [{log.time}] {log.msg}
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </>
-      )}
-
-      {!connected && (
-        <div style={{ ...styles.card, textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>💚</div>
-          <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Connect Your QuickBooks Account</div>
-          <div style={{ fontSize: 14, color: C.muted, marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" }}>
-            Sync completed jobs as invoices, partner pay as expenses, and client records automatically. No double-entry, no spreadsheets.
-          </div>
-          <button style={styles.btn("primary")} onClick={connectQB}>🔗 Connect QuickBooks Online</button>
-        </div>
-      )}
-    </div>
-  );
-}
-
-
-
-// ─── PRICING STRATEGY ────────────────────────────────────────────────────────
-const TIERS = [
-  {
-    name: "Starter", price: 29, color: C.blue, icon: "🌱",
-    tagline: "Perfect for 1–3 partners just getting organized",
-    features: [
-      "Up to 3 active partners","Unlimited job bookings","GPS check-in / check-out",
-      "Residential lead intake + quotes","Before & after photos","Basic pay tracking",
-      "Partner onboarding & training","Mobile + desktop access",
-    ],
-    notIncluded: ["Commercial lead module","Client portal","QuickBooks sync","Custom branding"],
-    cta: "Start Free 14-Day Trial",
-    highlight: false,
-  },
-  {
-    name: "Growth", price: 59, color: C.accent, icon: "🚀",
-    tagline: "Best for growing teams of 4–10 partners",
-    features: [
-      "Up to 10 active partners","Everything in Starter",
-      "Commercial leads + contract quotes","Client portal (quotes, invoices, payments)",
-      "QuickBooks Online sync","Upsell engine with partner incentives",
-      "Automated SMS/email reminders","Recurring job scheduling",
-      "Revenue & partner pay reports",
-    ],
-    notIncluded: ["Multi-location management","White-label branding"],
-    cta: "Most Popular — Start Free Trial",
-    highlight: true,
-  },
-  {
-    name: "Pro", price: 99, color: C.gold, icon: "⚡",
-    tagline: "For established businesses scaling fast",
-    features: [
-      "Unlimited partners","Everything in Growth",
-      "Multi-location / franchise management","White-label client portal",
-      "Geofencing & compliance alerts","AI-powered scheduling suggestions",
-      "Advanced analytics dashboard","Priority support",
-      "Custom onboarding templates","API access",
-    ],
-    notIncluded: [],
-    cta: "Start Free Trial",
-    highlight: false,
-  },
-];
-
-function PricingStrategy() {
-  const [billing, setBilling] = useState("monthly");
-  const discount = billing === "annual" ? 0.20 : 0;
-
-  const competitors = [
-    { name: "ZenMaid", starter: 39, mid: 109, top: 169, notes: "Residential only" },
-    { name: "Jobber", starter: 29, mid: 99, top: 199, notes: "No cleaning-specific features" },
-    { name: "Housecall Pro", starter: 59, mid: 189, top: 329, notes: "Multi-industry, not cleaning-focused" },
-    { name: "BookingKoala", starter: 65, mid: 130, top: 197, notes: "Not cleaning-specific" },
-    { name: "CleanPro ✨", starter: 29, mid: 59, top: 99, notes: "Cleaning-specific, all-in-one", highlight: true },
-  ];
-
-  return (
-    <div>
-      <div style={{ marginBottom: 24 }}>
-        <div style={styles.h2}>💰 Subscription Pricing Strategy</div>
-        <div style={{ color: C.muted, fontSize: 14 }}>Research-backed pricing to be the best value in the market while building a sustainable SaaS business.</div>
-      </div>
-
-      {/* The business case */}
-      <div style={{ ...styles.card, marginBottom: 28, borderLeft: `4px solid ${C.accent}` }}>
-        <div style={styles.h3}>Should You Charge a Subscription? Yes — Here's Why</div>
-        <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.75 }}>
-          The market is clear: <strong style={{ color: C.text }}>cleaning businesses will pay for software that saves them time and money.</strong> ZenMaid has 3,000+ paying users. Jobber and Housecall Pro serve tens of thousands. The $380B cleaning industry is actively digitizing, with 70% of firms now using software. <br/><br/>
-          CleanPro's unique advantage: it's <strong style={{ color: C.accent }}>the only platform combining partner management, GPS, onboarding, upsell logic, residential + commercial leads, and QuickBooks sync</strong> — features that individually cost $49–$329/mo on competitor platforms. At $29–$99/mo, you're the obvious best-value choice.
-        </div>
-      </div>
-
-      {/* Billing toggle */}
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24, justifyContent: "center" }}>
-        <button style={{ ...styles.btn(billing==="monthly"?"primary":"ghost") }} onClick={()=>setBilling("monthly")}>Monthly</button>
-        <button style={{ ...styles.btn(billing==="annual"?"primary":"ghost") }} onClick={()=>setBilling("annual")}>Annual (Save 20%)</button>
-      </div>
-
-      {/* Pricing cards */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(260px,1fr))", gap: 20, marginBottom: 36 }}>
-        {TIERS.map(tier => (
-          <div key={tier.name} style={{ background: tier.highlight ? `linear-gradient(145deg,${C.card},#0D2035)` : C.card, borderRadius: 20, border: `2px solid ${tier.highlight ? tier.color : C.border}`, padding: 28, position: "relative", overflow: "hidden" }}>
-            {tier.highlight && <div style={{ position: "absolute", top: 14, right: -24, background: C.accent, color: "#0A0F1E", fontSize: 11, fontWeight: 800, padding: "4px 36px", transform: "rotate(30deg)", letterSpacing: "0.05em" }}>BEST VALUE</div>}
-            <div style={{ fontSize: 32, marginBottom: 8 }}>{tier.icon}</div>
-            <div style={{ fontWeight: 800, fontSize: 22, color: tier.color }}>{tier.name}</div>
-            <div style={{ fontSize: 13, color: C.muted, marginBottom: 16 }}>{tier.tagline}</div>
-            <div style={{ marginBottom: 20 }}>
-              <span style={{ fontWeight: 800, fontSize: 38, color: tier.color }}>${Math.round(tier.price * (1 - discount))}</span>
-              <span style={{ color: C.muted, fontSize: 14 }}>/mo</span>
-              {billing === "annual" && <span style={{ marginLeft: 8, fontSize: 12, color: C.accent, fontWeight: 700 }}>Save ${Math.round(tier.price * discount * 12)}/yr</span>}
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 20 }}>
-              {tier.features.map(f => <div key={f} style={{ fontSize: 13, color: C.text, display: "flex", gap: 8 }}><span style={{ color: tier.color }}>✓</span>{f}</div>)}
-              {tier.notIncluded.map(f => <div key={f} style={{ fontSize: 13, color: C.dim, display: "flex", gap: 8 }}><span>✗</span>{f}</div>)}
-            </div>
-            <button style={{ ...styles.btn(tier.highlight?"primary":"ghost"), width: "100%", background: tier.highlight ? tier.color : "transparent", color: tier.highlight ? "#0A0F1E" : tier.color, border: `1px solid ${tier.color}` }}>
-              {tier.cta}
-            </button>
-          </div>
-        ))}
-      </div>
-
-      {/* Competitor price comparison */}
-      <div style={styles.card}>
-        <div style={styles.h3}>📊 Competitive Price Positioning</div>
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
-            <thead>
-              <tr style={{ borderBottom: `2px solid ${C.border}` }}>
-                {["Platform","Starter","Mid-Tier","Top Tier","Notes"].map(h => (
-                  <th key={h} style={{ padding: "10px 12px", textAlign: "left", color: C.muted, fontWeight: 700, fontSize: 11, letterSpacing: "0.06em", textTransform: "uppercase" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {competitors.map((c,i) => (
-                <tr key={i} style={{ borderBottom: `1px solid ${C.border}`, background: c.highlight ? C.accentDim : i%2===0?"transparent":"#ffffff04" }}>
-                  <td style={{ padding: "11px 12px", fontWeight: c.highlight?800:600, color: c.highlight?C.accent:C.text }}>{c.name}</td>
-                  <td style={{ padding: "11px 12px", color: c.highlight?C.accent:C.text, fontWeight: c.highlight?700:400 }}>${c.starter}/mo</td>
-                  <td style={{ padding: "11px 12px", color: c.highlight?C.accent:C.text, fontWeight: c.highlight?700:400 }}>${c.mid}/mo</td>
-                  <td style={{ padding: "11px 12px", color: c.highlight?C.accent:C.text, fontWeight: c.highlight?700:400 }}>${c.top}/mo</td>
-                  <td style={{ padding: "11px 12px", fontSize: 12, color: c.highlight?C.accent:C.muted }}>{c.notes}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-
-      {/* Revenue projections */}
-      <div style={{ ...styles.card, marginTop: 20 }}>
-        <div style={styles.h3}>📈 Revenue Potential — If You License CleanPro</div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
-          {[
-            { users: 50, avg: 59, label: "50 clients × $59/mo", mrr: 2950 },
-            { users: 100, avg: 59, label: "100 clients × $59/mo", mrr: 5900 },
-            { users: 250, avg: 65, label: "250 clients × $65 avg", mrr: 16250 },
-            { users: 500, avg: 65, label: "500 clients × $65 avg", mrr: 32500 },
-          ].map(row => (
-            <div key={row.users} style={{ background: C.surface, borderRadius: 12, padding: 16, textAlign: "center" }}>
-              <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{row.label}</div>
-              <div style={{ fontSize: 26, fontWeight: 800, color: C.accent, marginTop: 6 }}>${row.mrr.toLocaleString()}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>MRR · ${(row.mrr*12).toLocaleString()}/yr</div>
-            </div>
-          ))}
-        </div>
-        <div style={{ marginTop: 16, fontSize: 13, color: C.muted, lineHeight: 1.7 }}>
-          💡 <strong style={{ color: C.text }}>Opportunity:</strong> If you white-label and license CleanPro to other cleaning businesses, even 100 subscribers at $59/mo = <strong style={{ color: C.accent }}>$70,800/year</strong> in recurring revenue — on top of using it for your own business.
-        </div>
-      </div>
-
-      {/* Roadmap to address weaknesses */}
-      <div style={{ ...styles.card, marginTop: 20 }}>
-        <div style={styles.h3}>🗺️ Roadmap — Turning Weaknesses into Wins</div>
-        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {[
-            { status:"✅ Built", item:"QuickBooks sync (invoice + expense export)", tier:"Growth" },
-            { status:"✅ Built", item:"Client portal (quotes, invoices, reviews, portal link)", tier:"Growth" },
-            { status:"✅ Built", item:"GPS check-in / check-out with location capture", tier:"All" },
-            { status:"🔜 Next", item:"Stripe/Square payment processing (client pays in-app)", tier:"Growth" },
-            { status:"🔜 Next", item:"Automated SMS appointment reminders", tier:"Growth" },
-            { status:"🔜 Next", item:"Recurring job auto-scheduling", tier:"Starter+" },
-            { status:"🔮 Future", item:"Geofencing — flag off-site check-ins", tier:"Pro" },
-            { status:"🔮 Future", item:"AI scheduling assistant (ZenMaid users want this!)", tier:"Pro" },
-            { status:"🔮 Future", item:"Cloud sync — partners log in from own phones", tier:"All" },
-            { status:"🔮 Future", item:"White-label for franchise licensing", tier:"Pro" },
-          ].map((r,i) => (
-            <div key={i} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap" }}>
-              <span style={{ fontSize:13, color: r.status.startsWith("✅")?C.accent:r.status.startsWith("🔜")?C.gold:C.muted, fontWeight:700, minWidth:80 }}>{r.status}</span>
-              <span style={{ flex:1, fontSize:13, color:C.text }}>{r.item}</span>
-              <span style={{ ...styles.badge(r.tier==="All"?"green":r.tier==="Growth"?"blue":"gold"), fontSize:10 }}>{r.tier}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
+  const selectAll = () => setSelectedInvoices(invoiceQueue.map(i=>i.id))
