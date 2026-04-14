@@ -1552,6 +1552,17 @@ function ColdOutreach({ region }) {
         </div>
 
         {/* Outreach content */}
+        {viewLead.needs_upgrade && !upgradedContent && (
+          <div style={{ background:"#A78BFA22", border:`1px solid #A78BFA44`, borderRadius:10, padding:"12px 16px", marginBottom:14, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+            <div>
+              <div style={{ fontWeight:700, color:"#A78BFA", fontSize:14 }}>✨ Outreach has generic placeholders</div>
+              <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>Your n8n used template text. Hit Upgrade to generate real personalized outreach for {viewLead.segment}.</div>
+            </div>
+            <button style={{ ...S.btn("primary"), background:"#7C3AED", fontSize:13 }} onClick={() => upgradeOutreach(viewLead)} disabled={upgrading}>
+              {upgrading ? "Upgrading..." : "✨ Upgrade Now"}
+            </button>
+          </div>
+        )}
         {upgradedContent && (
           <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:C.accent, fontWeight:700 }}>
             ✨ Outreach upgraded with AI — industry-aware messaging for {viewLead.segment}
@@ -1635,7 +1646,7 @@ function ColdOutreach({ region }) {
         </div>
         <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
           Your n8n agent appends leads daily to your Google Sheet. Hit <strong style={{ color:C.text }}>Sync Sheet</strong> to pull them live.<br/>
-          <strong style={{ color:C.gold }}>First time?</strong> Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_SERVICE_ACCOUNT_EMAIL</code> and <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_PRIVATE_KEY</code> to Vercel env vars — see setup guide below.
+          <strong style={{ color:C.gold }}>First time?</strong> Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_SHEETS_API_KEY</code> to Vercel → Settings → Environment Variables. Also make sure your Google Sheet is shared as <strong style={{ color:C.text }}>Anyone with the link can view</strong>.
         </div>
       </div>
 
@@ -1706,6 +1717,7 @@ function ColdOutreach({ region }) {
                       <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
                       <PriorityBadge score={lead.priority_score} />
                       {hasOutreach && <span style={S.badge("green")}>✉️ Outreach ready</span>}
+                      {lead.needs_upgrade && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:"#A78BFA22", color:"#A78BFA" }}>✨ Needs upgrade</span>}
                       {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦 ON</span> : <span style={S.badge("gold")}>🇺🇸 AZ</span>}
                     </div>
                   </div>
