@@ -1337,8 +1337,9 @@ const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
 
-function ColdOutreach({ region }) {
-  const [leads, setLeads]               = useState(SAMPLE_COLD_LEADS);
+function ColdOutreach({ region, coldLeads, setColdLeads }) {
+  const leads    = coldLeads;
+  const setLeads = setColdLeads;
   const [viewLead, setViewLead]         = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterSeg, setFilterSeg]       = useState("All");
@@ -2725,13 +2726,15 @@ function TaxCompliance({ region }) {
 //   3. No storage at all        → in-memory only (still fully functional)
 
 const DB_KEYS = {
-  jobs:     "cp:jobs",
-  partners: "cp:partners",
-  leadsRes: "cp:leads_res",
-  leadsCom: "cp:leads_com",
-  region:   "cp:region",
-  settings: "cp:settings",
-  activity: "cp:activity_log",
+  jobs:               "cp:jobs",
+  partners:           "cp:partners",
+  leadsRes:           "cp:leads_res",
+  leadsCom:           "cp:leads_com",
+  region:             "cp:region",
+  settings:           "cp:settings",
+  activity:           "cp:activity_log",
+  coldLeads:          "cp:cold_leads",
+  onboardingProgress: "cp:onboarding_progress",
 };
 
 // Detect storage backend
@@ -3314,10 +3317,12 @@ export default function App() {
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
-  const [resLeads, setResLeads] = useState([]); // lifted up — shared between Quotes + Portal
+  const [resLeads, setResLeads] = useState([]);
+  const [coldLeads, setColdLeads] = useState(SAMPLE_COLD_LEADS); // persists across tab switches
+  const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
   // ── DB state ──
-  const [dbStatus, setDbStatus] = useState("loading"); // loading | synced | saving | error
+  const [dbStatus, setDbStatus] = useState("loading");
   const [lastSaved, setLastSaved] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activityLog, setActivityLog] = useState([]);
@@ -3337,12 +3342,14 @@ export default function App() {
 
     async function loadAll() {
       try {
-        const [savedJobs, savedPartners, savedRegion, log, savedResLeads] = await Promise.all([
+        const [savedJobs, savedPartners, savedRegion, log, savedResLeads, savedColdLeads, savedProgress] = await Promise.all([
           dbGet(DB_KEYS.jobs),
           dbGet(DB_KEYS.partners),
           dbGet(DB_KEYS.region),
           dbGet(DB_KEYS.activity),
           dbGet(DB_KEYS.leadsRes),
+          dbGet(DB_KEYS.coldLeads),
+          dbGet(DB_KEYS.onboardingProgress),
         ]);
 
         if (cancelled) return;
@@ -3351,6 +3358,8 @@ export default function App() {
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
         if (savedResLeads)  setResLeads(savedResLeads);
+        if (savedColdLeads && savedColdLeads.length > 0) setColdLeads(savedColdLeads);
+        if (savedProgress)  setOnboardingProgress(savedProgress);
         setDbStatus(hasArtifactStorage || hasLocalStorage ? "synced" : "local");
       } catch {
         if (!cancelled) setDbStatus("local");
@@ -3387,6 +3396,18 @@ export default function App() {
     if (isLoading) return;
     dbSet(DB_KEYS.leadsRes, resLeads);
   }, [resLeads, isLoading]);
+
+  // ── Auto-save coldLeads ──
+  useEffect(() => {
+    if (isLoading) return;
+    dbSet(DB_KEYS.coldLeads, coldLeads);
+  }, [coldLeads, isLoading]);
+
+  // ── Auto-save onboarding progress ──
+  useEffect(() => {
+    if (isLoading) return;
+    dbSet(DB_KEYS.onboardingProgress, onboardingProgress);
+  }, [onboardingProgress, isLoading]);
 
   // ── Save region preference ──
   useEffect(() => {
@@ -3434,10 +3455,14 @@ export default function App() {
       dbDelete(DB_KEYS.leadsRes),
       dbDelete(DB_KEYS.leadsCom),
       dbDelete(DB_KEYS.activity),
+      dbDelete(DB_KEYS.coldLeads),
+      dbDelete(DB_KEYS.onboardingProgress),
     ]);
     setJobs(initJobs);
     setPartners(initPartners);
     setResLeads([]);
+    setColdLeads(SAMPLE_COLD_LEADS);
+    setOnboardingProgress({});
     setActivityLog([]);
     await logActivity("SYSTEM_RESET", "All data reset to demo defaults");
     setLastSaved(new Date().toLocaleTimeString());
@@ -3650,7 +3675,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <ColdOutreach      region={activeRegion} />}
+        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
         {tab==="agent_workorder"&& <AgentPanel agent="WorkOrder_Agent" />}
@@ -3666,7 +3691,7 @@ export default function App() {
         {tab==="marketing"      && <MarketingHub      region={activeRegion} />}
         {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} />}
         {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
-        {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} />}
+        {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="tax"            && <TaxCompliance     region={activeRegion} />}
         {tab==="db"             && <DataManager       onReset={handleReset} onExport={handleExport}   activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
@@ -5645,10 +5670,11 @@ Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning 
 }
 
 // ─── ONBOARDING COMPONENT ─────────────────────────────────────────────────────
-function Onboarding({ partners, setPartners }) {
+function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingProgress }) {
+  const completedModules    = onboardingProgress;
+  const setCompletedModules = setOnboardingProgress;
   const [selectedPartner, setSelectedPartner] = useState(null);
-  const [activeModule, setActiveModule] = useState(null);
-  const [completedModules, setCompletedModules] = useState({});
+  const [activeModule, setActiveModule]       = useState(null);
   const [activeQuiz, setActiveQuiz] = useState(null);
   const [quizAnswerVisible, setQuizAnswerVisible] = useState({});
   const [libraryFilter, setLibraryFilter] = useState("All");
