@@ -39,12 +39,47 @@ export default async function handler(req, res) {
     // Row 1 = headers, rows 2+ = data
     const [headers, ...rows] = sheetData.values;
 
+    // Columns to exclude from the app (raw n8n pipeline data)
+    const EXCLUDE_COLS = ['output'];
+
     const leads = rows
       .map(row => {
         const obj = {};
-        headers.forEach((h, i) => { obj[h.trim()] = row[i] || ''; });
+        headers.forEach((h, i) => {
+          const key = h.trim();
+          if (EXCLUDE_COLS.includes(key)) return; // skip raw output column
+          obj[key] = row[i] || '';
+        });
+
         // Normalize types
         if (obj.priority_score) obj.priority_score = parseInt(obj.priority_score) || 3;
+
+        // Strip placeholder text from outreach fields — marks them as needing upgrade
+        const PLACEHOLDERS = ['[City]', '[Your Name]', '[Name]', '[your name]'];
+        const hasPlaceholder = (str) => PLACEHOLDERS.some(p => str.includes(p));
+
+        if (hasPlaceholder(obj.cold_email || '')) {
+          obj.cold_email_raw = obj.cold_email; // keep original
+          obj.cold_email = '';                  // clear so upgrade prompt shows
+          obj.needs_upgrade = true;
+        }
+        if (hasPlaceholder(obj.follow_up_email || '')) {
+          obj.follow_up_email = '';
+          obj.needs_upgrade = true;
+        }
+        if (hasPlaceholder(obj.linkedin_note || '')) {
+          obj.linkedin_note = '';
+          obj.needs_upgrade = true;
+        }
+        if (hasPlaceholder(obj.call_opener || '')) {
+          obj.call_opener = '';
+          obj.needs_upgrade = true;
+        }
+
+        // Default status if empty
+        if (!obj.status) obj.status = 'New';
+        if (!obj.owner)  obj.owner  = 'Jason';
+
         return obj;
       })
       .filter(l => l.lead_id && l.lead_id.trim() !== ''); // skip empty rows
