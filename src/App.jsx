@@ -603,99 +603,214 @@ function QuoteBox({ q, type = "res" }) {
 }
 
 // ─── STRIPE PAYMENTS ─────────────────────────────────────────────────────────
-function StripePayments({ jobs, partners }) {
-  const [connected, setConnected] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [payments, setPayments] = useState([
-    { id:"pay_001", jobId:4, client:"Green Office Suite 3", amount:375, fee:11.91, net:363.09, status:"succeeded", date:"2026-04-02", method:"Visa ••4242" },
-    { id:"pay_002", jobId:2, client:"Sunrise Apartments #4B", amount:198, fee:6.29, net:191.71, status:"pending",   date:"2026-04-03", method:"MC ••5555" },
-  ]);
-  const [showPayForm, setShowPayForm] = useState(false);
-  const [payForm, setPayForm] = useState({ client:"", amount:"", method:"card" });
+const STRIPE_PUBLISHABLE_KEY = "pk_live_51S1ParF5AYxkV3asN5kDlMPmQgTsrdd0PpafHXRLcG6xnzci8j0BoKPXrLQJTjLG5QNVGFS3V4DmjJ3XKJcph4Fr00awk4cSFa"; // replaced after user provides key
+const STRIPE_FEE_RATE = 0.03; // 3% built into price — covers 2.9% + $0.30 Stripe fee
+const ETRANSFER_EMAIL = "info@haveusclean.ca"; // Ontario e-transfer
 
-  const totalReceived = payments.filter(p=>p.status==="succeeded").reduce((a,b)=>a+b.net,0);
-  const totalPending  = payments.filter(p=>p.status==="pending").reduce((a,b)=>a+b.amount,0);
+// Calculate price with 3% processing fee baked in
+function priceWithFee(basePrice) {
+  return Math.round(basePrice * (1 + STRIPE_FEE_RATE));
+}
 
-  const connect = () => { setProcessing(true); setTimeout(() => { setConnected(true); setProcessing(false); }, 1600); };
+// Create a Stripe Checkout session via Vercel proxy
+async function createCheckoutSession({ job, region }) {
+  const currency = region?.id === "ON" ? "cad" : "usd";
+  const baseAmount = job.clientPrice || 0;
+  const amountWithFee = priceWithFee(baseAmount);
 
-  const runPayment = () => {
-    if (!payForm.client || !payForm.amount) return;
-    const amt = parseFloat(payForm.amount);
-    const fee = +(amt * 0.029 + 0.30).toFixed(2);
-    setPayments(p => [...p, { id:`pay_${Date.now()}`, jobId:null, client:payForm.client, amount:amt, fee, net:+(amt-fee).toFixed(2), status:"succeeded", date:new Date().toLocaleDateString(), method:"Visa ••4242" }]);
-    setShowPayForm(false);
-    setPayForm({ client:"", amount:"", method:"card" });
+  const res = await fetch("/api/stripe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      jobId: String(job.id),
+      clientName: job.client,
+      clientEmail: job.email || "",
+      serviceType: job.type,
+      amount: amountWithFee,
+      currency,
+      region: region?.id || "ON",
+      successUrl: `${window.location.origin}?payment=success&job=${job.id}`,
+      cancelUrl: `${window.location.origin}?payment=cancelled`,
+    }),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.url; // Stripe Checkout URL
+}
+
+function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
+  const [processingJob, setProcessingJob] = useState(null);
+  const [error, setError] = useState("");
+  const cur = region?.currencySymbol || "$";
+
+  // Check for payment return
+  const urlParams = new URLSearchParams(window.location.search);
+  const paymentResult = urlParams.get("payment");
+
+  const completedJobs = jobs.filter(j => j.status === "completed");
+  const paidJobs      = jobs.filter(j => j.paymentStatus === "paid");
+  const pendingJobs   = jobs.filter(j => j.status === "completed" && j.paymentStatus !== "paid");
+
+  const totalReceived = paidJobs.reduce((a,b) => a + (b.clientPrice || 0), 0);
+  const totalPending  = pendingJobs.reduce((a,b) => a + (b.clientPrice || 0), 0);
+  const totalFees     = paidJobs.reduce((a,b) => a + Math.round((b.clientPrice||0) * 0.029 + 0.30), 0);
+
+  const handlePayNow = async (job) => {
+    setProcessingJob(job.id);
+    setError("");
+    try {
+      const url = await createCheckoutSession({ job, region });
+      window.open(url, "_blank"); // open Stripe checkout in new tab
+    } catch (err) {
+      setError(`Payment setup failed: ${err.message}. Make sure STRIPE_SECRET_KEY is set in Vercel.`);
+    }
+    setProcessingJob(null);
   };
 
   return (
     <div>
-      <div style={S.h2}>💳 Stripe Payments</div>
-      <div style={{ ...S.card, marginBottom:22, borderLeft:`4px solid ${connected?C.accent:C.gold}` }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12 }}>
-          <div style={{ display:"flex", alignItems:"center", gap:14 }}>
-            <div style={{ fontSize:34 }}>💳</div>
-            <div>
-              <div style={{ fontWeight:800, fontSize:17 }}>Stripe Connect</div>
-              <div style={{ fontSize:13, color:connected?C.accent:C.gold, fontWeight:700 }}>{connected?"✅ Connected — Have Us Clean Services":"⚠️ Not Connected"}</div>
-              <div style={{ fontSize:12, color:C.muted }}>2.9% + $0.30 per transaction</div>
-            </div>
-          </div>
-          {!connected ? <button style={S.btn("primary")} onClick={connect} disabled={processing}>{processing?"Connecting...":"🔗 Connect Stripe"}</button>
-            : <button style={S.btn("ghost")} onClick={()=>setConnected(false)}>Disconnect</button>}
+      <div style={S.h2}>💳 Payments</div>
+
+      {/* Payment return banner */}
+      {paymentResult === "success" && (
+        <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, fontWeight:700, color:C.accent }}>
+          ✅ Payment received! Thank you — your booking is confirmed.
         </div>
+      )}
+      {paymentResult === "cancelled" && (
+        <div style={{ background:"#FF475722", border:`1px solid #FF475744`, borderRadius:10, padding:"12px 16px", marginBottom:18, fontWeight:700, color:"#FF4757" }}>
+          Payment was cancelled. No charge was made.
+        </div>
+      )}
+
+      {error && (
+        <div style={{ background:"#FF475722", border:`1px solid #FF475744`, borderRadius:10, padding:"12px 16px", marginBottom:18, fontSize:13, color:"#FF4757" }}>
+          ⚠️ {error}
+        </div>
+      )}
+
+      {/* Stats */}
+      <div style={S.grid3}>
+        <StatCard label="Total Received"  value={`${cur}${totalReceived.toLocaleString()}`}  icon="✅" color={C.accent} sub="paid jobs" />
+        <StatCard label="Awaiting Payment" value={`${cur}${totalPending.toLocaleString()}`}   icon="⏳" color={C.gold}   sub="completed, unpaid" />
+        <StatCard label="Processing Fees" value={`${cur}${totalFees.toLocaleString()}`}       icon="💸" color={C.red}    sub="3% built into price" />
       </div>
 
-      {connected && (
-        <>
-          <div style={S.grid3}>
-            <StatCard label="Total Received" value={`$${totalReceived.toFixed(2)}`} icon="✅" color={C.accent} sub="after Stripe fees" />
-            <StatCard label="Pending" value={`$${totalPending.toFixed(2)}`} icon="⏳" color={C.gold} />
-            <StatCard label="Stripe Fees Paid" value={`$${payments.reduce((a,b)=>a+b.fee,0).toFixed(2)}`} icon="💸" color={C.red} />
+      <div style={S.divider} />
+
+      {/* Payment method info */}
+      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
+        <div style={{ ...S.card, borderLeft:`4px solid ${C.accent}` }}>
+          <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>💳 Card Payments (Stripe)</div>
+          <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
+            Available for all clients · Ontario (CAD) + Arizona (USD)<br/>
+            3% fee built into price — no surprise charges<br/>
+            Client pays via secure Stripe checkout link
           </div>
-          <div style={S.divider} />
-          <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, flexWrap:"wrap", gap:10 }}>
-            <div style={S.h3}>Payment History</div>
-            <button style={S.btn("primary")} onClick={()=>setShowPayForm(true)}>+ Charge Client</button>
-          </div>
-          {payments.map(p => (
-            <div key={p.id} style={{ ...S.cardSm, marginBottom:10, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
-              <div>
-                <div style={{ fontWeight:700, fontSize:14 }}>{p.client}</div>
-                <div style={{ fontSize:12, color:C.muted }}>{p.date} · {p.method} · {p.id}</div>
-              </div>
-              <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontWeight:800, color:C.accent }}>${p.amount.toFixed(2)}</div>
-                  <div style={{ fontSize:11, color:C.dim }}>Net: ${p.net.toFixed(2)} (fee: ${p.fee.toFixed(2)})</div>
-                </div>
-                <span style={S.badge(p.status==="succeeded"?"green":"gold")}>{p.status}</span>
-              </div>
+        </div>
+        {region?.id === "ON" && (
+          <div style={{ ...S.card, borderLeft:`4px solid ${C.blue}` }}>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>📱 Interac E-Transfer (ON only)</div>
+            <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
+              Free · No processing fee · Ontario clients only<br/>
+              Send to: <strong style={{ color:C.text }}>{ETRANSFER_EMAIL}</strong><br/>
+              Use job ID or client name as the message
             </div>
-          ))}
+          </div>
+        )}
+        {region?.id === "AZ" && (
+          <div style={{ ...S.card, borderLeft:`4px solid ${C.gold}` }}>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>🇺🇸 Arizona Payments (USD)</div>
+            <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
+              Card payments only via Stripe<br/>
+              No tax on cleaning services in AZ<br/>
+              Payouts to your US bank account
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Pending payments */}
+      {pendingJobs.length > 0 && (
+        <>
+          <div style={S.h3}>⏳ Awaiting Payment ({pendingJobs.length})</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
+            {pendingJobs.map(job => {
+              const amountWithFee = priceWithFee(job.clientPrice || 0);
+              const isProcessing = processingJob === job.id;
+              return (
+                <div key={job.id} style={{ ...S.card, borderLeft:`3px solid ${C.gold}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:15 }}>{job.client}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type} · {job.address}</div>
+                      <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+                        Base: {cur}{job.clientPrice} + 3% fee = <strong style={{ color:C.text }}>{cur}{amountWithFee}</strong>
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+                      {region?.id === "ON" && (
+                        <button style={S.btn("ghost")}
+                          onClick={() => {
+                            navigator.clipboard?.writeText(`Please send ${cur}${amountWithFee} via Interac e-transfer to ${ETRANSFER_EMAIL}. Use "${job.client} - ${job.type}" as the message. Thank you! — Have Us Clean`);
+                            alert("✅ E-transfer instructions copied to clipboard!");
+                          }}>
+                          📱 E-Transfer Instructions
+                        </button>
+                      )}
+                      <button
+                        style={{ ...S.btn("primary"), background: isProcessing ? C.dim : C.accent }}
+                        onClick={() => handlePayNow(job)}
+                        disabled={isProcessing}>
+                        {isProcessing ? "Opening Stripe..." : "💳 Send Pay Link"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </>
       )}
 
-      {!connected && (
+      {/* Paid jobs */}
+      {paidJobs.length > 0 && (
+        <>
+          <div style={S.h3}>✅ Paid ({paidJobs.length})</div>
+          <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+            {paidJobs.map(job => (
+              <div key={job.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+                <div>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{job.client}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type}</div>
+                </div>
+                <div style={{ textAlign:"right" }}>
+                  <div style={{ fontWeight:800, color:C.accent }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
+                  <span style={S.badge("green")}>Paid ✅</span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      {completedJobs.length === 0 && (
         <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:48, marginBottom:12 }}>💳</div>
-          <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>Accept Payments In-App</div>
-          <div style={{ fontSize:13, color:C.muted, marginBottom:20, maxWidth:380, margin:"0 auto 20px" }}>Charge clients by card, send payment links, and track every transaction — all without leaving CleanPro.</div>
-          <button style={S.btn("primary")} onClick={connect}>Connect Stripe Account</button>
+          <div style={{ fontSize:40, marginBottom:12 }}>💳</div>
+          <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No completed jobs yet</div>
+          <div style={{ color:C.muted, fontSize:14 }}>Completed jobs will appear here ready for payment collection.</div>
         </div>
       )}
 
-      {showPayForm && (
-        <Modal title="💳 Charge Client" onClose={()=>setShowPayForm(false)}>
-          <div style={{ display:"flex", flexDirection:"column", gap:13 }}>
-            <div><div style={S.label}>Client Name</div><input style={S.input} value={payForm.client} onChange={e=>setPayForm({...payForm,client:e.target.value})} placeholder="Sarah Wilson" /></div>
-            <div><div style={S.label}>Amount ($)</div><input style={S.input} type="number" value={payForm.amount} onChange={e=>setPayForm({...payForm,amount:e.target.value})} placeholder="0.00" /></div>
-            {payForm.amount && <div style={{ background:C.surface, borderRadius:10, padding:14 }}>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:C.muted }}><span>Stripe fee (2.9% + $0.30)</span><span>−${(parseFloat(payForm.amount||0)*0.029+0.30).toFixed(2)}</span></div>
-              <div style={{ display:"flex", justifyContent:"space-between", fontSize:16, fontWeight:800, marginTop:6 }}><span>Net to You</span><span style={{ color:C.accent }}>${(parseFloat(payForm.amount||0)*0.971-0.30).toFixed(2)}</span></div>
-            </div>}
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={runPayment} disabled={!payForm.client||!payForm.amount}>💳 Process Payment</button>
+      {/* Setup reminder */}
+      {STRIPE_PUBLISHABLE_KEY.includes("REPLACE") && (
+        <div style={{ ...S.card, marginTop:20, borderLeft:`4px solid ${C.gold}`, background:"#FFB80011" }}>
+          <div style={{ fontWeight:700, color:C.gold, marginBottom:6 }}>⚙️ Stripe Setup Required</div>
+          <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
+            1. Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>STRIPE_SECRET_KEY</code> to Vercel → Settings → Environment Variables<br/>
+            2. Share your Stripe publishable key (starts with <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>pk_live_</code>) so we can update the app code
           </div>
-        </Modal>
+        </div>
       )}
     </div>
   );
@@ -703,12 +818,12 @@ function StripePayments({ jobs, partners }) {
 
 // ─── SMS REMINDERS ────────────────────────────────────────────────────────────
 const SMS_TEMPLATES = [
-  { id:"confirm",   icon:"✅", label:"Booking Confirmation",  timing:"Immediately", template:(j)=>`Hi! Your ${j.type} with CleanPro is confirmed for ${j.date} at ${j.time} at ${j.address}. Questions? Reply to this message.` },
-  { id:"remind24",  icon:"🔔", label:"24-Hour Reminder",      timing:"24h before",  template:(j)=>`Reminder: Your CleanPro cleaning is TOMORROW ${j.date} at ${j.time}. Your cleaner will arrive at ${j.address}. See you soon!` },
-  { id:"remind2",   icon:"⏰", label:"2-Hour Reminder",       timing:"2h before",   template:(j)=>`Your CleanPro cleaner is on the way! Arriving at ${j.address} around ${j.time} today. Need to reschedule? Reply here.` },
-  { id:"enroute",   icon:"🚗", label:"Cleaner En Route",      timing:"On check-in", template:(j)=>`Your CleanPro cleaner has arrived and is starting your ${j.type}. We'll notify you when done!` },
-  { id:"complete",  icon:"🎉", label:"Job Complete",          timing:"On checkout", template:(j)=>`Your ${j.type} is complete! We'd love your feedback — reply with a rating 1-5 ⭐. Thank you for choosing CleanPro!` },
-  { id:"followup",  icon:"💬", label:"Post-Clean Follow-Up",  timing:"2h after",    template:(j)=>`Hi! How did your CleanPro cleaning go? We want to make sure everything was perfect. Reply anytime with feedback.` },
+  { id:"confirm",   icon:"✅", label:"Booking Confirmation",  timing:"Immediately", template:(j)=>`Hi ${j.client}! Your ${j.type} with Have Us Clean is confirmed for ${j.date} at ${j.time} at ${j.address}. Questions? Reply or email haveusclean@gmail.com` },
+  { id:"remind24",  icon:"🔔", label:"24-Hour Reminder",      timing:"24h before",  template:(j)=>`Reminder: Your Have Us Clean service is TOMORROW ${j.date} at ${j.time}. Your cleaner will arrive at ${j.address}. See you soon!` },
+  { id:"remind2",   icon:"⏰", label:"2-Hour Reminder",       timing:"2h before",   template:(j)=>`Your Have Us Clean cleaner is on the way! Arriving at ${j.address} around ${j.time} today. Need to reach us? Reply here.` },
+  { id:"enroute",   icon:"🚗", label:"Cleaner En Route",      timing:"On check-in", template:(j)=>`Your Have Us Clean cleaner has arrived and is starting your ${j.type}. We'll let you know when done!` },
+  { id:"complete",  icon:"🎉", label:"Job Complete",          timing:"On checkout", template:(j)=>`Your ${j.type} is complete! We'd love your feedback — reply with a rating 1-5 ⭐. Thank you for choosing Have Us Clean!` },
+  { id:"followup",  icon:"💬", label:"Post-Clean Follow-Up",  timing:"2h after",    template:(j)=>`Hi ${j.client}! How did your Have Us Clean service go? We want to make sure everything was perfect. Reply anytime — we appreciate you!` },
 ];
 
 function SMSReminders({ jobs }) {
@@ -4039,7 +4154,7 @@ export default function App() {
         {tab==="agent_dm"       && <AgentPanel agent="DM_Conversion_Agent" />}
         {tab==="agent_ops"      && <AgentPanel agent="Operations_Manager_Agent" />}
         {tab==="pay"            && <Pay               partners={regionPartners} jobs={regionJobs} />}
-        {tab==="stripe"         && <StripePayments    jobs={regionJobs}     partners={regionPartners} />}
+        {tab==="stripe"         && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
         {tab==="qb"             && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
         {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTab} />}
