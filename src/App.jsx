@@ -1773,6 +1773,358 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   );
 }
 
+// ─── FORM INTAKE ──────────────────────────────────────────────────────────────
+// Google Form → New Leads auto-flow
+// Your Google Form submissions come in via n8n webhook and land here as new leads
+
+const GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/viewform";
+// Replace YOUR_FORM_ID with your actual Google Form ID after setup
+
+function FormIntake({ resLeads, setResLeads, region, setTab }) {
+  const [formUrl, setFormUrl] = useState(GOOGLE_FORM_URL);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [showManual, setShowManual] = useState(false);
+  const [manualForm, setManualForm] = useState({
+    name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo",
+    dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean",
+    frequency:"One-Time", addons:[], notes:""
+  });
+
+  const recentLeads = [...resLeads]
+    .sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0))
+    .slice(0,10);
+
+  const addManual = () => {
+    if (!manualForm.name || !manualForm.email) return;
+    const newLead = {
+      ...manualForm, id:Date.now(), status:"New", workOrder:null,
+      paymentConfirmed:false, quotedDate:"", bookedDate:"",
+      createdAt: new Date().toISOString(), source:"Manual Entry"
+    };
+    setResLeads(ls => [newLead, ...ls]);
+    setShowManual(false);
+    setManualForm({ name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", frequency:"One-Time", addons:[], notes:"" });
+    setTab("res");
+  };
+
+  return (
+    <div>
+      <div style={S.h2}>📋 Form Intake & Lead Flow</div>
+      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:20 }}>
+        Connect your Google Form to auto-create leads. Or add leads manually here.
+      </div>
+
+      {/* Flow diagram */}
+      <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>🔄 How the Flow Works</div>
+        <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:13 }}>
+          {[
+            { icon:"🌐", label:"haveusclean.ca", sub:"Google Form embed" },
+            { icon:"→", label:"", sub:"" },
+            { icon:"📋", label:"Google Form", sub:"Client fills out" },
+            { icon:"→", label:"", sub:"" },
+            { icon:"⚡", label:"n8n Webhook", sub:"Triggers on submit" },
+            { icon:"→", label:"", sub:"" },
+            { icon:"📱", label:"Have Us Clean App", sub:"New Lead appears" },
+            { icon:"→", label:"", sub:"" },
+            { icon:"💬", label:"Quote & Book", sub:"You respond" },
+          ].map((step, i) => step.icon === "→"
+            ? <span key={i} style={{ color:C.accent, fontSize:20, fontWeight:700 }}>→</span>
+            : (
+              <div key={i} style={{ background:C.surface, borderRadius:10, padding:"8px 12px", textAlign:"center", minWidth:90 }}>
+                <div style={{ fontSize:22 }}>{step.icon}</div>
+                <div style={{ fontWeight:700, fontSize:12, color:C.text }}>{step.label}</div>
+                <div style={{ fontSize:10, color:C.muted }}>{step.sub}</div>
+              </div>
+            )
+          )}
+        </div>
+      </div>
+
+      {/* Setup guide */}
+      <div style={{ ...S.card, marginBottom:20, borderLeft:`4px solid ${C.gold}` }}>
+        <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:12 }}>⚙️ Setup — 10 Minutes</div>
+        {[
+          { step:"1", title:"Create your Google Form", detail:'Go to forms.google.com → Create new form. Add fields: Name, Email, Phone, Address, Property Type, Bedrooms, Bathrooms, Service Needed, Frequency, Special Notes. Set it as "Collect email addresses".' },
+          { step:"2", title:"Embed on your website", detail:'In Google Form → Send → Embed (< >) → Copy the iframe code → Paste it on your haveusclean.ca "Get a Free Quote" page. This is the form clients fill out to request a quote.' },
+          { step:"3", title:"Connect to n8n", detail:'In n8n: Add a new workflow → Webhook trigger → copy the webhook URL → In Google Form → Responses → Connect to Sheets → Also add an n8n webhook via Apps Script (we can build this together).' },
+          { step:"4", title:"n8n sends to this app", detail:'Your n8n workflow receives the form data and calls your Vercel API to create a new lead. The lead appears instantly in 🏠 Residential Leads as status: New.' },
+        ].map(s => (
+          <div key={s.step} style={{ display:"flex", gap:12, marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${C.border}` }}>
+            <div style={{ width:28, height:28, borderRadius:"50%", background:C.gold, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:13, color:"#0A0F1E", flexShrink:0 }}>{s.step}</div>
+            <div>
+              <div style={{ fontWeight:700, fontSize:14, marginBottom:4 }}>{s.title}</div>
+              <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>{s.detail}</div>
+            </div>
+          </div>
+        ))}
+
+        <div style={{ marginTop:4 }}>
+          <div style={S.label}>Your Google Form URL (paste once set up)</div>
+          <input style={{ ...S.input, marginTop:6 }} value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="https://docs.google.com/forms/d/e/..." />
+          {formUrl && !formUrl.includes('YOUR_FORM_ID') && (
+            <a href={formUrl} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block", marginTop:8, fontSize:13 }}>
+              🔗 Open Form
+            </a>
+          )}
+        </div>
+      </div>
+
+      {/* Manual add */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+        <div style={S.h3}>Recent Leads ({resLeads.length} total)</div>
+        <button style={S.btn("primary")} onClick={() => setShowManual(true)}>+ Add Lead Manually</button>
+      </div>
+
+      {recentLeads.length === 0 && (
+        <div style={{ ...S.card, textAlign:"center", padding:30, color:C.muted }}>
+          No leads yet. Add one manually or set up your Google Form to auto-populate.
+        </div>
+      )}
+
+      <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
+        {recentLeads.map(lead => {
+          const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
+          return (
+            <div key={lead.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:14 }}>{lead.name}</div>
+                <div style={{ fontSize:12, color:C.muted }}>{lead.email} · {lead.dwellingType} · {lead.serviceType}</div>
+                <div style={{ fontSize:11, color:C.dim }}>{lead.createdAt ? new Date(lead.createdAt).toLocaleString() : ""} {lead.source ? `· ${lead.source}` : ""}</div>
+              </div>
+              <div style={{ display:"flex", gap:8, alignItems:"center" }}>
+                <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
+                <button style={{ ...S.btn("sm") }} onClick={() => setTab("res")}>View →</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Manual add modal */}
+      {showManual && (
+        <Modal title="+ Add Lead Manually" onClose={() => setShowManual(false)} wide>
+          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Full Name *</div><input style={S.input} value={manualForm.name} onChange={e=>setManualForm({...manualForm,name:e.target.value})} placeholder="Sarah M." /></div>
+              <div><div style={S.label}>Email *</div><input style={S.input} value={manualForm.email} onChange={e=>setManualForm({...manualForm,email:e.target.value})} placeholder="sarah@email.com" /></div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Phone</div><input style={S.input} value={manualForm.phone} onChange={e=>setManualForm({...manualForm,phone:e.target.value})} placeholder="(416) 555-0100" /></div>
+              <div><div style={S.label}>Address</div><input style={S.input} value={manualForm.address} onChange={e=>setManualForm({...manualForm,address:e.target.value})} placeholder="88 Maple Dr, North York" /></div>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+              <div><div style={S.label}>Property Type</div>
+                <select style={S.select} value={manualForm.dwellingType} onChange={e=>setManualForm({...manualForm,dwellingType:e.target.value})}>
+                  {["Apartment / Condo","Semi / Townhouse","Detached House"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div><div style={S.label}>Service</div>
+                <select style={S.select} value={manualForm.serviceType} onChange={e=>setManualForm({...manualForm,serviceType:e.target.value})}>
+                  {["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Move-Out","Kitchen & Bathroom Refresh"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+              <div><div style={S.label}>Frequency</div>
+                <select style={S.select} value={manualForm.frequency} onChange={e=>setManualForm({...manualForm,frequency:e.target.value})}>
+                  {["One-Time","Weekly","Bi-Weekly","Monthly"].map(t=><option key={t}>{t}</option>)}
+                </select>
+              </div>
+            </div>
+            <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={manualForm.notes} onChange={e=>setManualForm({...manualForm,notes:e.target.value})} placeholder="Special instructions, how they found us..." /></div>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManual} disabled={!manualForm.name||!manualForm.email}>💾 Add Lead → Goes to Residential Leads</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+// ─── FOLLOW-UP REMINDERS ──────────────────────────────────────────────────────
+function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
+  const today = new Date().toISOString().split("T")[0];
+  const todayDate = new Date(today);
+  const cur = region?.currencySymbol || "$";
+
+  // Calculate follow-up urgency for each lead
+  const getFollowUpStatus = (lead) => {
+    if (["Booked","Completed","Lost"].includes(lead.status)) return null;
+    const daysSinceQuoted = lead.quotedDate
+      ? Math.floor((todayDate - new Date(lead.quotedDate)) / 86400000)
+      : null;
+    const followUpDate = lead.followUpDate ? new Date(lead.followUpDate) : null;
+    const followUpDue = followUpDate ? followUpDate <= todayDate : false;
+    const followUpOverdue = followUpDate ? followUpDate < todayDate : false;
+
+    if (lead.status === "New" && (!lead.quotedDate)) return { level:"action", label:"Send Quote", color:C.blue, days:null };
+    if (lead.status === "Quoted" && daysSinceQuoted !== null && daysSinceQuoted >= 3 && daysSinceQuoted < 7) return { level:"reminder", label:`Follow up (${daysSinceQuoted}d since quote)`, color:C.gold, days:daysSinceQuoted };
+    if (lead.status === "Quoted" && daysSinceQuoted !== null && daysSinceQuoted >= 7) return { level:"urgent", label:`Overdue follow-up (${daysSinceQuoted}d!)`, color:C.red, days:daysSinceQuoted };
+    if (lead.status === "Follow Up" && followUpOverdue) return { level:"urgent", label:"Follow-up date passed!", color:C.red, days:null };
+    if (lead.status === "Follow Up" && followUpDue) return { level:"reminder", label:"Follow up today", color:C.gold, days:null };
+    return null;
+  };
+
+  // Build follow-up list
+  const followUps = resLeads
+    .map(lead => ({ lead, fu: getFollowUpStatus(lead) }))
+    .filter(x => x.fu !== null)
+    .sort((a,b) => {
+      const order = { urgent:0, action:1, reminder:2 };
+      return (order[a.fu.level]||3) - (order[b.fu.level]||3);
+    });
+
+  const urgent   = followUps.filter(x => x.fu.level === "urgent");
+  const action   = followUps.filter(x => x.fu.level === "action");
+  const reminder = followUps.filter(x => x.fu.level === "reminder");
+
+  // Generate follow-up email
+  const generateFollowUp = async (lead, setLoading, setResult) => {
+    setLoading(true);
+    const q = calcResQuote(lead, region || ACTIVE_REGION);
+    const prompt = `Write a short, warm follow-up email for a residential cleaning lead.
+
+Company: Have Us Clean
+Client: ${lead.name}
+Service quoted: ${lead.serviceType}
+Property: ${lead.dwellingType}${lead.dwellingSize ? ` — ${lead.dwellingSize}` : ""}
+Quote total: ${cur}${Math.round(q.total)}
+Days since quoted: ${lead.quotedDate ? Math.floor((todayDate - new Date(lead.quotedDate)) / 86400000) : "unknown"}
+Notes: ${lead.notes || "none"}
+
+Rules:
+- Under 80 words
+- Warm, not pushy
+- Reference the specific service and price
+- Include a simple next step
+- Sign as: Have Us Clean · haveusclean@gmail.com
+- Do not use placeholders`;
+
+    try {
+      const res = await fetch("/api/claude", {
+        method:"POST", headers:{ "Content-Type":"application/json" },
+        body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:300, messages:[{ role:"user", content:prompt }] })
+      });
+      const data = await res.json();
+      setResult(data.content?.[0]?.text || "");
+    } catch { setResult("Error generating follow-up. Check API connection."); }
+    setLoading(false);
+  };
+
+  const FollowUpCard = ({ lead, fu }) => {
+    const [loading, setLoading] = useState(false);
+    const [emailDraft, setEmailDraft] = useState("");
+    const [copied, setCopied] = useState(false);
+
+    const copy = (text) => {
+      navigator.clipboard?.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    };
+
+    const markFollowedUp = () => {
+      setResLeads(ls => ls.map(l => l.id === lead.id
+        ? { ...l, status:"Follow Up", followUpDate: new Date(Date.now() + 3*86400000).toISOString().split("T")[0] }
+        : l
+      ));
+    };
+
+    return (
+      <div style={{ ...S.card, borderLeft:`4px solid ${fu.color}`, marginBottom:12 }}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10, marginBottom:10 }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:15 }}>{lead.name}</div>
+            <div style={{ fontSize:12, color:C.muted }}>{lead.email} · {lead.serviceType} · {lead.dwellingType}</div>
+            {lead.notes && <div style={{ fontSize:11, color:C.dim, marginTop:2 }}>"{lead.notes}"</div>}
+          </div>
+          <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
+            <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${fu.color}22`, color:fu.color }}>{fu.label}</span>
+            <span style={{ fontSize:11, color:C.muted }}>{lead.status}</span>
+          </div>
+        </div>
+
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+          <button style={{ ...S.btn("sm"), background:"#7C3AED", color:"#fff" }}
+            onClick={() => generateFollowUp(lead, setLoading, setEmailDraft)} disabled={loading}>
+            {loading ? "Writing..." : "✨ Generate Follow-Up Email"}
+          </button>
+          <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up — ${lead.serviceType} quote`)}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, padding:"7px 14px" }}>
+            📨 Open Gmail
+          </a>
+          <button style={S.btn("sm")} onClick={markFollowedUp}>✅ Mark Followed Up</button>
+        </div>
+
+        {emailDraft && (
+          <div style={{ marginTop:12, background:C.surface, borderRadius:10, padding:14, border:`1px solid ${C.border}` }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
+              <div style={{ fontSize:12, fontWeight:700, color:"#A78BFA" }}>✨ AI-Generated Follow-Up</div>
+              <div style={{ display:"flex", gap:8 }}>
+                <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up — ${lead.serviceType} quote`)}&body=${encodeURIComponent(emailDraft)}`}
+                  target="_blank" rel="noopener noreferrer"
+                  style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>📨 Gmail</a>
+                <button style={{ ...S.btn("sm"), background: copied ? C.accentDim : C.surface, color: copied ? C.accent : C.muted, fontSize:11 }}
+                  onClick={() => copy(emailDraft)}>{copied ? "✅ Copied!" : "📋 Copy"}</button>
+              </div>
+            </div>
+            <div style={{ fontSize:13, color:C.muted, lineHeight:1.7, whiteSpace:"pre-wrap" }}>{emailDraft}</div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={S.h2}>🔔 Follow-Up Reminders</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
+            Auto-detected from your leads pipeline · Updates live as you change statuses
+          </div>
+        </div>
+      </div>
+
+      {/* Stats */}
+      <div style={S.grid3}>
+        <StatCard label="Urgent" value={urgent.length} icon="🚨" color={C.red} sub="overdue follow-ups" />
+        <StatCard label="Action Needed" value={action.length} icon="⚡" color={C.blue} sub="quotes to send" />
+        <StatCard label="Due Soon" value={reminder.length} icon="🔔" color={C.gold} sub="follow up this week" />
+      </div>
+
+      <div style={S.divider} />
+
+      {followUps.length === 0 && (
+        <div style={{ ...S.card, textAlign:"center", padding:40 }}>
+          <div style={{ fontSize:40, marginBottom:12 }}>🎉</div>
+          <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>All caught up!</div>
+          <div style={{ color:C.muted, fontSize:14 }}>No follow-ups needed right now. Check back after you send more quotes.</div>
+        </div>
+      )}
+
+      {urgent.length > 0 && (
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, color:C.red, marginBottom:10 }}>🚨 Urgent — Act Today</div>
+          {urgent.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
+        </div>
+      )}
+
+      {action.length > 0 && (
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, color:C.blue, marginBottom:10 }}>⚡ Send Quote</div>
+          {action.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
+        </div>
+      )}
+
+      {reminder.length > 0 && (
+        <div style={{ marginBottom:20 }}>
+          <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:10 }}>🔔 This Week</div>
+          {reminder.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── RESIDENTIAL LEADS — Have Us Clean ───────────────────────────────────────
 const SAMPLE_RES_LEADS = [
   { id:1, name:"Sarah M.", email:"sarah.m@email.com", phone:"(416) 555-2201", address:"88 Maple Dr, North York ON", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:850, serviceType:"Full Home Clean", addons:["oven","fridge"], frequency:"Bi-Weekly", preferredDate:"2026-04-10", preferredTime:"9:00 AM", notes:"Has a cat. Please use unscented products.", status:"Quoted", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T10:00:00Z" },
@@ -3509,6 +3861,7 @@ export default function App() {
       { id:"res",        label:"🏠 Residential",   desc:"Leads, quotes & booking" },
       { id:"com",        label:"🏢 Commercial",    desc:"Commercial proposals" },
       { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
+      { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
       { id:"agent_quote",    label:"💬 VA Quote",      desc:"Generate quotes with AI" },
@@ -3526,6 +3879,7 @@ export default function App() {
     { id:"clients",  label:"🌐 Clients", color: C.blue, tabs:[
       { id:"portal",      label:"🌐 Client Portal",  desc:"Quotes, invoices & reviews" },
       { id:"clientview",  label:"📲 Client View",    desc:"What your clients see" },
+      { id:"followup",    label:"🔔 Follow-Ups",     desc:"Automated reminder system" },
       { id:"sms",         label:"📱 SMS Reminders",  desc:"Automated messaging" },
       { id:"marketing",   label:"📣 Marketing",      desc:"30-day content system" },
     ]},
@@ -3676,6 +4030,8 @@ export default function App() {
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} />}
+        {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
         {tab==="agent_workorder"&& <AgentPanel agent="WorkOrder_Agent" />}
@@ -3709,21 +4065,37 @@ const HUC_AGENTS = {
     icon: "💬", color: C.accent,
     title: "VA Quote Agent",
     purpose: "Generate fast, consistent quotes using the locked pricing menu and dwelling grid.",
-    system: `You are the Have Us Clean VA Quote Agent. Your job is to produce consistent, margin-aware quotes using the internal pricing system.
+    system: `You are the Have Us Clean VA Quote Agent. Your job is to produce consistent, accurate quotes using the locked pricing grid.
 
-PRICING GRID (Toronto & GTA):
-- Apartment/Condo 1 Bed: $140–$180 one-time, $130–$165 bi-weekly
-- Apartment/Condo 2 Bed: $160–$220 one-time, $150–$200 bi-weekly
-- Apartment/Condo 3 Bed: $200–$260 one-time, $180–$240 bi-weekly
-- Semi/Townhouse Small: $160–$220 / Medium: $200–$260 / Large: $240–$320
-- Detached Small: $180–$240 / Medium: $220–$320 / Large: $300–$400
-- Kitchen & Bathroom Refresh (any size): $120–$200
+PRICING GRID (Toronto & GTA — all prices in CAD):
+Apartment/Condo:
+- 1 Bed: $140–$180 one-time | $120–$150 weekly | $130–$165 bi-weekly | $140–$180 monthly
+- 2 Bed: $160–$220 one-time | $140–$180 weekly | $150–$200 bi-weekly | $160–$220 monthly
+- 3 Bed: $200–$260 one-time | $170–$220 weekly | $180–$240 bi-weekly | $200–$260 monthly
+Semi/Townhouse:
+- Small: $160–$220 one-time | $140–$190 weekly | $150–$200 bi-weekly | $160–$220 monthly
+- Medium: $200–$260 one-time | $170–$220 weekly | $180–$240 bi-weekly | $200–$260 monthly
+- Large: $240–$320 one-time | $200–$270 weekly | $220–$290 bi-weekly | $240–$320 monthly
+Detached House:
+- Small: $180–$240 one-time | $150–$200 weekly | $160–$220 bi-weekly | $180–$240 monthly
+- Medium: $220–$320 one-time | $180–$260 weekly | $200–$280 bi-weekly | $220–$320 monthly
+- Large: $300–$400 one-time | $250–$340 weekly | $270–$360 bi-weekly | $300–$400 monthly
+Kitchen & Bathroom Refresh: $120–$200 (any size, any frequency)
 
-PACKAGES: Refresh Clean ($140–$300) · Full Home Clean ($180–$400) · Deep Clean ($250–$700) · Move-In/Move-Out ($300–$600) · Kitchen & Bathroom Refresh ($120–$200)
+PACKAGES: Refresh Clean ($140–$300) · Full Home Clean ($180–$400) · Deep Clean ($250–$700+) · Move-In/Move-Out ($300–$600+) · Kitchen & Bathroom Refresh ($120–$200)
 
-ADDONS: Fridge inside ($40–60) · Oven inside ($40–70) · Windows ($5–10/each) · Carpet ($60–120) · Pet Hair/Heavy Detail ($40–80) · Baseboards ($40–80)
+ADDONS (add to base price): Inside Fridge ($40–60) · Inside Oven ($40–70) · Interior Windows ($5–10/each) · Carpet Cleaning ($60–120) · Pet Hair/Heavy Detail ($40–80) · Baseboards/Detail ($40–80)
 
-RULES: Always protect 30% gross profit margin. Use mid-market positioning. Position price within the range based on condition (light=low end, heavy=high end). If the job is unusual, partial, or detail-heavy, flag for review. Keep customer-facing messages warm and short. Always add 13% HST for Ontario clients.`,
+PAY STRUCTURE: Partner earns 65% of client price. Company keeps 35%. Always calculate and show both.
+EXAMPLE: $200 job → Partner gets $130 · Company keeps $70
+
+RULES:
+- First clean always at one-time/full price. Recurring visits at the discounted frequency rate.
+- Position within price range based on condition: light buildup = low end, heavy/first-time = high end
+- Always add 13% HST for Ontario clients
+- For Arizona clients: no tax on cleaning services
+- Flag any unusual scope for review
+- Never invent prices outside the grid above`,
     inputLabel: "Describe the lead — include dwelling type, size, bedrooms/bathrooms, package requested, condition (light/average/heavy), addons, frequency, and any special notes.",
     inputPlaceholder: "e.g. 2BR condo in North York, average condition, Full Home Clean, bi-weekly, client wants inside fridge cleaned as an addon. What should I quote?",
     outputSections: ["Recommended Price", "Customer-Facing Quote Message", "Internal Rationale", "Warning Flag (if any)"],
