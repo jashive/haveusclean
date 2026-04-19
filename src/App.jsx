@@ -2032,16 +2032,26 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
       const data = await res.json();
       if (data.leads && data.leads.length > 0) {
         setResLeads(ls => {
-          const existingIds = new Set(ls.map(l => l.email + l.createdAt));
-          const newOnes = data.leads.filter(l => !existingIds.has(l.email + l.createdAt));
-          return [...newOnes, ...ls];
+          const existingKeys = new Set(ls.map(l =>
+            `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`
+          ));
+          const newOnes = data.leads.filter(l => {
+            const key = `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`;
+            return !existingKeys.has(key);
+          });
+          if (newOnes.length > 0) {
+            setPullResult(`✅ ${newOnes.length} new lead${newOnes.length > 1 ? 's' : ''} pulled from Google Form!`);
+            return [...newOnes, ...ls];
+          } else {
+            setPullResult(`ℹ️ ${data.leads.length} total submissions found — all already in app.`);
+            return ls;
+          }
         });
-        setPullResult(`✅ ${data.leads.length} new lead${data.leads.length > 1 ? 's' : ''} pulled from Google Form!`);
       } else {
-        setPullResult("No new form submissions since last pull.");
+        setPullResult("No submissions found in your form sheet yet.");
       }
     } catch {
-      setPullResult("Error connecting to intake endpoint. Make sure api/intake.js is deployed.");
+      setPullResult("Error reading form sheet. Make sure the sheet is shared as Anyone with the link can view.");
     }
     setPulling(false);
   };
@@ -4228,17 +4238,23 @@ export default function App() {
         const data = await res.json();
         if (data.leads && data.leads.length > 0) {
           setResLeads(ls => {
-            const existingIds = new Set(ls.map(l => l.email + l.createdAt));
-            const newOnes = data.leads.filter(l => !existingIds.has(l.email + l.createdAt));
+            // Deduplicate by email+timestamp combo
+            const existingKeys = new Set(ls.map(l =>
+              `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`
+            ));
+            const newOnes = data.leads.filter(l => {
+              const key = `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`;
+              return !existingKeys.has(key);
+            });
             if (newOnes.length === 0) return ls;
             console.log(`✅ Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
             return [...newOnes, ...ls];
           });
         }
-      } catch { /* silent — no network noise */ }
+      } catch { /* silent */ }
     };
-    pullIntake(); // pull immediately on load
-    const timer = setInterval(pullIntake, 5 * 60 * 1000); // then every 5 min
+    pullIntake();
+    const timer = setInterval(pullIntake, 5 * 60 * 1000);
     return () => clearInterval(timer);
   }, [isLoading]);
 
