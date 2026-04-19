@@ -1807,34 +1807,39 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
         {/* Inline edit for incomplete leads */}
         {(!viewLead.company || !viewLead.city || !viewLead.buyer_title || !viewLead.pain_point) && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.red}`, background:"#FF475711" }}>
-            <div style={{ fontWeight:700, color:C.red, marginBottom:12, fontSize:14 }}>⚠️ Incomplete Lead — Fill in missing details</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
-              {!viewLead.company && (
-                <div><div style={S.label}>Company Name</div>
-                  <input style={S.input} defaultValue={viewLead.company || ""} placeholder="e.g. Apex Medical Centre"
-                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,company:e.target.value} : l)); setViewLead(v=>({...v,company:e.target.value})); }} />
+            <div style={{ fontWeight:700, color:C.red, marginBottom:12, fontSize:14 }}>⚠️ Fill in missing details to use this lead</div>
+            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+              {[
+                { field:"company",     label:"Company Name",         placeholder:"e.g. Apex Medical Centre" },
+                { field:"city",        label:"City",                 placeholder:"e.g. Brampton" },
+                { field:"buyer_title", label:"Decision Maker Title", placeholder:"e.g. Property Manager" },
+                { field:"pain_point",  label:"Pain Point",           placeholder:"e.g. Maintaining cleanliness standards" },
+                { field:"segment",     label:"Segment",              placeholder:"Office / Medical / Property Manager" },
+              ].filter(f => !viewLead[f.field]).map(({ field, label, placeholder }) => (
+                <div key={field}>
+                  <div style={S.label}>{label}</div>
+                  <div style={{ display:"flex", gap:8 }}>
+                    <input
+                      key={`${viewLead.lead_id}-${field}`}
+                      style={{ ...S.input, flex:1 }}
+                      defaultValue=""
+                      placeholder={placeholder}
+                      onBlur={e => {
+                        const val = e.target.value.trim();
+                        if (!val) return;
+                        const updated = { ...viewLead, [field]: val };
+                        setLeads(ls => ls.map(l =>
+                          (l.lead_id || l.id) === (viewLead.lead_id || viewLead.id)
+                            ? { ...l, [field]: val } : l
+                        ));
+                        setViewLead(updated);
+                      }}
+                    />
+                  </div>
                 </div>
-              )}
-              {!viewLead.city && (
-                <div><div style={S.label}>City</div>
-                  <input style={S.input} defaultValue={viewLead.city || ""} placeholder="e.g. Brampton"
-                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,city:e.target.value} : l)); setViewLead(v=>({...v,city:e.target.value})); }} />
-                </div>
-              )}
-              {!viewLead.buyer_title && (
-                <div><div style={S.label}>Decision Maker Title</div>
-                  <input style={S.input} defaultValue={viewLead.buyer_title || ""} placeholder="e.g. Property Manager"
-                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,buyer_title:e.target.value} : l)); setViewLead(v=>({...v,buyer_title:e.target.value})); }} />
-                </div>
-              )}
-              {!viewLead.pain_point && (
-                <div><div style={S.label}>Pain Point</div>
-                  <input style={S.input} defaultValue={viewLead.pain_point || ""} placeholder="e.g. Maintaining cleanliness standards"
-                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,pain_point:e.target.value} : l)); setViewLead(v=>({...v,pain_point:e.target.value})); }} />
-                </div>
-              )}
+              ))}
+              <div style={{ fontSize:11, color:C.muted }}>Type a value and click out of the field to save. The ⚠️ panel disappears once all fields are filled.</div>
             </div>
-            <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Changes save automatically when you click out of a field.</div>
           </div>
         )}
 
