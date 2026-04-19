@@ -1,23 +1,39 @@
-// api/intake.js — Receives new leads from Google Form via n8n
-// Called by n8n HTTP Request node after mapping form fields
-// Stores lead in a simple in-memory log (upgradeable to Supabase later)
+// api/intake.js — Receives leads from Google Form via n8n
+// Uses /tmp file storage to persist between serverless function calls
+// For production scale, upgrade to Vercel KV or Supabase
 
-// Simple in-memory store — persists within the same Vercel function instance
-// For production persistence, upgrade to Supabase or KV store
-let pendingLeads = [];
+import { readFileSync, writeFileSync, existsSync } from 'fs';
+
+const LEADS_FILE = '/tmp/huc_pending_leads.json';
+
+function readLeads() {
+  try {
+    if (existsSync(LEADS_FILE)) {
+      return JSON.parse(readFileSync(LEADS_FILE, 'utf8'));
+    }
+  } catch {}
+  return [];
+}
+
+function writeLeads(leads) {
+  try {
+    writeFileSync(LEADS_FILE, JSON.stringify(leads), 'utf8');
+  } catch (err) {
+    console.error('Failed to write leads:', err.message);
+  }
+}
 
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   // POST — receive new lead from n8n
   if (req.method === 'POST') {
     try {
       const lead = req.body;
-
-      if (!lead.name && !lead.email) {
+      if (!lead || (!lead.name && !lead.email)) {
         return res.status(400).json({ error: 'Missing required fields: name or email' });
       }
 
@@ -33,31 +49,37 @@ export default async function handler(req, res) {
         bookedDate: '',
       };
 
-      pendingLeads.push(newLead);
+      const existing = readLeads();
+      existing.push(newLead);
+      writeLeads(existing);
 
-      console.log(`✅ New lead received: ${newLead.name} (${newLead.email}) — ${newLead.serviceType} in ${newLead.city}`);
+      console.log(`✅ Lead saved: ${newLead.name} (${newLead.email}) — ${newLead.serviceType}`);
 
       return res.status(200).json({
         success: true,
         leadId: newLead.id,
-        message: `Lead created for ${newLead.name}`,
-        lead: newLead,
+        message: `Lead saved for ${newLead.name}`,
+        pending_count: existing.length,
       });
 
     } catch (err) {
-      return res.status(500).json({ error: 'Failed to process lead', detail: err.message });
+      return res.status(500).json({ error: 'Failed to save lead', detail: err.message });
     }
   }
 
-  // GET — retrieve pending leads (called by app on sync)
+  // GET — retrieve and clear pending leads (called by app every 5 min)
   if (req.method === 'GET') {
-    const leads = [...pendingLeads];
-    pendingLeads = []; // clear after retrieval
-    return res.status(200).json({
-      leads,
-      count: leads.length,
-      retrieved_at: new Date().toISOString(),
-    });
+    try {
+      const leads = readLeads();
+      writeLeads([]); // clear after retrieval
+      return res.status(200).json({
+        leads,
+        count: leads.length,
+        retrieved_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      return res.status(500).json({ error: 'Failed to read leads', detail: err.message });
+    }
   }
 
   return res.status(405).json({ error: 'Method not allowed' });
