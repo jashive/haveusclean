@@ -1598,15 +1598,24 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       if (data.error) {
         setSyncError(data.error + (data.help ? " — " + data.help : ""));
       } else if (data.leads && data.leads.length > 0) {
-        // Merge: keep local status/notes updates, add new leads from sheet
+        // MERGE: keep everything already in the app, add only new leads from sheet
         setLeads(prev => {
           const prevMap = Object.fromEntries(prev.map(l => [l.lead_id, l]));
-          return data.leads.map(sheetLead => ({
+          const merged = data.leads.map(sheetLead => ({
             ...sheetLead,
-            // Preserve any local edits (status, notes) made in the app
+            // Preserve any local edits made in the app
             status: prevMap[sheetLead.lead_id]?.status || sheetLead.status || "New",
             notes:  prevMap[sheetLead.lead_id]?.notes  || sheetLead.notes  || "",
+            // Preserve upgraded outreach if it exists locally
+            cold_email:      prevMap[sheetLead.lead_id]?.cold_email      || sheetLead.cold_email      || "",
+            follow_up_email: prevMap[sheetLead.lead_id]?.follow_up_email || sheetLead.follow_up_email || "",
+            linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note   || "",
+            call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener     || "",
           }));
+          // Keep any manually-added leads not in the sheet
+          const sheetIds = new Set(data.leads.map(l => l.lead_id));
+          const manualLeads = prev.filter(l => l.source === "manual" || !sheetIds.has(l.lead_id));
+          return [...manualLeads, ...merged];
         });
         setLastSynced(new Date().toLocaleTimeString());
       } else {
@@ -1616,6 +1625,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       setSyncError("Network error — check your Vercel deployment.");
     }
     setLoadingSheet(false);
+  };
+
+  const deleteLead = (id) => {
+    setLeads(ls => ls.filter(l => l.lead_id !== id && l.id !== id));
+    if (viewLead?.lead_id === id || viewLead?.id === id) setViewLead(null);
   };
 
   // Filter leads
@@ -1707,7 +1721,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 
     return (
       <div>
-        <button style={{ ...S.btn("ghost"), marginBottom:18, fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); }}>← All Leads</button>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); }}>← All Leads</button>
+          <button style={{ ...S.btn("ghost"), fontSize:12, color:C.red, borderColor:C.red }}
+            onClick={() => { if(window.confirm(`Delete ${viewLead.company}? This cannot be undone.`)) deleteLead(viewLead.lead_id || viewLead.id); }}>
+            🗑 Delete Lead
+          </button>
+        </div>
 
         {/* Lead header */}
         <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${seg.color}` }}>
@@ -1784,6 +1804,40 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
         </div>
 
         {/* Outreach content */}
+        {/* Inline edit for incomplete leads */}
+        {(!viewLead.company || !viewLead.city || !viewLead.buyer_title || !viewLead.pain_point) && (
+          <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.red}`, background:"#FF475711" }}>
+            <div style={{ fontWeight:700, color:C.red, marginBottom:12, fontSize:14 }}>⚠️ Incomplete Lead — Fill in missing details</div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+              {!viewLead.company && (
+                <div><div style={S.label}>Company Name</div>
+                  <input style={S.input} defaultValue={viewLead.company || ""} placeholder="e.g. Apex Medical Centre"
+                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,company:e.target.value} : l)); setViewLead(v=>({...v,company:e.target.value})); }} />
+                </div>
+              )}
+              {!viewLead.city && (
+                <div><div style={S.label}>City</div>
+                  <input style={S.input} defaultValue={viewLead.city || ""} placeholder="e.g. Brampton"
+                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,city:e.target.value} : l)); setViewLead(v=>({...v,city:e.target.value})); }} />
+                </div>
+              )}
+              {!viewLead.buyer_title && (
+                <div><div style={S.label}>Decision Maker Title</div>
+                  <input style={S.input} defaultValue={viewLead.buyer_title || ""} placeholder="e.g. Property Manager"
+                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,buyer_title:e.target.value} : l)); setViewLead(v=>({...v,buyer_title:e.target.value})); }} />
+                </div>
+              )}
+              {!viewLead.pain_point && (
+                <div><div style={S.label}>Pain Point</div>
+                  <input style={S.input} defaultValue={viewLead.pain_point || ""} placeholder="e.g. Maintaining cleanliness standards"
+                    onBlur={e => { setLeads(ls => ls.map(l => (l.lead_id||l.id)===(viewLead.lead_id||viewLead.id) ? {...l,pain_point:e.target.value} : l)); setViewLead(v=>({...v,pain_point:e.target.value})); }} />
+                </div>
+              )}
+            </div>
+            <div style={{ fontSize:11, color:C.muted, marginTop:8 }}>Changes save automatically when you click out of a field.</div>
+          </div>
+        )}
+
         {viewLead.needs_upgrade && !upgradedContent && (
           <div style={{ background:"#A78BFA22", border:`1px solid #A78BFA44`, borderRadius:10, padding:"12px 16px", marginBottom:14, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
             <div>
@@ -1935,29 +1989,35 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
+          const isMissingInfo = !lead.company || !lead.city || !lead.buyer_title;
           return (
-            <div key={lead.lead_id} style={{ ...S.card, cursor:"pointer", borderLeft:`3px solid ${seg.color}` }}
-              onClick={() => { setViewLead(lead); setUpgradedContent(null); }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10 }}>
-                <div style={{ display:"flex", gap:12, alignItems:"flex-start" }}>
+            <div key={lead.lead_id || lead.id} style={{ ...S.card, borderLeft:`3px solid ${isMissingInfo ? C.red : seg.color}` }}>
+              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10 }}
+                onClick={() => { setViewLead(lead); setUpgradedContent(null); }} style={{ cursor:"pointer", flex:1 }}>
+                <div style={{ display:"flex", gap:12, alignItems:"flex-start", cursor:"pointer", flex:1 }}>
                   <div style={{ width:40, height:40, borderRadius:10, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{seg.icon}</div>
                   <div>
-                    <div style={{ fontWeight:800, fontSize:15 }}>{lead.company}</div>
-                    <div style={{ fontSize:12, color:C.muted }}>📍 {lead.city} · 👤 {lead.buyer_title}</div>
-                    <div style={{ fontSize:12, color:C.dim, marginTop:2, fontStyle:"italic" }}>"{lead.pain_point}"</div>
+                    <div style={{ fontWeight:800, fontSize:15 }}>{lead.company || <span style={{ color:C.red }}>⚠️ Missing company name</span>}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>📍 {lead.city || "Unknown city"} · 👤 {lead.buyer_title || "Unknown title"}</div>
+                    {lead.pain_point && <div style={{ fontSize:12, color:C.dim, marginTop:2, fontStyle:"italic" }}>"{lead.pain_point}"</div>}
                     <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
                       <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
                       <PriorityBadge score={lead.priority_score} />
                       {hasOutreach && <span style={S.badge("green")}>✉️ Outreach ready</span>}
                       {lead.needs_upgrade && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:"#A78BFA22", color:"#A78BFA" }}>✨ Needs upgrade</span>}
+                      {isMissingInfo && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${C.red}22`, color:C.red }}>⚠️ Incomplete</span>}
                       {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦 ON</span> : <span style={S.badge("gold")}>🇺🇸 AZ</span>}
                     </div>
                   </div>
                 </div>
-                <div style={{ textAlign:"right", fontSize:12, color:C.muted }}>
-                  <div style={{ fontWeight:700, color:C.text }}>{lead.lead_id}</div>
-                  <div style={{ marginTop:4 }}>{lead.first_offer}</div>
-                  {lead.notes && <div style={{ fontSize:11, color:C.dim, marginTop:4, maxWidth:160 }}>📝 {lead.notes.slice(0,40)}{lead.notes.length>40?"...":""}</div>}
+                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
+                  <button
+                    style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:8, padding:"4px 10px", fontSize:11, color:C.red, cursor:"pointer" }}
+                    onClick={e => { e.stopPropagation(); if(window.confirm(`Delete ${lead.company || "this lead"}?`)) deleteLead(lead.lead_id || lead.id); }}>
+                    🗑
+                  </button>
+                  <div style={{ fontSize:11, color:C.muted, textAlign:"right" }}>{lead.lead_id}</div>
+                  <div style={{ fontSize:11, color:C.muted }}>{lead.first_offer}</div>
                 </div>
               </div>
             </div>
