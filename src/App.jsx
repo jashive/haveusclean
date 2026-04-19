@@ -373,11 +373,16 @@ const initPartners = [
   { id:4, name:"Devon Mills",   phone:"(602) 555-0104", email:"devon@haveusclean.com",  status:"onboarding",rating:0,   jobsDone:0,  payRate:20, availability:[],                             onboarded:false, avatar:"DM", region:"AZ" },
 ];
 
+const TODAY_DATE = new Date().toISOString().split("T")[0];
+const YESTERDAY = new Date(Date.now()-86400000).toISOString().split("T")[0];
+const TOMORROW = new Date(Date.now()+86400000).toISOString().split("T")[0];
+const IN2DAYS = new Date(Date.now()+2*86400000).toISOString().split("T")[0];
+
 const initJobs = [
-  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:"2026-04-03", time:"9:00 AM",  partnerId:1, status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:"2026-04-17", region:"ON" },
-  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:"2026-04-03", time:"1:00 PM",  partnerId:3, status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
-  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:"2026-04-04", time:"10:00 AM", partnerId:2, status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:"2026-04-11", region:"ON" },
-  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:"2026-04-02", time:"8:00 AM",  partnerId:1, status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
+  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
+  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
+  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
+  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
 ];
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
@@ -3939,19 +3944,62 @@ function PartnerView({ jobs, partners, region }) {
         {upcomingJobs.filter(j => j.date !== today).length > 0 && (
           <div style={S.card}>
             <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>📆 Upcoming Jobs</div>
-            {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => (
-              <div key={job.id} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
-                <div>
-                  <div style={{ fontWeight:700, fontSize:14 }}>{job.client}</div>
-                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.time} · {job.type}</div>
-                  <div style={{ fontSize:12, color:C.muted }}>📍 {job.address}</div>
+            {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => {
+              const checklist = {
+                "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
+                "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
+                "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
+                "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
+                "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
+              }[job.type] || ["Full clean as per package"];
+
+              return (
+                <div key={job.id} style={{ paddingBottom:18, marginBottom:18, borderBottom:`1px solid ${C.border}` }}>
+                  {/* Job header */}
+                  <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+                    <div>
+                      <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>📅 {job.date} at {job.time}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>📍 {job.address}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>🧹 {job.type} · {job.hours}h</div>
+                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
+                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <div style={{ fontWeight:800, fontSize:20, color:C.blue }}>{cur}{job.partnerPay||0}</div>
+                      <div style={{ fontSize:11, color:C.dim }}>your pay</div>
+                    </div>
+                  </div>
+
+                  {/* RAG */}
+                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
+                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
+                  </div>
+
+                  {/* Checklist */}
+                  <div style={{ marginBottom:12 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
+                    {checklist.map((task, i) => (
+                      <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8 }}>
+                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
+                      </div>
+                    ))}
+                    {job.upsells?.map((addon,i) => (
+                      <div key={`u${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, border:`1px solid #FFB80033` }}>
+                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Directions */}
+                  <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
+                    target="_blank" rel="noopener noreferrer"
+                    style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none", display:"inline-block" }}>
+                    🗺 Get Directions
+                  </a>
                 </div>
-                <div style={{ textAlign:"right" }}>
-                  <div style={{ fontWeight:700, color:C.blue }}>{cur}{job.partnerPay||0}</div>
-                  <div style={{ fontSize:10, color:C.dim }}>your pay</div>
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
