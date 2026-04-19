@@ -3524,18 +3524,65 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         {upcomingJobs.length > 0 && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.accent}` }}>
             <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>📅 Upcoming Service</div>
-            {upcomingJobs.map(job => (
-              <div key={job.id} style={{ padding:"12px 0", borderBottom:`1px solid ${C.border}` }}>
-                <div style={{ fontWeight:700, fontSize:16 }}>{job.type}</div>
-                <div style={{ fontSize:14, color:C.muted, marginTop:4 }}>📅 {job.date} at {job.time}</div>
-                <div style={{ fontSize:14, color:C.muted }}>📍 {job.address}</div>
-                {job.upsells?.length > 0 && <div style={{ fontSize:13, color:C.gold, marginTop:4 }}>+ Add-ons: {job.upsells.join(", ")}</div>}
-                <div style={{ marginTop:10, display:"flex", gap:8, flexWrap:"wrap" }}>
-                  <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.accentDim, color:C.accent }}>{job.status === "in-progress" ? "🔄 In Progress" : "✅ Confirmed"}</span>
-                  <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.surface, color:C.muted }}>{cur}{(job.clientPrice||0).toLocaleString()}</span>
+            {upcomingJobs.map(job => {
+              const includes = {
+                "Refresh Clean":["Vacuum all floors","Mop hard floors","Kitchen surfaces + sink","Bathroom clean","Dusting accessible surfaces"],
+                "Full Home Clean":["Everything in Refresh Clean","Detailed kitchen + stovetop","Full bathroom scrub (shower/tub)","All rooms dusted and wiped","Floors throughout"],
+                "Deep Clean":["Everything in Full Home Clean","Baseboards throughout","Inside microwave","Cabinet exteriors","Detailed scrubbing throughout"],
+                "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets + drawers","All surfaces, fixtures, floors","Inside closets checked","Kitchen + bathrooms detailed"],
+                "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, appliances, cabinet exteriors","Bathroom: toilet, sink, shower/tub, mirror","Both room floors"],
+              }[job.type] || ["Full clean as per package"];
+
+              return (
+                <div key={job.id} style={{ padding:"14px 0", borderBottom:`1px solid ${C.border}` }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+                    <div>
+                      <div style={{ fontWeight:700, fontSize:16 }}>{job.type}</div>
+                      <div style={{ fontSize:14, color:C.muted, marginTop:4 }}>📅 {job.date} at {job.time}</div>
+                      <div style={{ fontSize:14, color:C.muted }}>📍 {job.address}</div>
+                    </div>
+                    <div style={{ textAlign:"right" }}>
+                      <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.accentDim, color:C.accent }}>
+                        {job.status === "in-progress" ? "🔄 In Progress" : "✅ Confirmed"}
+                      </span>
+                      <div style={{ fontSize:18, fontWeight:800, color:C.accent, marginTop:6 }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
+                    </div>
+                  </div>
+
+                  {/* What's included */}
+                  <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", marginBottom:10 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:8 }}>✅ WHAT'S INCLUDED</div>
+                    {includes.map((item, i) => (
+                      <div key={i} style={{ fontSize:13, color:C.text, padding:"3px 0", display:"flex", gap:8 }}>
+                        <span style={{ color:C.accent }}>✓</span><span>{item}</span>
+                      </div>
+                    ))}
+                    {job.upsells?.length > 0 && (
+                      <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
+                        <div style={{ fontSize:12, fontWeight:700, color:C.gold, marginBottom:4 }}>⭐ YOUR ADD-ONS</div>
+                        {job.upsells.map((addon, i) => (
+                          <div key={i} style={{ fontSize:13, color:C.gold, display:"flex", gap:8 }}>
+                            <span>★</span><span>{addon}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* After photos if done */}
+                  {job.afterPics?.filter(p=>p?.startsWith("data:")).length > 0 && (
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>📷 COMPLETED PHOTOS</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        {job.afterPics.filter(p=>p?.startsWith("data:")).map((p,i) => (
+                          <img key={i} src={p} alt="after" style={{ width:70, height:70, borderRadius:8, objectFit:"cover" }} />
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -3764,14 +3811,23 @@ function PartnerView({ jobs, partners, region }) {
             <div style={{ fontWeight:800, fontSize:16, color:C.gold, marginBottom:14 }}>📅 Today's Jobs</div>
             {todayJobs.map(job => {
               const statusColor = job.status==="in-progress" ? C.gold : job.status==="completed" ? C.accent : C.blue;
+              const checklist = {
+                "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
+                "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
+                "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
+                "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
+                "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
+              }[job.type] || ["Full clean as per package"];
+
               return (
                 <div key={job.id} style={{ padding:"14px 0", borderBottom:`1px solid ${C.border}` }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8 }}>
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:10 }}>
                     <div>
                       <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
                       <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h</div>
                       {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
+                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
@@ -3779,10 +3835,73 @@ function PartnerView({ jobs, partners, region }) {
                       <div style={{ fontSize:10, color:C.dim }}>your pay (65%)</div>
                     </div>
                   </div>
+
                   {/* RAG reminder */}
-                  <div style={{ marginTop:10, background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, color:C.muted }}>
-                    🎨 <strong>RAG System:</strong> 🔴 Toilets · 🟡 Sinks/Mirrors · 🟢 Kitchen · 🔵 General
+                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, marginBottom:10 }}>
+                    🎨 <strong>RAG:</strong> 🔴 Toilets · 🟡 Sinks/Mirrors · 🟢 Kitchen · 🔵 General/Glass
                   </div>
+
+                  {/* Checklist */}
+                  <div style={{ marginBottom:10 }}>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
+                    {checklist.map((task, i) => (
+                      <div key={i} style={{ fontSize:12, padding:"5px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8 }}>
+                        <span>☐</span><span>{task}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  {/* Photo upload */}
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:8 }}>
+                    <label style={{ ...S.btn("ghost"), fontSize:11, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+                      📷 Before Photo
+                      <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                        onChange={e => {
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = ev => {
+                            setJobs(prev => prev.map(j => j.id === job.id
+                              ? { ...j, beforePics: [...(j.beforePics||[]), ev.target.result] }
+                              : j
+                            ));
+                          };
+                          reader.readAsDataURL(file);
+                        }} />
+                    </label>
+                    <label style={{ ...S.btn("primary"), fontSize:11, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+                      ✨ After Photo
+                      <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                        onChange={e => {
+                          const file = e.target.files[0];
+                          if (!file) return;
+                          const reader = new FileReader();
+                          reader.onload = ev => {
+                            setJobs(prev => prev.map(j => j.id === job.id
+                              ? { ...j, afterPics: [...(j.afterPics||[]), ev.target.result] }
+                              : j
+                            ));
+                          };
+                          reader.readAsDataURL(file);
+                        }} />
+                    </label>
+                    <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`} target="_blank" rel="noopener noreferrer"
+                      style={{ ...S.btn("ghost"), fontSize:11, textDecoration:"none" }}>
+                      🗺 Directions
+                    </a>
+                  </div>
+
+                  {/* Show uploaded photos */}
+                  {(job.beforePics?.filter(p=>p?.startsWith("data:")).length > 0 || job.afterPics?.filter(p=>p?.startsWith("data:")).length > 0) && (
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
+                      {job.beforePics?.filter(p=>p?.startsWith("data:")).map((p,i) => (
+                        <img key={`b${i}`} src={p} alt="before" style={{ width:60, height:60, borderRadius:8, objectFit:"cover", border:`2px solid ${C.border}` }} />
+                      ))}
+                      {job.afterPics?.filter(p=>p?.startsWith("data:")).map((p,i) => (
+                        <img key={`a${i}`} src={p} alt="after" style={{ width:60, height:60, borderRadius:8, objectFit:"cover", border:`2px solid ${C.accent}` }} />
+                      ))}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -5054,29 +5173,154 @@ function Jobs({ jobs, setJobs, partners }) {
       )}
 
       {selectedJob && (
-        <Modal title={`📸 ${selectedJob.client}`} onClose={() => setSelectedJob(null)}>
-          <div>
-            <div style={styles.label}>Before Photos</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-              {selectedJob.beforePics.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>No before photos yet</div> : selectedJob.beforePics.map((p, i) => <div key={i} style={{ width: 80, height: 80, background: C.surface, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🖼</div>)}
-              <button style={{ ...styles.btn("ghost"), fontSize: 12 }} onClick={() => {
-                setJobs(jobs.map(j => j.id === selectedJob.id ? { ...j, beforePics: [...j.beforePics, "before_new.jpg"] } : j));
-                setSelectedJob({ ...selectedJob, beforePics: [...selectedJob.beforePics, "before_new.jpg"] });
-              }}>+ Add</button>
+        <Modal title={`📋 ${selectedJob.client}`} onClose={() => setSelectedJob(null)} wide>
+          <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
+
+            {/* Work Order Header */}
+            <div style={{ background:`linear-gradient(135deg,${C.accentDim},${C.surface})`, borderRadius:12, padding:16, border:`1px solid ${C.accent}44` }}>
+              <div style={{ fontWeight:800, fontSize:16, color:C.accent, marginBottom:10 }}>📋 Work Order {selectedJob.workOrder?.id || `WO-${selectedJob.id}`}</div>
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:13 }}>
+                <div><span style={{ color:C.muted }}>Client: </span><strong>{selectedJob.client}</strong></div>
+                <div><span style={{ color:C.muted }}>Date: </span><strong>{selectedJob.date}</strong></div>
+                <div><span style={{ color:C.muted }}>Time: </span><strong>{selectedJob.time}</strong></div>
+                <div><span style={{ color:C.muted }}>Hours: </span><strong>{selectedJob.hours}h estimated</strong></div>
+                <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Address: </span><strong>{selectedJob.address}</strong></div>
+                <div><span style={{ color:C.muted }}>Service: </span><strong>{selectedJob.type}</strong></div>
+                <div><span style={{ color:C.muted }}>Partner: </span><strong>{partners.find(p=>p.id===selectedJob.partnerId)?.name || "Unassigned"}</strong></div>
+              </div>
             </div>
-            <div style={styles.label}>After Photos</div>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
-              {selectedJob.afterPics.length === 0 ? <div style={{ color: C.muted, fontSize: 13 }}>No after photos yet</div> : selectedJob.afterPics.map((p, i) => <div key={i} style={{ width: 80, height: 80, background: C.surface, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28 }}>🖼</div>)}
-              <button style={{ ...styles.btn("ghost"), fontSize: 12 }} onClick={() => {
-                setJobs(jobs.map(j => j.id === selectedJob.id ? { ...j, afterPics: [...j.afterPics, "after_new.jpg"] } : j));
-                setSelectedJob({ ...selectedJob, afterPics: [...selectedJob.afterPics, "after_new.jpg"] });
-              }}>+ Add</button>
+
+            {/* RAG Reminder */}
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", fontSize:13, fontWeight:700 }}>
+              🎨 RAG SYSTEM: <span style={{ color:"#FF4757" }}>🔴 Red = Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Yellow = Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Green = Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 Blue = General/Glass</span>
             </div>
-            <div style={styles.label}>End-of-Job Summary</div>
-            <textarea style={{ ...styles.input, minHeight: 90, resize: "vertical" }} value={selectedJob.summary} onChange={e => {
-              setJobs(jobs.map(j => j.id === selectedJob.id ? { ...j, summary: e.target.value } : j));
-              setSelectedJob({ ...selectedJob, summary: e.target.value });
-            }} placeholder="Notes about the job, client feedback, issues..." />
+
+            {/* Checklist */}
+            <div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>✅ Room-by-Room Checklist</div>
+              <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                {(selectedJob.workOrder?.checklist || (() => {
+                  const lists = {
+                    "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
+                    "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
+                    "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
+                    "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
+                    "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
+                  };
+                  return lists[selectedJob.type] || lists["Full Home Clean"];
+                })()).map((task, i) => (
+                  <div key={i} style={{ display:"flex", alignItems:"center", gap:10, background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:13 }}>
+                    <span style={{ fontSize:16 }}>☐</span>
+                    <span>{task}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Addons */}
+            {selectedJob.upsells?.length > 0 && (
+              <div>
+                <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>⭐ Add-On Tasks</div>
+                {selectedJob.upsells.map((addon, i) => (
+                  <div key={i} style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:13, marginBottom:6 }}>
+                    <strong>{addon}</strong>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Client Notes */}
+            {selectedJob.notes && (
+              <div style={{ background:"#FFA50222", borderRadius:10, padding:"10px 14px", fontSize:13, borderLeft:`3px solid #FFA502` }}>
+                <strong>⚠️ Client Notes:</strong> {selectedJob.notes}
+              </div>
+            )}
+
+            {/* Before Photos */}
+            <div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>📷 Before Photos</div>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                {selectedJob.beforePics?.filter(p => p && !p.includes("_new")).map((p, i) => (
+                  <img key={i} src={p} alt={`before-${i}`} style={{ width:80, height:80, borderRadius:10, objectFit:"cover", border:`2px solid ${C.border}` }} />
+                ))}
+                {(!selectedJob.beforePics || selectedJob.beforePics.filter(p => p && !p.includes("_new")).length === 0) && (
+                  <div style={{ color:C.muted, fontSize:13 }}>No before photos yet</div>
+                )}
+                <label style={{ ...styles.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:6 }}>
+                  📷 Add Before Photo
+                  <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                    onChange={e => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = ev => {
+                        const updated = { ...selectedJob, beforePics: [...(selectedJob.beforePics||[]), ev.target.result] };
+                        setJobs(jobs.map(j => j.id === selectedJob.id ? updated : j));
+                        setSelectedJob(updated);
+                      };
+                      reader.readAsDataURL(file);
+                    }} />
+                </label>
+              </div>
+            </div>
+
+            {/* After Photos */}
+            <div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>✨ After Photos</div>
+              <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
+                {selectedJob.afterPics?.filter(p => p && !p.includes("_new")).map((p, i) => (
+                  <img key={i} src={p} alt={`after-${i}`} style={{ width:80, height:80, borderRadius:10, objectFit:"cover", border:`2px solid ${C.accent}44` }} />
+                ))}
+                {(!selectedJob.afterPics || selectedJob.afterPics.filter(p => p && !p.includes("_new")).length === 0) && (
+                  <div style={{ color:C.muted, fontSize:13 }}>No after photos yet</div>
+                )}
+                <label style={{ ...styles.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:6 }}>
+                  📷 Add After Photo
+                  <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
+                    onChange={e => {
+                      const file = e.target.files[0];
+                      if (!file) return;
+                      const reader = new FileReader();
+                      reader.onload = ev => {
+                        const updated = { ...selectedJob, afterPics: [...(selectedJob.afterPics||[]), ev.target.result] };
+                        setJobs(jobs.map(j => j.id === selectedJob.id ? updated : j));
+                        setSelectedJob(updated);
+                      };
+                      reader.readAsDataURL(file);
+                    }} />
+                </label>
+              </div>
+            </div>
+
+            {/* Job Summary */}
+            <div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>📝 End-of-Job Summary</div>
+              <textarea style={{ ...styles.input, minHeight:80, resize:"vertical" }}
+                value={selectedJob.summary || ""}
+                onChange={e => {
+                  const updated = { ...selectedJob, summary: e.target.value };
+                  setJobs(jobs.map(j => j.id === selectedJob.id ? updated : j));
+                  setSelectedJob(updated);
+                }}
+                placeholder="What was done, client feedback, any issues to flag..." />
+            </div>
+
+            {/* Pay Summary */}
+            <div style={{ background:C.surface, borderRadius:10, padding:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+              <div>
+                <div style={{ fontSize:12, color:C.muted }}>Partner Pay (65%)</div>
+                <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>${selectedJob.pay?.toFixed(2) || "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:C.muted }}>Client Price</div>
+                <div style={{ fontSize:22, fontWeight:800 }}>${selectedJob.clientPrice?.toFixed(2) || "—"}</div>
+              </div>
+              <div>
+                <div style={{ fontSize:12, color:C.muted }}>Hours</div>
+                <div style={{ fontSize:22, fontWeight:800 }}>{selectedJob.hours}h</div>
+              </div>
+            </div>
+
           </div>
         </Modal>
       )}
