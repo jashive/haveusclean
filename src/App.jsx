@@ -3820,88 +3820,108 @@ function PartnerView({ jobs, partners, region }) {
               }[job.type] || ["Full clean as per package"];
 
               return (
-                <div key={job.id} style={{ padding:"14px 0", borderBottom:`1px solid ${C.border}` }}>
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:10 }}>
+                <div key={job.id} style={{ paddingBottom:18, marginBottom:18, borderBottom:`1px solid ${C.border}` }}>
+
+                  {/* Job header */}
+                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
                     <div>
-                      <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
+                      <div style={{ fontWeight:800, fontSize:17 }}>{job.client}</div>
                       <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h</div>
+                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h estimated</div>
                       {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
                       {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
-                      <div style={{ fontWeight:800, fontSize:18, color:C.blue, marginTop:4 }}>{cur}{job.partnerPay || 0}</div>
-                      <div style={{ fontSize:10, color:C.dim }}>your pay (65%)</div>
+                      <div style={{ fontWeight:800, fontSize:20, color:C.blue, marginTop:6 }}>{cur}{job.partnerPay || 0}</div>
+                      <div style={{ fontSize:11, color:C.dim }}>your pay</div>
                     </div>
                   </div>
 
                   {/* RAG reminder */}
-                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, marginBottom:10 }}>
-                    🎨 <strong>RAG:</strong> 🔴 Toilets · 🟡 Sinks/Mirrors · 🟢 Kitchen · 🔵 General/Glass
+                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
+                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
                   </div>
 
                   {/* Checklist */}
-                  <div style={{ marginBottom:10 }}>
+                  <div style={{ marginBottom:12 }}>
                     <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
                     {checklist.map((task, i) => (
-                      <div key={i} style={{ fontSize:12, padding:"5px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8 }}>
-                        <span>☐</span><span>{task}</span>
+                      <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center" }}>
+                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
+                      </div>
+                    ))}
+                    {job.upsells?.length > 0 && job.upsells.map((addon, i) => (
+                      <div key={`addon-${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center", border:`1px solid #FFB80033` }}>
+                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
                       </div>
                     ))}
                   </div>
 
-                  {/* Photo upload */}
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:8 }}>
-                    <label style={{ ...S.btn("ghost"), fontSize:11, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+                  {/* Action buttons */}
+                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+                    <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
+                      target="_blank" rel="noopener noreferrer"
+                      style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none" }}>
+                      🗺 Directions
+                    </a>
+                    <label style={{ ...S.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
                       📷 Before Photo
                       <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                         onChange={e => {
-                          const file = e.target.files[0];
-                          if (!file) return;
+                          const file = e.target.files[0]; if (!file) return;
                           const reader = new FileReader();
-                          reader.onload = ev => {
-                            setJobs(prev => prev.map(j => j.id === job.id
-                              ? { ...j, beforePics: [...(j.beforePics||[]), ev.target.result] }
-                              : j
-                            ));
-                          };
+                          reader.onload = ev => setJobs(prev => prev.map(j => j.id === job.id
+                            ? { ...j, beforePics:[...(j.beforePics||[]), ev.target.result] } : j));
                           reader.readAsDataURL(file);
                         }} />
                     </label>
-                    <label style={{ ...S.btn("primary"), fontSize:11, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+                    <label style={{ ...S.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
                       ✨ After Photo
                       <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                         onChange={e => {
-                          const file = e.target.files[0];
-                          if (!file) return;
+                          const file = e.target.files[0]; if (!file) return;
                           const reader = new FileReader();
-                          reader.onload = ev => {
-                            setJobs(prev => prev.map(j => j.id === job.id
-                              ? { ...j, afterPics: [...(j.afterPics||[]), ev.target.result] }
-                              : j
-                            ));
-                          };
+                          reader.onload = ev => setJobs(prev => prev.map(j => j.id === job.id
+                            ? { ...j, afterPics:[...(j.afterPics||[]), ev.target.result] } : j));
                           reader.readAsDataURL(file);
                         }} />
                     </label>
-                    <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`} target="_blank" rel="noopener noreferrer"
-                      style={{ ...S.btn("ghost"), fontSize:11, textDecoration:"none" }}>
-                      🗺 Directions
-                    </a>
                   </div>
 
-                  {/* Show uploaded photos */}
-                  {(job.beforePics?.filter(p=>p?.startsWith("data:")).length > 0 || job.afterPics?.filter(p=>p?.startsWith("data:")).length > 0) && (
-                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginBottom:8 }}>
-                      {job.beforePics?.filter(p=>p?.startsWith("data:")).map((p,i) => (
-                        <img key={`b${i}`} src={p} alt="before" style={{ width:60, height:60, borderRadius:8, objectFit:"cover", border:`2px solid ${C.border}` }} />
-                      ))}
-                      {job.afterPics?.filter(p=>p?.startsWith("data:")).map((p,i) => (
-                        <img key={`a${i}`} src={p} alt="after" style={{ width:60, height:60, borderRadius:8, objectFit:"cover", border:`2px solid ${C.accent}` }} />
-                      ))}
+                  {/* Uploaded photos */}
+                  {((job.beforePics||[]).filter(p=>p?.startsWith("data:")).length > 0 ||
+                    (job.afterPics||[]).filter(p=>p?.startsWith("data:")).length > 0) && (
+                    <div style={{ marginBottom:10 }}>
+                      <div style={{ fontSize:11, color:C.muted, marginBottom:6, fontWeight:700 }}>UPLOADED PHOTOS</div>
+                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+                        {(job.beforePics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
+                          <div key={`b${i}`} style={{ position:"relative" }}>
+                            <img src={p} alt="before" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.border}` }} />
+                            <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:"#aaa" }}>BEFORE</div>
+                          </div>
+                        ))}
+                        {(job.afterPics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
+                          <div key={`a${i}`} style={{ position:"relative" }}>
+                            <img src={p} alt="after" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.accent}` }} />
+                            <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:C.accent }}>AFTER</div>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   )}
+
+                  {/* Job notes */}
+                  <div>
+                    <div style={{ fontSize:11, color:C.muted, fontWeight:700, marginBottom:4 }}>JOB NOTES</div>
+                    <textarea
+                      style={{ ...S.input, minHeight:60, fontSize:13, resize:"vertical" }}
+                      placeholder="End-of-job summary, client feedback, any issues..."
+                      value={job.summary || ""}
+                      onChange={e => setJobs(prev => prev.map(j => j.id === job.id ? { ...j, summary: e.target.value } : j))}
+                    />
+                  </div>
+
                 </div>
               );
             })}
@@ -4035,6 +4055,30 @@ export default function App() {
     if (isLoading) return;
     dbSet(DB_KEYS.onboardingProgress, onboardingProgress);
   }, [onboardingProgress, isLoading]);
+
+  // ── Auto-pull new form leads every 5 minutes ──
+  useEffect(() => {
+    if (isLoading) return;
+    const pullIntake = async () => {
+      try {
+        const res = await fetch("/api/intake");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (data.leads && data.leads.length > 0) {
+          setResLeads(ls => {
+            const existingIds = new Set(ls.map(l => l.email + l.createdAt));
+            const newOnes = data.leads.filter(l => !existingIds.has(l.email + l.createdAt));
+            if (newOnes.length === 0) return ls;
+            console.log(`✅ Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
+            return [...newOnes, ...ls];
+          });
+        }
+      } catch { /* silent — no network noise */ }
+    };
+    pullIntake(); // pull immediately on load
+    const timer = setInterval(pullIntake, 5 * 60 * 1000); // then every 5 min
+    return () => clearInterval(timer);
+  }, [isLoading]);
 
   // ── Save region preference ──
   useEffect(() => {
