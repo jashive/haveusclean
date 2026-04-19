@@ -159,8 +159,8 @@ const REGIONS = {
       notes: "Cleaning services are fully subject to HST in Ontario per CRA. Must display HST registration number on all invoices. Input Tax Credits (ITCs) available for commercial clients.",
     },
     // Partner pay benchmarks (Ontario minimum wage $17.20/hr as of Oct 2024)
-    partnerPayRange: { min: 20, mid: 26, max: 38 },
-    partnerCostPerHour: 26, // CAD
+    partnerPayRange: { min: 25, mid: 30, max: 40 },
+    partnerCostPerHour: 30, // CAD — $30/hr per partner
     // Market pricing benchmarks (research-verified, CAD)
     residential: {
       standardPerHour: { min: 35, max: 60 }, // GTA rates
@@ -217,8 +217,8 @@ const REGIONS = {
       filingDue: "20th of the following month (electronic: last business day of month)",
       notes: "Cleaning services are generally NOT subject to Arizona TPT. TPT applies if you sell tangible products. Register at AZTaxes.gov. $12/yr TPT license per location required.",
     },
-    partnerPayRange: { min: 17, max: 28 },
-    partnerCostPerHour: 22, // USD (AZ minimum wage $14.70/hr 2025)
+    partnerPayRange: { min: 22, max: 32 },
+    partnerCostPerHour: 25, // USD — $25/hr per partner
     residential: {
       standardPerHour: { min: 25, max: 50 },
       flatRateSmall: { min: 100, max: 200 },
@@ -387,25 +387,6 @@ const getSqftHours = (sqft) => {
   return SQFT_HOURS[5000] + (sqft - 5000) / 500;
 };
 const PARTNER_COST_PER_HOUR = 30; // updated — used in scheduling estimates
-
-// Service multipliers — mapped to HUC packages
-const RES_SERVICE_MULT = {
-  "Refresh Clean":           1.0,
-  "Full Home Clean":         1.35,
-  "Deep Clean":              1.8,
-  "Move-In / Move-Out":      1.9,
-  "Kitchen & Bathroom Refresh": 0.75,
-  "Post-Construction":       2.4,
-};
-
-// Addons use HUC real pricing — midpoint of range as client price, 60% as cost
-const RES_ADDONS = HUC_ADDONS.map(a => ({
-  ...a,
-  costToUs: a.costToUs,
-  clientPrice: Math.round((a.priceRange[0] + a.priceRange[1]) / 2),
-}));
-
-const FREQ_DISCOUNTS = { "One-Time":0, "Weekly":0.12, "Bi-Weekly":0.07, "Monthly":0.03 };
 
 // Commercial rates (cost per sqft → markup for 30% margin)
 const COM_SERVICE_COST_PER_SQFT = {
