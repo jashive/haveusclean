@@ -428,10 +428,10 @@ const TOMORROW = new Date(Date.now()+86400000).toISOString().split("T")[0];
 const IN2DAYS = new Date(Date.now()+2*86400000).toISOString().split("T")[0];
 
 const initJobs = [
-  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
-  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
-  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
-  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
+  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, partnerIds:[1], status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
+  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, partnerIds:[3], status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
+  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, partnerIds:[2], status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
+  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, partnerIds:[1], status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
 ];
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
@@ -2499,12 +2499,15 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       date: lead.preferredDate || new Date().toISOString().split("T")[0],
       time: lead.preferredTime || "9:00 AM",
       partnerId: assignedPartner?.id || 1,
+      partnerIds: [assignedPartner?.id || 1],
       status: "scheduled",
       hours: Math.ceil(q.serviceHours),
       upsells: lead.addons.map(id => RES_ADDONS.find(x => x.id === id)?.label).filter(Boolean),
       beforePics: [], afterPics: [], summary: "",
       clientPrice: Math.round(q.total),
       partnerPay: q.partnerPay,
+      partnerPayEach: q.partnerPayEach,
+      teamSize: q.teamSize,
       profit: q.profit,
       checkIn: null, checkOut: null,
       checkInCoords: null, checkOutCoords: null,
@@ -2517,7 +2520,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     setJobs(js => [...js, newJob]);
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
     if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
-    alert(`✅ Job booked + Work Order created!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nAssigned to: ${assignedPartner?.name || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} (65%)\n\nWork order is attached to this job in the Jobs tab.`);
+    alert(`✅ Job booked + Work Order created!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total (65%) — ${region.currencySymbol}${q.partnerPayEach} each\n\nWork order is attached to this job in the Jobs tab.`);
   };
 
   const confirmPayment = (lead) => {
@@ -2865,7 +2868,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   };
   const bookLead = (lead) => {
     const q = calcComQuote(lead, region);
-    const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
+    const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, partnerIds:[partners[0]?.id||1], status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
     setJobs(js=>[...js,newJob]);
     setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"booked",workOrder:newJob.id}:l));
     if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"booked"});
@@ -3840,7 +3843,7 @@ function PartnerView({ jobs, partners, region }) {
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {partners.map(partner => {
-            const myJobs = jobs.filter(j => j.partnerId === partner.id);
+            const myJobs = jobs.filter(j => (j.partnerIds || [j.partnerId]).includes(partner.id));
             const todayCount = myJobs.filter(j => j.date === today).length;
             const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a+(b.partnerPay||0), 0);
             return (
@@ -3873,7 +3876,7 @@ function PartnerView({ jobs, partners, region }) {
   const partner = partners.find(p => p.id === viewingId);
   if (!partner) return null;
 
-  const myJobs = jobs.filter(j => j.partnerId === partner.id);
+  const myJobs = jobs.filter(j => (j.partnerIds || [j.partnerId]).includes(partner.id));
   const todayJobs = myJobs.filter(j => j.date === today);
   const upcomingJobs = myJobs.filter(j => j.status === "scheduled" && j.date >= today).sort((a,b) => a.date.localeCompare(b.date));
   const completedJobs = myJobs.filter(j => j.status === "completed");
@@ -3949,8 +3952,8 @@ function PartnerView({ jobs, partners, region }) {
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
-                      <div style={{ fontWeight:800, fontSize:20, color:C.blue, marginTop:6 }}>{cur}{job.partnerPay || 0}</div>
-                      <div style={{ fontSize:11, color:C.dim }}>your pay</div>
+                      <div style={{ fontWeight:800, fontSize:20, color:C.blue, marginTop:6 }}>{cur}{job.partnerPayEach || job.partnerPay || 0}</div>
+                      <div style={{ fontSize:11, color:C.dim }}>your pay{job.teamSize > 1 ? ` (1 of ${job.teamSize})` : ""}</div>
                     </div>
                   </div>
 
@@ -5262,10 +5265,25 @@ function Jobs({ jobs, setJobs, partners }) {
   };
 
   const handleAdd = () => {
-    const pay = calcPay(newJob.partnerId, newJob.hours, newJob.upsells);
-    setJobs([...jobs, { ...newJob, id: Date.now(), partnerId: parseInt(newJob.partnerId), pay }]);
+    const partnerIds = newJob.partnerIds?.filter(Boolean) || (newJob.partnerId ? [parseInt(newJob.partnerId)] : []);
+    const teamSize = partnerIds.length || 1;
+    const clientPrice = Math.round((teamSize * PARTNER_COST_PER_HOUR * newJob.hours) / PARTNER_SHARE);
+    const partnerPayTotal = Math.round(clientPrice * PARTNER_SHARE);
+    const partnerPayEach = Math.round(partnerPayTotal / teamSize);
+    setJobs([...jobs, {
+      ...newJob,
+      id: Date.now(),
+      partnerId: partnerIds[0] || null,
+      partnerIds,
+      teamSize,
+      clientPrice,
+      partnerPay: partnerPayTotal,
+      partnerPayEach,
+      profit: Math.round(clientPrice * COMPANY_SHARE),
+      pay: partnerPayEach,
+    }]);
     setShowModal(false);
-    setNewJob({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: "scheduled", pay: 0 });
+    setNewJob({ client:"", address:"", type:"Standard Clean", date:"", time:"", partnerId:"", partnerIds:[], sqft:0, hours:2, upsells:[], beforePics:[], afterPics:[], summary:"", status:"scheduled", pay:0 });
   };
 
   const updateStatus = (id, status) => setJobs(jobs.map(j => j.id === id ? { ...j, status } : j));
@@ -5292,7 +5310,7 @@ function Jobs({ jobs, setJobs, partners }) {
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
         {filtered.map(job => {
-          const partner = partners.find(p => p.id === job.partnerId);
+          const jobPartners = (job.partnerIds || [job.partnerId]).map(id => partners.find(p => p.id === id)).filter(Boolean);
           return (
             <div key={job.id} style={styles.card}>
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
@@ -5300,7 +5318,7 @@ function Jobs({ jobs, setJobs, partners }) {
                   <div style={{ fontWeight: 800, fontSize: 17 }}>{job.client}</div>
                   <div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>📍 {job.address}</div>
                   <div style={{ color: C.muted, fontSize: 13 }}>📅 {job.date} at {job.time} · {job.type}</div>
-                  {partner && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{partner.name}</strong></div>}
+                  {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{jobPartners.map(p=>p.name).join(" + ")}</strong></div>}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                   <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
@@ -5349,15 +5367,31 @@ function Jobs({ jobs, setJobs, partners }) {
               <div><div style={styles.label}>Date</div><input style={styles.input} type="date" value={newJob.date} onChange={e => setNewJob({ ...newJob, date: e.target.value })} /></div>
               <div><div style={styles.label}>Time</div><input style={styles.input} type="time" value={newJob.time} onChange={e => setNewJob({ ...newJob, time: e.target.value })} /></div>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
               <div><div style={styles.label}>Job Type</div><select style={styles.select} value={newJob.type} onChange={e => setNewJob({ ...newJob, type: e.target.value })}>{JOB_TYPES.map(t => <option key={t}>{t}</option>)}</select></div>
+              <div><div style={styles.label}>Sqft</div><input style={styles.input} type="number" value={newJob.sqft||""} onChange={e => setNewJob({ ...newJob, sqft: parseInt(e.target.value)||0, hours: getJobHours(parseInt(e.target.value)||0) })} placeholder="e.g. 1200" /></div>
               <div><div style={styles.label}>Est. Hours</div><input style={styles.input} type="number" min={1} max={12} value={newJob.hours} onChange={e => setNewJob({ ...newJob, hours: parseInt(e.target.value) })} /></div>
             </div>
-            <div><div style={styles.label}>Assign Partner</div>
-              <select style={styles.select} value={newJob.partnerId} onChange={e => setNewJob({ ...newJob, partnerId: e.target.value })}>
-                <option value="">— Select Partner —</option>
-                {partners.filter(p => p.onboarded).map(p => <option key={p.id} value={p.id}>{p.name} (${p.payRate}/hr)</option>)}
-              </select>
+            <div>
+              <div style={styles.label}>
+                Assign Team
+                {newJob.sqft && <span style={{ marginLeft:8, fontSize:11, color:C.accent, fontWeight:700 }}>
+                  👥 {getTeamSize(newJob.sqft)} partner{getTeamSize(newJob.sqft)>1?"s":""} recommended for {newJob.sqft} sqft
+                </span>}
+              </div>
+              {[0,1,2].slice(0, Math.max(1, getTeamSize(newJob.sqft||0))).map((slot, i) => (
+                <select key={slot} style={{ ...styles.select, marginBottom:6 }}
+                  value={(newJob.partnerIds||[])[i] || ""}
+                  onChange={e => {
+                    const ids = [...(newJob.partnerIds||[null,null,null])];
+                    ids[i] = e.target.value ? parseInt(e.target.value) : null;
+                    const clean = ids.filter(Boolean);
+                    setNewJob({ ...newJob, partnerIds: clean, partnerId: clean[0] || "" });
+                  }}>
+                  <option value="">— Partner {i+1} {i===0?"(required)":"(optional)"} —</option>
+                  {partners.filter(p => p.onboarded).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              ))}
             </div>
             <div>
               <div style={styles.label}>Upsells</div>
@@ -5372,14 +5406,28 @@ function Jobs({ jobs, setJobs, partners }) {
                 ))}
               </div>
             </div>
-            {newJob.partnerId && (
+            {(newJob.partnerIds||[]).filter(Boolean).length > 0 && (
               <div style={{ background: C.surface, borderRadius: 10, padding: 14 }}>
-                <div style={styles.label}>Estimated Pay</div>
-                <div style={{ fontSize: 24, fontWeight: 800, color: C.accent }}>${calcPay(newJob.partnerId, newJob.hours, newJob.upsells)}</div>
-                <div style={{ fontSize: 12, color: C.muted }}>Base: ${partners.find(p=>p.id===parseInt(newJob.partnerId))?.payRate}/hr × {newJob.hours}h + ${newJob.upsells.length * 12} upsell bonus</div>
+                <div style={styles.label}>Pay Summary</div>
+                {(() => {
+                  const ids = (newJob.partnerIds||[]).filter(Boolean);
+                  const teamSize = ids.length;
+                  const clientPrice = Math.round((teamSize * PARTNER_COST_PER_HOUR * newJob.hours) / PARTNER_SHARE);
+                  const partnerTotal = Math.round(clientPrice * PARTNER_SHARE);
+                  const each = Math.round(partnerTotal / teamSize);
+                  return (
+                    <div>
+                      <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>${clientPrice} client price</div>
+                      <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>
+                        Partner total: ${partnerTotal} · Each: ${each} · Company: ${Math.round(clientPrice * COMPANY_SHARE)}
+                      </div>
+                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × ${each} each</div>}
+                    </div>
+                  );
+                })()}
               </div>
             )}
-            <button style={{ ...styles.btn("primary"), width: "100%" }} onClick={handleAdd} disabled={!newJob.client || !newJob.partnerId || !newJob.date}>Book Job</button>
+            <button style={{ ...styles.btn("primary"), width: "100%" }} onClick={handleAdd} disabled={!newJob.client || !(newJob.partnerIds||[newJob.partnerId]).filter(Boolean).length || !newJob.date}>Book Job</button>
           </div>
         </Modal>
       )}
@@ -5398,7 +5446,7 @@ function Jobs({ jobs, setJobs, partners }) {
                 <div><span style={{ color:C.muted }}>Hours: </span><strong>{selectedJob.hours}h estimated</strong></div>
                 <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Address: </span><strong>{selectedJob.address}</strong></div>
                 <div><span style={{ color:C.muted }}>Service: </span><strong>{selectedJob.type}</strong></div>
-                <div><span style={{ color:C.muted }}>Partner: </span><strong>{partners.find(p=>p.id===selectedJob.partnerId)?.name || "Unassigned"}</strong></div>
+                <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Team: </span><strong>{(selectedJob.partnerIds||[selectedJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" · ") || "Unassigned"}</strong></div>
               </div>
             </div>
 
