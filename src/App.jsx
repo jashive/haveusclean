@@ -293,32 +293,100 @@ const HUC_STATUS_COLOR = {
 // Have Us Clean pay structure:
 //   Partner earns 65% of the client price (pre-tax)
 //   Company keeps 35% of the client price (gross profit)
-//   This replaces the old hourly-cost model
-const PARTNER_SHARE = 0.65;  // partner gets 65% of job revenue
-const COMPANY_SHARE = 0.35;  // company keeps 35%
-const PROFIT_MARGIN = 0.35;  // used for markup display
+const PARTNER_SHARE = 0.65;
+const COMPANY_SHARE = 0.35;
+const PROFIT_MARGIN = 0.35;
 
-// Given a client price, calculate partner pay
-const partnerPayFromPrice = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
-// Given a client price, calculate company profit
+const partnerPayFromPrice  = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
 const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
-// Legacy markup helper (still used for commercial)
 const markupFactor = (cost) => Math.ceil(cost / (1 - PROFIT_MARGIN));
 
-// Partner hourly rates — only used as a fallback estimate for hours calculation
-const PARTNER_COST_PER_HOUR = 24;
+// ─── TEAM SIZE BY SQFT ───────────────────────────────────────────────────────
+// 1 partner  → up to 1,000 sqft
+// 2 partners → 1,001–3,000 sqft
+// 3 partners → 3,001+ sqft
+const getTeamSize = (sqft) => {
+  if (!sqft || sqft <= 1000) return 1;
+  if (sqft <= 3000) return 2;
+  return 3;
+};
 
-// Residential: cost-based → sqft + beds + baths drives labor hours → price for 30% margin
-// sqft tiers for sanity check / cross-reference
-const SQFT_HOURS = { // estimated labor hours by sqft tier
-  500: 1.5, 750: 2, 1000: 2.5, 1250: 3, 1500: 3.5, 1750: 4,
-  2000: 4.5, 2500: 5.5, 3000: 6.5, 3500: 7.5, 4000: 9, 5000: 11,
+// ─── HOURS BY SQFT (per team — team works together) ─────────────────────────
+// Production rate: 1,000 sqft/hr per team regardless of team size
+// Minimum 1.5h, rounded to nearest 0.5h
+const getJobHours = (sqft) => {
+  const raw = Math.max(1.5, (sqft || 900) / 1000);
+  return Math.round(raw * 2) / 2; // round to nearest 0.5
+};
+
+// ─── PARTNER HOURLY RATE ─────────────────────────────────────────────────────
+const PARTNER_HOURLY_ON = 30; // CAD per partner per hour (Ontario)
+const PARTNER_HOURLY_AZ = 25; // USD per partner per hour (Arizona)
+
+// ─── FLOOR PRICES BY DWELLING (market minimum — never go below these) ────────
+const FLOOR_PRICES = {
+  ON: {
+    "Apartment / Condo": { "1 Bed":140, "2 Bed":165, "3 Bed":205 },
+    "Semi / Townhouse":  { "Small":165, "Medium":205, "Large":245 },
+    "Detached House":    { "Small":185, "Medium":230, "Large":310 },
+  },
+  AZ: {
+    "Apartment / Condo": { "1 Bed":155, "2 Bed":185, "3 Bed":230 },
+    "Semi / Townhouse":  { "Small":185, "Medium":230, "Large":275 },
+    "Detached House":    { "Small":205, "Medium":255, "Large":345 },
+  },
+};
+
+// ─── PACKAGE MULTIPLIERS ─────────────────────────────────────────────────────
+const RES_SERVICE_MULT = {
+  "Refresh Clean":             1.00,
+  "Full Home Clean":           1.25,
+  "Deep Clean":                1.65,
+  "Move-In / Move-Out":        1.80,
+  "Kitchen & Bathroom Refresh":0.65,
+  "Pre-Sale Clean":            1.50,
+  "Post-Renovation Clean":     1.70,
+  "Office / Commercial":       1.20,
+};
+
+// ─── CONDITION MULTIPLIERS ───────────────────────────────────────────────────
+const CONDITION_MULT = {
+  "Light":   0.90,
+  "Average": 1.00,
+  "Heavy":   1.20,
+  "":        1.00,
+};
+
+// ─── FREQUENCY DISCOUNTS ─────────────────────────────────────────────────────
+const FREQ_DISCOUNTS = {
+  "One-Time":  0,
+  "Weekly":    0.15,
+  "Bi-Weekly": 0.10,
+  "Monthly":   0.05,
+};
+
+// ─── ADDON PRICES (fixed, market-tested) ────────────────────────────────────
+const RES_ADDONS = [
+  { id:"fridge",    label:"Inside Fridge",         clientPrice:50,  costToUs:20 },
+  { id:"oven",      label:"Inside Oven",            clientPrice:55,  costToUs:22 },
+  { id:"cabinets",  label:"Inside Cabinets",        clientPrice:65,  costToUs:26 },
+  { id:"windows",   label:"Interior Windows",       clientPrice:60,  costToUs:24 },
+  { id:"baseboards",label:"Baseboards / Detail",    clientPrice:55,  costToUs:22 },
+  { id:"carpet",    label:"Carpet Cleaning",        clientPrice:95,  costToUs:38 },
+  { id:"pethair",   label:"Pet Hair / Heavy Detail",clientPrice:65,  costToUs:26 },
+];
+
+// Legacy sqft hours table (kept for GPS / scheduling estimates)
+const SQFT_HOURS = {
+  500:1.5, 750:2, 1000:2.5, 1250:3, 1500:3.5, 1750:4,
+  2000:4.5, 2500:5.5, 3000:6.5, 3500:7.5, 4000:9, 5000:11,
 };
 const getSqftHours = (sqft) => {
   const tiers = Object.keys(SQFT_HOURS).map(Number).sort((a,b)=>a-b);
   for (let t of tiers) if (sqft <= t) return SQFT_HOURS[t];
   return SQFT_HOURS[5000] + (sqft - 5000) / 500;
 };
+const PARTNER_COST_PER_HOUR = 30; // updated — used in scheduling estimates
 
 // Service multipliers — mapped to HUC packages
 const RES_SERVICE_MULT = {
@@ -443,72 +511,120 @@ function Modal({ title, children, onClose, wide }) {
 // Uses real HUC pricing grid as primary source, cross-referenced with labor hours.
 // For ON: +13% HST. For AZ: no service tax.
 function calcResQuote(f, region = ACTIVE_REGION) {
-  const costPerHour = region.partnerCostPerHour;
-  const sqftHours = getSqftHours(f.sqft || 1200);
-  const bedBathHours = 1.0 + (f.beds || 2) * 0.4 + (f.baths || 1) * 0.3;
-  const baseHours = sqftHours * 0.6 + bedBathHours * 0.4;
-  const serviceHours = baseHours * (RES_SERVICE_MULT[f.serviceType] || 1.0);
-  const laborCost = serviceHours * costPerHour;
+  const isAZ       = region.id === "AZ";
+  const hourlyRate = isAZ ? PARTNER_HOURLY_AZ : PARTNER_HOURLY_ON;
+  const azUplift   = isAZ ? 1.12 : 1.0; // AZ market 12% higher than Ontario
 
-  // Addon costs
-  const addonCost = (f.addons || []).reduce((a, id) => {
+  // ── Step 1: Determine sqft (estimate from beds/baths if not provided) ──
+  const estimatedSqft = f.sqft && f.sqft > 0
+    ? f.sqft
+    : Math.max(400,
+        400
+        + (f.beds  || 2) * 180
+        + (f.baths || 1) * 80
+      );
+
+  // ── Step 2: Team size and hours ──
+  const teamSize  = getTeamSize(estimatedSqft);
+  const jobHours  = getJobHours(estimatedSqft);
+
+  // ── Step 3: Labor cost (team total) ──
+  const laborCost = teamSize * hourlyRate * jobHours;
+
+  // ── Step 4: Base price from labor (35% margin) ──
+  const laborBasePrice = Math.ceil(laborCost / PARTNER_SHARE);
+
+  // ── Step 5: Apply package multiplier ──
+  const pkgMult = RES_SERVICE_MULT[f.serviceType] || 1.0;
+  const formulaPrice = Math.round(laborBasePrice * pkgMult * azUplift);
+
+  // ── Step 6: Floor price (never go below market minimum) ──
+  const regionKey = isAZ ? "AZ" : "ON";
+  const floorGroup = FLOOR_PRICES[regionKey]?.[f.dwellingType];
+  const floorBase  = floorGroup?.[f.dwellingSize] || 140;
+  const floorPrice = Math.round(floorBase * pkgMult * azUplift);
+
+  // ── Step 7: Take the higher of formula or floor ──
+  const baseClientPrice = Math.max(formulaPrice, floorPrice);
+
+  // ── Step 8: Condition adjustment ──
+  const condMult = CONDITION_MULT[f.condition || ""] || 1.0;
+  const conditionedPrice = Math.round(baseClientPrice * condMult);
+
+  // ── Step 9: Addons ──
+  const addonClientTotal = (f.addons || []).reduce((a, id) => {
+    const ao = RES_ADDONS.find(x => x.id === id);
+    return a + (ao?.clientPrice || 0);
+  }, 0);
+  const addonCostTotal = (f.addons || []).reduce((a, id) => {
     const ao = RES_ADDONS.find(x => x.id === id);
     return a + (ao?.costToUs || 0);
   }, 0);
-  const addonClientTotal = (f.addons || []).reduce((a, id) => {
-    const ao = RES_ADDONS.find(x => x.id === id);
-    return a + (ao?.clientPrice || markupFactor(ao?.costToUs || 0));
-  }, 0);
 
-  // Primary: use HUC pricing grid if dwelling type and size specified
-  let gridPrice = null;
-  let gridNote = null;
-  if (f.dwellingType && f.dwellingSize && HUC_PRICING_GRID[f.dwellingType]?.[f.dwellingSize]) {
-    const gridRange = HUC_PRICING_GRID[f.dwellingType][f.dwellingSize][f.frequency || "One-Time"];
-    if (gridRange) {
-      // Apply package multiplier to grid price (grid is for Refresh/standard baseline)
-      const mult = RES_SERVICE_MULT[f.serviceType] || 1.0;
-      const baseGrid = (gridRange[0] + gridRange[1]) / 2;
-      gridPrice = Math.round(baseGrid * mult);
-      gridNote = `Grid: ${f.dwellingType} ${f.dwellingSize} ${f.frequency||"One-Time"} → CA$${gridRange[0]}–CA$${gridRange[1]} base`;
-    }
-  }
+  const clientSubtotal = conditionedPrice + addonClientTotal;
 
-  // Labor-based price (30% margin)
-  const laborPrice = markupFactor(laborCost);
+  // ── Step 10: Frequency discount ──
+  const discPct    = FREQ_DISCOUNTS[f.frequency] || 0;
+  const discountAmt = Math.round(clientSubtotal * discPct);
+  const preTaxTotal = clientSubtotal - discountAmt;
 
-  // Final: use grid if available (more market-accurate), else use labor model
-  // Take the higher of grid or labor to ensure margin
-  const totalCost = laborCost + addonCost;
-  const baseClientPrice = gridPrice ? Math.max(gridPrice, laborPrice) : laborPrice;
-  const clientSubtotal = baseClientPrice + addonClientTotal;
-
-  const discPct = FREQ_DISCOUNTS[f.frequency] || 0;
-  const discountAmt = clientSubtotal * discPct;
-  const preTaxTotal = Math.max(0, clientSubtotal - discountAmt);
-
-  const taxRate = region.id === "ON" ? region.tax.rate : 0;
-  const taxAmount = preTaxTotal * taxRate;
+  // ── Step 11: Tax (ON = 13% HST, AZ = 0%) ──
+  const taxRate   = region.id === "ON" ? region.tax.rate : 0;
+  const taxAmount = Math.round(preTaxTotal * taxRate);
   const finalTotal = preTaxTotal + taxAmount;
 
-  const partnerPay = partnerPayFromPrice(preTaxTotal);
-  const profit = companyProfitFromPrice(preTaxTotal);
-  const margin = preTaxTotal > 0 ? ((profit / preTaxTotal) * 100).toFixed(1) : "0";
+  // ── Step 12: Pay split ──
+  const partnerPayTotal = partnerPayFromPrice(preTaxTotal); // 65% of pre-tax
+  const partnerPayEach  = teamSize > 1 ? Math.round(partnerPayTotal / teamSize) : partnerPayTotal;
+  const profit          = companyProfitFromPrice(preTaxTotal); // 35%
+  const margin          = preTaxTotal > 0 ? ((profit / preTaxTotal) * 100).toFixed(1) : "0";
 
-  // Frequency pricing variants (for email / quote display)
-  const freq_prices = {
-    "One-Time":  Math.round(baseClientPrice * (1 - (FREQ_DISCOUNTS["One-Time"]  || 0))),
-    "Weekly":    Math.round(baseClientPrice * (1 - (FREQ_DISCOUNTS["Weekly"]    || 0))),
-    "Bi-Weekly": Math.round(baseClientPrice * (1 - (FREQ_DISCOUNTS["Bi-Weekly"] || 0))),
-    "Monthly":   Math.round(baseClientPrice * (1 - (FREQ_DISCOUNTS["Monthly"]   || 0))),
-  };
+  // ── Frequency pricing variants (for quote display) ──
+  const freq_prices = {};
+  Object.keys(FREQ_DISCOUNTS).forEach(freq => {
+    const d = FREQ_DISCOUNTS[freq] || 0;
+    freq_prices[freq] = Math.round(conditionedPrice * (1 - d));
+  });
 
+  // ── Breakdown lines ──
   const breakdown = [
-    { label:`Labor (${serviceHours.toFixed(1)} hrs × ${fmt(costPerHour, region)}/hr)`, cost:laborCost, price:baseClientPrice },
-    ...(f.addons||[]).map(id => { const ao=RES_ADDONS.find(x=>x.id===id); return ao ? { label:ao.label, cost:ao.costToUs, price:ao.clientPrice||markupFactor(ao.costToUs) } : null; }).filter(Boolean),
+    {
+      label: `Labor (${teamSize} partner${teamSize>1?"s":""} × ${jobHours}h × ${region.currencySymbol}${hourlyRate}/hr)`,
+      cost: laborCost,
+      price: conditionedPrice,
+    },
+    ...(f.addons||[]).map(id => {
+      const ao = RES_ADDONS.find(x => x.id === id);
+      return ao ? { label: ao.label, cost: ao.costToUs, price: ao.clientPrice } : null;
+    }).filter(Boolean),
   ];
 
-  return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, discountAmt, discPct, partnerPay, profit, margin:parseFloat(margin), breakdown, serviceHours, sqftHours, bedBathHours, currency:region.currencySymbol, region, gridNote, freq_prices, baseClientPrice };
+  return {
+    total: finalTotal,
+    preTaxTotal,
+    taxAmount,
+    taxRate,
+    taxName: region.tax.name,
+    discountAmt,
+    discPct,
+    partnerPay: partnerPayTotal,
+    partnerPayEach,
+    teamSize,
+    jobHours,
+    estimatedSqft,
+    profit,
+    margin: parseFloat(margin),
+    breakdown,
+    serviceHours: jobHours,
+    sqftHours: jobHours,
+    currency: region.currencySymbol,
+    region,
+    freq_prices,
+    baseClientPrice: conditionedPrice,
+    formulaPrice,
+    floorPrice,
+    condMult,
+  };
 }
 
 function calcComQuote(f, region = ACTIVE_REGION) {
@@ -556,6 +672,20 @@ function QuoteBox({ q, type = "res" }) {
           {q.taxRate === 0 && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>Tax Exempt</span>}
         </div>
       </div>
+      {/* Team and hours summary */}
+      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+        <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.blueDim, color:C.blue }}>
+          👥 {q.teamSize} partner{q.teamSize>1?"s":""}
+        </span>
+        <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.surface, color:C.muted }}>
+          ⏱ {q.jobHours}h estimated
+        </span>
+        {q.teamSize > 1 && (
+          <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>
+            💰 {q.currency}{q.partnerPayEach} each
+          </span>
+        )}
+      </div>
       {q.breakdown?.map((line, i) => (
         <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"5px 0", borderBottom:`1px solid ${C.border}`, color:C.muted }}>
           <span>{line.label}</span>
@@ -593,9 +723,9 @@ function QuoteBox({ q, type = "res" }) {
           <div style={{ fontSize:18, fontWeight:800, color:C.accent }}>{f(q.total)}</div>
         </div>
       </div>
-      {type==="res" && q.sqftHours && (
+      {type==="res" && q.teamSize && (
         <div style={{ marginTop:10, fontSize:11, color:C.dim, background:C.bg, borderRadius:8, padding:"8px 12px" }}>
-          📐 Sqft model: {q.sqftHours?.toFixed(1)}h · 🛏 Bed/bath model: {q.bedBathHours?.toFixed(1)}h · ⚖️ Blended: {q.serviceHours?.toFixed(1)}h
+          📐 {q.estimatedSqft?.toLocaleString()} sqft · 👥 {q.teamSize} partner{q.teamSize>1?"s":""} · ⏱ {q.jobHours}h · 💰 Floor check: {q.region?.currencySymbol}{q.floorPrice} → used: {q.region?.currencySymbol}{q.formulaPrice >= q.floorPrice ? q.formulaPrice : q.floorPrice}
         </div>
       )}
       {q.taxRate === 0 && q.region?.id === "AZ" && (
@@ -4431,41 +4561,50 @@ const HUC_AGENTS = {
   VA_Quote_Agent: {
     icon: "💬", color: C.accent,
     title: "VA Quote Agent",
-    purpose: "Generate fast, consistent quotes using the locked pricing menu and dwelling grid.",
-    system: `You are the Have Us Clean VA Quote Agent. Your job is to produce consistent, accurate quotes using the locked pricing grid.
+    purpose: "Generate fast, consistent quotes using the exact HUC formula.",
+    system: `You are the Have Us Clean VA Quote Agent. Use this exact formula every time.
 
-PRICING GRID (Toronto & GTA — all prices in CAD):
-Apartment/Condo:
-- 1 Bed: $140–$180 one-time | $120–$150 weekly | $130–$165 bi-weekly | $140–$180 monthly
-- 2 Bed: $160–$220 one-time | $140–$180 weekly | $150–$200 bi-weekly | $160–$220 monthly
-- 3 Bed: $200–$260 one-time | $170–$220 weekly | $180–$240 bi-weekly | $200–$260 monthly
-Semi/Townhouse:
-- Small: $160–$220 one-time | $140–$190 weekly | $150–$200 bi-weekly | $160–$220 monthly
-- Medium: $200–$260 one-time | $170–$220 weekly | $180–$240 bi-weekly | $200–$260 monthly
-- Large: $240–$320 one-time | $200–$270 weekly | $220–$290 bi-weekly | $240–$320 monthly
-Detached House:
-- Small: $180–$240 one-time | $150–$200 weekly | $160–$220 bi-weekly | $180–$240 monthly
-- Medium: $220–$320 one-time | $180–$260 weekly | $200–$280 bi-weekly | $220–$320 monthly
-- Large: $300–$400 one-time | $250–$340 weekly | $270–$360 bi-weekly | $300–$400 monthly
-Kitchen & Bathroom Refresh: $120–$200 (any size, any frequency)
+TEAM SIZE BY SQFT:
+- 1 partner → up to 1,000 sqft
+- 2 partners → 1,001–3,000 sqft
+- 3 partners → 3,001+ sqft
 
-PACKAGES: Refresh Clean ($140–$300) · Full Home Clean ($180–$400) · Deep Clean ($250–$700+) · Move-In/Move-Out ($300–$600+) · Kitchen & Bathroom Refresh ($120–$200)
+HOURS: sqft ÷ 1,000 (minimum 1.5h, round to nearest 0.5h)
+PARTNER RATE: $30/hr CAD (Ontario) · $25/hr USD (Arizona)
 
-ADDONS (add to base price): Inside Fridge ($40–60) · Inside Oven ($40–70) · Interior Windows ($5–10/each) · Carpet Cleaning ($60–120) · Pet Hair/Heavy Detail ($40–80) · Baseboards/Detail ($40–80)
+FORMULA:
+1. Labor cost = team size × hourly rate × hours
+2. Base price = labor cost ÷ 0.65
+3. Apply package multiplier
+4. Apply condition multiplier (Light ×0.9 / Average ×1.0 / Heavy ×1.2)
+5. Take MAX of formula result vs floor price below
+6. Add addons · Apply frequency discount · Add tax
 
-PAY STRUCTURE: Partner earns 65% of client price. Company keeps 35%. Always calculate and show both.
-EXAMPLE: $200 job → Partner gets $130 · Company keeps $70
+PACKAGE MULTIPLIERS:
+Refresh Clean ×1.0 · Full Home Clean ×1.25 · Deep Clean ×1.65
+Move-In/Out ×1.80 · Kitchen & Bath Refresh ×0.65 · Pre-Sale ×1.50
 
-RULES:
-- First clean always at one-time/full price. Recurring visits at the discounted frequency rate.
-- Position within price range based on condition: light buildup = low end, heavy/first-time = high end
-- Always add 13% HST for Ontario clients
-- For Arizona clients: no tax on cleaning services
-- Flag any unusual scope for review
-- Never invent prices outside the grid above`,
-    inputLabel: "Describe the lead — include dwelling type, size, bedrooms/bathrooms, package requested, condition (light/average/heavy), addons, frequency, and any special notes.",
-    inputPlaceholder: "e.g. 2BR condo in North York, average condition, Full Home Clean, bi-weekly, client wants inside fridge cleaned as an addon. What should I quote?",
-    outputSections: ["Recommended Price", "Customer-Facing Quote Message", "Internal Rationale", "Warning Flag (if any)"],
+FLOOR PRICES (Ontario CAD):
+Apartment: 1BR $140 · 2BR $165 · 3BR $205
+Semi/Town: Small $165 · Medium $205 · Large $245
+Detached: Small $185 · Medium $230 · Large $310
+Arizona: multiply floor by 1.12 for USD
+
+ADDONS: Fridge $50 · Oven $55 · Cabinets $65 · Windows $60 · Baseboards $55 · Carpet $95 · Pet Hair $65
+
+FREQUENCY DISCOUNTS: Weekly −15% · Bi-Weekly −10% · Monthly −5%
+
+TAX: Ontario +13% HST · Arizona 0%
+
+PAY SPLIT (always show):
+Partner total = pre-tax price × 65%
+2 partners → each gets half · 3 partners → each gets a third
+Company keeps = pre-tax price × 35%
+
+Always show: team size, hours, base price, condition adjustment, addons, discount, pre-tax, HST, total, partner pay per person, company margin.`,
+    inputLabel: "Describe the job — dwelling type, sqft (or beds/baths), package, condition, addons, frequency, Ontario or Arizona.",
+    inputPlaceholder: "e.g. 2BR condo North York, ~900 sqft, Full Home Clean, average condition, bi-weekly, add inside fridge. Quote please.",
+    outputSections: ["Quote Breakdown", "Partner Pay", "Customer-Facing Message", "Warning Flag (if any)"],
   },
   BidSpec_Agent: {
     icon: "📄", color: C.gold,
