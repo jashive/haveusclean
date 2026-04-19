@@ -1892,18 +1892,43 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 // Google Form → New Leads auto-flow
 // Your Google Form submissions come in via n8n webhook and land here as new leads
 
-const GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/YOUR_FORM_ID/viewform";
-// Replace YOUR_FORM_ID with your actual Google Form ID after setup
+const GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScyKKqwyg2hVLFqJFnrrP_j8uG97pBER_Uby_Y-eJeZY6ntgg/viewform";
+// Google Form URL — haveusclean.ca intake form
 
 function FormIntake({ resLeads, setResLeads, region, setTab }) {
-  const [formUrl, setFormUrl] = useState(GOOGLE_FORM_URL);
+  const [formUrl, setFormUrl] = useState("https://docs.google.com/forms/d/e/1FAIpQLScyKKqwyg2hVLFqJFnrrP_j8uG97pBER_Uby_Y-eJeZY6ntgg/viewform");
   const [webhookUrl, setWebhookUrl] = useState("");
   const [showManual, setShowManual] = useState(false);
+  const [pulling, setPulling] = useState(false);
+  const [pullResult, setPullResult] = useState("");
   const [manualForm, setManualForm] = useState({
     name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo",
     dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean",
     frequency:"One-Time", addons:[], notes:""
   });
+
+  // Pull leads submitted via Google Form from the intake endpoint
+  const pullFormLeads = async () => {
+    setPulling(true);
+    setPullResult("");
+    try {
+      const res = await fetch("/api/intake");
+      const data = await res.json();
+      if (data.leads && data.leads.length > 0) {
+        setResLeads(ls => {
+          const existingIds = new Set(ls.map(l => l.email + l.createdAt));
+          const newOnes = data.leads.filter(l => !existingIds.has(l.email + l.createdAt));
+          return [...newOnes, ...ls];
+        });
+        setPullResult(`✅ ${data.leads.length} new lead${data.leads.length > 1 ? 's' : ''} pulled from Google Form!`);
+      } else {
+        setPullResult("No new form submissions since last pull.");
+      }
+    } catch {
+      setPullResult("Error connecting to intake endpoint. Make sure api/intake.js is deployed.");
+    }
+    setPulling(false);
+  };
 
   const recentLeads = [...resLeads]
     .sort((a,b) => new Date(b.createdAt||0) - new Date(a.createdAt||0))
@@ -1924,10 +1949,26 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
 
   return (
     <div>
-      <div style={S.h2}>📋 Form Intake & Lead Flow</div>
-      <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:20 }}>
-        Connect your Google Form to auto-create leads. Or add leads manually here.
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:12 }}>
+        <div>
+          <div style={S.h2}>📋 Form Intake & Lead Flow</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
+            Google Form → n8n → App · Auto-creates New leads
+          </div>
+        </div>
+        <div style={{ display:"flex", gap:8 }}>
+          <button style={S.btn("ghost")} onClick={pullFormLeads} disabled={pulling}>
+            {pulling ? "🔄 Pulling..." : "🔄 Pull New Form Leads"}
+          </button>
+          <button style={S.btn("primary")} onClick={() => setShowManual(true)}>+ Add Manually</button>
+        </div>
       </div>
+
+      {pullResult && (
+        <div style={{ background: pullResult.startsWith("✅") ? C.accentDim : C.surface, border:`1px solid ${pullResult.startsWith("✅") ? C.accent : C.border}44`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:13, color: pullResult.startsWith("✅") ? C.accent : C.muted, fontWeight:700 }}>
+          {pullResult}
+        </div>
+      )}
 
       {/* Flow diagram */}
       <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
@@ -1977,7 +2018,7 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
         <div style={{ marginTop:4 }}>
           <div style={S.label}>Your Google Form URL (paste once set up)</div>
           <input style={{ ...S.input, marginTop:6 }} value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="https://docs.google.com/forms/d/e/..." />
-          {formUrl && !formUrl.includes('YOUR_FORM_ID') && (
+          {formUrl && !formUrl.length < 20 && (
             <a href={formUrl} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block", marginTop:8, fontSize:13 }}>
               🔗 Open Form
             </a>
