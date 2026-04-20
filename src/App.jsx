@@ -435,31 +435,37 @@ const initJobs = [
 ];
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
+// ─── RESPONSIVE HELPERS ──────────────────────────────────────────────────────
+const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
+
 const S = {
-  app: { minHeight:"100vh", background:C.bg, fontFamily:"'DM Sans','Segoe UI',sans-serif", color:C.text, display:"flex", flexDirection:"column" },
-  header: { background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 20px", display:"flex", alignItems:"center", justifyContent:"space-between", height:60, position:"sticky", top:0, zIndex:200 },
-  logo: { display:"flex", alignItems:"center", gap:10, fontWeight:800, fontSize:18, letterSpacing:"-0.5px", flexShrink:0 },
-  logoMark: { width:34, height:34, borderRadius:9, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:16 },
-  nav: { display:"flex", gap:2, overflowX:"auto", scrollbarWidth:"none", msOverflowStyle:"none" },
+  app: { minHeight:"100vh", background:C.bg, fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif", color:C.text, display:"flex", flexDirection:"column" },
+  header: { background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56, position:"sticky", top:0, zIndex:200, backdropFilter:"blur(8px)" },
+  logo: { display:"flex", alignItems:"center", gap:10, fontWeight:800, fontSize:17, letterSpacing:"-0.5px", flexShrink:0 },
+  logoMark: { width:32, height:32, borderRadius:9, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:15 },
+  nav: { display:"flex", gap:2, overflowX:"auto", scrollbarWidth:"none", msOverflowStyle:"none", WebkitOverflowScrolling:"touch" },
   navBtn: (a) => ({ padding:"6px 12px", borderRadius:7, border:"none", cursor:"pointer", fontSize:12, fontWeight:600, whiteSpace:"nowrap", transition:"all 0.15s", background:a?C.accentDim:"transparent", color:a?C.accent:C.muted, borderBottom:a?`2px solid ${C.accent}`:"2px solid transparent" }),
-  main: { flex:1, padding:"24px 20px", maxWidth:1200, width:"100%", margin:"0 auto", boxSizing:"border-box" },
-  card: { background:C.card, borderRadius:16, border:`1px solid ${C.border}`, padding:22 },
-  cardSm: { background:C.card, borderRadius:12, border:`1px solid ${C.border}`, padding:14 },
-  label: { fontSize:11, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", color:C.muted, marginBottom:5 },
-  h2: { fontSize:22, fontWeight:800, marginBottom:18, letterSpacing:"-0.3px" },
-  h3: { fontSize:16, fontWeight:700, marginBottom:12 },
+  main: { flex:1, padding:"20px 16px", maxWidth:960, width:"100%", margin:"0 auto", boxSizing:"border-box" },
+  card: { background:C.card, borderRadius:14, border:`1px solid ${C.border}`, padding:18 },
+  cardSm: { background:C.card, borderRadius:10, border:`1px solid ${C.border}`, padding:12 },
+  label: { fontSize:11, fontWeight:700, letterSpacing:"0.07em", textTransform:"uppercase", color:C.muted, marginBottom:5 },
+  h2: { fontSize:20, fontWeight:800, marginBottom:16, letterSpacing:"-0.3px" },
+  h3: { fontSize:15, fontWeight:700, marginBottom:10 },
   badge: (color) => ({ display:"inline-block", padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:color==="green"?C.accentDim:color==="gold"?C.goldDim:color==="red"?C.redDim:color==="purple"?C.purpleDim:C.blueDim, color:color==="green"?C.accent:color==="gold"?C.gold:color==="red"?C.red:color==="purple"?C.purple:C.blue }),
-  input: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 13px", color:C.text, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit" },
-  select: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"10px 13px", color:C.text, fontSize:14, outline:"none", boxSizing:"border-box", fontFamily:"inherit", cursor:"pointer" },
-  btn: (v="primary") => ({ padding:v==="sm"?"7px 14px":"10px 20px", borderRadius:9, cursor:"pointer", fontWeight:700, fontSize:v==="sm"?13:14, transition:"all 0.15s", background:v==="primary"?C.accent:v==="danger"?C.red:v==="gold"?C.gold:v==="purple"?C.purple:C.card, color:v==="primary"||v==="danger"||v==="gold"||v==="purple"?"#0A0F1E":C.muted, border:v==="ghost"?`1px solid ${C.border}`:"none" }),
-  avatar: (color) => ({ width:38, height:38, borderRadius:"50%", background:color||`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:14, color:"#fff", flexShrink:0 }),
-  divider: { height:1, background:C.border, margin:"18px 0" },
-  statCard: (color) => ({ background:C.card, borderRadius:13, border:`1px solid ${C.border}`, padding:"18px 20px", borderLeft:`4px solid ${color}` }),
-  grid2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:18 },
-  grid3: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:14 },
-  grid4: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))", gap:12 },
+  input: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 13px", color:C.text, fontSize:15, outline:"none", boxSizing:"border-box", fontFamily:"inherit", WebkitAppearance:"none" },
+  select: { width:"100%", background:C.surface, border:`1px solid ${C.border}`, borderRadius:9, padding:"11px 13px", color:C.text, fontSize:15, outline:"none", boxSizing:"border-box", fontFamily:"inherit", cursor:"pointer", WebkitAppearance:"none" },
+  btn: (v="primary") => ({ padding:v==="sm"?"8px 14px":"11px 20px", borderRadius:9, cursor:"pointer", fontWeight:700, fontSize:v==="sm"?13:14, transition:"all 0.15s", background:v==="primary"?C.accent:v==="danger"?C.red:v==="gold"?C.gold:v==="purple"?C.purple:C.card, color:v==="primary"||v==="danger"||v==="gold"||v==="purple"?"#0A0F1E":C.muted, border:v==="ghost"?`1px solid ${C.border}`:"none", WebkitTapHighlightColor:"transparent" }),
+  avatar: (color) => ({ width:36, height:36, borderRadius:"50%", background:color||`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:13, color:"#fff", flexShrink:0 }),
+  divider: { height:1, background:C.border, margin:"16px 0" },
+  statCard: (color) => ({ background:C.card, borderRadius:12, border:`1px solid ${C.border}`, padding:"15px 16px", borderLeft:`3px solid ${color}` }),
+  // Mobile-safe grids — stack on small screens
+  grid2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,260px),1fr))", gap:14 },
+  grid3: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,180px),1fr))", gap:12 },
+  grid4: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,140px),1fr))", gap:10 },
+  // 2-col grid that stacks on mobile
+  row2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,220px),1fr))", gap:12 },
 };
-const styles = S; // backward-compat alias for legacy components
+const styles = S;
 
 // ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, color, icon }) {
@@ -690,7 +696,7 @@ function QuoteBox({ q, type = "res" }) {
         </div>
       )}
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10, marginTop:12 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:10, marginTop:12 }}>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
           <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PARTNER PAY (65%)</div>
           <div style={{ fontSize:18, fontWeight:800, color:C.blue }}>{f(q.partnerPay)}</div>
@@ -815,7 +821,7 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
       <div style={S.divider} />
 
       {/* Payment method info */}
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:14, marginBottom:20 }}>
         <div style={{ ...S.card, borderLeft:`4px solid ${C.accent}` }}>
           <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>💳 Card Payments (Stripe)</div>
           <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
@@ -1117,18 +1123,18 @@ function RecurringJobs({ jobs, setJobs, partners }) {
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div><div style={S.label}>Client</div><input style={S.input} value={form.client} onChange={e=>setForm({...form,client:e.target.value})} placeholder="Client Name" /></div>
             <div><div style={S.label}>Address</div><input style={S.input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 Main St" /></div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Service</div><select style={S.select} value={form.type} onChange={e=>setForm({...form,type:e.target.value})}>{JOB_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
               <div><div style={S.label}>Frequency</div><select style={S.select} value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>{["Daily","Weekly","Bi-Weekly","Monthly"].map(f=><option key={f}>{f}</option>)}</select></div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:10 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:10 }}>
               <div><div style={S.label}>Partner</div><select style={S.select} value={form.partnerId} onChange={e=>setForm({...form,partnerId:e.target.value})}><option value="">Select</option>{partners.filter(p=>p.onboarded).map(p=><option key={p.id} value={p.id}>{p.name}</option>)}</select></div>
               <div><div style={S.label}>Start Date</div><input style={S.input} type="date" value={form.startDate} onChange={e=>setForm({...form,startDate:e.target.value})} /></div>
               <div><div style={S.label}>Hours</div><input style={S.input} type="number" min={1} max={12} value={form.hours} onChange={e=>setForm({...form,hours:+e.target.value})} /></div>
             </div>
             {form.partnerId && form.hours && (
               <div style={{ background:C.surface, borderRadius:10, padding:14 }}>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, textAlign:"center" }}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:8, textAlign:"center" }}>
                   <div><div style={{ fontSize:11,color:C.muted }}>COST</div><div style={{ fontSize:16,fontWeight:800,color:C.red }}>${partners.find(p=>p.id===parseInt(form.partnerId))?.payRate*form.hours}</div></div>
                   <div><div style={{ fontSize:11,color:C.muted }}>CLIENT PRICE</div><div style={{ fontSize:16,fontWeight:800,color:C.accent }}>${markupFactor(partners.find(p=>p.id===parseInt(form.partnerId))?.payRate*form.hours||0)}</div></div>
                   <div><div style={{ fontSize:11,color:C.muted }}>PROFIT</div><div style={{ fontSize:16,fontWeight:800,color:C.gold }}>~30%</div></div>
@@ -1391,7 +1397,7 @@ function WhiteLabel() {
                 <span style={{ fontSize:13, color:C.muted }}>partner logins</span>
               </div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8 }}>
               <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... 🚀")}>⬆ Upgrade to Pro</button>
               <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>💳 Manage Billing</button>
             </div>
@@ -1792,7 +1798,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
         </div>
 
         {/* Offer + next action */}
-        <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:18 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginBottom:18 }}>
           <div style={{ ...S.cardSm, borderLeft:`3px solid ${C.accent}` }}>
             <div style={S.label}>First Offer</div>
             <div style={{ fontWeight:700, fontSize:14, color:C.accent, marginTop:4 }}>{viewLead.first_offer}</div>
@@ -2034,11 +2040,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       {showManual && (
         <Modal title="+ Add Lead Manually" onClose={() => setShowManual(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Company Name</div><input style={S.input} value={manualForm.company} onChange={e=>setManualForm({...manualForm,company:e.target.value})} placeholder="ABC Medical Centre" /></div>
               <div><div style={S.label}>City</div><input style={S.input} value={manualForm.city} onChange={e=>setManualForm({...manualForm,city:e.target.value})} placeholder="Brampton" /></div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Market</div>
                 <select style={S.select} value={manualForm.market} onChange={e=>setManualForm({...manualForm,market:e.target.value})}>
                   <option>Ontario</option><option>Arizona</option>
@@ -2050,7 +2056,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
                 </select>
               </div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Buyer Title</div><input style={S.input} value={manualForm.buyer_title} onChange={e=>setManualForm({...manualForm,buyer_title:e.target.value})} placeholder="Property Manager" /></div>
               <div><div style={S.label}>Priority (1-5)</div>
                 <select style={S.select} value={manualForm.priority_score} onChange={e=>setManualForm({...manualForm,priority_score:parseInt(e.target.value)})}>
@@ -2252,15 +2258,15 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
       {showManual && (
         <Modal title="+ Add Lead Manually" onClose={() => setShowManual(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Full Name *</div><input style={S.input} value={manualForm.name} onChange={e=>setManualForm({...manualForm,name:e.target.value})} placeholder="Sarah M." /></div>
               <div><div style={S.label}>Email *</div><input style={S.input} value={manualForm.email} onChange={e=>setManualForm({...manualForm,email:e.target.value})} placeholder="sarah@email.com" /></div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Phone</div><input style={S.input} value={manualForm.phone} onChange={e=>setManualForm({...manualForm,phone:e.target.value})} placeholder="(416) 555-0100" /></div>
               <div><div style={S.label}>Address</div><input style={S.input} value={manualForm.address} onChange={e=>setManualForm({...manualForm,address:e.target.value})} placeholder="88 Maple Dr, North York" /></div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:12 }}>
               <div><div style={S.label}>Property Type</div>
                 <select style={S.select} value={manualForm.dwellingType} onChange={e=>setManualForm({...manualForm,dwellingType:e.target.value})}>
                   {["Apartment / Condo","Semi / Townhouse","Detached House"].map(t=><option key={t}>{t}</option>)}
@@ -2697,7 +2703,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       {showForm && (
         <Modal title="🏠 New Residential Lead — Have Us Clean" onClose={()=>setShowForm(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Full Name</div><input style={S.input} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Jane Smith" /></div>
               <div><div style={S.label}>Phone</div><input style={S.input} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} placeholder="(416) 555-0000" /></div>
             </div>
@@ -2705,7 +2711,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             <div><div style={S.label}>Address (Toronto / GTA / AZ)</div><input style={S.input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 King St W, Toronto ON" /></div>
 
             {/* Dwelling Type + Size — HUC pricing grid */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Dwelling Type</div>
                 <select style={S.select} value={form.dwellingType} onChange={e=>setForm({...form,dwellingType:e.target.value,dwellingSize:Object.keys(HUC_PRICING_GRID[e.target.value]||{})[0]||""})}>
                   {dwellingOptions.map(d=><option key={d}>{d}</option>)}
@@ -2725,7 +2731,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div><div style={S.label}>Est. Hours</div><div style={{ padding:"10px 0", fontSize:14, fontWeight:700, color:C.accent }}>{getSqftHours(form.sqft).toFixed(1)}h</div></div>
             </div>
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Service Package</div>
                 <select style={S.select} value={form.serviceType} onChange={e=>setForm({...form,serviceType:e.target.value})}>
                   {Object.keys(HUC_PACKAGES).map(p=><option key={p}>{p}</option>)}
@@ -2758,7 +2764,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
             {form.name && (() => { const q=calcResQuote(form,region); return <QuoteBox q={q} type="res" />; })()}
 
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
               <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
             </div>
@@ -2780,7 +2786,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             </div>
             <QuoteBox q={calcResQuote(viewLead,region)} type="res" />
             {/* Editable job notes + follow-up */}
-            <div style={{ marginTop:14, display:"grid", gridTemplateColumns:"1fr 1fr", gap:10 }}>
+            <div style={{ marginTop:14, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10 }}>
               <div><div style={S.label}>Job Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={viewLead.jobNotes||""} onChange={e=>updateLeadField(viewLead.id,"jobNotes",e.target.value)} placeholder="Notes for VA / team..." /></div>
               <div><div style={S.label}>Follow-Up Date</div><input style={S.input} type="date" value={viewLead.followUpDate||""} onChange={e=>updateLeadField(viewLead.id,"followUpDate",e.target.value)} /></div>
             </div>
@@ -2809,7 +2815,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             </div>
 
             {/* To / Subject */}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginBottom:14 }}>
               <div>
                 <div style={S.label}>To</div>
                 <div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700, color:C.text }}>
@@ -3007,11 +3013,11 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       {showForm && (
         <Modal title="🏢 New Commercial Lead" onClose={()=>setShowForm(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Business Name</div><input style={S.input} value={form.bizName} onChange={e=>setForm({...form,bizName:e.target.value})} placeholder="Acme Corp" /></div>
               <div><div style={S.label}>Contact Name</div><input style={S.input} value={form.contactName} onChange={e=>setForm({...form,contactName:e.target.value})} placeholder="John Smith" /></div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Email</div><input style={S.input} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} /></div>
               <div><div style={S.label}>Phone</div><input style={S.input} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} /></div>
             </div>
@@ -3024,8 +3030,8 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
             </div>
             <div><div style={S.label}>Frequency</div><select style={S.select} value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>{Object.keys(COM_FREQ_DISCOUNTS).map(f=><option key={f}>{f}</option>)}</select></div>
             <div><div style={S.label}>Add-Ons</div><div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>{COM_ADDONS.map(ao=>(<button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:form.addons.includes(ao.id)?C.blueDim:C.surface, color:form.addons.includes(ao.id)?C.blue:C.muted, border:`1px solid ${form.addons.includes(ao.id)?C.blue:C.border}` }}>{ao.label} +${markupFactor(ao.costToUs)}</button>))}</div></div>
-            {form.bizName && (() => { const q=calcComQuote(form, region); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            {form.bizName && (() => { const q=calcComQuote(form, region); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
               <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
             </div>
@@ -3044,7 +3050,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
                 <div style={{ fontSize:13, color:C.muted }}>📐 {viewLead.sqft.toLocaleString()} sqft · {viewLead.floors} floor(s) · {viewLead.serviceType} · {viewLead.frequency}</div>
               </div>
               <QuoteBox q={q} type="com" />
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginTop:10 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}>
                 <div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:20,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div>
                 <div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{viewLead.contractMonths}-MO CONTRACT</div><div style={{ fontSize:20,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div>
               </div>
@@ -3069,7 +3075,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
                 <div style={{ fontSize:12, color:C.muted }}>Send the proposal using one of the options below</div>
               </div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginBottom:14 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginBottom:14 }}>
               <div><div style={S.label}>To</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700 }}>{showEmail.lead.email}</div></div>
               <div><div style={S.label}>Subject</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:13, color:C.muted }}>{showEmail.subject}</div></div>
             </div>
@@ -3263,7 +3269,7 @@ function TaxCompliance({ region }) {
             ) : (
               <div style={{ fontSize:14, color:C.muted, lineHeight:1.8 }}>
                 <p style={{ marginBottom:8 }}>Ontario uses a single uniform <strong style={{ color:C.text }}>13% HST</strong> rate province-wide. There are no city-level variations — unlike the US, every invoice in Ontario charges exactly 13%.</p>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12, marginTop:12 }}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginTop:12 }}>
                   <div style={{ background:C.bg, borderRadius:10, padding:14 }}>
                     <div style={{ fontWeight:700, color:C.gold, marginBottom:4 }}>Filing Frequency</div>
                     <div style={{ fontSize:13 }}>Monthly (large), Quarterly (mid), Annual (small). CRA assigns based on your revenue level.</div>
@@ -3342,7 +3348,7 @@ function TaxCompliance({ region }) {
           </div>
           <div style={{ ...S.card, marginTop:16 }}>
             <div style={S.h3}>📞 Phone & Address Format</div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div style={{ background:C.surface, borderRadius:10, padding:14 }}>
                 <div style={{ fontSize:12, color:C.muted, fontWeight:700 }}>PHONE FORMAT</div>
                 <div style={{ fontSize:18, fontWeight:800, color:C.accent, marginTop:6 }}>{R.phoneFormat}</div>
@@ -3443,103 +3449,115 @@ const DB_KEYS = {
 const SUPABASE_URL  = "https://opazwghrohmfykzxxsjk.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
 
-const sbHeaders = {
+const sbH = {
   "apikey":        SUPABASE_ANON,
   "Authorization": `Bearer ${SUPABASE_ANON}`,
   "Content-Type":  "application/json",
-  "Prefer":        "return=minimal",
 };
 
-// Map DB_KEY → Supabase table + field names
-const SB_TABLE_MAP = {
-  "cp:jobs":                 { table: "huc_jobs",      pk: "id",         dataField: "data" },
-  "cp:partners":             { table: "huc_partners",  pk: "id",         dataField: "data" },
-  "cp:leads_res":            { table: "huc_leads_res", pk: "id",         dataField: "data" },
-  "cp:cold_leads":           { table: "huc_leads_cold",pk: "lead_id",    dataField: "data" },
-  "cp:onboarding_progress":  { table: "huc_onboarding",pk: "partner_id", dataField: "completed_modules" },
-  "cp:region":               { table: "huc_settings",  pk: "key",        dataField: "value" },
+// Safe string ID — converts any ID to a stable string
+const toStrId = (v) => v !== undefined && v !== null ? String(v) : String(Date.now());
+
+// Supabase table config
+const SB = {
+  "cp:jobs":                { table:"huc_jobs",      pk:"id",         isArray:true  },
+  "cp:partners":            { table:"huc_partners",  pk:"id",         isArray:true  },
+  "cp:leads_res":           { table:"huc_leads_res", pk:"id",         isArray:true  },
+  "cp:cold_leads":          { table:"huc_leads_cold",pk:"lead_id",    isArray:true  },
+  "cp:onboarding_progress": { table:"huc_onboarding",pk:"partner_id", isArray:false },
+  "cp:region":              { table:"huc_settings",  pk:"key",        isArray:false },
 };
 
-// Supabase: get all rows from a table and return as array
-async function sbGet(key) {
-  const map = SB_TABLE_MAP[key];
-  if (!map) return null;
+async function sbFetch(path, opts = {}) {
   try {
-    const res = await fetch(`${SUPABASE_URL}/rest/v1/${map.table}?select=*`, {
-      headers: { ...sbHeaders, "Prefer": "return=representation" }
+    const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      headers: { ...sbH, "Prefer": "resolution=merge-duplicates,return=minimal", ...opts.headers },
+      ...opts,
     });
-    if (!res.ok) return null;
-    const rows = await res.json();
-    if (!rows || rows.length === 0) return null;
+    return r;
+  } catch { return null; }
+}
 
-    // Special cases
+async function sbGet(key) {
+  const cfg = SB[key];
+  if (!cfg) return null;
+  try {
+    const r = await sbFetch(`${cfg.table}?select=*`);
+    if (!r || !r.ok) return null;
+    const rows = await r.json();
+    if (!rows || !Array.isArray(rows) || rows.length === 0) return null;
+
     if (key === "cp:region") {
       const row = rows.find(r => r.key === "region");
       return row ? row.value : null;
     }
     if (key === "cp:onboarding_progress") {
       const obj = {};
-      rows.forEach(r => { obj[r.partner_id] = r.completed_modules; });
-      return obj;
+      rows.forEach(r => { if (r.partner_id) obj[r.partner_id] = r.completed_modules || []; });
+      return Object.keys(obj).length > 0 ? obj : null;
     }
-    // Default: return array of data fields
-    return rows.map(r => r[map.dataField]).filter(Boolean);
+    // Array tables: return array of data objects
+    const result = rows.map(r => r.data).filter(Boolean);
+    return result.length > 0 ? result : null;
   } catch { return null; }
 }
 
-// Supabase: upsert data
 async function sbSet(key, value) {
-  const map = SB_TABLE_MAP[key];
-  if (!map) return false;
+  const cfg = SB[key];
+  if (!cfg) return false;
   try {
-    // Special cases
+    // Region setting
     if (key === "cp:region") {
-      await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
+      await sbFetch(`${cfg.table}`, {
         method: "POST",
-        headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ key: "region", value }),
+        body: JSON.stringify({ key:"region", value }),
       });
       return true;
     }
+    // Onboarding progress
     if (key === "cp:onboarding_progress") {
       if (!value || typeof value !== "object") return true;
-      const rows = Object.entries(value).map(([partner_id, modules]) => ({
-        partner_id, completed_modules: modules, updated_at: new Date().toISOString()
-      }));
+      const rows = Object.entries(value)
+        .filter(([k]) => k)
+        .map(([partner_id, modules]) => ({
+          partner_id: String(partner_id),
+          completed_modules: Array.isArray(modules) ? modules : [],
+          updated_at: new Date().toISOString(),
+        }));
       if (rows.length === 0) return true;
-      await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
-        method: "POST",
-        headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify(rows),
-      });
+      await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows) });
       return true;
     }
-    // Array of objects (jobs, partners, leads)
+    // Array tables (jobs, partners, leads)
     if (!Array.isArray(value) || value.length === 0) return true;
-    const rows = value.map(item => ({
-      [map.pk]: item.id || item.lead_id || item.partner_id || String(Date.now()),
-      [map.dataField]: item,
-      updated_at: new Date().toISOString(),
-      ...(map.table !== "huc_leads_cold" ? { region: item.region || "ON" } : {}),
-    }));
-    await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
-      method: "POST",
-      headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
-      body: JSON.stringify(rows),
-    });
+    const rows = value
+      .filter(item => item) // skip nulls
+      .map(item => {
+        // Get primary key value — ensure it's a string
+        let pkVal;
+        if (key === "cp:cold_leads") {
+          pkVal = toStrId(item.lead_id || item.id);
+        } else {
+          pkVal = toStrId(item.id || item.lead_id);
+        }
+        return {
+          [cfg.pk]: pkVal,
+          data: item,
+          updated_at: new Date().toISOString(),
+          ...(key !== "cp:cold_leads" ? { region: item.region || "ON" } : {}),
+        };
+      });
+    if (rows.length === 0) return true;
+    await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows) });
     return true;
   } catch { return false; }
 }
 
-// Supabase: delete all rows in a table
 async function sbDelete(key) {
-  const map = SB_TABLE_MAP[key];
-  if (!map) return false;
+  const cfg = SB[key];
+  if (!cfg) return false;
   try {
-    await fetch(`${SUPABASE_URL}/rest/v1/${map.table}?${map.pk}=neq.null`, {
-      method: "DELETE",
-      headers: sbHeaders,
-    });
+    await sbFetch(`${cfg.table}?${cfg.pk}=neq.null_impossible`, { method:"DELETE" });
     return true;
   } catch { return false; }
 }
@@ -3551,13 +3569,13 @@ const hasLocalStorage = (() => {
 })();
 const hasArtifactStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
 
-// Try Supabase first, fall back to localStorage
 async function dbGet(key) {
+  // Try Supabase first (shared across devices)
   try {
-    const sbResult = await sbGet(key);
-    if (sbResult !== null) return sbResult;
+    const r = await sbGet(key);
+    if (r !== null && r !== undefined) return r;
   } catch {}
-  // localStorage fallback
+  // Fallback to local storage
   try {
     if (hasArtifactStorage) { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; }
     if (hasLocalStorage) { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
@@ -3566,19 +3584,19 @@ async function dbGet(key) {
 }
 
 async function dbSet(key, value) {
-  // Write to both — Supabase for sharing, localStorage for offline
-  let ok = false;
-  try { ok = await sbSet(key, value); } catch {}
+  // Fire-and-forget to Supabase (don't block UI)
+  sbSet(key, value).catch(() => {});
+  // Always write to local storage for offline support
   try {
     const s = JSON.stringify(value);
     if (hasArtifactStorage) await window.storage.set(key, s);
     else if (hasLocalStorage) localStorage.setItem(key, s);
   } catch {}
-  return ok;
+  return true; // never block the UI
 }
 
 async function dbDelete(key) {
-  try { await sbDelete(key); } catch {}
+  sbDelete(key).catch(() => {});
   try {
     if (hasArtifactStorage) await window.storage.delete(key);
     else if (hasLocalStorage) localStorage.removeItem(key);
@@ -4309,6 +4327,31 @@ function PartnerView({ jobs, partners, region }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
+  // Inject global CSS for mobile fixes on mount
+  useEffect(() => {
+    const style = document.createElement('style');
+    style.textContent = `
+      *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+      body { margin: 0; padding: 0; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
+      input, select, textarea, button { font-family: inherit; font-size: 16px; }
+      /* Fix iOS input zoom */
+      @media (max-width: 640px) {
+        input, select, textarea { font-size: 16px !important; }
+        .modal-inner { padding: 16px !important; }
+        .grid-2col { grid-template-columns: 1fr !important; }
+      }
+      /* Scrollbar hide */
+      ::-webkit-scrollbar { width: 4px; height: 4px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #1E2D45; border-radius: 4px; }
+      /* Smooth scroll */
+      html { scroll-behavior: smooth; }
+      /* Fix text overflow */
+      .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    `;
+    document.head.appendChild(style);
+    return () => document.head.removeChild(style);
+  }, []);
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
@@ -5088,7 +5131,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
 
       <div style={S.divider} />
 
-      <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16, marginBottom:20 }}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:16, marginBottom:20 }}>
         {/* Pipeline snapshot */}
         <div style={S.card}>
           <div style={S.h3}>📊 Pipeline Snapshot</div>
@@ -5632,7 +5675,7 @@ function Jobs({ jobs, setJobs, partners }) {
             {/* Work Order Header */}
             <div style={{ background:`linear-gradient(135deg,${C.accentDim},${C.surface})`, borderRadius:12, padding:16, border:`1px solid ${C.accent}44` }}>
               <div style={{ fontWeight:800, fontSize:16, color:C.accent, marginBottom:10 }}>📋 Work Order {selectedJob.workOrder?.id || `WO-${selectedJob.id}`}</div>
-              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, fontSize:13 }}>
+              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8, fontSize:13 }}>
                 <div><span style={{ color:C.muted }}>Client: </span><strong>{selectedJob.client}</strong></div>
                 <div><span style={{ color:C.muted }}>Date: </span><strong>{selectedJob.date}</strong></div>
                 <div><span style={{ color:C.muted }}>Time: </span><strong>{selectedJob.time}</strong></div>
@@ -6666,7 +6709,7 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
                     <div style={{ fontSize:12, color:C.muted }}>{rag.zone}</div>
                   </div>
                 </div>
-                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", background:C.card }}>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", background:C.card }}>
                   <div style={{ padding:"10px 14px", borderRight:`1px solid ${C.border}` }}>
                     <div style={{ fontSize:11, fontWeight:700, color:C.accent, textTransform:"uppercase", marginBottom:5 }}>✅ Use For</div>
                     {rag.uses.map(u => <div key={u} style={{ fontSize:12, color:C.text, padding:"2px 0" }}>• {u}</div>)}
