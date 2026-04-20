@@ -428,9 +428,9 @@ const TOMORROW = new Date(Date.now()+86400000).toISOString().split("T")[0];
 const IN2DAYS = new Date(Date.now()+2*86400000).toISOString().split("T")[0];
 
 const initJobs = [
-  { id:1, client:"Sarah M. — 2BR Condo",        address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, partnerIds:[1], status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
-  { id:2, client:"The Thompson House",           address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, partnerIds:[3], status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
-  { id:3, client:"Priya S. — 3BR Detached",     address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, partnerIds:[2], status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
+  { id:1, client:"Sarah M. — 2BR Condo",        email:"sarah.m@email.com", address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, partnerIds:[1], status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
+  { id:2, client:"The Thompson House",           email:"thompson@email.com", address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, partnerIds:[3], status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
+  { id:3, client:"Priya S. — 3BR Detached",     email:"priya@email.com", address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, partnerIds:[2], status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
   { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, partnerIds:[1], status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
 ];
 
@@ -1588,6 +1588,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
+  const [page, setPage]                 = useState(0); // pagination — 15 leads per page
+  const PAGE_SIZE = 15;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
     buyer_title:"", pain_point:"", first_offer:"office cleaning",
@@ -1638,12 +1640,28 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
     if (viewLead?.lead_id === id || viewLead?.id === id) setViewLead(null);
   };
 
+  // Auto-delete leads with no company name AND no city (truly empty rows from sheet)
+  useEffect(() => {
+    setLeads(ls => {
+      const cleaned = ls.filter(l => {
+        const isEmpty = !l.company && !l.city && !l.buyer_title && !l.segment;
+        return !isEmpty;
+      });
+      return cleaned.length !== ls.length ? cleaned : ls;
+    });
+  }, [leads.length]); // run when lead count changes (after sync)
+
   // Filter leads
   const filtered = leads.filter(l =>
     (filterStatus === "All" || l.status === filterStatus) &&
     (filterSeg    === "All" || l.segment === filterSeg) &&
     (filterMkt    === "All" || l.market === filterMkt)
   );
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
+  const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+
+  // Reset page when filters change
+  useEffect(() => { setPage(0); }, [filterStatus, filterSeg, filterMkt]);
 
   // Stats
   const total     = leads.length;
@@ -1995,8 +2013,27 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
         </div>
       )}
 
+      {/* Pagination info */}
+      {filtered.length > PAGE_SIZE && (
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
+          <div style={{ fontSize:13, color:C.muted }}>
+            Showing {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, filtered.length)} of {filtered.length} leads
+          </div>
+          <div style={{ display:"flex", gap:6 }}>
+            <button style={{ ...S.btn("ghost"), fontSize:12, padding:"6px 12px" }}
+              disabled={page===0} onClick={() => setPage(p=>p-1)}>← Prev</button>
+            {Array.from({length:totalPages},(_,i)=>i).slice(Math.max(0,page-2),Math.min(totalPages,page+3)).map(p=>(
+              <button key={p} style={{ ...S.btn(p===page?"primary":"ghost"), fontSize:12, padding:"6px 12px" }}
+                onClick={()=>setPage(p)}>{p+1}</button>
+            ))}
+            <button style={{ ...S.btn("ghost"), fontSize:12, padding:"6px 12px" }}
+              disabled={page>=totalPages-1} onClick={() => setPage(p=>p+1)}>Next →</button>
+          </div>
+        </div>
+      )}
+
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {filtered.map(lead => {
+        {paginated.map(lead => {
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
@@ -2762,7 +2799,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               </div>
             </div>
 
-            {form.name && (() => { const q=calcResQuote(form,region); return <QuoteBox q={q} type="res" />; })()}
+            {form.name && (() => { try { const q=calcResQuote({...form, dwellingType:form.dwellingType||"Apartment / Condo", dwellingSize:form.dwellingSize||"2 Bed", serviceType:form.serviceType||"Refresh Clean", frequency:form.frequency||"One-Time", beds:form.beds||2, baths:form.baths||1, sqft:form.sqft||900, addons:form.addons||[]},region); return <QuoteBox q={q} type="res" />; } catch(e) { return null; } })()}
 
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
@@ -2784,7 +2821,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ fontSize:14, color:C.muted }}>{HUC_PACKAGES[viewLead.serviceType]?.icon} {viewLead.serviceType} · {viewLead.frequency}</div>
               {viewLead.notes && <div style={{ fontSize:13, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px", marginTop:8 }}>💬 {viewLead.notes}</div>}
             </div>
-            <QuoteBox q={calcResQuote(viewLead,region)} type="res" />
+            {(() => { try { return <QuoteBox q={calcResQuote({...viewLead, dwellingType:viewLead.dwellingType||"Apartment / Condo", dwellingSize:viewLead.dwellingSize||"2 Bed", serviceType:viewLead.serviceType||"Refresh Clean", frequency:viewLead.frequency||"One-Time", beds:viewLead.beds||2, baths:viewLead.baths||1, sqft:viewLead.sqft||900, addons:viewLead.addons||[]},region)} type="res" />; } catch(e) { return <div style={{color:C.muted,fontSize:13,padding:12}}>Quote preview unavailable — fill in property details</div>; } })()}
             {/* Editable job notes + follow-up */}
             <div style={{ marginTop:14, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10 }}>
               <div><div style={S.label}>Job Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={viewLead.jobNotes||""} onChange={e=>updateLeadField(viewLead.id,"jobNotes",e.target.value)} placeholder="Notes for VA / team..." /></div>
@@ -3773,10 +3810,18 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     }
   };
 
-  // Get data for the logged-in client
-  const getClientData = (name) => {
-    const clientJobs  = jobs.filter(j => j.client === name);
-    const clientLeads = (resLeads||[]).filter(l => l.name === name);
+  // Get data for the logged-in client — match by email OR name
+  const getClientData = (authed) => {
+    const email = authed.email?.toLowerCase();
+    const name  = authed.name;
+    const clientJobs = jobs.filter(j =>
+      (email && j.email?.toLowerCase() === email) ||
+      j.client === name ||
+      j.client?.toLowerCase().includes(name?.split(" ")[0]?.toLowerCase() || "NOMATCH")
+    );
+    const clientLeads = (resLeads||[]).filter(l =>
+      (email && l.email?.toLowerCase() === email) || l.name === name
+    );
     const lead = clientLeads[clientLeads.length - 1];
     return { clientJobs, clientLeads, lead };
   };
@@ -3816,7 +3861,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
   }
 
   // Logged in — show client's own data only
-  const { clientJobs, clientLeads, lead } = getClientData(authedClient.name);
+  const { clientJobs, clientLeads, lead } = getClientData(authedClient);
   const upcomingJobs = clientJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
   const completedJobs = clientJobs.filter(j => j.status === "completed");
   const activeQuote = clientLeads.filter(l => ["Quoted","Follow Up"].includes(l.status)).slice(-1)[0];
@@ -3843,6 +3888,19 @@ function ClientView({ jobs, resLeads, region, setTab }) {
             </div>
           </div>
         </div>
+
+        {/* Empty state */}
+        {upcomingJobs.length === 0 && completedJobs.length === 0 && !activeQuote && (
+          <div style={{ ...S.card, textAlign:"center", padding:32, marginBottom:18 }}>
+            <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+            <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>No scheduled services yet</div>
+            <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Ready to book? We'd love to help.</div>
+            <a href={`mailto:${BRAND.supportEmail}?subject=New Booking Request`}
+              style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block" }}>
+              📅 Book a Service
+            </a>
+          </div>
+        )}
 
         {/* Upcoming jobs */}
         {upcomingJobs.length > 0 && (
@@ -4792,36 +4850,52 @@ TEAM SIZE BY SQFT:
 HOURS: sqft ÷ 1,000 (minimum 1.5h, round to nearest 0.5h)
 PARTNER RATE: $30/hr CAD (Ontario) · $25/hr USD (Arizona)
 
-FORMULA:
-1. Labor cost = team size × hourly rate × hours
-2. Base price = labor cost ÷ 0.65
-3. Apply package multiplier
-4. Apply condition multiplier (Light ×0.9 / Average ×1.0 / Heavy ×1.2)
-5. Take MAX of formula result vs floor price below
-6. Add addons · Apply frequency discount · Add tax
+STEP-BY-STEP FORMULA:
+1. Hours = MAX(1.5, sqft ÷ 1000), round to nearest 0.5
+2. Labor cost = team size × $30 × hours
+3. Labor price = labor cost ÷ 0.65
+4. Formula price = labor price × package multiplier
+5. Floor base = floor price for that dwelling type (see below)
+6. Floor price with package = floor base × package multiplier  ← CRITICAL: multiply floor by package too
+7. Final base = MAX(formula price, floor price with package)
+8. Condition adjust = final base × condition multiplier
+9. Add addons at fixed prices
+10. Apply frequency discount
+11. Ontario: add 13% HST. Arizona: no tax.
 
 PACKAGE MULTIPLIERS:
 Refresh Clean ×1.0 · Full Home Clean ×1.25 · Deep Clean ×1.65
 Move-In/Out ×1.80 · Kitchen & Bath Refresh ×0.65 · Pre-Sale ×1.50
 
-FLOOR PRICES (Ontario CAD):
-Apartment: 1BR $140 · 2BR $165 · 3BR $205
-Semi/Town: Small $165 · Medium $205 · Large $245
-Detached: Small $185 · Medium $230 · Large $310
-Arizona: multiply floor by 1.12 for USD
+FLOOR BASE PRICES — Ontario CAD (multiply by package multiplier per step 6):
+Apartment/Condo: 1BR $140 · 2BR $165 · 3BR $205
+Semi/Townhouse: Small $165 · Medium $205 · Large $245
+Detached House: Small $185 · Medium $230 · Large $310
+Arizona: multiply Ontario floor by 1.12
 
 ADDONS: Fridge $50 · Oven $55 · Cabinets $65 · Windows $60 · Baseboards $55 · Carpet $95 · Pet Hair $65
-
 FREQUENCY DISCOUNTS: Weekly −15% · Bi-Weekly −10% · Monthly −5%
-
 TAX: Ontario +13% HST · Arizona 0%
 
-PAY SPLIT (always show):
-Partner total = pre-tax price × 65%
-2 partners → each gets half · 3 partners → each gets a third
-Company keeps = pre-tax price × 35%
+WORKED EXAMPLE — 2BR Condo, 900 sqft, Full Home Clean, average condition, one-time, Ontario:
+1. Hours = MAX(1.5, 900÷1000=0.9) → 1.5h
+2. Labor cost = 1 × $30 × 1.5 = $45
+3. Labor price = $45 ÷ 0.65 = $69
+4. Formula price = $69 × 1.25 = $86
+5. Floor base (2BR Condo Ontario) = $165
+6. Floor with package = $165 × 1.25 = $206  ← floor gets multiplied too
+7. Final base = MAX($86, $206) = $206  ← floor wins
+8. Condition average ×1.0 → $206
+9. No addons
+10. No discount (one-time)
+11. Pre-tax = $206 · HST = $27 · TOTAL = $233
 
-Always show: team size, hours, base price, condition adjustment, addons, discount, pre-tax, HST, total, partner pay per person, company margin.`,
+Partner pay = $206 × 0.65 = $134 · Company keeps = $206 × 0.35 = $72
+
+PAY SPLIT: Partner total = pre-tax × 65% · Company = pre-tax × 35%
+2 partners → each gets half · 3 partners → each gets a third
+
+Always show full breakdown: team, hours, formula price, floor check, final base, condition, addons, discount, pre-tax, HST, total, partner pay each, company margin.`,
     inputLabel: "Describe the job — dwelling type, sqft (or beds/baths), package, condition, addons, frequency, Ontario or Arizona.",
     inputPlaceholder: "e.g. 2BR condo North York, ~900 sqft, Full Home Clean, average condition, bi-weekly, add inside fridge. Quote please.",
     outputSections: ["Quote Breakdown", "Partner Pay", "Customer-Facing Message", "Warning Flag (if any)"],
