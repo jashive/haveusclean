@@ -3439,39 +3439,151 @@ const DB_KEYS = {
   onboardingProgress: "cp:onboarding_progress",
 };
 
-// Detect storage backend
-const hasArtifactStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
-const hasLocalStorage    = (() => { try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); return true; } catch { return false; } })();
+// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+const SUPABASE_URL  = "https://opazwghrohmfykzxxsjk.supabase.co";
+const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
 
-async function dbGet(key) {
+const sbHeaders = {
+  "apikey":        SUPABASE_ANON,
+  "Authorization": `Bearer ${SUPABASE_ANON}`,
+  "Content-Type":  "application/json",
+  "Prefer":        "return=minimal",
+};
+
+// Map DB_KEY → Supabase table + field names
+const SB_TABLE_MAP = {
+  "cp:jobs":                 { table: "huc_jobs",      pk: "id",         dataField: "data" },
+  "cp:partners":             { table: "huc_partners",  pk: "id",         dataField: "data" },
+  "cp:leads_res":            { table: "huc_leads_res", pk: "id",         dataField: "data" },
+  "cp:cold_leads":           { table: "huc_leads_cold",pk: "lead_id",    dataField: "data" },
+  "cp:onboarding_progress":  { table: "huc_onboarding",pk: "partner_id", dataField: "completed_modules" },
+  "cp:region":               { table: "huc_settings",  pk: "key",        dataField: "value" },
+};
+
+// Supabase: get all rows from a table and return as array
+async function sbGet(key) {
+  const map = SB_TABLE_MAP[key];
+  if (!map) return null;
   try {
-    if (hasArtifactStorage) {
-      const r = await window.storage.get(key);
-      return r ? JSON.parse(r.value) : null;
+    const res = await fetch(`${SUPABASE_URL}/rest/v1/${map.table}?select=*`, {
+      headers: { ...sbHeaders, "Prefer": "return=representation" }
+    });
+    if (!res.ok) return null;
+    const rows = await res.json();
+    if (!rows || rows.length === 0) return null;
+
+    // Special cases
+    if (key === "cp:region") {
+      const row = rows.find(r => r.key === "region");
+      return row ? row.value : null;
     }
-    if (hasLocalStorage) {
-      const v = localStorage.getItem(key);
-      return v ? JSON.parse(v) : null;
+    if (key === "cp:onboarding_progress") {
+      const obj = {};
+      rows.forEach(r => { obj[r.partner_id] = r.completed_modules; });
+      return obj;
     }
-    return null;
+    // Default: return array of data fields
+    return rows.map(r => r[map.dataField]).filter(Boolean);
   } catch { return null; }
 }
 
-async function dbSet(key, value) {
+// Supabase: upsert data
+async function sbSet(key, value) {
+  const map = SB_TABLE_MAP[key];
+  if (!map) return false;
   try {
-    const s = JSON.stringify(value);
-    if (hasArtifactStorage) { await window.storage.set(key, s); return true; }
-    if (hasLocalStorage)    { localStorage.setItem(key, s); return true; }
-    return false; // in-memory only — changes exist in React state, just won't persist
+    // Special cases
+    if (key === "cp:region") {
+      await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
+        method: "POST",
+        headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ key: "region", value }),
+      });
+      return true;
+    }
+    if (key === "cp:onboarding_progress") {
+      if (!value || typeof value !== "object") return true;
+      const rows = Object.entries(value).map(([partner_id, modules]) => ({
+        partner_id, completed_modules: modules, updated_at: new Date().toISOString()
+      }));
+      if (rows.length === 0) return true;
+      await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
+        method: "POST",
+        headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify(rows),
+      });
+      return true;
+    }
+    // Array of objects (jobs, partners, leads)
+    if (!Array.isArray(value) || value.length === 0) return true;
+    const rows = value.map(item => ({
+      [map.pk]: item.id || item.lead_id || item.partner_id || String(Date.now()),
+      [map.dataField]: item,
+      updated_at: new Date().toISOString(),
+      ...(map.table !== "huc_leads_cold" ? { region: item.region || "ON" } : {}),
+    }));
+    await fetch(`${SUPABASE_URL}/rest/v1/${map.table}`, {
+      method: "POST",
+      headers: { ...sbHeaders, "Prefer": "resolution=merge-duplicates,return=minimal" },
+      body: JSON.stringify(rows),
+    });
+    return true;
   } catch { return false; }
 }
 
-async function dbDelete(key) {
+// Supabase: delete all rows in a table
+async function sbDelete(key) {
+  const map = SB_TABLE_MAP[key];
+  if (!map) return false;
   try {
-    if (hasArtifactStorage) { await window.storage.delete(key); return true; }
-    if (hasLocalStorage)    { localStorage.removeItem(key); return true; }
-    return false;
+    await fetch(`${SUPABASE_URL}/rest/v1/${map.table}?${map.pk}=neq.null`, {
+      method: "DELETE",
+      headers: sbHeaders,
+    });
+    return true;
   } catch { return false; }
+}
+
+// ─── DB LAYER — Supabase first, localStorage fallback ─────────────────────────
+const hasLocalStorage = (() => {
+  try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); return true; }
+  catch { return false; }
+})();
+const hasArtifactStorage = typeof window !== "undefined" && window.storage && typeof window.storage.get === "function";
+
+// Try Supabase first, fall back to localStorage
+async function dbGet(key) {
+  try {
+    const sbResult = await sbGet(key);
+    if (sbResult !== null) return sbResult;
+  } catch {}
+  // localStorage fallback
+  try {
+    if (hasArtifactStorage) { const r = await window.storage.get(key); return r ? JSON.parse(r.value) : null; }
+    if (hasLocalStorage) { const v = localStorage.getItem(key); return v ? JSON.parse(v) : null; }
+  } catch {}
+  return null;
+}
+
+async function dbSet(key, value) {
+  // Write to both — Supabase for sharing, localStorage for offline
+  let ok = false;
+  try { ok = await sbSet(key, value); } catch {}
+  try {
+    const s = JSON.stringify(value);
+    if (hasArtifactStorage) await window.storage.set(key, s);
+    else if (hasLocalStorage) localStorage.setItem(key, s);
+  } catch {}
+  return ok;
+}
+
+async function dbDelete(key) {
+  try { await sbDelete(key); } catch {}
+  try {
+    if (hasArtifactStorage) await window.storage.delete(key);
+    else if (hasLocalStorage) localStorage.removeItem(key);
+  } catch {}
+  return true;
 }
 
 async function logActivity(action, detail) {
@@ -3503,7 +3615,7 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 17 }}>
-                {hasArtifactStorage ? "Artifact Persistent Storage" : hasLocalStorage ? "Browser localStorage" : "In-Memory (Session Only)"}
+                {hasArtifactStorage ? "Artifact Persistent Storage" : "Supabase + localStorage"}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: dbStatus === "synced" ? C.accent : dbStatus === "local" ? C.blue : C.gold }}>
                 {hasArtifactStorage ? "✅ Data persists across reloads in the artifact player"
@@ -4220,7 +4332,7 @@ export default function App() {
     const timeout = setTimeout(() => {
       if (!cancelled) {
         setIsLoading(false);
-        setDbStatus(hasArtifactStorage || hasLocalStorage ? "synced" : "local");
+        setDbStatus("supabase");
       }
     }, 2000);
 
@@ -4244,7 +4356,7 @@ export default function App() {
         if (savedResLeads)  setResLeads(savedResLeads);
         if (savedColdLeads && savedColdLeads.length > 0) setColdLeads(savedColdLeads);
         if (savedProgress)  setOnboardingProgress(savedProgress);
-        setDbStatus(hasArtifactStorage || hasLocalStorage ? "synced" : "local");
+        setDbStatus("supabase");
       } catch {
         if (!cancelled) setDbStatus("local");
       } finally {
