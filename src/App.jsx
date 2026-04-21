@@ -1607,24 +1607,27 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       if (data.error) {
         setSyncError(data.error + (data.help ? " — " + data.help : ""));
       } else if (data.leads && data.leads.length > 0) {
-        // MERGE: keep everything already in the app, add only new leads from sheet
+        // MERGE: keep local edits, add all sheet leads
         setLeads(prev => {
           const prevMap = Object.fromEntries(prev.map(l => [l.lead_id, l]));
           const merged = data.leads.map(sheetLead => ({
             ...sheetLead,
-            // Preserve any local edits made in the app
-            status: prevMap[sheetLead.lead_id]?.status || sheetLead.status || "New",
-            notes:  prevMap[sheetLead.lead_id]?.notes  || sheetLead.notes  || "",
-            // Preserve upgraded outreach if it exists locally
+            status:          prevMap[sheetLead.lead_id]?.status          || sheetLead.status || "New",
+            notes:           prevMap[sheetLead.lead_id]?.notes           || sheetLead.notes  || "",
             cold_email:      prevMap[sheetLead.lead_id]?.cold_email      || sheetLead.cold_email      || "",
             follow_up_email: prevMap[sheetLead.lead_id]?.follow_up_email || sheetLead.follow_up_email || "",
             linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note   || "",
             call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener     || "",
           }));
-          // Keep any manually-added leads not in the sheet
           const sheetIds = new Set(data.leads.map(l => l.lead_id));
           const manualLeads = prev.filter(l => l.source === "manual" || !sheetIds.has(l.lead_id));
-          return [...manualLeads, ...merged];
+          const final = [...manualLeads, ...merged];
+          // Write to Supabase in batches so all devices get these leads on 15s sync
+          // Batch into groups of 100 to avoid request size limits
+          const batches = [];
+          for (let i = 0; i < final.length; i += 100) batches.push(final.slice(i, i+100));
+          batches.forEach(batch => sbSet("cp:cold_leads", batch).catch(()=>{}));
+          return final;
         });
         setLastSynced(new Date().toLocaleTimeString());
       } else {
@@ -1645,24 +1648,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
     sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
   };
 
-  // Auto-delete incomplete leads — runs on every render cycle change
-  // A lead is incomplete if it has NO company AND NO city AND NO buyer_title
-  // These are junk rows from the Google Sheet (empty rows, header artifacts, etc.)
+  // Auto-delete incomplete leads — only runs when leads array changes
+  // A lead is junk if it has NO company AND NO city AND NO buyer_title AND NO lead_id
   useEffect(() => {
     if (!leads || leads.length === 0) return;
-    const cleaned = leads.filter(l => {
-      // Keep if it has ANY meaningful identifying info
-      return !!(l.company || l.city || l.buyer_title || l.bizName);
-    });
+    const cleaned = leads.filter(l =>
+      !!(l.company?.trim() || l.city?.trim() || l.buyer_title?.trim() || l.lead_id?.trim())
+    );
     if (cleaned.length !== leads.length) {
       setLeads(cleaned);
     }
-  }); // no dependency — runs every render but only updates if count changed
+  }, [leads.length]); // only re-run when count changes — NOT every render
 
-  // Filter leads — also filter out incomplete ones from display
+  // Filter leads — hide truly empty rows but keep leads with lead_id
   const filtered = leads.filter(l => {
-    const hasInfo = !!(l.company || l.city || l.buyer_title);
-    if (!hasInfo) return false; // never show truly empty leads
+    // A lead is valid if it has a lead_id OR any identifying info
+    const isValid = !!(l.lead_id?.trim() || l.company?.trim() || l.city?.trim());
+    if (!isValid) return false;
     return (filterStatus === "All" || l.status === filterStatus) &&
            (filterSeg    === "All" || l.segment === filterSeg) &&
            (filterMkt    === "All" || l.market === filterMkt);
@@ -3628,7 +3630,11 @@ async function sbSet(key, value) {
         };
       });
     if (rows.length === 0) return true;
-    await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows) });
+    // Batch in groups of 50 to avoid Supabase request size limits
+    const BATCH = 50;
+    for (let i = 0; i < rows.length; i += BATCH) {
+      await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows.slice(i, i+BATCH)) });
+    }
     return true;
   } catch { return false; }
 }
@@ -4581,28 +4587,33 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isLoading]);
 
-  // ── Real-time sync — poll Supabase every 15s for shared data changes ──
-  // Keeps all devices in sync: phone, computer, all team members
+  // ── Real-time sync — poll Supabase every 15s ──
+  // IMPORTANT: Only sync FROM Supabase if it has more leads than the app currently shows.
+  // This prevents Supabase's small seed data from wiping leads loaded from Google Sheet.
   useEffect(() => {
     if (isLoading) return;
     const syncFromSupabase = async () => {
       try {
-        // Sync cold leads — critical for sales team, always sync
+        // Cold leads — only update if Supabase has equal or more leads
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
-          setColdLeads(freshCold);
+          setColdLeads(prev => {
+            // Never downgrade — if Supabase has fewer, keep what we have
+            if (freshCold.length < prev.length) return prev;
+            return freshCold;
+          });
         }
-        // Sync jobs
+        // Jobs — always sync (small dataset)
         const freshJobs = await sbGet("cp:jobs");
         if (freshJobs && Array.isArray(freshJobs) && freshJobs.length > 0) {
-          setJobs(freshJobs);
+          setJobs(prev => freshJobs.length >= prev.length ? freshJobs : prev);
         }
-        // Sync residential leads
+        // Residential leads — only upgrade
         const freshRes = await sbGet("cp:leads_res");
         if (freshRes && Array.isArray(freshRes) && freshRes.length > 0) {
-          setResLeads(freshRes);
+          setResLeads(prev => freshRes.length >= prev.length ? freshRes : prev);
         }
-      } catch { /* silent — offline ok */ }
+      } catch { /* silent */ }
     };
     const t = setInterval(syncFromSupabase, 15000);
     return () => clearInterval(t);
