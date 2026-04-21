@@ -1650,25 +1650,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 
   // Auto-delete incomplete leads — only runs when leads array changes
   // A lead is junk if it has NO company AND NO city AND NO buyer_title AND NO lead_id
+  // Auto-delete junk leads — runs whenever leads array changes
+  const prevLeadsRef = React.useRef(null);
   useEffect(() => {
     if (!leads || leads.length === 0) return;
+    // Skip if leads haven't actually changed
+    const key = leads.map(l=>l.lead_id||l.id||"").join(",");
+    if (prevLeadsRef.current === key) return;
+    prevLeadsRef.current = key;
     const cleaned = leads.filter(l => {
       if (!l) return false;
-      const hasCompany = !!(l.company?.trim());
-      const hasCity    = !!(l.city?.trim());
-      const hasId      = !!(l.lead_id?.trim());
-      // Keep lead if: has company name, OR has both city and lead_id (legitimate but incomplete)
-      return hasCompany || (hasCity && hasId);
+      return !!(l.company?.trim()) || !!(l.city?.trim() && l.lead_id?.trim());
     });
     if (cleaned.length !== leads.length) {
-      console.log(`Auto-deleted ${leads.length - cleaned.length} junk leads (no company name)`);
       setLeads(cleaned);
-      // Also delete from Supabase
-      if (cleaned.length < leads.length) {
-        sbSet("cp:cold_leads", cleaned).catch(()=>{});
-      }
+      sbSet("cp:cold_leads", cleaned).catch(()=>{});
     }
-  }, [leads.length]);
+  });
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const filtered = leads.filter(l => {
@@ -2048,26 +2046,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
         </div>
       )}
 
-      {/* Pagination info */}
+      {/* Pagination info — ABOVE list as count indicator only */}
       {filtered.length > PAGE_SIZE && (
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 }}>
-          <div style={{ fontSize:13, color:C.muted }}>
-            Showing {page*PAGE_SIZE+1}–{Math.min((page+1)*PAGE_SIZE, filtered.length)} of {filtered.length} leads
-          </div>
-          <div style={{ display:"flex", gap:6 }}>
-            <button style={{ ...S.btn("ghost"), fontSize:12, padding:"6px 12px" }}
-              disabled={page===0} onClick={() => setPage(p=>p-1)}>← Prev</button>
-            {Array.from({length:totalPages},(_,i)=>i).slice(Math.max(0,page-2),Math.min(totalPages,page+3)).map(p=>(
-              <button key={p} style={{ ...S.btn(p===page?"primary":"ghost"), fontSize:12, padding:"6px 12px" }}
-                onClick={()=>setPage(p)}>{p+1}</button>
-            ))}
-            <button style={{ ...S.btn("ghost"), fontSize:12, padding:"6px 12px" }}
-              disabled={page>=totalPages-1} onClick={() => setPage(p=>p+1)}>Next →</button>
-          </div>
+        <div style={{ fontSize:12, color:C.muted, marginBottom:8, textAlign:"right" }}>
+          Page {page+1} of {totalPages} · {filtered.length} leads
         </div>
       )}
 
-      <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
+      <div id="cold-leads-list" style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {paginated.map(lead => {
           const lid = lead.lead_id || lead.id || String(Math.random());
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
@@ -2125,6 +2111,26 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
           );
         })}
       </div>
+
+      {/* Pagination controls — scrolls to top of list on page change */}
+      {filtered.length > PAGE_SIZE && (
+        <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginTop:16, flexWrap:"wrap" }}>
+          <button style={{ ...S.btn("ghost"), fontSize:13, padding:"8px 16px" }}
+            disabled={page===0}
+            onClick={() => {
+              setPage(p => p-1);
+              setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
+            }}>← Prev</button>
+          <span style={{ fontSize:13, color:C.muted }}>Page {page+1} of {totalPages}</span>
+          <button style={{ ...S.btn(page<totalPages-1?"primary":"ghost"), fontSize:13, padding:"8px 16px" }}
+            disabled={page>=totalPages-1}
+            onClick={() => {
+              setPage(p => p+1);
+              setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
+            }}>Next →</button>
+        </div>
+      )}
+
 
       {/* Manual add modal */}
       {showManual && (
@@ -2585,6 +2591,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [viewLead, setViewLead] = useState(null);
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
+  const [searchQuery, setSearchQuery] = useState("");
   const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status:"New", assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
 
@@ -2718,6 +2725,14 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
 
   const filteredLeads = (filterStatus === "All" ? leads : leads.filter(l=>l.status===filterStatus))
+    .filter(l => {
+      if (!searchQuery.trim()) return true;
+      const q = searchQuery.toLowerCase();
+      return (l.name||"").toLowerCase().includes(q) ||
+             (l.email||"").toLowerCase().includes(q) ||
+             (l.address||"").toLowerCase().includes(q) ||
+             (l.phone||"").toLowerCase().includes(q);
+    })
     .filter(l => l && (l.name || l.email || l.id)) // remove null/empty
     .sort((a,b) => {
       const da = a.createdAt || a.quotedDate || a.bookedDate || "";
@@ -2736,6 +2751,14 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
         </div>
         <button style={S.btn("primary")} onClick={()=>setShowForm(true)}>+ New Lead</button>
       </div>
+
+      {/* Search */}
+      <input
+        style={{ ...S.input, marginBottom:12 }}
+        placeholder="🔍 Search by name, email, address or phone..."
+        value={searchQuery}
+        onChange={e => setSearchQuery(e.target.value)}
+      />
 
       {/* Status pipeline */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
