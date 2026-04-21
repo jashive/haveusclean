@@ -2032,24 +2032,30 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       </div>
 
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
-        {["All", "Ontario", "Arizona"].map(m => (
-          <button key={m} onClick={() => setFilterMkt(m)}
-            style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
-              background: filterMkt===m ? C.accentDim : C.surface,
-              color: filterMkt===m ? C.accent : C.muted,
-              border: `1px solid ${filterMkt===m ? C.accent : C.border}` }}>
-            {m === "Ontario" ? "🇨🇦 Ontario" : m === "Arizona" ? "🇺🇸 Arizona" : "All Markets"}
-          </button>
-        ))}
-        {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => (
-          <button key={seg} onClick={() => setFilterSeg(seg)}
-            style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
-              background: filterSeg===seg ? C.accentDim : C.surface,
-              color: filterSeg===seg ? C.accent : C.muted,
-              border: `1px solid ${filterSeg===seg ? C.accent : C.border}` }}>
-            {SEGMENT_META[seg]?.icon || "📋"} {seg}
-          </button>
-        ))}
+        {["All", "Ontario", "Arizona"].map(m => {
+          const count = m === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.market===m && l?.company?.trim()).length;
+          return (
+            <button key={m} onClick={() => setFilterMkt(m)}
+              style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
+                background: filterMkt===m ? C.accentDim : C.surface,
+                color: filterMkt===m ? C.accent : C.muted,
+                border: `1px solid ${filterMkt===m ? C.accent : C.border}` }}>
+              {m === "Ontario" ? "🇨🇦 Ontario" : m === "Arizona" ? "🇺🇸 Arizona" : "All Markets"} ({count})
+            </button>
+          );
+        })}
+        {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => {
+          const count = seg === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.segment===seg && l?.company?.trim()).length;
+          return (
+            <button key={seg} onClick={() => setFilterSeg(seg)}
+              style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
+                background: filterSeg===seg ? C.accentDim : C.surface,
+                color: filterSeg===seg ? C.accent : C.muted,
+                border: `1px solid ${filterSeg===seg ? C.accent : C.border}` }}>
+              {SEGMENT_META[seg]?.icon || "📋"} {seg} ({count})
+            </button>
+          );
+        })}
       </div>
 
       {/* Lead cards */}
@@ -2777,7 +2783,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     }
   })();
 
-  const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>l.status===s).length }), {});
+  const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>l?.status===s).length }), {});
 
   return (
     <div>
@@ -4666,26 +4672,29 @@ export default function App() {
     if (isLoading) return;
     const syncFromSupabase = async () => {
       try {
-        // ── Cold leads: smart merge — preserve local status/notes, never downgrade ──
+        // ── Cold leads: filter junk BEFORE setting state ──────────────────
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
+          const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
+          const cleanCold = freshCold.filter(l => {
+            if (!l?.company?.trim()) return false;       // no company = junk
+            if (JUNK.test(l.company)) return false;      // placeholder company = junk
+            return true;
+          });
           setColdLeads(prev => {
             const localMap = Object.fromEntries(
               (prev||[]).map(l => [l.lead_id||l.id||"", l])
             );
-            // Use Supabase data but preserve local status/notes edits
-            const merged = freshCold.map(l => ({
+            const merged = cleanCold.map(l => ({
               ...l,
               status: localMap[l.lead_id||l.id]?.status || l.status || "New",
               notes:  localMap[l.lead_id||l.id]?.notes  || l.notes  || "",
             }));
-            // Keep manual leads not in Supabase
-            const sbIds = new Set(freshCold.map(l => l.lead_id||l.id||""));
+            const sbIds = new Set(cleanCold.map(l => l.lead_id||l.id||""));
             const manualOnly = (prev||[]).filter(l =>
               (l.source === "manual") && !sbIds.has(l.lead_id||l.id||"")
             );
             const final = [...manualOnly, ...merged];
-            // If Supabase has far fewer than local, keep local (sync hasn't propagated yet)
             return final.length >= (prev||[]).length * 0.8 ? final : prev;
           });
         }
