@@ -479,11 +479,13 @@ function StatCard({ label, value, sub, color, icon }) {
 
 function Modal({ title, children, onClose, wide }) {
   return (
-    <div style={{ position:"fixed", inset:0, background:"#000B", zIndex:999, display:"flex", alignItems:"center", justifyContent:"center", padding:16 }}>
-      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:18, padding:26, width:"100%", maxWidth:wide?680:520, maxHeight:"92vh", overflowY:"auto", position:"relative" }}>
-        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18 }}>
-          <div style={{ fontSize:17, fontWeight:800 }}>{title}</div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, fontSize:22, cursor:"pointer", lineHeight:1, padding:"0 4px" }}>×</button>
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:999, display:"flex", alignItems:"flex-start", justifyContent:"center", overflowY:"auto", padding:"16px 12px" }}
+      onClick={e => { if(e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 18px", width:"100%", maxWidth: wide ? 720 : 520, margin:"auto", boxSizing:"border-box", flexShrink:0 }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <div style={{ fontSize:16, fontWeight:800, paddingRight:12 }}>{title}</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, fontSize:24, cursor:"pointer", padding:"0 4px", lineHeight:1, flexShrink:0 }}>×</button>
         </div>
         {children}
       </div>
@@ -2063,54 +2065,52 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
           const isDeleting = confirmDelete === lid;
           return (
-            <div key={lid} style={{ ...S.card, borderLeft:`3px solid ${seg.color}`, padding:0, overflow:"hidden" }}>
-              {/* Main row — two separate click zones */}
-              <div style={{ display:"flex", alignItems:"stretch" }}>
+            <div key={lid} style={{ ...S.card, padding:0, overflow:"hidden", borderLeft:`3px solid ${seg.color}`, display:"flex", alignItems:"stretch" }}>
 
-                {/* LEFT: info area — tapping opens detail */}
-                <div style={{ flex:1, padding:"14px 14px 14px 16px", cursor:"pointer" }}
-                  onClick={() => { if(!isDeleting){ setViewLead(lead); setUpgradedContent(null); setConfirmDelete(null); } }}>
-                  <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
-                    <div style={{ width:36, height:36, borderRadius:9, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{seg.icon}</div>
-                    <div style={{ flex:1, minWidth:0 }}>
-                      <div style={{ fontWeight:800, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
-                        {lead.company || <span style={{ color:C.red }}>⚠️ No company name</span>}
-                      </div>
-                      <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
-                        📍 {lead.city || "—"} · 👤 {lead.buyer_title || "—"}
-                      </div>
-                      <div style={{ display:"flex", gap:5, marginTop:6, flexWrap:"wrap" }}>
-                        <span style={{ padding:"2px 8px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status || "New"}</span>
-                        <PriorityBadge score={lead.priority_score} />
-                        {hasOutreach && <span style={S.badge("green")}>✉️ Ready</span>}
-                        {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦</span> : <span style={S.badge("gold")}>🇺🇸</span>}
-                      </div>
+              {/* LEFT — tap to open detail */}
+              <div
+                style={{ flex:1, padding:"13px 14px", cursor:"pointer", minWidth:0 }}
+                onClick={() => { if(!isDeleting){ setViewLead(lead); setUpgradedContent(null); setConfirmDelete(null); } }}
+              >
+                <div style={{ display:"flex", gap:10, alignItems:"center" }}>
+                  <div style={{ width:34, height:34, borderRadius:8, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>{seg.icon}</div>
+                  <div style={{ minWidth:0 }}>
+                    <div style={{ fontWeight:700, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:lead.company?C.text:C.red }}>
+                      {lead.company || "⚠️ No company name"}
+                    </div>
+                    <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+                      {lead.city || "—"} · {lead.segment || "—"}
+                    </div>
+                    <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
+                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status||"New"}</span>
+                      {hasOutreach && <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.accentDim, color:C.accent }}>✉️</span>}
+                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.surface, color:C.muted }}>{lead.market==="Ontario"?"🇨🇦":"🇺🇸"}</span>
                     </div>
                   </div>
                 </div>
-
-                {/* RIGHT: delete zone — completely separate from info click */}
-                <div style={{ display:"flex", flexDirection:"column", justifyContent:"center", alignItems:"center", padding:"0 12px", borderLeft:`1px solid ${C.border}`, minWidth:64, background:isDeleting ? `${C.red}11` : "transparent" }}>
-                  {isDeleting ? (
-                    <div style={{ display:"flex", flexDirection:"column", gap:5, alignItems:"center" }}>
-                      <button style={{ background:C.red, border:"none", borderRadius:7, padding:"6px 10px", fontSize:11, color:"#fff", fontWeight:800, cursor:"pointer", width:"100%" }}
-                        onClick={() => { deleteLead(lid); setConfirmDelete(null); }}>
-                        Delete
-                      </button>
-                      <button style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"4px 10px", fontSize:10, color:C.muted, cursor:"pointer", width:"100%" }}
-                        onClick={() => setConfirmDelete(null)}>
-                        Cancel
-                      </button>
-                    </div>
-                  ) : (
-                    <button style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.dim, padding:8, lineHeight:1 }}
-                      onClick={() => setConfirmDelete(lid)}>
-                      🗑
-                    </button>
-                  )}
-                </div>
-
               </div>
+
+              {/* RIGHT — delete only, completely isolated */}
+              <div style={{ width:56, borderLeft:`1px solid ${C.border}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, padding:"8px 0", background: isDeleting ? `${C.red}11` : "transparent", flexShrink:0 }}>
+                {isDeleting ? (
+                  <>
+                    <button
+                      style={{ background:C.red, border:"none", borderRadius:6, padding:"5px 8px", fontSize:11, color:"#fff", fontWeight:800, cursor:"pointer", width:44 }}
+                      onClick={() => { deleteLead(lid); setConfirmDelete(null); }}
+                    >Del</button>
+                    <button
+                      style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:6, padding:"4px 8px", fontSize:10, color:C.muted, cursor:"pointer", width:44 }}
+                      onClick={() => setConfirmDelete(null)}
+                    >No</button>
+                  </>
+                ) : (
+                  <button
+                    style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.dim, padding:"8px 0", lineHeight:1 }}
+                    onClick={() => setConfirmDelete(lid)}
+                  >🗑</button>
+                )}
+              </div>
+
             </div>
           );
         })}
