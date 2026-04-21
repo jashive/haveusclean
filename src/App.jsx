@@ -1652,13 +1652,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   // A lead is junk if it has NO company AND NO city AND NO buyer_title AND NO lead_id
   useEffect(() => {
     if (!leads || leads.length === 0) return;
-    const cleaned = leads.filter(l =>
-      !!(l.company?.trim() || l.city?.trim() || l.buyer_title?.trim() || l.lead_id?.trim())
-    );
+    const cleaned = leads.filter(l => {
+      if (!l) return false;
+      const hasCompany = !!(l.company?.trim());
+      const hasCity    = !!(l.city?.trim());
+      const hasId      = !!(l.lead_id?.trim());
+      // Keep lead if: has company name, OR has both city and lead_id (legitimate but incomplete)
+      return hasCompany || (hasCity && hasId);
+    });
     if (cleaned.length !== leads.length) {
+      console.log(`Auto-deleted ${leads.length - cleaned.length} junk leads (no company name)`);
       setLeads(cleaned);
+      // Also delete from Supabase
+      if (cleaned.length < leads.length) {
+        sbSet("cp:cold_leads", cleaned).catch(()=>{});
+      }
     }
-  }, [leads.length]); // only re-run when count changes — NOT every render
+  }, [leads.length]);
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const filtered = leads.filter(l => {
@@ -2707,7 +2717,13 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const dwellingOptions = Object.keys(HUC_PRICING_GRID);
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
 
-  const filteredLeads = filterStatus === "All" ? leads : leads.filter(l=>l.status===filterStatus);
+  const filteredLeads = (filterStatus === "All" ? leads : leads.filter(l=>l.status===filterStatus))
+    .filter(l => l && (l.name || l.email || l.id)) // remove null/empty
+    .sort((a,b) => {
+      const da = a.createdAt || a.quotedDate || a.bookedDate || "";
+      const db = b.createdAt || b.quotedDate || b.bookedDate || "";
+      return db.localeCompare(da); // newest first
+    });
 
   const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>l.status===s).length }), {});
 
@@ -4589,26 +4605,67 @@ export default function App() {
     if (isLoading) return;
     const syncFromSupabase = async () => {
       try {
-        // Cold leads — only update if Supabase has equal or more leads
+        // ── Cold leads: smart merge — preserve local status/notes, never downgrade ──
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
           setColdLeads(prev => {
-            // Never downgrade — if Supabase has fewer, keep what we have
-            if (freshCold.length < prev.length) return prev;
-            return freshCold;
+            const localMap = Object.fromEntries(
+              (prev||[]).map(l => [l.lead_id||l.id||"", l])
+            );
+            // Use Supabase data but preserve local status/notes edits
+            const merged = freshCold.map(l => ({
+              ...l,
+              status: localMap[l.lead_id||l.id]?.status || l.status || "New",
+              notes:  localMap[l.lead_id||l.id]?.notes  || l.notes  || "",
+            }));
+            // Keep manual leads not in Supabase
+            const sbIds = new Set(freshCold.map(l => l.lead_id||l.id||""));
+            const manualOnly = (prev||[]).filter(l =>
+              (l.source === "manual") && !sbIds.has(l.lead_id||l.id||"")
+            );
+            const final = [...manualOnly, ...merged];
+            // If Supabase has far fewer than local, keep local (sync hasn't propagated yet)
+            return final.length >= (prev||[]).length * 0.8 ? final : prev;
           });
         }
-        // Jobs — always sync (small dataset)
+
+        // ── Jobs: merge by id, never lose local jobs ──
         const freshJobs = await sbGet("cp:jobs");
         if (freshJobs && Array.isArray(freshJobs) && freshJobs.length > 0) {
-          setJobs(prev => freshJobs.length >= prev.length ? freshJobs : prev);
+          setJobs(prev => {
+            const sbIds = new Set(freshJobs.map(j => String(j.id||"")));
+            const localOnly = (prev||[]).filter(j => !sbIds.has(String(j.id||"")));
+            const merged = [...freshJobs, ...localOnly];
+            // Deduplicate
+            const seen = new Set();
+            return merged.filter(j => {
+              const k = String(j.id||"");
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+          });
         }
-        // Residential leads — only upgrade
+
+        // ── Residential leads: merge + deduplicate ──
         const freshRes = await sbGet("cp:leads_res");
         if (freshRes && Array.isArray(freshRes) && freshRes.length > 0) {
-          setResLeads(prev => freshRes.length >= prev.length ? freshRes : prev);
+          setResLeads(prev => {
+            const sbIds = new Set(freshRes.map(l => String(l.id||l.email||"")));
+            const localOnly = (prev||[]).filter(l =>
+              !sbIds.has(String(l.id||l.email||"")) && l.source === "VA Quote Agent"
+            );
+            const merged = [...freshRes, ...localOnly];
+            const seen = new Set();
+            return merged.filter(l => {
+              const k = String(l.id||l.email||Math.random());
+              if (seen.has(k)) return false;
+              seen.add(k);
+              return true;
+            });
+          });
         }
-      } catch { /* silent */ }
+      } catch { /* silent — offline ok */ }
     };
     const t = setInterval(syncFromSupabase, 15000);
     return () => clearInterval(t);
