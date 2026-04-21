@@ -2737,42 +2737,62 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {filteredLeads.map(lead => {
-          const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
+          if (!lead || (!lead.id && !lead.name && !lead.email)) return null;
+          let q;
+          try {
+            q = calcResQuote({
+              ...lead,
+              dwellingType: lead.dwellingType || "Apartment / Condo",
+              dwellingSize: lead.dwellingSize || "2 Bed",
+              serviceType:  lead.serviceType  || "Refresh Clean",
+              frequency:    lead.frequency    || "One-Time",
+              beds:   lead.beds  || 2,
+              baths:  lead.baths || 1,
+              sqft:   lead.sqft  || 900,
+              addons: lead.addons || [],
+            }, region);
+          } catch(e) {
+            q = { total:0, profit:0, margin:0, teamSize:1, currency: region?.currencySymbol || "CA$" };
+          }
           const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
+          const key = lead.id ? String(lead.id) : `${lead.email||""}${lead.name||""}${lead.createdAt||Math.random()}`;
           return (
-            <div key={lead.id} style={{ ...S.card, borderLeft:`4px solid ${statusColor}` }}>
+            <div key={key} style={{ ...S.card, borderLeft:`4px solid ${statusColor}` }}>
               <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
-                <div>
-                  <div style={{ fontWeight:800, fontSize:16 }}>{lead.name}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>📍 {lead.address}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>📧 {lead.email} · 📞 {lead.phone}</div>
-                  <div style={{ fontSize:13, marginTop:4 }}>
-                    {lead.dwellingType} — {lead.dwellingSize} · 🛏 {lead.beds}bd / 🚿 {lead.baths}ba · 📐 {lead.sqft} sqft
+                <div style={{ flex:1, minWidth:0 }}>
+                  <div style={{ fontWeight:800, fontSize:16 }}>{lead.name || <span style={{color:C.muted}}>Unnamed Lead</span>}</div>
+                  {lead.address  && <div style={{ fontSize:13, color:C.muted }}>📍 {lead.address}</div>}
+                  {lead.email    && <div style={{ fontSize:13, color:C.muted }}>📧 {lead.email}{lead.phone ? ` · 📞 ${lead.phone}` : ""}</div>}
+                  <div style={{ fontSize:13, marginTop:4, color:C.muted }}>
+                    {[lead.dwellingType, lead.dwellingSize, lead.serviceType, lead.frequency].filter(Boolean).join(" · ")}
                   </div>
-                  <div style={{ fontSize:13 }}>{HUC_PACKAGES[lead.serviceType]?.icon} {lead.serviceType} · {lead.frequency}</div>
-                  <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
-                    {lead.addons?.map(id=>{ const ao=RES_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("gold")}>{ao.icon} {ao.label}</span>:null; })}
-                  </div>
+                  {(lead.addons||[]).length > 0 && (
+                    <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
+                      {(lead.addons||[]).map(id=>{ const ao=RES_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("gold")}>{ao.label}</span>:null; })}
+                    </div>
+                  )}
+                  {lead.source === "VA Quote Agent" && (
+                    <div style={{ fontSize:11, color:C.purple, marginTop:4 }}>🤖 From VA Agent</div>
+                  )}
                 </div>
-                <div style={{ textAlign:"right" }}>
-                  {/* Status dropdown */}
-                  <select value={lead.status} onChange={e=>updateLeadField(lead.id,"status",e.target.value)} style={{ ...S.select, width:"auto", fontSize:12, padding:"4px 10px", marginBottom:6, color:statusColor, fontWeight:700, background:`${statusColor}11`, border:`1px solid ${statusColor}44` }}>
+                <div style={{ textAlign:"right", flexShrink:0 }}>
+                  <select value={lead.status || "New"} onChange={e=>updateLeadField(lead.id || key,"status",e.target.value)}
+                    style={{ ...S.select, width:"auto", fontSize:12, padding:"4px 10px", marginBottom:6, color:statusColor, fontWeight:700, background:`${statusColor}11`, border:`1px solid ${statusColor}44` }}>
                     {HUC_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
                   </select>
-                  <div style={{ fontWeight:800, fontSize:22, color:C.accent }}>{fmt(q.total, region)}</div>
-                  <div style={{ fontSize:11, color:C.gold }}>Profit: {fmt(q.profit, region)} · {q.margin}%</div>
-                  {q.gridNote && <div style={{ fontSize:10, color:C.dim, maxWidth:160 }}>{q.gridNote}</div>}
+                  {q.total > 0 && <div style={{ fontWeight:800, fontSize:22, color:C.accent }}>{fmt(q.total, region)}</div>}
+                  {q.profit > 0 && <div style={{ fontSize:11, color:C.gold }}>Profit: {fmt(q.profit, region)} · {q.margin}%</div>}
                 </div>
               </div>
-              {lead.jobNotes && <div style={{ marginTop:8, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"6px 10px" }}>📝 {lead.jobNotes}</div>}
+              {lead.notes && <div style={{ marginTop:8, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"6px 10px" }}>📝 {lead.notes}</div>}
               {lead.followUpDate && <div style={{ fontSize:12, color:"#FF6B6B", marginTop:4 }}>📅 Follow up: {lead.followUpDate}</div>}
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
-                <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View Quote</button>
-                {lead.status==="New" && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Send Quote</button>}
+                <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
+                {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
-                {lead.status==="Booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Confirm Payment</button>}
-                {lead.status==="Completed" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Complete!</span>}
+                {lead.status==="Booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Pay</button>}
+                {lead.status==="Completed" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Done</span>}
               </div>
             </div>
           );
