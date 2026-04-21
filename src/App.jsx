@@ -2583,8 +2583,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   // Build the full quote email
   const buildEmail = (lead, q) => {
     const pkg = HUC_PACKAGES[lead.serviceType];
-    const addonList = lead.addons.map(id => RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
-    const addonPrices = lead.addons.map(id => {
+    const addonList = lead.addons?.map(id => RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
+    const addonPrices = lead.addons?.map(id => {
       const ao = RES_ADDONS.find(x=>x.id===id);
       return ao ? `- ${ao.label}: CA$${ao.priceRange[0]}–$${ao.priceRange[1]}` : null;
     }).filter(Boolean);
@@ -2665,7 +2665,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       partnerIds: [assignedPartner?.id || 1],
       status: "scheduled",
       hours: Math.ceil(q.serviceHours),
-      upsells: lead.addons.map(id => RES_ADDONS.find(x => x.id === id)?.label).filter(Boolean),
+      upsells: lead.addons?.map(id => RES_ADDONS.find(x => x.id === id)?.label).filter(Boolean),
       beforePics: [], afterPics: [], summary: "",
       clientPrice: Math.round(q.total),
       partnerPay: q.partnerPay,
@@ -2704,7 +2704,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     setForm(emptyForm);
   };
 
-  const toggleAddon = (id) => setForm(f=>({...f,addons:f.addons.includes(id)?f.addons.filter(x=>x!==id):[...f.addons,id]}));
+  const toggleAddon = (id) => setForm(f=>({...f,addons:(f.addons||[]).includes(id)?(f.addons||[]).filter(x=>x!==id):[...f.addons,id]}));
 
   const dwellingOptions = Object.keys(HUC_PRICING_GRID);
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
@@ -2753,7 +2753,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
                   </div>
                   <div style={{ fontSize:13 }}>{HUC_PACKAGES[lead.serviceType]?.icon} {lead.serviceType} · {lead.frequency}</div>
                   <div style={{ display:"flex", gap:6, flexWrap:"wrap", marginTop:6 }}>
-                    {lead.addons.map(id=>{ const ao=RES_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("gold")}>{ao.icon} {ao.label}</span>:null; })}
+                    {lead.addons?.map(id=>{ const ao=RES_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("gold")}>{ao.icon} {ao.label}</span>:null; })}
                   </div>
                 </div>
                 <div style={{ textAlign:"right" }}>
@@ -2837,7 +2837,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             <div><div style={S.label}>Add-Ons</div>
               <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                 {RES_ADDONS.map(ao=>(
-                  <button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:form.addons.includes(ao.id)?C.accentDim:C.surface, color:form.addons.includes(ao.id)?C.accent:C.muted, border:`1px solid ${form.addons.includes(ao.id)?C.accent:C.border}` }}>
+                  <button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:(form.addons||[]).includes(ao.id)?C.accentDim:C.surface, color:(form.addons||[]).includes(ao.id)?C.accent:C.muted, border:`1px solid ${(form.addons||[]).includes(ao.id)?C.accent:C.border}` }}>
                     {ao.icon} {ao.label} (CA${ao.priceRange[0]}–${ao.priceRange[1]})
                   </button>
                 ))}
@@ -2992,7 +2992,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   const sendQuote = (lead) => {
     const q = calcComQuote(lead, region);
     const pkg = lead.serviceType;
-    const addonList = lead.addons.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
+    const addonList = lead.addons?.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
     const cur = region.id === "ON" ? "CA$" : "$";
     const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
     const subject = `Commercial Cleaning Proposal — ${BRAND.businessName}`;
@@ -3031,7 +3031,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   };
   const bookLead = (lead) => {
     const q = calcComQuote(lead, region);
-    const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, partnerIds:[partners[0]?.id||1], status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
+    const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, partnerIds:[partners[0]?.id||1], status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons?.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
     setJobs(js=>[...js,newJob]);
     setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"booked",workOrder:newJob.id}:l));
     if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"booked"});
@@ -3046,7 +3046,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
     setShowForm(false);
     setForm({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
   };
-  const toggleAddon = (id) => setForm(f=>({...f,addons:f.addons.includes(id)?f.addons.filter(x=>x!==id):[...f.addons,id]}));
+  const toggleAddon = (id) => setForm(f=>({...f,addons:(f.addons||[]).includes(id)?(f.addons||[]).filter(x=>x!==id):[...f.addons,id]}));
 
   return (
     <div>
@@ -3078,7 +3078,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
                   <div style={{ fontSize:12, color:C.muted }}>${q.monthly.toFixed(0)}/mo · ${q.contract.toFixed(0)} contract</div>
                 </div>
               </div>
-              {lead.addons.length>0 && <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>{lead.addons.map(id=>{ const ao=COM_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("blue")}>{ao.label}</span>:null; })}</div>}
+              {(lead.addons||[]).length>0 && <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>{lead.addons?.map(id=>{ const ao=COM_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("blue")}>{ao.label}</span>:null; })}</div>}
               {lead.notes && <div style={{ marginTop:10, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px" }}>💬 {lead.notes}</div>}
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View Proposal</button>
@@ -3111,7 +3111,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               <div><div style={S.label}>Service</div><select style={S.select} value={form.serviceType} onChange={e=>setForm({...form,serviceType:e.target.value})}>{Object.keys(COM_SERVICE_COST_PER_SQFT).map(t=><option key={t}>{t}</option>)}</select></div>
             </div>
             <div><div style={S.label}>Frequency</div><select style={S.select} value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>{Object.keys(COM_FREQ_DISCOUNTS).map(f=><option key={f}>{f}</option>)}</select></div>
-            <div><div style={S.label}>Add-Ons</div><div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>{COM_ADDONS.map(ao=>(<button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:form.addons.includes(ao.id)?C.blueDim:C.surface, color:form.addons.includes(ao.id)?C.blue:C.muted, border:`1px solid ${form.addons.includes(ao.id)?C.blue:C.border}` }}>{ao.label} +${markupFactor(ao.costToUs)}</button>))}</div></div>
+            <div><div style={S.label}>Add-Ons</div><div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>{COM_ADDONS.map(ao=>(<button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:(form.addons||[]).includes(ao.id)?C.blueDim:C.surface, color:(form.addons||[]).includes(ao.id)?C.blue:C.muted, border:`1px solid ${(form.addons||[]).includes(ao.id)?C.blue:C.border}` }}>{ao.label} +${markupFactor(ao.costToUs)}</button>))}</div></div>
             {form.bizName && (() => { const q=calcComQuote(form, region); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
@@ -3993,7 +3993,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
                     {job.upsells?.length > 0 && (
                       <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
                         <div style={{ fontSize:12, fontWeight:700, color:C.gold, marginBottom:4 }}>⭐ YOUR ADD-ONS</div>
-                        {job.upsells.map((addon, i) => (
+                        {(job.upsells||[]).map((addon, i) => (
                           <div key={i} style={{ fontSize:13, color:C.gold, display:"flex", gap:8 }}>
                             <span>★</span><span>{addon}</span>
                           </div>
@@ -4007,7 +4007,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
                     <div style={{ marginBottom:10 }}>
                       <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>📷 COMPLETED PHOTOS</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                        {job.afterPics.filter(p=>p?.startsWith("data:")).map((p,i) => (
+                        {(job.afterPics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
                           <img key={i} src={p} alt="after" style={{ width:70, height:70, borderRadius:8, objectFit:"cover" }} />
                         ))}
                       </div>
@@ -4286,7 +4286,7 @@ function PartnerView({ jobs, partners, region }) {
                         <span style={{ color:C.muted }}>☐</span><span>{task}</span>
                       </div>
                     ))}
-                    {job.upsells?.length > 0 && job.upsells.map((addon, i) => (
+                    {job.upsells?.length > 0 && (job.upsells||[]).map((addon, i) => (
                       <div key={`addon-${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center", border:`1px solid #FFB80033` }}>
                         <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
                       </div>
@@ -4892,7 +4892,7 @@ export default function App() {
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
-        {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" />}
+        {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
         {tab==="agent_workorder"&& <AgentPanel agent="WorkOrder_Agent" />}
         {tab==="agent_social"   && <AgentPanel agent="Social_Content_Agent" />}
@@ -5100,18 +5100,20 @@ Be direct and action-oriented. No fluff. Max 300 words.`,
 };
 
 // ─── AGENT PANEL COMPONENT ────────────────────────────────────────────────────
-function AgentPanel({ agent }) {
+function AgentPanel({ agent, setResLeads, region }) {
   const cfg = HUC_AGENTS[agent];
   const [input, setInput] = useState("");
   const [output, setOutput] = useState("");
   const [loading, setLoading] = useState(false);
   const [history, setHistory] = useState([]);
   const [copied, setCopied] = useState(false);
+  const [savedLead, setSavedLead] = useState(false);
 
   const run = async () => {
     if (!input.trim()) return;
     setLoading(true);
     setOutput("");
+    setSavedLead(false);
     const userMsg = input;
     try {
       const res = await fetch("/api/claude", {
@@ -5141,6 +5143,90 @@ function AgentPanel({ agent }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Parse VA Quote output and save as a residential lead
+  const saveAsLead = () => {
+    if (!output || !setResLeads) return;
+
+    // Extract key details from the agent's text output
+    const txt = output.toLowerCase();
+    const raw = input;
+
+    // Parse numbers from output
+    const preTaxMatch = output.match(/pre[\s-]*tax[:\s]+\$?([\d,]+)/i) || output.match(/\$([\d,]+)\s*pre-tax/i);
+    const totalMatch  = output.match(/total[:\s]+[A-Z$]*([\d,]+)/i) || output.match(/\$([\d,]+)\s*(?:CAD|USD|total)/i);
+    const hoursMatch  = output.match(/([\d.]+)\s*h(?:ours?)?/i);
+    const teamMatch   = output.match(/(\d)\s*partner/i);
+
+    // Infer fields from input text
+    const bedsMatch   = raw.match(/(\d)\s*(?:br|bed)/i);
+    const sqftMatch   = raw.match(/([\d,]+)\s*sqft/i);
+    const isAZ = /arizona|scottsdale|phoenix|tempe|mesa|chandler|gilbert/i.test(raw);
+
+    const pkgMap = {
+      "refresh":    "Refresh Clean",
+      "full home":  "Full Home Clean",
+      "deep":       "Deep Clean",
+      "move":       "Move-In / Move-Out",
+      "kitchen":    "Kitchen & Bathroom Refresh",
+      "pre-sale":   "Pre-Sale Clean",
+      "post-reno":  "Post-Renovation Clean",
+    };
+    let serviceType = "Refresh Clean";
+    for (const [k, v] of Object.entries(pkgMap)) {
+      if (raw.toLowerCase().includes(k)) { serviceType = v; break; }
+    }
+
+    const freqMap = { "weekly": "Weekly", "bi-weekly": "Bi-Weekly", "monthly": "Monthly" };
+    let frequency = "One-Time";
+    for (const [k,v] of Object.entries(freqMap)) {
+      if (raw.toLowerCase().includes(k)) { frequency = v; break; }
+    }
+
+    const preTax    = preTaxMatch ? parseInt(preTaxMatch[1].replace(/,/g,'')) : 0;
+    const total     = totalMatch  ? parseInt(totalMatch[1].replace(/,/g,''))  : 0;
+    const teamSize  = teamMatch   ? parseInt(teamMatch[1]) : 1;
+    const hours     = hoursMatch  ? parseFloat(hoursMatch[1]) : 1.5;
+    const partnerPay = Math.round(preTax * 0.65);
+    const profit     = Math.round(preTax * 0.35);
+
+    const newLead = {
+      id:            Date.now(),
+      name:          "",
+      email:         "",
+      phone:         "",
+      address:       "",
+      region:        isAZ ? "AZ" : "ON",
+      dwellingType:  /condo|apartment/i.test(raw) ? "Apartment / Condo"
+                   : /semi|town/i.test(raw) ? "Semi / Townhouse"
+                   : "Detached House",
+      dwellingSize:  bedsMatch ? (bedsMatch[1]==="1"?"1 Bed":bedsMatch[1]==="2"?"2 Bed":"3 Bed") : "2 Bed",
+      beds:          bedsMatch ? parseInt(bedsMatch[1]) : 2,
+      baths:         1,
+      sqft:          sqftMatch ? parseInt(sqftMatch[1].replace(/,/g,'')) : 900,
+      serviceType,
+      frequency,
+      addons:        [],
+      notes:         `VA Quote Agent result:\n${output.slice(0, 500)}`,
+      status:        "Quoted",
+      source:        "VA Quote Agent",
+      quotedDate:    new Date().toLocaleDateString(),
+      quotedPrice:   preTax || total,
+      clientPrice:   total || preTax,
+      partnerPay,
+      profit,
+      teamSize,
+      hours,
+      condition:     /heavy/i.test(raw) ? "Heavy" : /light/i.test(raw) ? "Light" : "Average",
+      workOrder:     null,
+      paymentConfirmed: false,
+      bookedDate:    "",
+      createdAt:     new Date().toISOString(),
+    };
+
+    setResLeads(ls => [newLead, ...(ls||[])]);
+    setSavedLead(true);
+  };
+
   return (
     <div>
       {/* Header */}
@@ -5153,7 +5239,7 @@ function AgentPanel({ agent }) {
         <div style={{ marginLeft:"auto", padding:"4px 12px", borderRadius:20, background:`${cfg.color}22`, color:cfg.color, fontSize:11, fontWeight:700, border:`1px solid ${cfg.color}44` }}>HUC AI Agent</div>
       </div>
 
-      {/* What this agent produces */}
+      {/* Output sections */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:20 }}>
         {cfg.outputSections.map(s => (
           <span key={s} style={{ padding:"4px 12px", borderRadius:20, background:C.surface, color:C.muted, fontSize:11, fontWeight:600, border:`1px solid ${C.border}` }}>📤 {s}</span>
@@ -5184,13 +5270,25 @@ function AgentPanel({ agent }) {
       {/* Output */}
       {(loading || output) && (
         <div style={{ ...S.card, marginBottom:16, borderLeft:`4px solid ${cfg.color}` }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
             <div style={{ fontWeight:700, fontSize:14, color:cfg.color }}>{cfg.icon} Agent Response</div>
-            {output && (
-              <button style={S.btn("ghost")} onClick={copy}>
-                {copied ? "✅ Copied!" : "📋 Copy"}
-              </button>
-            )}
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              {output && (
+                <button style={S.btn("ghost")} onClick={copy}>
+                  {copied ? "✅ Copied!" : "📋 Copy"}
+                </button>
+              )}
+              {/* VA Quote Agent only — Save as Lead button */}
+              {output && agent === "VA_Quote_Agent" && setResLeads && (
+                <button
+                  style={{ ...S.btn(savedLead ? "ghost" : "primary"), fontSize:13 }}
+                  onClick={saveAsLead}
+                  disabled={savedLead}
+                >
+                  {savedLead ? "✅ Saved to Leads!" : "➕ Save as Lead"}
+                </button>
+              )}
+            </div>
           </div>
           {loading ? (
             <div style={{ display:"flex", gap:8, alignItems:"center", color:C.muted, fontSize:13 }}>
@@ -5201,6 +5299,11 @@ function AgentPanel({ agent }) {
           ) : (
             <div style={{ fontSize:13, color:C.text, lineHeight:1.8, whiteSpace:"pre-wrap" }}>{output}</div>
           )}
+          {savedLead && (
+            <div style={{ marginTop:12, padding:"10px 14px", background:C.accentDim, borderRadius:9, fontSize:13, color:C.accent, fontWeight:600 }}>
+              ✅ Lead saved to 🏠 Residential Leads with "Quoted" status. Go there to add client name, email, and book the job.
+            </div>
+          )}
         </div>
       )}
 
@@ -5209,7 +5312,7 @@ function AgentPanel({ agent }) {
         <div style={S.card}>
           <div style={{ fontWeight:700, fontSize:13, marginBottom:10, color:C.muted }}>📋 Recent Runs (this session)</div>
           {history.map((h, i) => (
-            <div key={i} style={{ borderBottom:`1px solid ${C.border}`, padding:"10px 0", cursor:"pointer" }} onClick={() => { setInput(h.input); setOutput(h.output); }}>
+            <div key={i} style={{ borderBottom:`1px solid ${C.border}`, padding:"10px 0", cursor:"pointer" }} onClick={() => { setInput(h.input); setOutput(h.output); setSavedLead(false); }}>
               <div style={{ fontSize:11, color:C.dim, marginBottom:4 }}>{h.ts}</div>
               <div style={{ fontSize:12, color:C.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.input}</div>
             </div>
@@ -5726,15 +5829,15 @@ function Jobs({ jobs, setJobs, partners }) {
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                   <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
                   <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.pay}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {job.upsells.length} upsells</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {(job.upsells||[]).length} upsells</div>
                 </div>
               </div>
 
-              {job.upsells.length > 0 && (
+              {(job.upsells||[]).length > 0 && (
                 <div style={{ marginTop: 12 }}>
                   <div style={styles.label}>Upsells</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {job.upsells.map(u => <span key={u} style={styles.badge("gold")}>{u}</span>)}
+                    {(job.upsells||[]).map(u => <span key={u} style={styles.badge("gold")}>{u}</span>)}
                   </div>
                 </div>
               )}
@@ -7829,7 +7932,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
                   <div>
                     <div style={{ fontWeight:700, fontSize:14 }}>{lead.serviceType}</div>
                     <div style={{ fontSize:12, color:C.muted }}>{lead.dwellingType} · {lead.frequency} · {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ""}</div>
-                    {lead.addons?.length > 0 && <div style={{ fontSize:11, color:C.dim }}>+ {lead.addons.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</div>}
+                    {lead.addons?.length > 0 && <div style={{ fontSize:11, color:C.dim }}>+ {lead.addons?.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</div>}
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                     <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
