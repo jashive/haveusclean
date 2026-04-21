@@ -1574,7 +1574,7 @@ const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
 
-function ColdOutreach({ region, coldLeads, setColdLeads }) {
+function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {} }) {
   const leads    = coldLeads;
   const setLeads = setColdLeads;
   const [viewLead, setViewLead]         = useState(null);
@@ -1585,11 +1585,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   const [upgradedContent, setUpgradedContent] = useState(null);
   const [copied, setCopied]             = useState("");
   const [showManual, setShowManual]     = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(null); // lead_id pending delete
+  const [confirmDelete, setConfirmDelete] = useState(null);
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
-  const [page, setPage]                 = useState(0); // pagination — 15 leads per page
   const PAGE_SIZE = 15;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
@@ -1607,10 +1606,16 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       if (data.error) {
         setSyncError(data.error + (data.help ? " — " + data.help : ""));
       } else if (data.leads && data.leads.length > 0) {
-        // MERGE: keep local edits, add all sheet leads
+        // Strip junk leads RIGHT HERE before they touch state or Supabase
+        const validLeads = data.leads.filter(l => l?.company?.trim());
+        if (validLeads.length === 0) {
+          setSyncError("Sheet returned leads but none had a company name. Check your n8n workflow.");
+          setLoadingSheet(false);
+          return;
+        }
         setLeads(prev => {
           const prevMap = Object.fromEntries(prev.map(l => [l.lead_id, l]));
-          const merged = data.leads.map(sheetLead => ({
+          const merged = validLeads.map(sheetLead => ({
             ...sheetLead,
             status:          prevMap[sheetLead.lead_id]?.status          || sheetLead.status || "New",
             notes:           prevMap[sheetLead.lead_id]?.notes           || sheetLead.notes  || "",
@@ -1619,11 +1624,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
             linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note   || "",
             call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener     || "",
           }));
-          const sheetIds = new Set(data.leads.map(l => l.lead_id));
-          const manualLeads = prev.filter(l => l.source === "manual" || !sheetIds.has(l.lead_id));
+          const sheetIds = new Set(validLeads.map(l => l.lead_id));
+          const manualLeads = prev.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
           const final = [...manualLeads, ...merged];
-          // Write to Supabase in batches so all devices get these leads on 15s sync
-          // Batch into groups of 100 to avoid request size limits
+          // Write only clean leads to Supabase
           const batches = [];
           for (let i = 0; i < final.length; i += 100) batches.push(final.slice(i, i+100));
           batches.forEach(batch => sbSet("cp:cold_leads", batch).catch(()=>{}));
@@ -1660,7 +1664,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
     prevLeadsRef.current = key;
     const cleaned = leads.filter(l => {
       if (!l) return false;
-      return !!(l.company?.trim()) || !!(l.city?.trim() && l.lead_id?.trim());
+      // Delete any lead without a company name — these are junk n8n rows
+      return !!(l.company?.trim());
     });
     if (cleaned.length !== leads.length) {
       setLeads(cleaned);
@@ -1670,9 +1675,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const filtered = leads.filter(l => {
-    // A lead is valid if it has a lead_id OR any identifying info
-    const isValid = !!(l.lead_id?.trim() || l.company?.trim() || l.city?.trim());
-    if (!isValid) return false;
+    // Only show leads with a company name — no company = junk row from n8n
+    if (!l?.company?.trim()) return false;
     return (filterStatus === "All" || l.status === filterStatus) &&
            (filterSeg    === "All" || l.segment === filterSeg) &&
            (filterMkt    === "All" || l.market === filterMkt);
@@ -1681,7 +1685,15 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
   // Reset page when filters change
+  // Reset to page 0 when filters change
   useEffect(() => { setPage(0); }, [filterStatus, filterSeg, filterMkt]);
+
+  // Snap back if current page is now beyond available pages (happens after sync reduces lead count)
+  useEffect(() => {
+    if (totalPages > 0 && page >= totalPages) {
+      setPage(Math.max(0, totalPages - 1));
+    }
+  }, [totalPages, page]);
 
   // Stats
   const total     = leads.length;
@@ -2054,7 +2066,21 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
       )}
 
       <div id="cold-leads-list" style={{ display:"flex", flexDirection:"column", gap:10 }}>
-        {paginated.map(lead => {
+        {filtered.length === 0 ? (
+          <div style={{ ...S.card, textAlign:"center", padding:32, color:C.muted }}>
+            <div style={{ fontSize:32, marginBottom:12 }}>🎯</div>
+            <div style={{ fontWeight:700, marginBottom:6 }}>No leads found</div>
+            <div style={{ fontSize:13 }}>
+              {leads.length > 0
+                ? "All leads were filtered out. Try changing your filters or sync the sheet again."
+                : "Hit Sync Sheet to load leads from your n8n pipeline."}
+            </div>
+          </div>
+        ) : paginated.length === 0 ? (
+          <div style={{ ...S.card, textAlign:"center", padding:24, color:C.muted, fontSize:13 }}>
+            No leads on this page — going back to page 1
+          </div>
+        ) : paginated.map(lead => {
           const lid = lead.lead_id || lead.id || String(Math.random());
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
@@ -4500,7 +4526,8 @@ export default function App() {
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
   const [resLeads, setResLeads] = useState([]);
-  const [coldLeads, setColdLeads] = useState(SAMPLE_COLD_LEADS); // persists across tab switches
+  const [coldLeads, setColdLeads] = useState(SAMPLE_COLD_LEADS);
+  const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
   // ── DB state ──
@@ -4959,7 +4986,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} />}
+        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
