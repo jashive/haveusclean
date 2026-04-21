@@ -2584,7 +2584,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     const addonList = lead.addons?.map(id => RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
     const addonPrices = lead.addons?.map(id => {
       const ao = RES_ADDONS.find(x=>x.id===id);
-      return ao ? `- ${ao.label}: CA$${ao.priceRange[0]}–$${ao.priceRange[1]}` : null;
+      return ao ? `- ${ao.label}: +CA$${ao.clientPrice}` : null;
     }).filter(Boolean);
     const cur = region.id === "ON" ? "CA$" : "$";
     const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
@@ -2856,7 +2856,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
                 {RES_ADDONS.map(ao=>(
                   <button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:(form.addons||[]).includes(ao.id)?C.accentDim:C.surface, color:(form.addons||[]).includes(ao.id)?C.accent:C.muted, border:`1px solid ${(form.addons||[]).includes(ao.id)?C.accent:C.border}` }}>
-                    {ao.icon} {ao.label} (CA${ao.priceRange[0]}–${ao.priceRange[1]})
+                    {ao.label} (+{region?.currencySymbol || "CA$"}{ao.clientPrice})
                   </button>
                 ))}
               </div>
