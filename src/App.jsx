@@ -1607,7 +1607,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         setSyncError(data.error + (data.help ? " — " + data.help : ""));
       } else if (data.leads && data.leads.length > 0) {
         // Strip junk leads RIGHT HERE before they touch state or Supabase
-        const validLeads = data.leads.filter(l => l?.company?.trim());
+        const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
+        const validLeads = data.leads.filter(l => {
+          if (!l?.company?.trim()) return false;
+          // Reject template placeholders that GPT failed to fill in
+          const text = JSON.stringify(l);
+          if (PLACEHOLDER_PATTERNS.test(text)) return false;
+          return true;
+        });
         if (validLeads.length === 0) {
           setSyncError("Sheet returned leads but none had a company name. Check your n8n workflow.");
           setLoadingSheet(false);
@@ -1674,9 +1681,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   });
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
+  const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
   const filtered = leads.filter(l => {
-    // Only show leads with a company name — no company = junk row from n8n
-    if (!l?.company?.trim()) return false;
+    if (!l?.company?.trim()) return false; // no company = junk
+    if (PLACEHOLDER.test(JSON.stringify(l))) return false; // unfilled template = junk
     return (filterStatus === "All" || l.status === filterStatus) &&
            (filterSeg    === "All" || l.segment === filterSeg) &&
            (filterMkt    === "All" || l.market === filterMkt);
@@ -1688,12 +1696,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Reset to page 0 when filters change
   useEffect(() => { setPage(0); }, [filterStatus, filterSeg, filterMkt]);
 
-  // Snap back if current page is now beyond available pages (happens after sync reduces lead count)
-  useEffect(() => {
-    if (totalPages > 0 && page >= totalPages) {
-      setPage(Math.max(0, totalPages - 1));
-    }
-  }, [totalPages, page]);
+  // Snap-back removed: was resetting page on every 15s sync
 
   // Stats
   const total     = leads.length;
@@ -2750,21 +2753,29 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const dwellingOptions = Object.keys(HUC_PRICING_GRID);
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
 
-  const filteredLeads = (filterStatus === "All" ? leads : leads.filter(l=>l.status===filterStatus))
-    .filter(l => {
-      if (!searchQuery.trim()) return true;
-      const q = searchQuery.toLowerCase();
-      return (l.name||"").toLowerCase().includes(q) ||
-             (l.email||"").toLowerCase().includes(q) ||
-             (l.address||"").toLowerCase().includes(q) ||
-             (l.phone||"").toLowerCase().includes(q);
-    })
-    .filter(l => l && (l.name || l.email || l.id)) // remove null/empty
-    .sort((a,b) => {
-      const da = a.createdAt || a.quotedDate || a.bookedDate || "";
-      const db = b.createdAt || b.quotedDate || b.bookedDate || "";
-      return db.localeCompare(da); // newest first
-    });
+  const filteredLeads = (() => {
+    try {
+      const base = filterStatus === "All" ? leads : leads.filter(l => l?.status === filterStatus);
+      const sq = searchQuery.trim().toLowerCase();
+      return base
+        .filter(l => {
+          if (!l) return false;
+          if (!l.name && !l.email && !l.id) return false; // remove null/empty
+          if (!sq) return true;
+          return (l.name    || "").toLowerCase().includes(sq) ||
+                 (l.email   || "").toLowerCase().includes(sq) ||
+                 (l.address || "").toLowerCase().includes(sq) ||
+                 (l.phone   || "").toLowerCase().includes(sq);
+        })
+        .sort((a, b) => {
+          const da = a.createdAt || a.quotedDate || a.bookedDate || "";
+          const db = b.createdAt || b.quotedDate || b.bookedDate || "";
+          return db.localeCompare(da);
+        });
+    } catch(e) {
+      return leads.filter(l => !!l);
+    }
+  })();
 
   const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>l.status===s).length }), {});
 
