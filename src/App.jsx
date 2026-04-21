@@ -436,8 +436,6 @@ const initJobs = [
 
 // ─── SHARED STYLES ────────────────────────────────────────────────────────────
 // ─── RESPONSIVE HELPERS ──────────────────────────────────────────────────────
-const isMobile = typeof window !== "undefined" && window.innerWidth < 640;
-
 const S = {
   app: { minHeight:"100vh", background:C.bg, fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif", color:C.text, display:"flex", flexDirection:"column" },
   header: { background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56, position:"sticky", top:0, zIndex:200, backdropFilter:"blur(8px)" },
@@ -4027,7 +4025,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
             <div style={{ fontSize:14, color:C.muted }}>Property: <strong style={{ color:C.text }}>{activeQuote.dwellingType} — {activeQuote.dwellingSize}</strong></div>
             <div style={{ fontSize:14, color:C.muted }}>Frequency: <strong style={{ color:C.text }}>{activeQuote.frequency}</strong></div>
             {activeQuote.addons?.length > 0 && (
-              <div style={{ fontSize:14, color:C.muted }}>Add-ons: <strong style={{ color:C.text }}>{activeQuote.addons.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</strong></div>
+              <div style={{ fontSize:14, color:C.muted }}>Add-ons: <strong style={{ color:C.text }}>{(activeQuote.addons||[]).map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</strong></div>
             )}
             <div style={{ marginTop:14, padding:"12px 16px", background:C.surface, borderRadius:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:13, color:C.muted }}>Quote Total</span>
@@ -4438,31 +4436,6 @@ function PartnerView({ jobs, partners, region }) {
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
 export default function App() {
-  // Inject global CSS for mobile fixes on mount
-  useEffect(() => {
-    const style = document.createElement('style');
-    style.textContent = `
-      *, *::before, *::after { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
-      body { margin: 0; padding: 0; overflow-x: hidden; -webkit-text-size-adjust: 100%; }
-      input, select, textarea, button { font-family: inherit; font-size: 16px; }
-      /* Fix iOS input zoom */
-      @media (max-width: 640px) {
-        input, select, textarea { font-size: 16px !important; }
-        .modal-inner { padding: 16px !important; }
-        .grid-2col { grid-template-columns: 1fr !important; }
-      }
-      /* Scrollbar hide */
-      ::-webkit-scrollbar { width: 4px; height: 4px; }
-      ::-webkit-scrollbar-track { background: transparent; }
-      ::-webkit-scrollbar-thumb { background: #1E2D45; border-radius: 4px; }
-      /* Smooth scroll */
-      html { scroll-behavior: smooth; }
-      /* Fix text overflow */
-      .truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    `;
-    document.head.appendChild(style);
-    return () => document.head.removeChild(style);
-  }, []);
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
@@ -4765,8 +4738,7 @@ export default function App() {
   if (isLoading) {
     return (
       <div style={{ ...S.app, alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
-        <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
-        <div style={{ textAlign:"center" }}>
+<div style={{ textAlign:"center" }}>
           <div style={{ fontSize:52, marginBottom:16 }}>✨</div>
           <div style={{ fontWeight:800, fontSize:24, color:C.accent, marginBottom:8 }}>Have Us Clean 🧹</div>
           <div style={{ color:C.muted, fontSize:14, marginBottom:28 }}>Loading your data...</div>
@@ -4781,9 +4753,7 @@ export default function App() {
 
   return (
     <div style={S.app}>
-      <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700;800&display=swap" rel="stylesheet" />
-
-      {/* ── TOP HEADER: Logo + Region + DB status ── */}
+{/* ── TOP HEADER: Logo + Region + DB status ── */}
       <header style={{ ...S.header, flexShrink: 0 }}>
         <div style={S.logo}>
           <div style={S.logoMark}>{BRAND.logoMark}</div>
