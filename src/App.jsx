@@ -1585,6 +1585,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   const [upgradedContent, setUpgradedContent] = useState(null);
   const [copied, setCopied]             = useState("");
   const [showManual, setShowManual]     = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(null); // lead_id pending delete
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
@@ -1636,8 +1637,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   };
 
   const deleteLead = (id) => {
+    // Remove from local state immediately
     setLeads(ls => ls.filter(l => l.lead_id !== id && l.id !== id));
     if (viewLead?.lead_id === id || viewLead?.id === id) setViewLead(null);
+    // Delete from Supabase so other devices sync it within 15s
+    const cfg = { table:"huc_leads_cold", pk:"lead_id" };
+    sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
   };
 
   // Auto-delete leads with no company name AND no city (truly empty rows from sheet)
@@ -1745,12 +1750,25 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 
     return (
       <div>
-        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); }}>← All Leads</button>
-          <button style={{ ...S.btn("ghost"), fontSize:12, color:C.red, borderColor:C.red }}
-            onClick={() => { if(window.confirm(`Delete ${viewLead.company}? This cannot be undone.`)) deleteLead(viewLead.lead_id || viewLead.id); }}>
-            🗑 Delete Lead
-          </button>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
+          <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); setConfirmDelete(null); }}>← All Leads</button>
+          {confirmDelete === "detail" ? (
+            <div style={{ display:"flex", gap:8 }}>
+              <button style={{ ...S.btn("danger"), fontSize:12, padding:"7px 14px" }}
+                onClick={() => { deleteLead(viewLead.lead_id || viewLead.id); setConfirmDelete(null); }}>
+                Yes, delete
+              </button>
+              <button style={{ ...S.btn("ghost"), fontSize:12, padding:"7px 14px" }}
+                onClick={() => setConfirmDelete(null)}>
+                Cancel
+              </button>
+            </div>
+          ) : (
+            <button style={{ ...S.btn("ghost"), fontSize:12, color:C.red, borderColor:`${C.red}55` }}
+              onClick={() => setConfirmDelete("detail")}>
+              🗑 Delete Lead
+            </button>
+          )}
         </div>
 
         {/* Lead header */}
@@ -2059,11 +2077,26 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
                   </div>
                 </div>
                 <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
-                  <button
-                    style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:8, padding:"4px 10px", fontSize:11, color:C.red, cursor:"pointer" }}
-                    onClick={e => { e.stopPropagation(); if(window.confirm(`Delete ${lead.company || "this lead"}?`)) deleteLead(lead.lead_id || lead.id); }}>
-                    🗑
-                  </button>
+                  {confirmDelete === (lead.lead_id || lead.id) ? (
+                    <div style={{ display:"flex", gap:6 }}>
+                      <button
+                        style={{ background:C.red, border:"none", borderRadius:7, padding:"5px 10px", fontSize:11, color:"#fff", fontWeight:700, cursor:"pointer" }}
+                        onClick={e => { e.stopPropagation(); deleteLead(lead.lead_id || lead.id); setConfirmDelete(null); }}>
+                        Yes, delete
+                      </button>
+                      <button
+                        style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 10px", fontSize:11, color:C.muted, cursor:"pointer" }}
+                        onClick={e => { e.stopPropagation(); setConfirmDelete(null); }}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <button
+                      style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, color:C.red, cursor:"pointer" }}
+                      onClick={e => { e.stopPropagation(); setConfirmDelete(lead.lead_id || lead.id); }}>
+                      🗑
+                    </button>
+                  )}
                   <div style={{ fontSize:11, color:C.muted, textAlign:"right" }}>{lead.lead_id}</div>
                   <div style={{ fontSize:11, color:C.muted }}>{lead.first_offer}</div>
                 </div>
@@ -3797,8 +3830,9 @@ function ClientView({ jobs, resLeads, region, setTab }) {
       setLoginError("Please enter a valid email address.");
       return;
     }
-    // Find client by email in leads or jobs
-    const matchedLead = (resLeads||[]).find(l => l.email?.toLowerCase() === email);
+    // Search resLeads, SAMPLE_RES_LEADS, and jobs by email
+    const allLeads = resLeads.length > 0 ? resLeads : SAMPLE_RES_LEADS;
+    const matchedLead = allLeads.find(l => l.email?.toLowerCase() === email);
     const matchedJob  = jobs.find(j => j.email?.toLowerCase() === email);
     const name = matchedLead?.name || matchedJob?.client;
 
@@ -3806,7 +3840,8 @@ function ClientView({ jobs, resLeads, region, setTab }) {
       setAuthedClient({ email, name });
       setLoginError("");
     } else {
-      setLoginError("No account found with that email. Contact Have Us Clean if you need help.");
+      // More helpful error with hint
+      setLoginError(`No account found for ${email}. Try the email you used when booking, or contact us at ${BRAND.supportEmail}`);
     }
   };
 
@@ -4536,6 +4571,46 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isLoading]);
 
+  // ── Real-time sync — poll Supabase every 15s for shared data changes ──
+  // This keeps all devices (phone, computer, team members) in sync
+  useEffect(() => {
+    if (isLoading) return;
+    const syncFromSupabase = async () => {
+      try {
+        // Sync cold leads — most critical for sales team
+        const freshCold = await sbGet("cp:cold_leads");
+        if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
+          setColdLeads(prev => {
+            // Merge: keep local edits, add remote changes
+            if (JSON.stringify(prev.map(l=>l.lead_id||l.id).sort()) ===
+                JSON.stringify(freshCold.map(l=>l.lead_id||l.id).sort())) return prev; // no change
+            return freshCold;
+          });
+        }
+        // Sync jobs
+        const freshJobs = await sbGet("cp:jobs");
+        if (freshJobs && Array.isArray(freshJobs) && freshJobs.length > 0) {
+          setJobs(prev => {
+            if (JSON.stringify(prev.map(j=>j.id).sort()) ===
+                JSON.stringify(freshJobs.map(j=>j.id).sort())) return prev;
+            return freshJobs;
+          });
+        }
+        // Sync residential leads
+        const freshRes = await sbGet("cp:leads_res");
+        if (freshRes && Array.isArray(freshRes) && freshRes.length > 0) {
+          setResLeads(prev => {
+            if (JSON.stringify(prev.map(l=>l.id).sort()) ===
+                JSON.stringify(freshRes.map(l=>l.id).sort())) return prev;
+            return freshRes;
+          });
+        }
+      } catch { /* silent — offline is OK */ }
+    };
+    const syncTimer = setInterval(syncFromSupabase, 15000); // every 15 seconds
+    return () => clearInterval(syncTimer);
+  }, [isLoading]);
+
   // ── Save region preference ──
   useEffect(() => {
     if (isLoading) return;
@@ -4895,9 +4970,17 @@ Partner pay = $206 × 0.65 = $134 · Company keeps = $206 × 0.35 = $72
 PAY SPLIT: Partner total = pre-tax × 65% · Company = pre-tax × 35%
 2 partners → each gets half · 3 partners → each gets a third
 
-Always show full breakdown: team, hours, formula price, floor check, final base, condition, addons, discount, pre-tax, HST, total, partner pay each, company margin.`,
-    inputLabel: "Describe the job — dwelling type, sqft (or beds/baths), package, condition, addons, frequency, Ontario or Arizona.",
-    inputPlaceholder: "e.g. 2BR condo North York, ~900 sqft, Full Home Clean, average condition, bi-weekly, add inside fridge. Quote please.",
+Always show full breakdown: team, hours, formula price, floor check, final base, condition, addons, discount, pre-tax, HST, total, partner pay each, company margin.
+
+IMPORTANT: Never ask for more information. If details are missing, use these smart defaults:
+- Sqft missing → estimate from beds/baths or use 900 sqft for 2BR
+- Condition missing → assume Average
+- Frequency missing → assume One-Time
+- Region missing → assume Ontario
+- Package missing → assume Refresh Clean
+Always produce a complete quote. State your assumptions clearly at the top.`,
+    inputLabel: "Describe the job — be as brief or detailed as you want. I'll make smart assumptions for anything missing.",
+    inputPlaceholder: "e.g. 2BR condo North York, Full Home Clean\n— or —\n3BR detached Mississauga, Deep Clean, heavy condition, bi-weekly, add inside oven\n— or —\nSmall office Scottsdale AZ, weekly janitorial",
     outputSections: ["Quote Breakdown", "Partner Pay", "Customer-Facing Message", "Warning Flag (if any)"],
   },
   BidSpec_Agent: {
