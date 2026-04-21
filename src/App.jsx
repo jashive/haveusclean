@@ -2414,7 +2414,7 @@ function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
   // Generate follow-up email
   const generateFollowUp = async (lead, setLoading, setResult) => {
     setLoading(true);
-    const q = calcResQuote(lead, region || ACTIVE_REGION);
+    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region || ACTIVE_REGION); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
     const prompt = `Write a short, warm follow-up email for a residential cleaning lead.
 
 Company: Have Us Clean
@@ -2642,7 +2642,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const sendQuote = (lead) => {
-    const q = calcResQuote(lead, region);
+    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
     const email = buildEmail(lead, q);
     // Mark as Quoted
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Quoted", quotedDate:new Date().toLocaleDateString() } : l));
@@ -2651,7 +2651,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const bookLead = (lead) => {
-    const q = calcResQuote(lead, region);
+    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
     const assignedPartner = partners.find(p => p.onboarded) || partners[0];
     const jobId = Date.now();
     const newJob = {
@@ -2739,7 +2739,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {filteredLeads.map(lead => {
-          const q = calcResQuote(lead, region);
+          const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
           const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
           return (
             <div key={lead.id} style={{ ...S.card, borderLeft:`4px solid ${statusColor}` }}>
@@ -4031,7 +4031,9 @@ function ClientView({ jobs, resLeads, region, setTab }) {
             )}
             <div style={{ marginTop:14, padding:"12px 16px", background:C.surface, borderRadius:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:13, color:C.muted }}>Quote Total</span>
-              <span style={{ fontSize:22, fontWeight:800, color:C.gold }}>{cur}{Math.round(calcResQuote(activeQuote, region||ACTIVE_REGION).total).toLocaleString()}</span>
+              <span style={{ fontSize:22, fontWeight:800, color:C.gold }}>
+                {cur}{(() => { try { return Math.round(calcResQuote({...activeQuote, dwellingType:activeQuote.dwellingType||"Apartment / Condo", dwellingSize:activeQuote.dwellingSize||"2 Bed", serviceType:activeQuote.serviceType||"Refresh Clean", frequency:activeQuote.frequency||"One-Time", beds:activeQuote.beds||2, baths:activeQuote.baths||1, sqft:activeQuote.sqft||900, addons:activeQuote.addons||[]}, region||ACTIVE_REGION).total).toLocaleString(); } catch(e) { return "—"; } })()}
+              </span>
             </div>
             <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
               <a href={`mailto:${BRAND.supportEmail}?subject=Booking Confirmation — ${activeQuote.serviceType}&body=Hi Have Us Clean,%0A%0AI'd like to confirm my booking for ${activeQuote.serviceType}.%0A%0AThanks!`}
@@ -7820,7 +7822,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
               <button style={S.btn("sm")} onClick={() => setTab("res")}>+ New Quote</button>
             </div>
             {quotedLeads.map(lead => {
-              const q = calcResQuote(lead, region || ACTIVE_REGION);
+              const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region || ACTIVE_REGION); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
               const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
               return (
                 <div key={lead.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
