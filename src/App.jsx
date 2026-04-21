@@ -1645,23 +1645,28 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
     sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
   };
 
-  // Auto-delete leads with no company name AND no city (truly empty rows from sheet)
+  // Auto-delete incomplete leads — runs on every render cycle change
+  // A lead is incomplete if it has NO company AND NO city AND NO buyer_title
+  // These are junk rows from the Google Sheet (empty rows, header artifacts, etc.)
   useEffect(() => {
-    setLeads(ls => {
-      const cleaned = ls.filter(l => {
-        const isEmpty = !l.company && !l.city && !l.buyer_title && !l.segment;
-        return !isEmpty;
-      });
-      return cleaned.length !== ls.length ? cleaned : ls;
+    if (!leads || leads.length === 0) return;
+    const cleaned = leads.filter(l => {
+      // Keep if it has ANY meaningful identifying info
+      return !!(l.company || l.city || l.buyer_title || l.bizName);
     });
-  }, [leads.length]); // run when lead count changes (after sync)
+    if (cleaned.length !== leads.length) {
+      setLeads(cleaned);
+    }
+  }); // no dependency — runs every render but only updates if count changed
 
-  // Filter leads
-  const filtered = leads.filter(l =>
-    (filterStatus === "All" || l.status === filterStatus) &&
-    (filterSeg    === "All" || l.segment === filterSeg) &&
-    (filterMkt    === "All" || l.market === filterMkt)
-  );
+  // Filter leads — also filter out incomplete ones from display
+  const filtered = leads.filter(l => {
+    const hasInfo = !!(l.company || l.city || l.buyer_title);
+    if (!hasInfo) return false; // never show truly empty leads
+    return (filterStatus === "All" || l.status === filterStatus) &&
+           (filterSeg    === "All" || l.segment === filterSeg) &&
+           (filterMkt    === "All" || l.market === filterMkt);
+  });
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -2052,54 +2057,59 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
 
       <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {paginated.map(lead => {
+          const lid = lead.lead_id || lead.id || String(Math.random());
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
-          const isMissingInfo = !lead.company || !lead.city || !lead.buyer_title;
+          const isDeleting = confirmDelete === lid;
           return (
-            <div key={lead.lead_id || lead.id} style={{ ...S.card, borderLeft:`3px solid ${isMissingInfo ? C.red : seg.color}` }}>
-              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10 }}
-                onClick={() => { setViewLead(lead); setUpgradedContent(null); }} style={{ cursor:"pointer", flex:1 }}>
-                <div style={{ display:"flex", gap:12, alignItems:"flex-start", cursor:"pointer", flex:1 }}>
-                  <div style={{ width:40, height:40, borderRadius:10, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>{seg.icon}</div>
-                  <div>
-                    <div style={{ fontWeight:800, fontSize:15 }}>{lead.company || <span style={{ color:C.red }}>⚠️ Missing company name</span>}</div>
-                    <div style={{ fontSize:12, color:C.muted }}>📍 {lead.city || "Unknown city"} · 👤 {lead.buyer_title || "Unknown title"}</div>
-                    {lead.pain_point && <div style={{ fontSize:12, color:C.dim, marginTop:2, fontStyle:"italic" }}>"{lead.pain_point}"</div>}
-                    <div style={{ display:"flex", gap:6, marginTop:6, flexWrap:"wrap" }}>
-                      <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
-                      <PriorityBadge score={lead.priority_score} />
-                      {hasOutreach && <span style={S.badge("green")}>✉️ Outreach ready</span>}
-                      {lead.needs_upgrade && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:"#A78BFA22", color:"#A78BFA" }}>✨ Needs upgrade</span>}
-                      {isMissingInfo && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${C.red}22`, color:C.red }}>⚠️ Incomplete</span>}
-                      {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦 ON</span> : <span style={S.badge("gold")}>🇺🇸 AZ</span>}
+            <div key={lid} style={{ ...S.card, borderLeft:`3px solid ${seg.color}`, padding:0, overflow:"hidden" }}>
+              {/* Main row — two separate click zones */}
+              <div style={{ display:"flex", alignItems:"stretch" }}>
+
+                {/* LEFT: info area — tapping opens detail */}
+                <div style={{ flex:1, padding:"14px 14px 14px 16px", cursor:"pointer" }}
+                  onClick={() => { if(!isDeleting){ setViewLead(lead); setUpgradedContent(null); setConfirmDelete(null); } }}>
+                  <div style={{ display:"flex", gap:10, alignItems:"flex-start" }}>
+                    <div style={{ width:36, height:36, borderRadius:9, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:18, flexShrink:0 }}>{seg.icon}</div>
+                    <div style={{ flex:1, minWidth:0 }}>
+                      <div style={{ fontWeight:800, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                        {lead.company || <span style={{ color:C.red }}>⚠️ No company name</span>}
+                      </div>
+                      <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
+                        📍 {lead.city || "—"} · 👤 {lead.buyer_title || "—"}
+                      </div>
+                      <div style={{ display:"flex", gap:5, marginTop:6, flexWrap:"wrap" }}>
+                        <span style={{ padding:"2px 8px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status || "New"}</span>
+                        <PriorityBadge score={lead.priority_score} />
+                        {hasOutreach && <span style={S.badge("green")}>✉️ Ready</span>}
+                        {lead.market === "Ontario" ? <span style={S.badge("blue")}>🇨🇦</span> : <span style={S.badge("gold")}>🇺🇸</span>}
+                      </div>
                     </div>
                   </div>
                 </div>
-                <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:6 }}>
-                  {confirmDelete === (lead.lead_id || lead.id) ? (
-                    <div style={{ display:"flex", gap:6 }}>
-                      <button
-                        style={{ background:C.red, border:"none", borderRadius:7, padding:"5px 10px", fontSize:11, color:"#fff", fontWeight:700, cursor:"pointer" }}
-                        onClick={e => { e.stopPropagation(); deleteLead(lead.lead_id || lead.id); setConfirmDelete(null); }}>
-                        Yes, delete
+
+                {/* RIGHT: delete zone — completely separate from info click */}
+                <div style={{ display:"flex", flexDirection:"column", justifyContent:"center", alignItems:"center", padding:"0 12px", borderLeft:`1px solid ${C.border}`, minWidth:64, background:isDeleting ? `${C.red}11` : "transparent" }}>
+                  {isDeleting ? (
+                    <div style={{ display:"flex", flexDirection:"column", gap:5, alignItems:"center" }}>
+                      <button style={{ background:C.red, border:"none", borderRadius:7, padding:"6px 10px", fontSize:11, color:"#fff", fontWeight:800, cursor:"pointer", width:"100%" }}
+                        onClick={() => { deleteLead(lid); setConfirmDelete(null); }}>
+                        Delete
                       </button>
-                      <button
-                        style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 10px", fontSize:11, color:C.muted, cursor:"pointer" }}
-                        onClick={e => { e.stopPropagation(); setConfirmDelete(null); }}>
+                      <button style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"4px 10px", fontSize:10, color:C.muted, cursor:"pointer", width:"100%" }}
+                        onClick={() => setConfirmDelete(null)}>
                         Cancel
                       </button>
                     </div>
                   ) : (
-                    <button
-                      style={{ background:"none", border:`1px solid ${C.border}`, borderRadius:7, padding:"5px 10px", fontSize:12, color:C.red, cursor:"pointer" }}
-                      onClick={e => { e.stopPropagation(); setConfirmDelete(lead.lead_id || lead.id); }}>
+                    <button style={{ background:"none", border:"none", fontSize:18, cursor:"pointer", color:C.dim, padding:8, lineHeight:1 }}
+                      onClick={() => setConfirmDelete(lid)}>
                       🗑
                     </button>
                   )}
-                  <div style={{ fontSize:11, color:C.muted, textAlign:"right" }}>{lead.lead_id}</div>
-                  <div style={{ fontSize:11, color:C.muted }}>{lead.first_offer}</div>
                 </div>
+
               </div>
             </div>
           );
@@ -4572,43 +4582,30 @@ export default function App() {
   }, [isLoading]);
 
   // ── Real-time sync — poll Supabase every 15s for shared data changes ──
-  // This keeps all devices (phone, computer, team members) in sync
+  // Keeps all devices in sync: phone, computer, all team members
   useEffect(() => {
     if (isLoading) return;
     const syncFromSupabase = async () => {
       try {
-        // Sync cold leads — most critical for sales team
+        // Sync cold leads — critical for sales team, always sync
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
-          setColdLeads(prev => {
-            // Merge: keep local edits, add remote changes
-            if (JSON.stringify(prev.map(l=>l.lead_id||l.id).sort()) ===
-                JSON.stringify(freshCold.map(l=>l.lead_id||l.id).sort())) return prev; // no change
-            return freshCold;
-          });
+          setColdLeads(freshCold);
         }
         // Sync jobs
         const freshJobs = await sbGet("cp:jobs");
         if (freshJobs && Array.isArray(freshJobs) && freshJobs.length > 0) {
-          setJobs(prev => {
-            if (JSON.stringify(prev.map(j=>j.id).sort()) ===
-                JSON.stringify(freshJobs.map(j=>j.id).sort())) return prev;
-            return freshJobs;
-          });
+          setJobs(freshJobs);
         }
         // Sync residential leads
         const freshRes = await sbGet("cp:leads_res");
         if (freshRes && Array.isArray(freshRes) && freshRes.length > 0) {
-          setResLeads(prev => {
-            if (JSON.stringify(prev.map(l=>l.id).sort()) ===
-                JSON.stringify(freshRes.map(l=>l.id).sort())) return prev;
-            return freshRes;
-          });
+          setResLeads(freshRes);
         }
-      } catch { /* silent — offline is OK */ }
+      } catch { /* silent — offline ok */ }
     };
-    const syncTimer = setInterval(syncFromSupabase, 15000); // every 15 seconds
-    return () => clearInterval(syncTimer);
+    const t = setInterval(syncFromSupabase, 15000);
+    return () => clearInterval(t);
   }, [isLoading]);
 
   // ── Save region preference ──
