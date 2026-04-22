@@ -2020,7 +2020,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           const count = s === "All" ? leads.length : leads.filter(l => l.status === s).length;
           const active = filterStatus === s;
           return (
-            <button key={s} onClick={() => setFilterStatus(s)}
+            <button key={s} onClick={() => { setFilterStatus(s); setPage(0); }}
               style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700,
                 background: active ? `${col}22` : C.surface,
                 color: active ? col : C.muted,
@@ -2035,7 +2035,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         {["All", "Ontario", "Arizona"].map(m => {
           const count = m === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.market===m && l?.company?.trim()).length;
           return (
-            <button key={m} onClick={() => setFilterMkt(m)}
+            <button key={m} onClick={() => { setFilterMkt(m); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
                 background: filterMkt===m ? C.accentDim : C.surface,
                 color: filterMkt===m ? C.accent : C.muted,
@@ -2047,7 +2047,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => {
           const count = seg === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.segment===seg && l?.company?.trim()).length;
           return (
-            <button key={seg} onClick={() => setFilterSeg(seg)}
+            <button key={seg} onClick={() => { setFilterSeg(seg); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
                 background: filterSeg===seg ? C.accentDim : C.surface,
                 color: filterSeg===seg ? C.accent : C.muted,
@@ -2090,7 +2090,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
             No leads on this page — going back to page 1
           </div>
         ) : paginated.map(lead => {
-          const lid = lead.lead_id || lead.id || String(Math.random());
+          const lid = lead.lead_id || lead.id || `${lead.company||""}-${lead.city||""}-${lead.segment||""}`;
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
