@@ -1633,7 +1633,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           }));
           const sheetIds = new Set(validLeads.map(l => l.lead_id));
           const manualLeads = prev.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
-          const final = [...manualLeads, ...merged];
+          const combined = [...manualLeads, ...merged];
+          // Deduplicate by company name — same company can appear many times if n8n ran multiple times
+          // Keep the version with the most data (longest cold_email = most enriched)
+          const companyMap = new Map();
+          for (const lead of combined) {
+            const key = (lead.company || "").trim().toLowerCase();
+            if (!key) continue;
+            const existing = companyMap.get(key);
+            if (!existing) {
+              companyMap.set(key, lead);
+            } else {
+              // Keep whichever has better outreach content, or the more recent status
+              const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
+              if (score(lead) > score(existing)) companyMap.set(key, lead);
+            }
+          }
+          const final = Array.from(companyMap.values());
           // Write only clean leads to Supabase
           const batches = [];
           for (let i = 0; i < final.length; i += 100) batches.push(final.slice(i, i+100));
@@ -1682,13 +1698,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-  const filtered = leads.filter(l => {
-    if (!l?.company?.trim()) return false; // no company = junk
-    if (PLACEHOLDER.test(JSON.stringify(l))) return false; // unfilled template = junk
-    return (filterStatus === "All" || l.status === filterStatus) &&
-           (filterSeg    === "All" || l.segment === filterSeg) &&
-           (filterMkt    === "All" || l.market === filterMkt);
-  });
+  const filtered = (() => {
+    const seenCompanies = new Set();
+    return leads.filter(l => {
+      if (!l?.company?.trim()) return false;
+      if (PLACEHOLDER.test(JSON.stringify(l))) return false;
+      // Deduplicate by company name — never show same company twice
+      const key = l.company.trim().toLowerCase();
+      if (seenCompanies.has(key)) return false;
+      seenCompanies.add(key);
+      return (filterStatus === "All" || l.status === filterStatus) &&
+             (filterSeg    === "All" || l.segment === filterSeg) &&
+             (filterMkt    === "All" || l.market === filterMkt);
+    });
+  })();
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
   const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
 
@@ -4694,7 +4717,18 @@ export default function App() {
             const manualOnly = (prev||[]).filter(l =>
               (l.source === "manual") && !sbIds.has(l.lead_id||l.id||"")
             );
-            const final = [...manualOnly, ...merged];
+            const combined = [...manualOnly, ...merged];
+            // Deduplicate by company name — keep best version (most data / non-New status)
+            const compMap = new Map();
+            for (const lead of combined) {
+              const key = (lead.company||"").trim().toLowerCase();
+              if (!key) continue;
+              const ex = compMap.get(key);
+              if (!ex) { compMap.set(key, lead); continue; }
+              const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
+              if (score(lead) > score(ex)) compMap.set(key, lead);
+            }
+            const final = Array.from(compMap.values());
             return final.length >= (prev||[]).length * 0.8 ? final : prev;
           });
         }
