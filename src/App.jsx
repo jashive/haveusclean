@@ -1580,9 +1580,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [viewLead, setViewLead]         = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterSeg, setFilterSeg]       = useState("All");
-  const [filterMkt, setFilterMkt]       = useState(filterMktProp);
-  // Sync filterMkt to App state so it persists across tab switches
-  const handleSetFilterMkt = (v) => { setFilterMkt(v); setFilterMktProp(v); };
+  // filterMkt comes directly from App state (filterMktProp) — no local copy needed
+  const filterMkt = filterMktProp;
+  const handleSetFilterMkt = (v) => { setFilterMktProp(v); setPage(0); };
   const [upgrading, setUpgrading]       = useState(false);
   const [upgradedContent, setUpgradedContent] = useState(null);
   const [copied, setCopied]             = useState("");
@@ -1745,7 +1745,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
   // Reset page when filters change
   // Reset to page 0 when filters change
-  useEffect(() => { setPage(0); }, [filterStatus, filterSeg, filterMkt]);
+  useEffect(() => { setPage(0); }, [filterStatus, filterSeg]);
 
   // Snap-back removed: was resetting page on every 15s sync
 
@@ -2092,7 +2092,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                 return m === "Ontario" ? lm.includes("ontario") : lm.includes("arizona");
               }).length;
           return (
-            <button key={m} onClick={() => { handleSetFilterMkt(m); setPage(0); }}
+            <button key={m} onClick={() => handleSetFilterMkt(m)}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
                 background: filterMkt===m ? C.accentDim : C.surface,
                 color: filterMkt===m ? C.accent : C.muted,
@@ -3722,6 +3722,26 @@ async function sbGet(key) {
   const cfg = SB[key];
   if (!cfg) return null;
   try {
+    // Cold leads: fetch in batches to avoid timeout with large datasets
+    if (key === "cp:cold_leads") {
+      const allRows = [];
+      const BATCH = 1000;
+      let from = 0;
+      while (true) {
+        const r = await sbFetch(`${cfg.table}?select=*&order=lead_id&limit=${BATCH}&offset=${from}`);
+        if (!r || !r.ok) break;
+        const rows = await r.json();
+        if (!Array.isArray(rows) || rows.length === 0) break;
+        allRows.push(...rows);
+        if (rows.length < BATCH) break; // last batch
+        from += BATCH;
+        if (from > 20000) break; // safety cap — never fetch more than 20k rows
+      }
+      if (allRows.length === 0) return null;
+      const result = allRows.map(r => r.data).filter(Boolean);
+      return result.length > 0 ? result : null;
+    }
+
     const r = await sbFetch(`${cfg.table}?select=*`);
     if (!r || !r.ok) return null;
     const rows = await r.json();
@@ -4824,8 +4844,34 @@ export default function App() {
         }
       } catch { /* silent — offline ok */ }
     };
-    const t = setInterval(syncFromSupabase, 15000);
-    return () => clearInterval(t);
+
+    // ── Supabase Realtime subscription for instant cold leads updates ──
+    // This fires immediately when any device writes to huc_leads_cold
+    // No more waiting 15 seconds — changes appear within ~1 second
+    let realtimeChannel = null;
+    try {
+      const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm").catch(() => ({ createClient: null }));
+      if (createClient) {
+        const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+        realtimeChannel = sb
+          .channel("cold-leads-changes")
+          .on("postgres_changes", { event: "*", schema: "public", table: "huc_leads_cold" }, () => {
+            syncFromSupabase(); // re-fetch when any change happens
+          })
+          .subscribe();
+      }
+    } catch { /* Realtime not available, fall back to polling */ }
+
+    // Keep polling as fallback (every 30s instead of 15s — less aggressive)
+    const t = setInterval(syncFromSupabase, 30000);
+
+    // Run once immediately on mount
+    syncFromSupabase();
+
+    return () => {
+      clearInterval(t);
+      if (realtimeChannel) realtimeChannel.unsubscribe?.();
+    };
   }, [isLoading]);
 
   // ── Save region preference ──
