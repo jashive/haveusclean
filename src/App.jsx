@@ -4641,7 +4641,12 @@ export default function App() {
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
         if (savedResLeads)  setResLeads(savedResLeads);
-        if (savedColdLeads && savedColdLeads.length > 0) setColdLeads(savedColdLeads);
+        if (savedColdLeads && savedColdLeads.length > 0) {
+          // Strip out the hardcoded sample lead IDs that were stored in previous sessions
+          const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
+          const realLeads = savedColdLeads.filter(l => !SAMPLE_IDS.has(l.lead_id));
+          if (realLeads.length > 0) setColdLeads(realLeads);
+        }
         if (savedProgress)  setOnboardingProgress(savedProgress);
         setDbStatus("supabase");
       } catch {
@@ -4731,11 +4736,13 @@ export default function App() {
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
           const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
+          const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
           const cleanCold = freshCold
             .filter(l => {
               if (!l?.company?.trim()) return false;
               if (JUNK.test(l.company)) return false;
               const lid = String(l.lead_id || l.id || "");
+              if (SAMPLE_IDS.has(lid)) return false;  // never show demo leads
               if (lid && deletedLeadIds.has(lid)) return false;
               return true;
             })
