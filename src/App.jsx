@@ -1685,26 +1685,37 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       setColdLeads(final);
       setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
 
-      // ── Step 5: Write to Supabase AFTER setState (sequential, awaited) ──
+      // ── Step 5: Write to Supabase in parallel batches of 5 ──
       const BATCH = 50;
+      const PARALLEL = 5;
       let written = 0;
+      const batches = [];
       for (let i = 0; i < final.length; i += BATCH) {
-        const batch = final.slice(i, i + BATCH);
-        const rows = batch.map(lead => ({
-          lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${i}`),
-          data: lead,
-          updated_at: new Date().toISOString(),
-        }));
-        try {
-          const r = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
+        batches.push(final.slice(i, i + BATCH));
+      }
+
+      // Process PARALLEL batches at a time
+      for (let i = 0; i < batches.length; i += PARALLEL) {
+        const chunk = batches.slice(i, i + PARALLEL);
+        setLastSynced(`v5.31 · writing batch ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length}...`);
+        const promises = chunk.map(batch => {
+          const rows = batch.map(lead => ({
+            lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`),
+            data: lead,
+            updated_at: new Date().toISOString(),
+          }));
+          return sbFetch("huc_leads_cold?on_conflict=lead_id", {
             method: "POST",
             body: JSON.stringify(rows),
             headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-          });
-          if (r && r.ok) written += batch.length;
-        } catch { /* continue on network error */ }
+          }).then(r => {
+            if (r && r.ok) written += batch.length;
+            return r;
+          }).catch(() => null);
+        });
+        await Promise.all(promises);
       }
-      setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved to Supabase`);
+      setLastSynced(`v5.31 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved to Supabase`);
 
     } catch (err) {
       setSyncError("Network error: " + err.message);
