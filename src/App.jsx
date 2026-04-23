@@ -4845,32 +4845,14 @@ export default function App() {
       } catch { /* silent — offline ok */ }
     };
 
-    // ── Supabase Realtime subscription for instant cold leads updates ──
-    // This fires immediately when any device writes to huc_leads_cold
-    // No more waiting 15 seconds — changes appear within ~1 second
-    let realtimeChannel = null;
-    try {
-      const { createClient } = await import("https://cdn.jsdelivr.net/npm/@supabase/supabase-js/+esm").catch(() => ({ createClient: null }));
-      if (createClient) {
-        const sb = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-        realtimeChannel = sb
-          .channel("cold-leads-changes")
-          .on("postgres_changes", { event: "*", schema: "public", table: "huc_leads_cold" }, () => {
-            syncFromSupabase(); // re-fetch when any change happens
-          })
-          .subscribe();
-      }
-    } catch { /* Realtime not available, fall back to polling */ }
-
-    // Keep polling as fallback (every 30s instead of 15s — less aggressive)
-    const t = setInterval(syncFromSupabase, 30000);
-
-    // Run once immediately on mount
+    // Run once immediately on mount so leads load without waiting 30s
     syncFromSupabase();
+
+    // Poll every 30s as reliable fallback
+    const t = setInterval(syncFromSupabase, 30000);
 
     return () => {
       clearInterval(t);
-      if (realtimeChannel) realtimeChannel.unsubscribe?.();
     };
   }, [isLoading]);
 
