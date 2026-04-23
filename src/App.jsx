@@ -1623,9 +1623,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           .map(l => ({
             ...l,
             // Normalize market casing so filters always work
-            market: (l.market||"").trim().toLowerCase().includes("ontario") ? "Ontario"
-              : (l.market||"").trim().toLowerCase().includes("arizona") ? "Arizona"
-              : l.market || "",
+            market: (() => {
+              const m = (l.market||"").trim().toLowerCase();
+              if (m.includes("ontario")) return "Ontario";
+              if (m.includes("arizona")) return "Arizona";
+              const id = (l.lead_id||l.id||"").toUpperCase();
+              if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+              if (id.startsWith("AZ-")) return "Arizona";
+              const city = (l.city||"").toLowerCase();
+              const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","pickering","ajax","whitby","oshawa","north york","etobicoke","scarborough"];
+              const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills"];
+              if (ontarioCities.some(c => city.includes(c))) return "Ontario";
+              if (arizonaCities.some(c => city.includes(c))) return "Arizona";
+              return l.market || "";
+            })(),
           }));
         if (validLeads.length === 0) {
           setSyncError("Sheet returned leads but none had a company name. Check your n8n workflow.");
@@ -1736,9 +1747,18 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (!l?.company?.trim()) return false;
       if (JUNK_CHECK.test(l.company)) return false;
       // Normalize market — handle any casing or whitespace from n8n
-      const leadMarket = (l.market || "").trim().toLowerCase();
-      const normalizedMarket = leadMarket.includes("ontario") ? "Ontario"
-        : leadMarket.includes("arizona") ? "Arizona" : "";
+      const normalizedMarket = (() => {
+        const m = (l.market||"").trim().toLowerCase();
+        if (m.includes("ontario")) return "Ontario";
+        if (m.includes("arizona")) return "Arizona";
+        const id = (l.lead_id||l.id||"").toUpperCase();
+        if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+        if (id.startsWith("AZ-")) return "Arizona";
+        const city = (l.city||"").toLowerCase();
+        if (["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa"].some(c=>city.includes(c))) return "Ontario";
+        if (["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale"].some(c=>city.includes(c))) return "Arizona";
+        return "";
+      })();
       // Apply market filter BEFORE dedup so each market has its own dedup scope
       const marketMatch = filterMkt === "All" ||
         (filterMkt === "Ontario" && normalizedMarket === "Ontario") ||
@@ -4816,9 +4836,22 @@ export default function App() {
             .map(l => ({
               ...l,
               // Normalize market to exact casing so filters always work
-              market: (l.market||"").trim().toLowerCase().includes("ontario") ? "Ontario"
-                : (l.market||"").trim().toLowerCase().includes("arizona") ? "Arizona"
-                : l.market || "",
+              market: (() => {
+                const m = (l.market||"").trim().toLowerCase();
+                if (m.includes("ontario")) return "Ontario";
+                if (m.includes("arizona")) return "Arizona";
+                // Fallback: derive from lead_id prefix (ON- = Ontario, AZ- = Arizona)
+                const id = (l.lead_id||l.id||"").toUpperCase();
+                if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+                if (id.startsWith("AZ-")) return "Arizona";
+                // Fallback: derive from city name
+                const city = (l.city||"").toLowerCase();
+                const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","pickering","ajax","whitby","oshawa","north york","etobicoke","scarborough"];
+                const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills"];
+                if (ontarioCities.some(c => city.includes(c))) return "Ontario";
+                if (arizonaCities.some(c => city.includes(c))) return "Arizona";
+                return l.market || "";
+              })(),
             }));
           setColdLeads(prev => {
             const localMap = Object.fromEntries(
