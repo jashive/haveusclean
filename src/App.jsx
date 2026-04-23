@@ -1574,13 +1574,15 @@ const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
 
-function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {}, deletedLeadIds = new Set(), setDeletedLeadIds = () => {} }) {
+function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {}, deletedLeadIds = new Set(), setDeletedLeadIds = () => {}, filterMktProp = "All", setFilterMktProp = () => {} }) {
   const leads    = coldLeads;
   const setLeads = setColdLeads;
   const [viewLead, setViewLead]         = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterSeg, setFilterSeg]       = useState("All");
-  const [filterMkt, setFilterMkt]       = useState("All");
+  const [filterMkt, setFilterMkt]       = useState(filterMktProp);
+  // Sync filterMkt to App state so it persists across tab switches
+  const handleSetFilterMkt = (v) => { setFilterMkt(v); setFilterMktProp(v); };
   const [upgrading, setUpgrading]       = useState(false);
   const [upgradedContent, setUpgradedContent] = useState(null);
   const [copied, setCopied]             = useState("");
@@ -2090,7 +2092,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                 return m === "Ontario" ? lm.includes("ontario") : lm.includes("arizona");
               }).length;
           return (
-            <button key={m} onClick={() => { setFilterMkt(m); setPage(0); }}
+            <button key={m} onClick={() => { handleSetFilterMkt(m); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
                 background: filterMkt===m ? C.accentDim : C.surface,
                 color: filterMkt===m ? C.accent : C.muted,
@@ -4601,6 +4603,7 @@ export default function App() {
   const [resLeads, setResLeads] = useState([]);
   const [coldLeads, setColdLeads] = useState([]); // load from Supabase on boot
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
+  const [coldFilterMkt, setColdFilterMkt] = useState("All"); // persists market filter
   const [deletedLeadIds, setDeletedLeadIds] = useState(new Set()); // tracks permanently deleted leads
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
@@ -5090,7 +5093,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} />}
+        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
