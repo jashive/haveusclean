@@ -1608,15 +1608,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       } else if (data.leads && data.leads.length > 0) {
         // Strip junk leads RIGHT HERE before they touch state or Supabase
         const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-        const validLeads = data.leads.filter(l => {
-          if (!l?.company?.trim()) return false;
-          const text = JSON.stringify(l);
-          if (PLACEHOLDER_PATTERNS.test(text)) return false;
-          // Don't re-add leads the user has deleted
-          const lid = String(l.lead_id || l.id || "");
-          if (lid && deletedLeadIds.has(lid)) return false;
-          return true;
-        });
+        const validLeads = data.leads
+          .filter(l => {
+            if (!l?.company?.trim()) return false;
+            const text = JSON.stringify(l);
+            if (PLACEHOLDER_PATTERNS.test(text)) return false;
+            // Don't re-add leads the user has deleted
+            const lid = String(l.lead_id || l.id || "");
+            if (lid && deletedLeadIds.has(lid)) return false;
+            return true;
+          })
+          .map(l => ({
+            ...l,
+            // Normalize market casing so filters always work
+            market: (l.market||"").trim().toLowerCase().includes("ontario") ? "Ontario"
+              : (l.market||"").trim().toLowerCase().includes("arizona") ? "Arizona"
+              : l.market || "",
+          }));
         if (validLeads.length === 0) {
           setSyncError("Sheet returned leads but none had a company name. Check your n8n workflow.");
           setLoadingSheet(false);
@@ -1704,22 +1712,28 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
   const filtered = (() => {
+    const JUNK_CHECK = /\[Your Name\]|\[City\]|\[Name\]/i;
     const seenCompanies = new Set();
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
-      if (PLACEHOLDER.test(JSON.stringify(l))) return false;
-      // Deduplicate by company name — never show same company twice
+      if (JUNK_CHECK.test(l.company)) return false;
+      // Normalize market — handle any casing or whitespace from n8n
+      const leadMarket = (l.market || "").trim().toLowerCase();
+      const normalizedMarket = leadMarket.includes("ontario") ? "Ontario"
+        : leadMarket.includes("arizona") ? "Arizona" : "";
+      // Apply market filter BEFORE dedup so each market has its own dedup scope
+      const marketMatch = filterMkt === "All" ||
+        (filterMkt === "Ontario" && normalizedMarket === "Ontario") ||
+        (filterMkt === "Arizona" && normalizedMarket === "Arizona");
+      if (!marketMatch) return false;
+      // Apply status and segment filters
+      if (filterStatus !== "All" && l.status !== filterStatus) return false;
+      if (filterSeg    !== "All" && l.segment !== filterSeg)    return false;
+      // Deduplicate by company name WITHIN the current filter scope
       const key = l.company.trim().toLowerCase();
       if (seenCompanies.has(key)) return false;
       seenCompanies.add(key);
-      // Normalize market for comparison — trim + case-insensitive
-      const leadMarket = (l.market || "").trim().toLowerCase();
-      const marketMatch = filterMkt === "All" ||
-        (filterMkt === "Ontario" && leadMarket === "ontario") ||
-        (filterMkt === "Arizona" && leadMarket === "arizona");
-      return (filterStatus === "All" || l.status === filterStatus) &&
-             (filterSeg    === "All" || l.segment === filterSeg) &&
-             marketMatch;
+      return true;
     });
   })();
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
@@ -2068,7 +2082,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
         {["All", "Ontario", "Arizona"].map(m => {
-          const count = m === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.market===m && l?.company?.trim()).length;
+          const count = m === "All"
+            ? leads.filter(l=>l?.company?.trim()).length
+            : leads.filter(l => {
+                if (!l?.company?.trim()) return false;
+                const lm = (l.market||"").trim().toLowerCase();
+                return m === "Ontario" ? lm.includes("ontario") : lm.includes("arizona");
+              }).length;
           return (
             <button key={m} onClick={() => { setFilterMkt(m); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
@@ -2737,7 +2757,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const bookLead = (lead) => {
     const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
-    const assignedPartner = partners.find(p => p.onboarded) || partners[0];
+    const assignedPartner = partners.find(p => p.onboarded) || partners[0] || { id: 1, name: 'Unassigned' };
     const jobId = Date.now();
     const newJob = {
       id: jobId,
@@ -2783,8 +2803,9 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const submitForm = () => {
     const newLead = { ...form, id:Date.now(), status:"New", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:new Date().toISOString() };
-    setLeads(ls => [...ls, newLead]);
-    setFilterStatus("All"); // reset to All so new lead is visible immediately
+    setLeads(ls => [newLead, ...ls]);
+    setFilterStatus("All");
+    setSearchQuery(""); // clear search so new lead is visible
     setShowForm(false);
     setForm(emptyForm);
   };
@@ -4578,7 +4599,7 @@ export default function App() {
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
   const [resLeads, setResLeads] = useState([]);
-  const [coldLeads, setColdLeads] = useState(SAMPLE_COLD_LEADS);
+  const [coldLeads, setColdLeads] = useState([]); // load from Supabase on boot
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
   const [deletedLeadIds, setDeletedLeadIds] = useState(new Set()); // tracks permanently deleted leads
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
@@ -4710,14 +4731,21 @@ export default function App() {
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
           const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
-          const cleanCold = freshCold.filter(l => {
-            if (!l?.company?.trim()) return false;
-            if (JUNK.test(l.company)) return false;
-            // Never bring back a deleted lead
-            const lid = String(l.lead_id || l.id || "");
-            if (lid && deletedLeadIds.has(lid)) return false;
-            return true;
-          });
+          const cleanCold = freshCold
+            .filter(l => {
+              if (!l?.company?.trim()) return false;
+              if (JUNK.test(l.company)) return false;
+              const lid = String(l.lead_id || l.id || "");
+              if (lid && deletedLeadIds.has(lid)) return false;
+              return true;
+            })
+            .map(l => ({
+              ...l,
+              // Normalize market to exact casing so filters always work
+              market: (l.market||"").trim().toLowerCase().includes("ontario") ? "Ontario"
+                : (l.market||"").trim().toLowerCase().includes("arizona") ? "Arizona"
+                : l.market || "",
+            }));
           setColdLeads(prev => {
             const localMap = Object.fromEntries(
               (prev||[]).map(l => [l.lead_id||l.id||"", l])
