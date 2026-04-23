@@ -3710,8 +3710,15 @@ const SB = {
 
 async function sbFetch(path, opts = {}) {
   try {
+    const method = (opts.method || "GET").toUpperCase();
+    const isWrite = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      headers: { ...sbH, "Prefer": "resolution=merge-duplicates,return=minimal", ...opts.headers },
+      headers: {
+        ...sbH,
+        // Only send Prefer header on writes — sending it on GET causes empty response
+        ...(isWrite ? { "Prefer": "resolution=merge-duplicates,return=minimal" } : {}),
+        ...opts.headers,
+      },
       ...opts,
     });
     return r;
