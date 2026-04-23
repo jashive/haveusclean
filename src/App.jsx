@@ -1607,100 +1607,107 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const data = await res.json();
       if (data.error) {
         setSyncError(data.error + (data.help ? " — " + data.help : ""));
-      } else if (data.leads && data.leads.length > 0) {
-        // Strip junk leads RIGHT HERE before they touch state or Supabase
-        const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-        const validLeads = data.leads
-          .filter(l => {
-            if (!l?.company?.trim()) return false;
-            const text = JSON.stringify(l);
-            if (PLACEHOLDER_PATTERNS.test(text)) return false;
-            // Don't re-add leads the user has deleted
-            const lid = String(l.lead_id || l.id || "");
-            if (lid && deletedLeadIds.has(lid)) return false;
-            return true;
-          })
-          .map(l => ({
-            ...l,
-            // Normalize market casing so filters always work
-            market: (() => {
-              const m = (l.market||"").trim().toLowerCase();
-              if (m.includes("ontario")) return "Ontario";
-              if (m.includes("arizona")) return "Arizona";
-              const id = (l.lead_id||l.id||"").toUpperCase();
-              if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
-              if (id.startsWith("AZ-")) return "Arizona";
-              const city = (l.city||"").toLowerCase();
-              const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","pickering","ajax","whitby","oshawa","north york","etobicoke","scarborough"];
-              const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills"];
-              if (ontarioCities.some(c => city.includes(c))) return "Ontario";
-              if (arizonaCities.some(c => city.includes(c))) return "Arizona";
-              return l.market || "";
-            })(),
-          }));
-        if (validLeads.length === 0) {
-          setSyncError("Sheet returned leads but none had a company name. Check your n8n workflow.");
-          setLoadingSheet(false);
-          return;
-        }
-        setLeads(prev => {
-          const prevMap = Object.fromEntries(prev.map(l => [l.lead_id, l]));
-          const merged = validLeads.map(sheetLead => ({
-            ...sheetLead,
-            status:          prevMap[sheetLead.lead_id]?.status          || sheetLead.status || "New",
-            notes:           prevMap[sheetLead.lead_id]?.notes           || sheetLead.notes  || "",
-            cold_email:      prevMap[sheetLead.lead_id]?.cold_email      || sheetLead.cold_email      || "",
-            follow_up_email: prevMap[sheetLead.lead_id]?.follow_up_email || sheetLead.follow_up_email || "",
-            linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note   || "",
-            call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener     || "",
-          }));
-          const sheetIds = new Set(validLeads.map(l => l.lead_id));
-          const manualLeads = prev.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
-          const combined = [...manualLeads, ...merged];
-          // Deduplicate by company name — same company can appear many times if n8n ran multiple times
-          // Keep the version with the most data (longest cold_email = most enriched)
-          const companyMap = new Map();
-          for (const lead of combined) {
-            const key = (lead.company || "").trim().toLowerCase();
-            if (!key) continue;
-            const existing = companyMap.get(key);
-            if (!existing) {
-              companyMap.set(key, lead);
-            } else {
-              // Keep whichever has better outreach content, or the more recent status
-              const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
-              if (score(lead) > score(existing)) companyMap.set(key, lead);
-            }
-          }
-          const final = Array.from(companyMap.values());
-          // Write to Supabase sequentially to avoid rate limits
-          // Fire and forget — don't block the UI, but write in order
-          (async () => {
-            const BATCH = 50;
-            for (let i = 0; i < final.length; i += BATCH) {
-              const batch = final.slice(i, i + BATCH);
-              const rows = batch.map(lead => ({
-                lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${i}`),
-                data: lead,
-                updated_at: new Date().toISOString(),
-              }));
-              try {
-                await sbFetch("huc_leads_cold", {
-                  method: "POST",
-                  body: JSON.stringify(rows),
-                  headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-                });
-              } catch { /* continue on error */ }
-            }
-          })();
-          return final;
-        });
-        setLastSynced(new Date().toLocaleTimeString());
-      } else {
-        setSyncError("Sheet returned 0 leads. Make sure your n8n has run and the sheet has data.");
+        setLoadingSheet(false);
+        return;
       }
+      if (!data.leads || data.leads.length === 0) {
+        setSyncError("Sheet returned 0 leads. Make sure your n8n has run and the sheet has data.");
+        setLoadingSheet(false);
+        return;
+      }
+
+      // ── Step 1: Clean and normalize leads ──
+      const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
+      const validLeads = data.leads
+        .filter(l => {
+          if (!l?.company?.trim()) return false;
+          if (PLACEHOLDER_PATTERNS.test(JSON.stringify(l))) return false;
+          const lid = String(l.lead_id || l.id || "");
+          if (lid && deletedLeadIds.has(lid)) return false;
+          return true;
+        })
+        .map(l => ({
+          ...l,
+          market: (() => {
+            const m = (l.market||"").trim().toLowerCase();
+            if (m.includes("ontario")) return "Ontario";
+            if (m.includes("arizona")) return "Arizona";
+            const id = (l.lead_id||l.id||"").toUpperCase();
+            if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+            if (id.startsWith("AZ-")) return "Arizona";
+            const city = (l.city||"").toLowerCase();
+            const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa","stouffville","barrie"];
+            const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills","paradise valley"];
+            if (ontarioCities.some(c => city.includes(c))) return "Ontario";
+            if (arizonaCities.some(c => city.includes(c))) return "Arizona";
+            return l.market || "";
+          })(),
+        }));
+
+      if (validLeads.length === 0) {
+        setSyncError("Sheet returned leads but none had a company name.");
+        setLoadingSheet(false);
+        return;
+      }
+
+      // ── Step 2: Merge with existing state ──
+      const prevLeads = coldLeads || [];
+      const prevMap = Object.fromEntries(prevLeads.map(l => [l.lead_id, l]));
+      const merged = validLeads.map(sheetLead => ({
+        ...sheetLead,
+        status:          prevMap[sheetLead.lead_id]?.status          || sheetLead.status || "New",
+        notes:           prevMap[sheetLead.lead_id]?.notes           || sheetLead.notes  || "",
+        cold_email:      prevMap[sheetLead.lead_id]?.cold_email      || sheetLead.cold_email || "",
+        follow_up_email: prevMap[sheetLead.lead_id]?.follow_up_email || sheetLead.follow_up_email || "",
+        linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note || "",
+        call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener || "",
+      }));
+      const sheetIds = new Set(validLeads.map(l => l.lead_id));
+      const manualLeads = prevLeads.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
+      const combined = [...manualLeads, ...merged];
+
+      // ── Step 3: Deduplicate by company name ──
+      const companyMap = new Map();
+      for (const lead of combined) {
+        const key = (lead.company || "").trim().toLowerCase();
+        if (!key) continue;
+        const existing = companyMap.get(key);
+        if (!existing) {
+          companyMap.set(key, lead);
+        } else {
+          const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
+          if (score(lead) > score(existing)) companyMap.set(key, lead);
+        }
+      }
+      const final = Array.from(companyMap.values());
+
+      // ── Step 4: Update React state (pure — no side effects) ──
+      setColdLeads(final);
+      setLastSynced(new Date().toLocaleTimeString());
+
+      // ── Step 5: Write to Supabase AFTER setState (sequential, awaited) ──
+      const BATCH = 50;
+      let written = 0;
+      for (let i = 0; i < final.length; i += BATCH) {
+        const batch = final.slice(i, i + BATCH);
+        const rows = batch.map(lead => ({
+          lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${i}`),
+          data: lead,
+          updated_at: new Date().toISOString(),
+        }));
+        try {
+          const r = await sbFetch("huc_leads_cold", {
+            method: "POST",
+            body: JSON.stringify(rows),
+            headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+          });
+          if (r && r.ok) written += batch.length;
+        } catch { /* continue on network error */ }
+      }
+      setLastSynced(`${new Date().toLocaleTimeString()} · ${final.length} leads · ${written} saved`);
+
     } catch (err) {
-      setSyncError("Network error — check your Vercel deployment.");
+      setSyncError("Network error: " + err.message);
     }
     setLoadingSheet(false);
   };
