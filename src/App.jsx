@@ -1696,7 +1696,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           updated_at: new Date().toISOString(),
         }));
         try {
-          const r = await sbFetch("huc_leads_cold", {
+          const r = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
             method: "POST",
             body: JSON.stringify(rows),
             headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
@@ -2334,12 +2334,21 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
       const data = await res.json();
       if (data.leads && data.leads.length > 0) {
         setResLeads(ls => {
-          const existingKeys = new Set(ls.map(l =>
-            `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`
-          ));
+          // Dedup by email + name — most stable identifiers
+          // Timestamps vary between pulls for same submission, so can't be used
+          const existingKeys = new Set(ls.map(l => {
+            const email = (l.email||'').toLowerCase().trim();
+            const name  = (l.name ||'').toLowerCase().trim();
+            return `${email}|${name}`;
+          }));
           const newOnes = data.leads.filter(l => {
-            const key = `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`;
-            return !existingKeys.has(key);
+            const email = (l.email||'').toLowerCase().trim();
+            const name  = (l.name ||'').toLowerCase().trim();
+            if (!email || !name) return false; // skip junk rows
+            const key = `${email}|${name}`;
+            if (existingKeys.has(key)) return false;
+            existingKeys.add(key); // prevent duplicates within the same batch
+            return true;
           });
           if (newOnes.length > 0) {
             setPullResult(`✅ ${newOnes.length} new lead${newOnes.length > 1 ? 's' : ''} pulled from Google Form!`);
@@ -4801,13 +4810,20 @@ export default function App() {
         const data = await res.json();
         if (data.leads && data.leads.length > 0) {
           setResLeads(ls => {
-            // Deduplicate by email+timestamp combo
-            const existingKeys = new Set(ls.map(l =>
-              `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`
-            ));
+            // Dedup by email+name (stable identifiers)
+            const existingKeys = new Set(ls.map(l => {
+              const email = (l.email||'').toLowerCase().trim();
+              const name  = (l.name ||'').toLowerCase().trim();
+              return `${email}|${name}`;
+            }));
             const newOnes = data.leads.filter(l => {
-              const key = `${(l.email||'').toLowerCase()}|${l.timestamp||l.createdAt||''}`;
-              return !existingKeys.has(key);
+              const email = (l.email||'').toLowerCase().trim();
+              const name  = (l.name ||'').toLowerCase().trim();
+              if (!email || !name) return false;
+              const key = `${email}|${name}`;
+              if (existingKeys.has(key)) return false;
+              existingKeys.add(key);
+              return true;
             });
             if (newOnes.length === 0) return ls;
             console.log(`✅ Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
