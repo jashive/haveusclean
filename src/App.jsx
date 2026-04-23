@@ -1683,7 +1683,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       // ── Step 4: Update React state (pure — no side effects) ──
       setColdLeads(final);
-      setLastSynced(new Date().toLocaleTimeString());
+      setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
 
       // ── Step 5: Write to Supabase AFTER setState (sequential, awaited) ──
       const BATCH = 50;
@@ -1704,7 +1704,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           if (r && r.ok) written += batch.length;
         } catch { /* continue on network error */ }
       }
-      setLastSynced(`${new Date().toLocaleTimeString()} · ${final.length} leads · ${written} saved`);
+      setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved to Supabase`);
 
     } catch (err) {
       setSyncError("Network error: " + err.message);
