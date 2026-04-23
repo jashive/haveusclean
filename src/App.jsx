@@ -1662,10 +1662,26 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
             }
           }
           const final = Array.from(companyMap.values());
-          // Write only clean leads to Supabase
-          const batches = [];
-          for (let i = 0; i < final.length; i += 100) batches.push(final.slice(i, i+100));
-          batches.forEach(batch => sbSet("cp:cold_leads", batch).catch(()=>{}));
+          // Write to Supabase sequentially to avoid rate limits
+          // Fire and forget — don't block the UI, but write in order
+          (async () => {
+            const BATCH = 50;
+            for (let i = 0; i < final.length; i += BATCH) {
+              const batch = final.slice(i, i + BATCH);
+              const rows = batch.map(lead => ({
+                lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${i}`),
+                data: lead,
+                updated_at: new Date().toISOString(),
+              }));
+              try {
+                await sbFetch("huc_leads_cold", {
+                  method: "POST",
+                  body: JSON.stringify(rows),
+                  headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+                });
+              } catch { /* continue on error */ }
+            }
+          })();
           return final;
         });
         setLastSynced(new Date().toLocaleTimeString());
@@ -4718,7 +4734,28 @@ export default function App() {
   // ── Auto-save coldLeads ──
   useEffect(() => {
     if (isLoading) return;
-    dbSet(DB_KEYS.coldLeads, coldLeads);
+    // Write cold leads directly to Supabase sequentially
+    if (coldLeads && coldLeads.length > 0) {
+      (async () => {
+        const BATCH = 50;
+        for (let i = 0; i < coldLeads.length; i += BATCH) {
+          const batch = coldLeads.slice(i, i + BATCH);
+          const rows = batch.map(lead => ({
+            lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`),
+            data: lead,
+            updated_at: new Date().toISOString(),
+          }));
+          try {
+            await sbFetch("huc_leads_cold", {
+              method: "POST",
+              body: JSON.stringify(rows),
+              headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+            });
+          } catch { /* continue */ }
+        }
+      })();
+    }
+    dbSet(DB_KEYS.coldLeads, coldLeads); // also save to localStorage as backup
   }, [coldLeads, isLoading]);
 
   // ── Auto-save onboarding progress ──
