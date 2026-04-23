@@ -1574,7 +1574,7 @@ const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
 
-function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {} }) {
+function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {}, deletedLeadIds = new Set(), setDeletedLeadIds = () => {} }) {
   const leads    = coldLeads;
   const setLeads = setColdLeads;
   const [viewLead, setViewLead]         = useState(null);
@@ -1610,9 +1610,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
         const validLeads = data.leads.filter(l => {
           if (!l?.company?.trim()) return false;
-          // Reject template placeholders that GPT failed to fill in
           const text = JSON.stringify(l);
           if (PLACEHOLDER_PATTERNS.test(text)) return false;
+          // Don't re-add leads the user has deleted
+          const lid = String(l.lead_id || l.id || "");
+          if (lid && deletedLeadIds.has(lid)) return false;
           return true;
         });
         if (validLeads.length === 0) {
@@ -1667,12 +1669,15 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   };
 
   const deleteLead = (id) => {
-    // Remove from local state immediately
+    if (!id) return;
+    // 1. Remove from local state immediately
     setLeads(ls => ls.filter(l => l.lead_id !== id && l.id !== id));
     if (viewLead?.lead_id === id || viewLead?.id === id) setViewLead(null);
-    // Delete from Supabase so other devices sync it within 15s
-    const cfg = { table:"huc_leads_cold", pk:"lead_id" };
-    sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
+    // 2. Permanently track this ID so the 15s sync never brings it back
+    setDeletedLeadIds(prev => new Set([...prev, String(id)]));
+    // 3. Delete from Supabase
+    sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
+    sbFetch(`huc_leads_cold?id=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
   };
 
   // Auto-delete incomplete leads — only runs when leads array changes
@@ -1707,13 +1712,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const key = l.company.trim().toLowerCase();
       if (seenCompanies.has(key)) return false;
       seenCompanies.add(key);
+      // Normalize market for comparison — trim + case-insensitive
+      const leadMarket = (l.market || "").trim().toLowerCase();
+      const marketMatch = filterMkt === "All" ||
+        (filterMkt === "Ontario" && leadMarket === "ontario") ||
+        (filterMkt === "Arizona" && leadMarket === "arizona");
       return (filterStatus === "All" || l.status === filterStatus) &&
              (filterSeg    === "All" || l.segment === filterSeg) &&
-             (filterMkt    === "All" || l.market === filterMkt);
+             marketMatch;
     });
   })();
-  const totalPages = Math.ceil(filtered.length / PAGE_SIZE);
-  const paginated  = filtered.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE);
+  const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
+  // If page is out of range (e.g. after deletion or filter change), correct it immediately
+  const safePage = Math.min(page, Math.max(0, totalPages - 1));
+  const paginated  = filtered.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
 
   // Reset page when filters change
   // Reset to page 0 when filters change
@@ -2093,7 +2105,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       {/* Pagination info — ABOVE list as count indicator only */}
       {filtered.length > PAGE_SIZE && (
         <div style={{ fontSize:12, color:C.muted, marginBottom:8, textAlign:"right" }}>
-          Page {page+1} of {totalPages} · {filtered.length} leads
+          Page {safePage+1} of {totalPages} · {filtered.length} leads
         </div>
       )}
 
@@ -2174,16 +2186,16 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       {filtered.length > PAGE_SIZE && (
         <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginTop:16, flexWrap:"wrap" }}>
           <button style={{ ...S.btn("ghost"), fontSize:13, padding:"8px 16px" }}
-            disabled={page===0}
+            disabled={safePage===0}
             onClick={() => {
-              setPage(p => p-1);
+              setPage(Math.max(0, safePage - 1));
               setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
             }}>← Prev</button>
-          <span style={{ fontSize:13, color:C.muted }}>Page {page+1} of {totalPages}</span>
+          <span style={{ fontSize:13, color:C.muted }}>Page {safePage+1} of {totalPages}</span>
           <button style={{ ...S.btn(page<totalPages-1?"primary":"ghost"), fontSize:13, padding:"8px 16px" }}
-            disabled={page>=totalPages-1}
+            disabled={safePage>=totalPages-1}
             onClick={() => {
-              setPage(p => p+1);
+              setPage(safePage + 1);
               setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
             }}>Next →</button>
         </div>
@@ -4568,6 +4580,7 @@ export default function App() {
   const [resLeads, setResLeads] = useState([]);
   const [coldLeads, setColdLeads] = useState(SAMPLE_COLD_LEADS);
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
+  const [deletedLeadIds, setDeletedLeadIds] = useState(new Set()); // tracks permanently deleted leads
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
   // ── DB state ──
@@ -4689,19 +4702,20 @@ export default function App() {
   }, [isLoading]);
 
   // ── Real-time sync — poll Supabase every 15s ──
-  // IMPORTANT: Only sync FROM Supabase if it has more leads than the app currently shows.
-  // This prevents Supabase's small seed data from wiping leads loaded from Google Sheet.
   useEffect(() => {
     if (isLoading) return;
     const syncFromSupabase = async () => {
       try {
-        // ── Cold leads: filter junk BEFORE setting state ──────────────────
+        // ── Cold leads: filter junk AND deleted leads BEFORE setting state ──
         const freshCold = await sbGet("cp:cold_leads");
         if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
           const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
           const cleanCold = freshCold.filter(l => {
-            if (!l?.company?.trim()) return false;       // no company = junk
-            if (JUNK.test(l.company)) return false;      // placeholder company = junk
+            if (!l?.company?.trim()) return false;
+            if (JUNK.test(l.company)) return false;
+            // Never bring back a deleted lead
+            const lid = String(l.lead_id || l.id || "");
+            if (lid && deletedLeadIds.has(lid)) return false;
             return true;
           });
           setColdLeads(prev => {
@@ -4718,7 +4732,7 @@ export default function App() {
               (l.source === "manual") && !sbIds.has(l.lead_id||l.id||"")
             );
             const combined = [...manualOnly, ...merged];
-            // Deduplicate by company name — keep best version (most data / non-New status)
+            // Deduplicate by company name — keep best version
             const compMap = new Map();
             for (const lead of combined) {
               const key = (lead.company||"").trim().toLowerCase();
@@ -4729,7 +4743,8 @@ export default function App() {
               if (score(lead) > score(ex)) compMap.set(key, lead);
             }
             const final = Array.from(compMap.values());
-            return final.length >= (prev||[]).length * 0.8 ? final : prev;
+            // Only replace if we have a meaningful result — never drop below 50% of local
+            return final.length >= (prev||[]).length * 0.5 ? final : prev;
           });
         }
 
@@ -5040,7 +5055,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} />}
+        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
