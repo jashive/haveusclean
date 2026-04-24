@@ -1690,17 +1690,26 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const PARALLEL = 2;     // only 2 parallel to avoid rate limit
       let written = 0;
       let lastError = "";
+
+      // Dedupe by lead_id — Postgres rejects batches with duplicate primary keys
+      const leadIdMap = new Map();
+      for (const lead of final) {
+        const lid = String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`);
+        if (!leadIdMap.has(lid)) leadIdMap.set(lid, { lead, lid });
+      }
+      const uniqueFinal = Array.from(leadIdMap.values());
+
       const batches = [];
-      for (let i = 0; i < final.length; i += BATCH) {
-        batches.push(final.slice(i, i + BATCH));
+      for (let i = 0; i < uniqueFinal.length; i += BATCH) {
+        batches.push(uniqueFinal.slice(i, i + BATCH));
       }
 
       for (let i = 0; i < batches.length; i += PARALLEL) {
         const chunk = batches.slice(i, i + PARALLEL);
-        setLastSynced(`v5.35 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
+        setLastSynced(`v5.36 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
         const promises = chunk.map(batch => {
-          const rows = batch.map(lead => ({
-            lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`),
+          const rows = batch.map(({ lead, lid }) => ({
+            lead_id: lid,
             data: lead,
             updated_at: new Date().toISOString(),
           }));
@@ -1724,11 +1733,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           await new Promise(res => setTimeout(res, 200));
         }
       }
-      const finalMsg = written === final.length
-        ? `v5.35 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved ✅`
+      const finalMsg = written === uniqueFinal.length
+        ? `v5.36 · ${new Date().toLocaleTimeString()} · ${written}/${uniqueFinal.length} saved ✅`
         : written > 0
-        ? `v5.35 · partial: ${written}/${final.length} saved · ${lastError}`
-        : `v5.35 · FAILED · 0/${final.length} · ${lastError || "no response"}`;
+        ? `v5.36 · partial: ${written}/${uniqueFinal.length} saved · ${lastError}`
+        : `v5.36 · FAILED · 0/${uniqueFinal.length} · ${lastError || "no response"}`;
       setLastSynced(finalMsg);
 
     } catch (err) {
