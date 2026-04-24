@@ -1685,9 +1685,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       setColdLeads(final);
       setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
 
-      // ── Step 5: Write to Supabase — small batches, parallel, error visibility ──
-      const BATCH = 10;       // smaller batches to avoid payload size limits
-      const PARALLEL = 3;     // fewer parallel to avoid rate limits
+      // ── Step 5: Write to Supabase — larger batches to stay under rate limit ──
+      const BATCH = 100;      // 100 leads per request reduces total request count
+      const PARALLEL = 2;     // only 2 parallel to avoid rate limit
       let written = 0;
       let lastError = "";
       const batches = [];
@@ -1697,7 +1697,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       for (let i = 0; i < batches.length; i += PARALLEL) {
         const chunk = batches.slice(i, i + PARALLEL);
-        setLastSynced(`v5.32 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved so far`);
+        setLastSynced(`v5.35 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
         const promises = chunk.map(batch => {
           const rows = batch.map(lead => ({
             lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`),
@@ -1713,21 +1713,22 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
               written += batch.length;
             } else if (r) {
               const txt = await r.text().catch(() => "no body");
-              lastError = `HTTP ${r.status}: ${txt.slice(0, 150)}`;
-            } else {
-              lastError = "fetch returned null (network or CORS error)";
+              lastError = `HTTP ${r.status}: ${txt.slice(0, 120)}`;
             }
             return r;
-          }).catch(e => {
-            lastError = "exception: " + (e.message || String(e));
-            return null;
-          });
+          }).catch(e => { lastError = "exception: " + (e.message || e); return null; });
         });
         await Promise.all(promises);
+        // Rate limit safety: small pause between rounds
+        if (i + PARALLEL < batches.length) {
+          await new Promise(res => setTimeout(res, 200));
+        }
       }
-      const finalMsg = written > 0
-        ? `v5.32 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved ✅`
-        : `v5.32 · FAILED · 0/${final.length} · ${lastError || "unknown error"}`;
+      const finalMsg = written === final.length
+        ? `v5.35 · ${new Date().toLocaleTimeString()} · ${written}/${final.length} saved ✅`
+        : written > 0
+        ? `v5.35 · partial: ${written}/${final.length} saved · ${lastError}`
+        : `v5.35 · FAILED · 0/${final.length} · ${lastError || "no response"}`;
       setLastSynced(finalMsg);
 
     } catch (err) {
