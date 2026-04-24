@@ -1618,9 +1618,18 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       // ── Step 1: Clean and normalize leads ──
       const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
+      const isBadCompany = (c) => {
+        if (!c || c.length > 80) return true;
+        if (/@|\|/.test(c)) return true;
+        if (/\d{3}-\d{3}-\d{4}/.test(c)) return true;
+        if (/\. [A-Z]/.test(c)) return true;
+        if (/^(hi |hello |dear |i |i'm |danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring)/i.test(c.trim())) return true;
+        return false;
+      };
       const validLeads = data.leads
         .filter(l => {
           if (!l?.company?.trim()) return false;
+          if (isBadCompany(l.company)) return false;
           if (PLACEHOLDER_PATTERNS.test(JSON.stringify(l))) return false;
           const lid = String(l.lead_id || l.id || "");
           if (lid && deletedLeadIds.has(lid)) return false;
@@ -1788,6 +1797,19 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
   const filtered = (() => {
     const JUNK_CHECK = /\[Your Name\]|\[City\]|\[Name\]/i;
+    // Filter out rows where company field contains email body / signatures / greetings
+    // These come from n8n Parse outreach writing wrong data into the company field
+    const isFakeCompany = (name) => {
+      if (!name) return true;
+      if (name.length > 80) return true;                         // too long = email body
+      if (/@/.test(name)) return true;                           // contains @ = email address
+      if (/\|/.test(name)) return true;                          // contains | = signature
+      if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;         // contains phone number
+      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|i noticed|as the|as a |this is danae|danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring|maintaining|i'd love|i noticed)/i.test(name.trim())) return true;
+      if (/\. [A-Z]/.test(name)) return true;                    // contains sentence = email body
+      if (/,hi |,hello /i.test(name)) return true;               // comma + greeting = signature+greeting
+      return false;
+    };
     const seenCompanies = new Set();
     // Aggressively normalize company name so variants like "ABC Inc" and "ABC Ltd." both collapse
     const normalizeCompany = (name) => {
