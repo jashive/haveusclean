@@ -1819,7 +1819,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;
       if (/have us clean/i.test(name)) return true;
       if (/info@|haveusclean\.ca/i.test(name)) return true;
-      if (name.trim().endsWith(".")) return true;              // sentence fragment ending with period
+      // Sentence fragment: ends with period BUT not a business suffix like Inc. Corp. Ltd.
+      if (name.trim().endsWith(".") && !/\b(inc|corp|ltd|co|llc|llp|plc|sa|pty|mgmt)\.$/.test(name.trim().toLowerCase())) return true;
       if (/\b(tailored for|tailored to|seamlessly|dependable services|high-quality cleaning|compliant cleaning|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(name)) return true;
       return false;
     };
@@ -4976,11 +4977,12 @@ export default function App() {
               if (lid && deletedLeadIds.has(lid)) return false;
               const c = l.company.trim();
               if (c.length > 80) return false;
-              if (c.endsWith(".")) return false;               // sentence fragment
+              // Sentence fragment: ends with period but NOT a business suffix like Inc. Corp. Ltd.
+              if (c.endsWith(".") && !/\b(inc|corp|ltd|co|llc|llp|plc|sa|pty|mgmt)\.$/.test(c.toLowerCase())) return false;
               if (/\b(patients?|tenants?|just like yours|have us clean|we specialize|haveusclean\.ca|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(c)) return false;
               if (/@|\|/.test(c)) return false;
-              if (/[.!?]\s+[A-Z]/.test(c)) return false;      // full sentence
-              if (/\b(tailored for|tailored to|seamlessly|dependable|high-quality|compliant|impression|downtime|standards)\b/i.test(c)) return false; // pitch words
+              if (/[.!?]\s+[A-Z]/.test(c)) return false;
+              if (/\b(tailored for|tailored to|seamlessly|impression|downtime)\b/i.test(c)) return false;
               return true;
             })
             .map(l => ({
