@@ -1895,20 +1895,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   useEffect(() => { setPage(0); }, [filterStatus, filterSeg]);
 
   // ── Auto-sync on mount — pulls fresh leads from Google Sheet automatically ──
-  // Runs if: (a) never synced before, (b) last sync was 30+ min ago, or (c) new browser session
+  // Runs on every mount (tab switch won't remount, but page refresh will)
   useEffect(() => {
-    const lastSyncKey = "cp:lastColdSync";
-    const sessionKey  = "cp:coldSyncedThisSession";
-    const now = Date.now();
-    const last = parseInt(localStorage.getItem(lastSyncKey) || "0", 10);
-    const thirtyMin = 30 * 60 * 1000;
-    const syncedThisSession = sessionStorage.getItem(sessionKey);
-    // Run if: never synced, OR 30+ min since last sync, OR fresh session (app reopened)
-    if (!syncedThisSession || now - last > thirtyMin) {
-      localStorage.setItem(lastSyncKey, String(now));
-      sessionStorage.setItem(sessionKey, "1");
-      syncSheet();
-    }
+    syncSheet();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []); // empty deps = runs once on mount
 
