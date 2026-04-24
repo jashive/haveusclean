@@ -1850,7 +1850,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     };
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
-      if (JUNK_CHECK.test(l.company)) return false;
+      // Only show leads with a proper stable hash ID (ON-XXXXXXXX or AZ-XXXXXXXX)
+      const lid = (l.lead_id || l.id || "").trim();
+      if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
       // Normalize market — handle any casing or whitespace from n8n
       const normalizedMarket = (() => {
         const m = (l.market||"").trim().toLowerCase();
@@ -4975,14 +4977,9 @@ export default function App() {
               const lid = String(l.lead_id || l.id || "");
               if (SAMPLE_IDS.has(lid)) return false;
               if (lid && deletedLeadIds.has(lid)) return false;
-              const c = l.company.trim();
-              if (c.length > 80) return false;
-              // Sentence fragment: ends with period but NOT a business suffix like Inc. Corp. Ltd.
-              if (c.endsWith(".") && !/\b(inc|corp|ltd|co|llc|llp|plc|sa|pty|mgmt)\.$/.test(c.toLowerCase())) return false;
-              if (/\b(patients?|tenants?|just like yours|have us clean|we specialize|haveusclean\.ca|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(c)) return false;
-              if (/@|\|/.test(c)) return false;
-              if (/[.!?]\s+[A-Z]/.test(c)) return false;
-              if (/\b(tailored for|tailored to|seamlessly|impression|downtime)\b/i.test(c)) return false;
+              // Only show leads with a proper stable hash ID (ON-XXXXXXXX or AZ-XXXXXXXX)
+              // Anything else is junk from old n8n runs
+              if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
               return true;
             })
             .map(l => ({
