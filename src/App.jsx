@@ -1618,27 +1618,15 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       // ── Step 1: Clean and normalize leads ──
       const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-      const isBadCompany = (c) => {
-        if (!c || c.length > 80) return true;
-        if (/@|\|/.test(c)) return true;
-        if (/\d{3}-\d{3}-\d{4}/.test(c)) return true;
-        if (/\. [A-Z]/.test(c)) return true;
-        if (/,\s*(hi|hello|dear)/i.test(c)) return true;
-        if (/^(hi |hello |dear |i |i'm |danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(c.trim())) return true;
-        if (/just like yours/i.test(c)) return true;
-        if (/clean(ing)? (dental|medical|office|your)/i.test(c)) return true;
-        if (/\bpatients?\b|\btenants?\b/i.test(c)) return true;
-        if (/have us clean/i.test(c)) return true;
-        if (/info@|haveusclean\.ca/i.test(c)) return true;
-        return false;
-      };
       const validLeads = data.leads
         .filter(l => {
           if (!l?.company?.trim()) return false;
-          if (isBadCompany(l.company)) return false;
           if (PLACEHOLDER_PATTERNS.test(JSON.stringify(l))) return false;
           const lid = String(l.lead_id || l.id || "");
-          if (lid && deletedLeadIds.has(lid)) return false;
+          if (!lid) return false;
+          // Only accept proper stable hash IDs — same rule as display
+          if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
+          if (deletedLeadIds.has(lid)) return false;
           return true;
         })
         .map(l => ({
