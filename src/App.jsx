@@ -1814,17 +1814,15 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     // Aggressively normalize company name so variants like "ABC Inc" and "ABC Ltd." both collapse
     const normalizeCompany = (name) => {
       let n = (name || "").trim();
-      // Extract real company name from enrichment opener pattern:
-      // "As the Facility Manager at 360 Medical Centre → making a..."
-      // "As a Property Manager at Fort Lowell Realty → ..."
-      const atMatch = n.match(/at\s+([^→\-–—()
-]+?)(?:\s*[→\-–—()
-]|$)/i);
+      // Extract real company name from enrichment opener pattern
+      // e.g. "As the Facility Manager at 360 Medical Centre → making a lasting impression"
+      // Strip everything from "→" onwards first
+      n = n.replace(/→.*/g, "").trim();
+      // Now extract "at COMPANY_NAME" pattern
+      const atMatch = n.match(/\bat\s+(.+)$/i);
       if (atMatch) n = atMatch[1].trim();
-      // Also handle "At Viva Health Centre → ..."
-      const atStart = n.match(/^at\s+([^→\-–—()
-]+?)(?:\s*[→\-–—()
-]|$)/i);
+      // Handle leading "At COMPANY_NAME" with nothing before it
+      const atStart = n.match(/^[Aa]t\s+(.+)$/);
       if (atStart) n = atStart[1].trim();
       return n
         // Strip trailing business suffixes
