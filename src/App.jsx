@@ -1814,6 +1814,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Reset to page 0 when filters change
   useEffect(() => { setPage(0); }, [filterStatus, filterSeg]);
 
+  // ── Auto-sync on mount — pulls fresh leads from Google Sheet automatically ──
+  // Only runs if last sync was more than 5 minutes ago (to avoid hammering on every tab switch)
+  useEffect(() => {
+    const lastSyncKey = "cp:lastColdSync";
+    const now = Date.now();
+    const last = parseInt(localStorage.getItem(lastSyncKey) || "0", 10);
+    const fiveMin = 5 * 60 * 1000;
+    if (now - last > fiveMin) {
+      localStorage.setItem(lastSyncKey, String(now));
+      syncSheet();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []); // empty deps = runs once on mount
+
   // Snap-back removed: was resetting page on every 15s sync
 
   // Stats
