@@ -1814,11 +1814,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (/\. [A-Z]/.test(name)) return true;                    // sentence pattern
       if (/,\s*(hi|hello|dear)/i.test(name)) return true;        // comma + greeting
       if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|this is danae|danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(name.trim())) return true;
-      if (/just like yours/i.test(name)) return true;            // email copy
-      if (/clean(ing)? (dental|medical|office|your)/i.test(name)) return true; // email copy
-      if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;  // email copy words
-      if (/have us clean/i.test(name)) return true;              // our own company name
-      if (/info@|haveusclean\.ca/i.test(name)) return true;      // our contact info
+      if (/just like yours/i.test(name)) return true;
+      if (/clean(ing)? (dental|medical|office|your)/i.test(name)) return true;
+      if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;
+      if (/have us clean/i.test(name)) return true;
+      if (/info@|haveusclean\.ca/i.test(name)) return true;
+      if (name.trim().endsWith(".")) return true;              // sentence fragment ending with period
+      if (/\b(tailored for|tailored to|seamlessly|dependable services|high-quality cleaning|compliant cleaning|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(name)) return true;
       return false;
     };
     const seenCompanies = new Set();
@@ -4972,12 +4974,13 @@ export default function App() {
               const lid = String(l.lead_id || l.id || "");
               if (SAMPLE_IDS.has(lid)) return false;
               if (lid && deletedLeadIds.has(lid)) return false;
-              // Reject rows where company is a sentence / email body
               const c = l.company.trim();
               if (c.length > 80) return false;
-              if (/\b(patients?|tenants?|just like yours|have us clean|we specialize|haveusclean\.ca)\b/i.test(c)) return false;
+              if (c.endsWith(".")) return false;               // sentence fragment
+              if (/\b(patients?|tenants?|just like yours|have us clean|we specialize|haveusclean\.ca|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(c)) return false;
               if (/@|\|/.test(c)) return false;
-              if (/[.!?]\s+[A-Z]/.test(c)) return false; // sentence pattern
+              if (/[.!?]\s+[A-Z]/.test(c)) return false;      // full sentence
+              if (/\b(tailored for|tailored to|seamlessly|dependable|high-quality|compliant|impression|downtime|standards)\b/i.test(c)) return false; // pitch words
               return true;
             })
             .map(l => ({
