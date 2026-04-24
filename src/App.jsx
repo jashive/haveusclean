@@ -1692,9 +1692,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       let lastError = "";
 
       // Dedupe by lead_id — Postgres rejects batches with duplicate primary keys
+      // Also: skip any lead without a real lead_id (don't invent random ones that pollute Supabase)
       const leadIdMap = new Map();
+      let skipped = 0;
       for (const lead of final) {
-        const lid = String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`);
+        const lid = String(lead.lead_id || lead.id || "").trim();
+        // Only accept lead_ids that look like real IDs (have a prefix like ON-, AZ-, LD-)
+        // Reject empty IDs and IDs that look like failed fallbacks (LD-17... timestamp pattern)
+        if (!lid || /^LD-17\d{11}/.test(lid)) { skipped++; continue; }
         if (!leadIdMap.has(lid)) leadIdMap.set(lid, { lead, lid });
       }
       const uniqueFinal = Array.from(leadIdMap.values());
@@ -1734,10 +1739,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         }
       }
       const finalMsg = written === uniqueFinal.length
-        ? `v5.36 · ${new Date().toLocaleTimeString()} · ${written}/${uniqueFinal.length} saved ✅`
+        ? `v5.37 · ${new Date().toLocaleTimeString()} · ${written}/${uniqueFinal.length} saved · ${skipped} skipped (no ID) ✅`
         : written > 0
-        ? `v5.36 · partial: ${written}/${uniqueFinal.length} saved · ${lastError}`
-        : `v5.36 · FAILED · 0/${uniqueFinal.length} · ${lastError || "no response"}`;
+        ? `v5.37 · partial: ${written}/${uniqueFinal.length} saved · ${lastError}`
+        : `v5.37 · FAILED · 0/${uniqueFinal.length} · ${lastError || "no response"}`;
       setLastSynced(finalMsg);
 
     } catch (err) {
