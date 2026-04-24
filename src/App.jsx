@@ -3788,14 +3788,15 @@ async function sbFetch(path, opts = {}) {
   try {
     const method = (opts.method || "GET").toUpperCase();
     const isWrite = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
+    // CRITICAL: spread opts FIRST, then override headers — otherwise opts.headers wins and wipes out auth
+    const { headers: optsHeaders, ...restOpts } = opts;
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
+      ...restOpts,
       headers: {
         ...sbH,
-        // Only send Prefer header on writes — sending it on GET causes empty response
         ...(isWrite ? { "Prefer": "resolution=merge-duplicates,return=minimal" } : {}),
-        ...opts.headers,
+        ...(optsHeaders || {}),
       },
-      ...opts,
     });
     return r;
   } catch { return null; }
