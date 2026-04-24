@@ -1789,6 +1789,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const filtered = (() => {
     const JUNK_CHECK = /\[Your Name\]|\[City\]|\[Name\]/i;
     const seenCompanies = new Set();
+    // Aggressively normalize company name so variants like "ABC Inc" and "ABC Ltd." both collapse
+    const normalizeCompany = (name) => {
+      return (name || "")
+        .toLowerCase()
+        .trim()
+        // Strip trailing business suffixes
+        .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "")
+        .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "") // run twice to catch "ABC Inc Ltd"
+        // Strip all punctuation
+        .replace(/[.,''"`''""\-–—&()/\\|:;!?*#]/g, " ")
+        // Collapse whitespace
+        .replace(/\s+/g, " ")
+        .trim();
+    };
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
       if (JUNK_CHECK.test(l.company)) return false;
@@ -1813,8 +1827,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       // Apply status and segment filters
       if (filterStatus !== "All" && l.status !== filterStatus) return false;
       if (filterSeg    !== "All" && l.segment !== filterSeg)    return false;
-      // Deduplicate by company name WITHIN the current filter scope
-      const key = l.company.trim().toLowerCase();
+      // Dedup by NORMALIZED company name — catches "ABC" = "ABC Inc." = "ABC Ltd"
+      // Also include city so "Acme Phoenix" and "Acme Scottsdale" stay separate
+      const normCompany = normalizeCompany(l.company);
+      const normCity    = (l.city || "").trim().toLowerCase();
+      const key = normCompany + "|" + normCity;
+      if (!normCompany) return false; // empty after normalization = junk
       if (seenCompanies.has(key)) return false;
       seenCompanies.add(key);
       return true;
