@@ -4966,8 +4966,14 @@ export default function App() {
               if (!l?.company?.trim()) return false;
               if (JUNK.test(l.company)) return false;
               const lid = String(l.lead_id || l.id || "");
-              if (SAMPLE_IDS.has(lid)) return false;  // never show demo leads
+              if (SAMPLE_IDS.has(lid)) return false;
               if (lid && deletedLeadIds.has(lid)) return false;
+              // Reject rows where company is a sentence / email body
+              const c = l.company.trim();
+              if (c.length > 80) return false;
+              if (/\b(patients?|tenants?|just like yours|have us clean|we specialize|haveusclean\.ca)\b/i.test(c)) return false;
+              if (/@|\|/.test(c)) return false;
+              if (/[.!?]\s+[A-Z]/.test(c)) return false; // sentence pattern
               return true;
             })
             .map(l => ({
