@@ -1623,7 +1623,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         if (/@|\|/.test(c)) return true;
         if (/\d{3}-\d{3}-\d{4}/.test(c)) return true;
         if (/\. [A-Z]/.test(c)) return true;
-        if (/^(hi |hello |dear |i |i'm |danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring)/i.test(c.trim())) return true;
+        if (/,\s*(hi|hello|dear)/i.test(c)) return true;
+        if (/^(hi |hello |dear |i |i'm |danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(c.trim())) return true;
+        if (/just like yours/i.test(c)) return true;
+        if (/clean(ing)? (dental|medical|office|your)/i.test(c)) return true;
+        if (/\bpatients?\b|\btenants?\b/i.test(c)) return true;
+        if (/have us clean/i.test(c)) return true;
+        if (/info@|haveusclean\.ca/i.test(c)) return true;
         return false;
       };
       const validLeads = data.leads
@@ -1801,13 +1807,18 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     // These come from n8n Parse outreach writing wrong data into the company field
     const isFakeCompany = (name) => {
       if (!name) return true;
-      if (name.length > 80) return true;                         // too long = email body
-      if (/@/.test(name)) return true;                           // contains @ = email address
-      if (/\|/.test(name)) return true;                          // contains | = signature
-      if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;         // contains phone number
-      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|i noticed|this is danae|danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean)/i.test(name.trim())) return true;
-      if (/\. [A-Z]/.test(name)) return true;                    // contains sentence = email body
-      if (/,hi |,hello /i.test(name)) return true;               // comma + greeting = signature+greeting
+      if (name.length > 80) return true;
+      if (/@/.test(name)) return true;                           // email address
+      if (/\|/.test(name)) return true;                          // pipe = signature
+      if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;          // phone number
+      if (/\. [A-Z]/.test(name)) return true;                    // sentence pattern
+      if (/,\s*(hi|hello|dear)/i.test(name)) return true;        // comma + greeting
+      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|this is danae|danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(name.trim())) return true;
+      if (/just like yours/i.test(name)) return true;            // email copy
+      if (/clean(ing)? (dental|medical|office|your)/i.test(name)) return true; // email copy
+      if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;  // email copy words
+      if (/have us clean/i.test(name)) return true;              // our own company name
+      if (/info@|haveusclean\.ca/i.test(name)) return true;      // our contact info
       return false;
     };
     const seenCompanies = new Set();
