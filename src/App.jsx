@@ -1805,7 +1805,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (/@/.test(name)) return true;                           // contains @ = email address
       if (/\|/.test(name)) return true;                          // contains | = signature
       if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;         // contains phone number
-      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|i noticed|as the|as a |this is danae|danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring|maintaining|i'd love|i noticed)/i.test(name.trim())) return true;
+      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|i noticed|this is danae|danae|have us clean,|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean)/i.test(name.trim())) return true;
       if (/\. [A-Z]/.test(name)) return true;                    // contains sentence = email body
       if (/,hi |,hello /i.test(name)) return true;               // comma + greeting = signature+greeting
       return false;
@@ -1813,9 +1813,20 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     const seenCompanies = new Set();
     // Aggressively normalize company name so variants like "ABC Inc" and "ABC Ltd." both collapse
     const normalizeCompany = (name) => {
-      return (name || "")
-        .toLowerCase()
-        .trim()
+      let n = (name || "").trim();
+      // Extract real company name from enrichment opener pattern:
+      // "As the Facility Manager at 360 Medical Centre → making a..."
+      // "As a Property Manager at Fort Lowell Realty → ..."
+      const atMatch = n.match(/at\s+([^→\-–—()
+]+?)(?:\s*[→\-–—()
+]|$)/i);
+      if (atMatch) n = atMatch[1].trim();
+      // Also handle "At Viva Health Centre → ..."
+      const atStart = n.match(/^at\s+([^→\-–—()
+]+?)(?:\s*[→\-–—()
+]|$)/i);
+      if (atStart) n = atStart[1].trim();
+      return n
         // Strip trailing business suffixes
         .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "")
         .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "") // run twice to catch "ABC Inc Ltd"
