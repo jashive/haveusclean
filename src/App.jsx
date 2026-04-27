@@ -2832,6 +2832,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
+  const [editLead, setEditLead] = useState(null);
+  const [showEditForm, setShowEditForm] = useState(false);
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -3080,6 +3082,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               {lead.followUpDate && <div style={{ fontSize:12, color:"#FF6B6B", marginTop:4 }}>📅 Follow up: {lead.followUpDate}</div>}
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
+                <button style={{...S.btn("ghost"), color:"#60A5FA"}} onClick={()=>{setEditLead({...lead});setShowEditForm(true);}}>✏️ Edit</button>
+                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={()=>{if(window.confirm("Delete this lead?"))setLeads(ls=>ls.filter(l=>l.id!==lead.id));}}>🗑</button>
                 {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
@@ -3167,6 +3171,42 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       )}
 
       {/* View / Quote Modal */}
+      {showEditForm && editLead && (
+        <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
+          <div style={{ padding:16 }}>
+            <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
+            {["name","email","phone","address","notes"].map(field => (
+              <div key={field} style={{ marginBottom:10 }}>
+                <div style={S.label}>{field.charAt(0).toUpperCase()+field.slice(1)}</div>
+                <input style={S.input} value={editLead[field]||""} onChange={e=>setEditLead(v=>({...v,[field]:e.target.value}))} />
+              </div>
+            ))}
+            <div style={{ marginBottom:10 }}>
+              <div style={S.label}>Status</div>
+              <select style={S.input} value={editLead.status||"New"} onChange={e=>setEditLead(v=>({...v,status:e.target.value}))}>
+                {["New","Quoted","Follow Up","Booked","Completed","Lost"].map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={S.label}>Follow-Up Date</div>
+              <input style={S.input} type="date" value={editLead.followUpDate||""} onChange={e=>setEditLead(v=>({...v,followUpDate:e.target.value}))} />
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:16 }}>
+              <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
+                setLeads(ls=>ls.map(l=>l.id===editLead.id?editLead:l));
+                setShowEditForm(false);setEditLead(null);
+              }}>💾 Save Changes</button>
+              <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
+            </div>
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+              if(window.confirm("Delete this lead permanently?")) {
+                setLeads(ls=>ls.filter(l=>l.id!==editLead.id));
+                setShowEditForm(false);setEditLead(null);
+              }
+            }}>🗑 Delete Lead</button>
+          </div>
+        </Modal>
+      )}
       {viewLead && (
         <Modal title={`📄 Quote — ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
           <div>
@@ -3433,6 +3473,42 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
         </Modal>
       )}
 
+      {showEditForm && editLead && (
+        <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
+          <div style={{ padding:16 }}>
+            <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
+            {["name","email","phone","address","notes"].map(field => (
+              <div key={field} style={{ marginBottom:10 }}>
+                <div style={S.label}>{field.charAt(0).toUpperCase()+field.slice(1)}</div>
+                <input style={S.input} value={editLead[field]||""} onChange={e=>setEditLead(v=>({...v,[field]:e.target.value}))} />
+              </div>
+            ))}
+            <div style={{ marginBottom:10 }}>
+              <div style={S.label}>Status</div>
+              <select style={S.input} value={editLead.status||"New"} onChange={e=>setEditLead(v=>({...v,status:e.target.value}))}>
+                {["New","Quoted","Follow Up","Booked","Completed","Lost"].map(s=><option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div style={{ marginBottom:10 }}>
+              <div style={S.label}>Follow-Up Date</div>
+              <input style={S.input} type="date" value={editLead.followUpDate||""} onChange={e=>setEditLead(v=>({...v,followUpDate:e.target.value}))} />
+            </div>
+            <div style={{ display:"flex", gap:8, marginTop:16 }}>
+              <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
+                setLeads(ls=>ls.map(l=>l.id===editLead.id?editLead:l));
+                setShowEditForm(false);setEditLead(null);
+              }}>💾 Save Changes</button>
+              <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
+            </div>
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+              if(window.confirm("Delete this lead permanently?")) {
+                setLeads(ls=>ls.filter(l=>l.id!==editLead.id));
+                setShowEditForm(false);setEditLead(null);
+              }
+            }}>🗑 Delete Lead</button>
+          </div>
+        </Modal>
+      )}
       {viewLead && (
         <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
           {(() => { const q=calcComQuote(viewLead, region); return (
@@ -4775,7 +4851,147 @@ function PartnerView({ jobs, partners, region }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-export default function App() {
+export default // ─── System Diagnostic Component ─────────────────────────────────────────────
+function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
+  const [results, setResults] = useState([]);
+  const [running, setRunning] = useState(false);
+  const [summary, setSummary] = useState(null);
+
+  const SB_URL = "https://opazwghrohmfykzxxsjk.supabase.co";
+  const SB_KEY = SUPABASE_ANON;
+  const SB_H = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
+
+  const addResult = (name, status, message) => {
+    setResults(prev => [...prev, { name, status, message, time: new Date().toLocaleTimeString() }]);
+  };
+
+  const runAll = async () => {
+    setResults([]);
+    setSummary(null);
+    setRunning(true);
+    let passed = 0, failed = 0, warned = 0;
+
+    // 1. Supabase connection
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id&limit=1`, { headers: SB_H });
+      if (r.ok) { addResult("Supabase connection", "ok", "HTTP 200 ✅"); passed++; }
+      else { addResult("Supabase connection", "err", `HTTP ${r.status}`); failed++; }
+    } catch(e) { addResult("Supabase connection", "err", e.message); failed++; }
+
+    // 2. Supabase row count
+    try {
+      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id`, { headers: { ...SB_H, "Prefer": "count=exact" } });
+      const range = r.headers.get("Content-Range") || "";
+      const total = range.split("/")[1] || "?";
+      addResult("Supabase row count", "ok", `${total} rows in database`); passed++;
+    } catch(e) { addResult("Supabase row count", "err", e.message); failed++; }
+
+    // 3. Supabase write
+    try {
+      const testId = "DIAG-" + Date.now();
+      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?on_conflict=lead_id`, {
+        method: "POST", headers: { ...SB_H, "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify([{ lead_id: testId, data: { company: "Diagnostic Test" }, updated_at: new Date().toISOString() }])
+      });
+      if (r.ok) {
+        await fetch(`${SB_URL}/rest/v1/huc_leads_cold?lead_id=eq.${testId}`, { method: "DELETE", headers: SB_H });
+        addResult("Supabase write/delete", "ok", "Write + cleanup succeeded ✅"); passed++;
+      } else { addResult("Supabase write/delete", "err", `HTTP ${r.status}`); failed++; }
+    } catch(e) { addResult("Supabase write/delete", "err", e.message); failed++; }
+
+    // 4. Google Sheet API
+    try {
+      const r = await fetch("/api/sheet");
+      const d = await r.json();
+      if (d.error) { addResult("Google Sheet API", "err", d.error); failed++; }
+      else if (!d.leads || d.leads.length === 0) { addResult("Google Sheet API", "warn", "Connected but 0 leads returned"); warned++; }
+      else {
+        const hashCount = d.leads.filter(l => /^(ON|AZ)-[A-Z0-9]{4,}$/i.test(l.lead_id || "")).length;
+        addResult("Google Sheet API", "ok", `${d.leads.length} leads | ${hashCount} with hash IDs | ${d.leads.length - hashCount} old/junk`);
+        passed++;
+      }
+    } catch(e) { addResult("Google Sheet API", "err", e.message); failed++; }
+
+    // 5. Form intake API
+    try {
+      const r = await fetch("/api/intake");
+      const d = await r.json();
+      if (d.error) { addResult("Form Intake API", "warn", d.error); warned++; }
+      else { addResult("Form Intake API", "ok", `${(d.leads||[]).length} form submissions`); passed++; }
+    } catch(e) { addResult("Form Intake API", "err", e.message); failed++; }
+
+    // 6. App state checks
+    addResult("Cold leads in memory", coldLeads.length > 0 ? "ok" : "warn",
+      `${coldLeads.length} leads loaded | ${coldLeads.filter(l => /^(ON|AZ)-[A-Z0-9]{4,}$/i.test(l.lead_id||"")).length} with hash IDs`);
+    if (coldLeads.length > 0) passed++; else warned++;
+
+    addResult("Residential leads", resLeads.length >= 0 ? "ok" : "warn",
+      `${resLeads.length} leads in app`); passed++;
+
+    addResult("Jobs in memory", jobs.length >= 0 ? "ok" : "warn",
+      `${jobs.length} jobs | ${jobs.filter(j=>j.status==="scheduled").length} scheduled`); passed++;
+
+    addResult("Partners", partners.length > 0 ? "ok" : "warn",
+      `${partners.length} partners registered`);
+    if (partners.length > 0) passed++; else warned++;
+
+    // 7. GPS
+    if ("geolocation" in navigator) { addResult("GPS/Geolocation", "ok", "Available ✅"); passed++; }
+    else { addResult("GPS/Geolocation", "err", "Not available"); failed++; }
+
+    // 8. localStorage
+    try {
+      localStorage.setItem("diag","1"); localStorage.removeItem("diag");
+      addResult("localStorage", "ok", "Working ✅"); passed++;
+    } catch(e) { addResult("localStorage", "err", e.message); failed++; }
+
+    // 9. Region
+    addResult("Active region", "ok", `${region?.name || "Unknown"} (${region?.id || "?"}) — ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
+    passed++;
+
+    setSummary({ passed, failed, warned });
+    setRunning(false);
+  };
+
+  const statusIcon = (s) => s === "ok" ? "✅" : s === "err" ? "❌" : "⚠️";
+  const statusColor = (s) => s === "ok" ? "#00D4AA" : s === "err" ? "#FF4757" : "#f59e0b";
+
+  return (
+    <div style={{ padding: 20, maxWidth: 680, margin: "0 auto" }}>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={{ color: C.accent, fontSize: 20, marginBottom: 4 }}>🔬 System Diagnostic</h2>
+        <p style={{ color: C.muted, fontSize: 13 }}>Run all checks to verify the app is working correctly</p>
+      </div>
+
+      <button onClick={runAll} disabled={running} style={{ ...S.btn("primary"), marginBottom: 20, opacity: running ? 0.6 : 1 }}>
+        {running ? "⏳ Running tests..." : "▶ Run All Checks"}
+      </button>
+
+      {summary && (
+        <div style={{ padding: 14, borderRadius: 10, marginBottom: 16, background: summary.failed > 0 ? "#FF475715" : summary.warned > 0 ? "#f59e0b15" : "#00D4AA15", border: `1px solid ${summary.failed > 0 ? "#FF475744" : summary.warned > 0 ? "#f59e0b44" : "#00D4AA44"}`, color: summary.failed > 0 ? "#FF4757" : summary.warned > 0 ? "#f59e0b" : "#00D4AA", fontWeight: 700, fontSize: 14, textAlign: "center" }}>
+          ✅ {summary.passed} passed · ❌ {summary.failed} failed · ⚠️ {summary.warned} warnings
+        </div>
+      )}
+
+      {results.map((r, i) => (
+        <div key={i} style={{ display: "flex", gap: 12, padding: "10px 14px", background: C.card, borderRadius: 8, marginBottom: 6, border: `1px solid ${C.border}` }}>
+          <div style={{ fontSize: 18, minWidth: 24 }}>{statusIcon(r.status)}</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{r.name}</div>
+            <div style={{ fontSize: 12, color: statusColor(r.status), marginTop: 2 }}>{r.message}</div>
+          </div>
+          <div style={{ fontSize: 11, color: C.muted, alignSelf: "center" }}>{r.time}</div>
+        </div>
+      ))}
+
+      {results.length === 0 && !running && (
+        <div style={{ textAlign: "center", color: C.muted, padding: 40 }}>Click "Run All Checks" to test every system</div>
+      )}
+    </div>
+  );
+}
+
+function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
@@ -5194,6 +5410,7 @@ export default function App() {
       { id:"whitelabel", label:"🏷️ App Store",    desc:"Licensing & white-label" },
       { id:"pricing",    label:"💰 Pricing",       desc:"Subscription tiers" },
       { id:"swot",       label:"📊 SWOT",          desc:"Competitive analysis" },
+      { id:"diagnostic", label:"🔬 Diagnostic",     desc:"System health check" },
     ]},
   ];
 
@@ -5350,6 +5567,7 @@ export default function App() {
         {tab==="whitelabel"     && <WhiteLabel />}
         {tab==="pricing"        && <PricingStrategy />}
         {tab==="swot"           && <SWOTAnalysis />}
+        {tab==="diagnostic"     && <SystemDiagnostic jobs={jobs} partners={partners} resLeads={resLeads} coldLeads={coldLeads} region={activeRegion} />}
       </main>
     </div>
   );
