@@ -2824,7 +2824,7 @@ const SAMPLE_RES_LEADS = [
   { id:3, name:"Priya S.", email:"priya@email.com", phone:"(416) 555-4410", address:"44 Lakeshore Blvd, Toronto ON", dwellingType:"Semi / Townhouse", dwellingSize:"Large", beds:4, baths:3, sqft:2200, serviceType:"Move-In / Move-Out", addons:["cabinets","carpet"], frequency:"One-Time", preferredDate:"2026-04-12", preferredTime:"8:00 AM", notes:"Empty unit. Move-out clean.", status:"New", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:"2026-04-02T09:00:00Z" },
 ];
 
-function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads }) {
+function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads, setTab = () => {} }) {
   // Use lifted state; seed with sample data if empty
   const leads = resLeads.length > 0 ? resLeads : SAMPLE_RES_LEADS;
   const setLeads = (updater) => {
@@ -2941,7 +2941,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     setJobs(js => [...js, newJob]);
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
     if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
-    alert(`✅ Job booked + Work Order created!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total (65%) — ${region.currencySymbol}${q.partnerPayEach} each\n\nWork order is attached to this job in the Jobs tab.`);
+    if (typeof setTab === "function") setTab("jobs");
+    alert(`✅ Job booked!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total\n\nOpening Jobs tab now.`);
   };
 
   const confirmPayment = (lead) => {
@@ -5322,7 +5323,7 @@ export default function App() {
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
-        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} />}
+        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTab} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
