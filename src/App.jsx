@@ -5474,11 +5474,38 @@ export default function App() {
   }, []);
 
   
-  const handleMyScheduleCheckIn = (job) => {
+
+  const getMySchedulePosition = () =>
+    new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          resolve({
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+            accuracy: position.coords.accuracy,
+            capturedAt: new Date().toISOString(),
+          });
+        },
+        () => resolve(null),
+        {
+          enableHighAccuracy: true,
+          timeout: 10000,
+          maximumAge: 30000,
+        }
+      );
+    });
+  const handleMyScheduleCheckIn = async (job) => {
     const now = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
+
+    const coords = await getMySchedulePosition();
 
     setJobsDB((prevJobs) =>
       prevJobs.map((j) =>
@@ -5487,18 +5514,20 @@ export default function App() {
               ...j,
               status: "in-progress",
               checkIn: j.checkIn || now,
-              checkInCoords: j.checkInCoords || null,
+              checkInCoords: j.checkInCoords || coords,
             }
           : j
       )
     );
   };
 
-  const handleMyScheduleCheckOut = (job) => {
+  const handleMyScheduleCheckOut = async (job) => {
     const now = new Date().toLocaleTimeString([], {
       hour: "2-digit",
       minute: "2-digit",
     });
+
+    const coords = await getMySchedulePosition();
 
     setJobsDB((prevJobs) =>
       prevJobs.map((j) =>
@@ -5507,12 +5536,13 @@ export default function App() {
               ...j,
               status: "completed",
               checkOut: j.checkOut || now,
-              checkOutCoords: j.checkOutCoords || null,
+              checkOutCoords: j.checkOutCoords || coords,
             }
           : j
       )
     );
   };
+
 
   const setPartnersDB = useCallback((updater) => {
     setPartners(prev => {
