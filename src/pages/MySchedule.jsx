@@ -258,8 +258,12 @@ export default function MySchedule({
   // ─── GPS action buttons ──────────────────────────────────────────────
   const GpsActions = ({ job }) => {
     const local = checkedIn[job.id];
-    const alreadyIn  = !!(local?.time   || job.checkIn);
+    const alreadyIn = !!(local?.time || job.checkIn);
     const alreadyOut = !!(local?.checkOutTime || job.checkOut);
+    const done = checklistDoneCount(job);
+    const total = checklistTotalCount(job);
+    const isChecklistComplete = checklistComplete(job);
+    const remaining = Math.max(0, total - done);
 
     if (job.status === "completed") {
       return (
@@ -282,12 +286,13 @@ export default function MySchedule({
               📍 Check In
             </button>
           ) : !alreadyOut ? (
-            checklistComplete(job) ? (
+            isChecklistComplete ? (
               <button style={st.btnCheckOut} onClick={() => handleCheckOut(job)}>
                 ✅ Check Out
               </button>
             ) : (
               <button
+                type="button"
                 style={{
                   ...st.btnDisabled,
                   color: C.gold,
@@ -302,6 +307,7 @@ export default function MySchedule({
           ) : (
             <div style={st.btnDisabled}>✅ Checked Out</div>
           )}
+
           {job.address && (
             <a
               href={mapsUrl(job.address)}
@@ -315,13 +321,30 @@ export default function MySchedule({
           )}
         </div>
 
-        {/* Optimistic check-in confirmation */}
+        {alreadyIn && !alreadyOut && !isChecklistComplete && (
+          <div
+            style={{
+              marginTop: 8,
+              fontSize: 12,
+              color: C.gold,
+              lineHeight: 1.5,
+              padding: "6px 10px",
+              background: `${C.gold}11`,
+              borderRadius: 8,
+              border: `1px solid ${C.gold}33`,
+            }}
+          >
+            🔒 Checkout unlocks when all checklist tasks are done. {remaining} task{remaining === 1 ? "" : "s"} remaining.
+          </div>
+        )}
+
         {alreadyIn && !alreadyOut && (
           <div style={st.checkedInBar}>
             ✅ Checked in at {local?.time || job.checkIn}
             <span style={{ fontSize: 11, color: C.muted, marginLeft: "auto" }}>GPS wired Phase 2D</span>
           </div>
         )}
+
         {alreadyIn && alreadyOut && (
           <div style={st.checkedInBar}>
             ✅ In: {local?.time || job.checkIn} · Out: {local?.checkOutTime || job.checkOut}
@@ -330,6 +353,7 @@ export default function MySchedule({
       </div>
     );
   };
+
 
 
   const ChecklistBox = ({ job }) => {
