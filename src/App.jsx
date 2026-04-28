@@ -5521,6 +5521,29 @@ export default function App() {
 
 
 
+
+  const handleMyScheduleReviewReferralUpdate = (job, kind, status) => {
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) => {
+        if (j.id !== job.id) return j;
+
+        if (kind === "review") {
+          return {
+            ...j,
+            reviewStatus: status,
+            reviewUpdatedAt: new Date().toISOString(),
+          };
+        }
+
+        return {
+          ...j,
+          referralStatus: status,
+          referralUpdatedAt: new Date().toISOString(),
+        };
+      })
+    );
+  };
+
   const handleMyScheduleFollowUpUpdate = (job, followUpStatus) => {
     setJobsDB((prevJobs) =>
       prevJobs.map((j) =>
@@ -5879,6 +5902,7 @@ export default function App() {
             onToggleChecklist={handleMyScheduleChecklistToggle}
             onUpdateQuality={handleMyScheduleQualityUpdate}
             onUpdateFollowUp={handleMyScheduleFollowUpUpdate}
+            onUpdateReviewReferral={handleMyScheduleReviewReferralUpdate}
           />
         )}
 
@@ -5894,6 +5918,7 @@ export default function App() {
             onToggleChecklist={handleMyScheduleChecklistToggle}
             onUpdateQuality={handleMyScheduleQualityUpdate}
             onUpdateFollowUp={handleMyScheduleFollowUpUpdate}
+            onUpdateReviewReferral={handleMyScheduleReviewReferralUpdate}
           />
         )}
 {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
