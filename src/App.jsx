@@ -11693,6 +11693,318 @@ function PaymentInvoicingLayer({ jobs = [], region, setTab }) {
   );
 }
 
+
+function RealPartnerWorkflow({ jobs = [], partners = [], region, setTab }) {
+  const [partnerId, setPartnerId] = useState(partners[0]?.id || "");
+  const [localProgress, setLocalProgress] = useState({});
+  const [view, setView] = useState("active");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date().toISOString().split("T")[0];
+
+  const selectedPartner = partners.find((p) => String(p.id) === String(partnerId)) || partners[0] || null;
+  const selectedId = selectedPartner?.id || partnerId;
+
+  const patchLocal = (jobId, patch) => {
+    setLocalProgress((prev) => ({
+      ...prev,
+      [jobId]: {
+        ...(prev[jobId] || {}),
+        ...patch,
+      },
+    }));
+  };
+
+  const jobState = (job) => {
+    const local = localProgress[job.id] || {};
+    const checklist = { ...(job.checklist || {}), ...(local.checklist || {}) };
+    const beforePics = local.beforePics ?? (job.beforePics || []).length;
+    const afterPics = local.afterPics ?? (job.afterPics || []).length;
+    const checkIn = local.checkIn || job.checkIn;
+    const checkOut = local.checkOut || job.checkOut;
+    const checklistDone = Object.values(checklist).filter(Boolean).length;
+    const requiredChecklist = Math.max(3, Object.keys(checklist).length || 3);
+
+    const steps = [
+      { id: "checkIn", label: "Check in", done: !!checkIn },
+      { id: "beforePics", label: "Before photos", done: beforePics > 0 },
+      { id: "checklist", label: "Checklist", done: checklistDone >= requiredChecklist },
+      { id: "afterPics", label: "After photos", done: afterPics > 0 },
+      { id: "checkOut", label: "Check out", done: !!checkOut },
+    ];
+
+    const missing = steps.filter((s) => !s.done).map((s) => s.label);
+    const complete = missing.length === 0;
+
+    return {
+      local,
+      checklist,
+      beforePics,
+      afterPics,
+      checkIn,
+      checkOut,
+      checklistDone,
+      requiredChecklist,
+      steps,
+      missing,
+      complete,
+      percent: Math.round((steps.filter((s) => s.done).length / steps.length) * 100),
+    };
+  };
+
+  const partnerJobs = jobs
+    .filter((job) => !selectedId || (job.partnerIds || [job.partnerId]).includes(selectedId))
+    .sort((a, b) => {
+      const dateA = a.date || "9999-99-99";
+      const dateB = b.date || "9999-99-99";
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      return (a.routeOrder || 999) - (b.routeOrder || 999);
+    });
+
+  const activeJobs = partnerJobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const todayJobs = partnerJobs.filter((job) => job.date === today);
+  const blockedJobs = partnerJobs.filter((job) => job.status === "completed" && !jobState(job).complete);
+  const completeJobs = partnerJobs.filter((job) => jobState(job).complete);
+  const visibleJobs = view === "today" ? todayJobs : view === "blocked" ? blockedJobs : view === "complete" ? completeJobs : activeJobs;
+
+  const startCheckIn = (job) => {
+    patchLocal(job.id, { checkIn: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+  };
+
+  const addBefore = (job) => {
+    const state = jobState(job);
+    patchLocal(job.id, { beforePics: state.beforePics + 1 });
+  };
+
+  const completeChecklist = (job) => {
+    patchLocal(job.id, {
+      checklist: {
+        arrival: true,
+        surfaces: true,
+        floors: true,
+        bathroom: true,
+        finalReview: true,
+      },
+    });
+  };
+
+  const addAfter = (job) => {
+    const state = jobState(job);
+    patchLocal(job.id, { afterPics: state.afterPics + 1 });
+  };
+
+  const checkOut = (job) => {
+    const state = jobState(job);
+    if (!state.checkIn || state.beforePics <= 0 || state.checklistDone < state.requiredChecklist || state.afterPics <= 0) {
+      alert("Cannot check out yet. Complete check-in, before photos, checklist, and after photos first.");
+      return;
+    }
+    patchLocal(job.id, { checkOut: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) });
+  };
+
+  const copyJobChecklist = async (job) => {
+    const state = jobState(job);
+    const lines = [
+      "Have Us Clean Field Workflow Checklist",
+      "",
+      "Client: " + (job.client || "Client"),
+      "Date: " + (job.date || "No date"),
+      "Time: " + (job.time || "Time TBD"),
+      "Address: " + (job.address || "No address"),
+      "Partner Pay: " + cur + (job.partnerPay || job.pay || 0),
+      "",
+      "Workflow:",
+      "1. Check in: " + (state.checkIn || "pending"),
+      "2. Before photos: " + state.beforePics,
+      "3. Checklist: " + state.checklistDone + "/" + state.requiredChecklist,
+      "4. After photos: " + state.afterPics,
+      "5. Check out: " + (state.checkOut || "pending"),
+      "",
+      "Completion: " + (state.complete ? "Ready/complete" : "Blocked — missing " + state.missing.join(", ")),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Job checklist copied.");
+    } catch {
+      window.prompt("Copy job checklist:", lines);
+    }
+  };
+
+  const copyPartnerBrief = async () => {
+    const name = selectedPartner?.name || "Partner";
+    const lines = [
+      "Have Us Clean Real Partner Workflow Brief",
+      "",
+      "Partner: " + name,
+      "Today jobs: " + todayJobs.length,
+      "Active jobs: " + activeJobs.length,
+      "Blocked completed jobs: " + blockedJobs.length,
+      "Workflow-complete jobs: " + completeJobs.length,
+      "",
+      "Rules:",
+      "1. Check in before work starts.",
+      "2. Upload before photos.",
+      "3. Complete checklist.",
+      "4. Upload after photos.",
+      "5. Check out only after proof is complete.",
+      "6. Job cannot be considered complete while any proof step is missing.",
+      "",
+      "Today route:",
+      ...(todayJobs.length ? todayJobs.map((job, i) => (job.routeOrder || i + 1) + ". " + (job.time || "Time TBD") + " — " + (job.client || "Job") + " — " + (job.address || "No address")) : ["No jobs today."]),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Partner workflow brief copied.");
+    } catch {
+      window.prompt("Copy partner workflow brief:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const openMap = (job) => {
+    if (!job.address) return alert("No address on this job.");
+    window.open("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(job.address), "_blank");
+  };
+
+  const jobCard = (job) => {
+    const state = jobState(job);
+    const color = state.complete ? C.accent : state.percent >= 60 ? C.gold : C.blue;
+
+    return (
+      <div key={job.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{job.client || "Client"}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{job.date || "No date"} · {job.time || "Time TBD"} · Route #{job.routeOrder || "—"}</div>
+            {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {job.address}</div>}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{state.percent}%</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>workflow</div>
+          </div>
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, overflow: "hidden", height: 10, marginTop: 12 }}>
+          <div style={{ width: state.percent + "%", height: "100%", background: color }} />
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8, marginTop: 12 }}>
+          {state.steps.map((step) => (
+            <div key={step.id} style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+              <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>{step.label}</div>
+              <div style={{ fontSize: 13, fontWeight: 900, color: step.done ? C.accent : C.gold }}>{step.done ? "Done" : "Pending"}</div>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(job.status || "scheduled", C.blue)}
+          {state.complete ? badge("Completion ready", C.accent) : badge("Blocked", C.gold)}
+          {state.missing.map((m) => badge("Missing " + m, C.gold))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(118px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => startCheckIn(job)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Check In
+          </button>
+          <button type="button" onClick={() => addBefore(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            + Before
+          </button>
+          <button type="button" onClick={() => completeChecklist(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Checklist
+          </button>
+          <button type="button" onClick={() => addAfter(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            + After
+          </button>
+          <button type="button" onClick={() => checkOut(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Check Out
+          </button>
+          <button type="button" onClick={() => openMap(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Map
+          </button>
+        </div>
+
+        <button type="button" onClick={() => copyJobChecklist(job)} style={{ minHeight: 42, width: "100%", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 900, cursor: "pointer", marginTop: 8 }}>
+          📋 Copy Job Checklist
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🧹 Real Partner Workflow</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Field execution flow: check-in, photos, checklist, check-out, and completion lock.</div>
+        </div>
+        <button type="button" onClick={copyPartnerBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Brief
+        </button>
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>Select Partner</div>
+        <select
+          value={selectedId || ""}
+          onChange={(e) => setPartnerId(e.target.value)}
+          style={{ width: "100%", minHeight: 46, borderRadius: 12, border: `1px solid ${C.border}`, background: C.surface, color: C.text, padding: "10px 12px", fontSize: 14 }}
+        >
+          {partners.map((p) => (
+            <option key={p.id} value={p.id}>{p.name || "Partner " + p.id}</option>
+          ))}
+        </select>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today", todayJobs.length, "Jobs", C.blue)}
+        {stat("Active", activeJobs.length, "In field", C.accent)}
+        {stat("Blocked", blockedJobs.length, "Missing proof", blockedJobs.length ? C.gold : C.accent)}
+        {stat("Complete", completeJobs.length, "Workflow ready", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["active", "Active"],
+          ["today", "Today"],
+          ["blocked", "Blocked"],
+          ["complete", "Complete"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setView(id)} style={{ ...S.btn(view === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+        <button type="button" onClick={() => setTab && setTab("partner_app_mode")} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+          Partner App
+        </button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Field Workflow Jobs</div>
+        {visibleJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No jobs in this view.</div>
+        ) : (
+          visibleJobs.map(jobCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -12281,6 +12593,7 @@ export default function App() {
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
+      { id:"real_partner_workflow", label:"🧹 Field Flow", desc:"Real partner workflow" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -12504,6 +12817,7 @@ export default function App() {
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
+        {tab==="real_partner_workflow" && <RealPartnerWorkflow jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
