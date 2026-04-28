@@ -2839,6 +2839,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [viewLead, setViewLead] = useState(null);
   const [editLead, setEditLead] = useState(null);
   const [showEditForm, setShowEditForm] = useState(false);
+  const [confirmDeleteRes, setConfirmDeleteRes] = useState(null);
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -3088,16 +3089,23 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
                 <button style={{...S.btn("ghost"), color:"#60A5FA"}} onClick={()=>{setEditLead({...lead});setShowEditForm(true);}}>✏️ Edit</button>
-                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={async ()=>{if(window.confirm("Delete this lead?")){
-                  const lid = String(lead.id || "");
-                  setResLeads(ls => {
-                    const next = ls.filter(l => l.id !== lead.id);
-                    dbSet(DB_KEYS.leadsRes, next);
-                    return next;
-                  });
-                  // Also delete directly from Supabase so sync never brings it back
-                  try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-                }}}>🗑</button>
+                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={async ()=>{
+                  setConfirmDeleteRes(lead.id);
+                }}>🗑 Delete</button>
+              </div>
+              {confirmDeleteRes === lead.id && (
+                <div style={{ marginTop:8, padding:"10px 12px", background:"#FF475720", border:"1px solid #FF475766", borderRadius:8, display:"flex", gap:8, alignItems:"center" }}>
+                  <span style={{ fontSize:13, color:"#FF4757", flex:1 }}>Delete this lead?</span>
+                  <button style={{ background:"#FF4757", border:"none", color:"#fff", borderRadius:6, padding:"6px 14px", fontWeight:700, cursor:"pointer" }} onClick={async ()=>{
+                    const lid = String(lead.id || "");
+                    setConfirmDeleteRes(null);
+                    setResLeads(ls => ls.filter(l => l.id !== lead.id));
+                    try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+                  }}>Yes, Delete</button>
+                  <button style={{ background:"#1e2d45", border:"none", color:"#aaa", borderRadius:6, padding:"6px 14px", cursor:"pointer" }} onClick={()=>setConfirmDeleteRes(null)}>Cancel</button>
+                </div>
+              )}
+              <div style={{ marginTop:8, display:"flex", gap:8, flexWrap:"wrap" }}>
                 {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
