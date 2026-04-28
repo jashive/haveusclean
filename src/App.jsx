@@ -5668,6 +5668,7 @@ export default function App() {
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
+      { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
       { id:"jobs",       label:"📋 Jobs",          desc:"All jobs & work orders" },
       { id:"recurring",  label:"🔄 Recurring",     desc:"Recurring job schedules" },
@@ -5838,6 +5839,7 @@ export default function App() {
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} 
+        {tab==="proof_archive" && <MySchedule jobs={regionJobs} partners={regionPartners} region={activeRegion} mode="archive" onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} onPhotoUpload={handleMySchedulePhotoUpload} onToggleChecklist={handleMyScheduleChecklistToggle} />}
               onPhotoUpload={handleMySchedulePhotoUpload} 
               onToggleChecklist={handleMyScheduleChecklistToggle} />}
         {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
