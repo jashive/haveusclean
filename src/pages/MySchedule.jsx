@@ -33,6 +33,7 @@ export default function MySchedule({
   onToggleChecklist = () => {},
   onUpdateQuality = () => {},
   onUpdateFollowUp = () => {},
+  onUpdateReviewReferral = () => {},
   mode = "schedule",
 }) {
   const [activeTab, setActiveTab] = useState("today");
@@ -834,6 +835,157 @@ Thank you for trusting Have Us Clean. If everything looks good, we would really 
     }
   };
 
+
+  const reviewMeta = (status) => {
+    const map = {
+      none: { label: "No Ask", icon: "⏳", color: C.muted },
+      requested: { label: "Review Requested", icon: "⭐", color: C.gold },
+      received: { label: "Review Received", icon: "🌟", color: C.accent },
+    };
+    return map[status || "none"] || map.none;
+  };
+
+  const referralMeta = (status) => {
+    const map = {
+      none: { label: "No Ask", icon: "⏳", color: C.muted },
+      requested: { label: "Referral Requested", icon: "🤝", color: C.blue },
+      received: { label: "Referral Received", icon: "🎉", color: C.accent },
+    };
+    return map[status || "none"] || map.none;
+  };
+
+  const buildReviewReferralMessage = (job) => {
+    const firstName = (job.client || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+
+    return `Hi ${firstName}, thank you again for choosing Have Us Clean.
+
+If you were happy with the service, would you be willing to leave us a quick review? It really helps our small business grow.
+
+And if you know a friend, neighbour, property manager, or business owner who could use reliable cleaning help, we would be grateful for the referral.
+
+Thank you again — we appreciate your trust.`;
+  };
+
+  const copyReviewReferralMessage = async (job) => {
+    const message = buildReviewReferralMessage(job);
+
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Review/referral message copied to clipboard.");
+    } catch {
+      window.prompt("Copy review/referral message:", message);
+    }
+  };
+
+  const ReviewReferralControls = ({ job }) => {
+    const review = reviewMeta(job.reviewStatus);
+    const referral = referralMeta(job.referralStatus);
+
+    const btn = (kind, status, label) => {
+      const meta = kind === "review" ? reviewMeta(status) : referralMeta(status);
+
+      return (
+        <button
+          type="button"
+          onClick={() => onUpdateReviewReferral(job, kind, status)}
+          style={{
+            minHeight: 40,
+            borderRadius: 10,
+            border: `1px solid ${meta.color}44`,
+            background:
+              (kind === "review" ? job.reviewStatus : job.referralStatus) === status
+                ? `${meta.color}22`
+                : C.surface,
+            color:
+              (kind === "review" ? job.reviewStatus : job.referralStatus) === status
+                ? meta.color
+                : C.text,
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: "pointer",
+            padding: "8px 10px",
+          }}
+        >
+          {meta.icon} {label}
+        </button>
+      );
+    };
+
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 10 }}>
+          Reviews & Referrals
+        </div>
+
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+          <span style={st.badge(review.color)}>{review.icon} {review.label}</span>
+          <span style={st.badge(referral.color)}>{referral.icon} {referral.label}</span>
+        </div>
+
+        {(job.reviewUpdatedAt || job.referralUpdatedAt) && (
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+            {job.reviewUpdatedAt && <div>Review updated: {new Date(job.reviewUpdatedAt).toLocaleString()}</div>}
+            {job.referralUpdatedAt && <div>Referral updated: {new Date(job.referralUpdatedAt).toLocaleString()}</div>}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => copyReviewReferralMessage(job)}
+          style={{
+            minHeight: 44,
+            width: "100%",
+            borderRadius: 10,
+            border: "none",
+            background: C.accent,
+            color: "#0A0F1E",
+            fontWeight: 900,
+            cursor: "pointer",
+            marginBottom: 8,
+          }}
+        >
+          📋 Copy Review / Referral Ask
+        </button>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {btn("review", "requested", "Review Asked")}
+          {btn("review", "received", "Review Got")}
+          {btn("referral", "requested", "Referral Asked")}
+          {btn("referral", "received", "Referral Got")}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => {
+            onUpdateReviewReferral(job, "review", "none");
+            onUpdateReviewReferral(job, "referral", "none");
+          }}
+          style={{
+            marginTop: 8,
+            minHeight: 40,
+            width: "100%",
+            borderRadius: 10,
+            border: `1px solid ${C.border}`,
+            background: "transparent",
+            color: C.muted,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          Reset Review / Referral
+        </button>
+      </div>
+    );
+  };
+
   const FollowUpControls = ({ job }) => {
     const meta = followUpMeta(job.followUpStatus);
 
@@ -1085,6 +1237,8 @@ Thank you for trusting Have Us Clean. If everything looks good, we would really 
                 <QualityControls job={job} />
 
                 <FollowUpControls job={job} />
+
+                <ReviewReferralControls job={job} />
 
                 <div
                   style={{
