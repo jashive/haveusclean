@@ -8560,6 +8560,69 @@ function AutomationTriggerCenter({ jobs = [], partners = [], coldLeads = [], reg
   );
 }
 
+
+function OwnerDashboard({ jobs=[], partners=[], region }) {
+  const cur = region?.currencySymbol || "$";
+
+  const groupByDate = (arr)=>arr.reduce((a,j)=>{
+    const d=j.date||"unknown";
+    if(!a[d]) a[d]={revenue:0,profit:0,count:0};
+    a[d].revenue+=j.clientPrice||0;
+    a[d].profit+=j.profit??((j.clientPrice||0)-(j.partnerPay||j.pay||0));
+    a[d].count++;
+    return a;
+  },{});
+
+  const byDate = Object.entries(groupByDate(jobs)).sort((a,b)=>a[0]<b[0]?1:-1);
+  const last7 = byDate.slice(0,7);
+  const prev7 = byDate.slice(7,14);
+
+  const sum=(arr,k)=>arr.reduce((s,[,v])=>s+v[k],0);
+
+  const rev7=sum(last7,"revenue"), revPrev=sum(prev7,"revenue");
+  const prof7=sum(last7,"profit"), profPrev=sum(prev7,"profit");
+
+  const growth = revPrev? Math.round((rev7-revPrev)/revPrev*100):0;
+
+  const completed = jobs.filter(j=>j.status==="completed");
+  const returning = completed.filter((j,i,arr)=>arr.findIndex(x=>x.client===j.client)!==i);
+
+  const partnerPerf = partners.map(p=>{
+    const pj = completed.filter(j=>(j.partnerIds||[j.partnerId]).includes(p.id));
+    const revenue = pj.reduce((s,j)=>s+(j.clientPrice||0),0);
+    const issues = pj.filter(j=>["issue","callback"].includes(j.qualityStatus)).length;
+    return {name:p.name||"Partner", revenue, issues};
+  }).sort((a,b)=>b.revenue-a.revenue);
+
+  const stat=(l,v,s)=>`
+    <div style="background:#111827;border-radius:10px;padding:12px">
+      <div style="font-size:12px;color:#888">${l}</div>
+      <div style="font-size:22px;font-weight:900">${v}</div>
+      <div style="font-size:11px;color:#888">${s||""}</div>
+    </div>`;
+
+  return (
+    <div>
+      <div style={S.h2}>👑 Owner Dashboard</div>
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10,marginBottom:16}}>
+        <div dangerouslySetInnerHTML={{__html:stat("Revenue (7d)",cur+rev7,growth+"% vs prev")}} />
+        <div dangerouslySetInnerHTML={{__html:stat("Profit (7d)",cur+prof7,"trend")}} />
+        <div dangerouslySetInnerHTML={{__html:stat("Growth",growth+"%","week over week")}} />
+        <div dangerouslySetInnerHTML={{__html:stat("Returning Clients",returning.length,"retention")}} />
+      </div>
+
+      <div style={S.card}>
+        <div style={{fontWeight:900,marginBottom:8}}>Top Partners</div>
+        {partnerPerf.slice(0,5).map(p=>(
+          <div key={p.name} style={{marginBottom:6}}>
+            {p.name} — {cur}{p.revenue} · {p.issues} issues
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -9137,7 +9200,8 @@ export default function App() {
       { id:"financial_dashboard", label:"📊 Finance", desc:"Profit and revenue intelligence" },
       { id:"scale_center", label:"🌎 Scale", desc:"Multi-region scale command center" },
       { id:"ai_growth_engine", label:"🧠 AI Engine", desc:"Daily growth and operations action brain" },
-      { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
+      { id:"automation_center"},
+{ id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" , label:"⚙️ Automation", desc:"Automation trigger center" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -9349,7 +9413,8 @@ export default function App() {
         {tab==="financial_dashboard" && <FinancialDashboard jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="scale_center" && <ScaleCommandCenter jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} />}
         {tab==="ai_growth_engine" && <AIGrowthEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
-        {tab==="automation_center" && <AutomationTriggerCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="automation_center" && <AutomationTriggerCenter
+        {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />} jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
