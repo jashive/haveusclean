@@ -1,6 +1,8 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
+import StatusBadge from './components/StatusBadge';
+
 import {
   BRAND,
   C,
