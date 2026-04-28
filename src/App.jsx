@@ -6800,6 +6800,216 @@ function CustomerCRM({ jobs = [], region }) {
   );
 }
 
+
+function CampaignCenter({ jobs = [], region }) {
+  const [campaign, setCampaign] = useState("rebook");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          name: job.client || "Unknown Client",
+          email: job.email || "",
+          address: job.address || "",
+          jobs: [],
+        };
+      }
+      acc[key].jobs.push(job);
+      if (job.email && !acc[key].email) acc[key].email = job.email;
+      if (job.address && !acc[key].address) acc[key].address = job.address;
+      return acc;
+    }, {})
+  ).map((profile) => {
+    const sorted = [...profile.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const ltv = sorted.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    const lastAge = daysSince(last?.date);
+    const needsFollowUp = completed.some((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
+    const missingReview = completed.some((j) => j.reviewStatus !== "received");
+    const missingReferral = completed.some((j) => j.referralStatus !== "received");
+
+    let rebookDueDays = 30;
+    if (recurring === "Weekly") rebookDueDays = 7;
+    if (recurring === "Bi-Weekly") rebookDueDays = 14;
+    if (recurring === "Monthly") rebookDueDays = 30;
+
+    return {
+      ...profile,
+      jobs: sorted,
+      completed,
+      last,
+      ltv,
+      recurring,
+      lastAge,
+      rebookDueDays,
+      rebookDue: completed.length > 0 && lastAge >= rebookDueDays,
+      needsFollowUp,
+      missingReview,
+      missingReferral,
+    };
+  }).sort((a, b) => b.ltv - a.ltv);
+
+  const buckets = {
+    rebook: profiles.filter((p) => p.rebookDue),
+    followup: profiles.filter((p) => p.needsFollowUp),
+    review: profiles.filter((p) => p.missingReview),
+    referral: profiles.filter((p) => p.missingReferral),
+  };
+
+  const campaignMeta = {
+    rebook: { label: "Rebooking", icon: "🔄", color: C.accent },
+    followup: { label: "Follow-Up", icon: "📌", color: C.gold },
+    review: { label: "Review Ask", icon: "⭐", color: C.purple },
+    referral: { label: "Referral Ask", icon: "🤝", color: C.blue },
+  };
+
+  const buildMessage = (profile, type = campaign) => {
+    const firstName = (profile.name || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+
+    if (type === "rebook") {
+      return "Hi " + firstName + ", this is Have Us Clean. It has been about " + profile.lastAge + " day(s) since your last cleaning. Would you like us to book your next service? We can get you back on the schedule this week.";
+    }
+
+    if (type === "followup") {
+      return "Hi " + firstName + ", this is Have Us Clean. I wanted to follow up on your recent cleaning and make sure everything looked good. If anything needs attention, reply here and we will take care of it.";
+    }
+
+    if (type === "review") {
+      return "Hi " + firstName + ", thank you again for choosing Have Us Clean. If you were happy with the service, would you be willing to leave us a quick review? It really helps our small business grow.";
+    }
+
+    return "Hi " + firstName + ", thank you again for trusting Have Us Clean. If you know a friend, neighbour, property manager, or business owner who could use reliable cleaning help, we would be grateful for the referral.";
+  };
+
+  const copyMessage = async (profile, type = campaign) => {
+    const message = buildMessage(profile, type);
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Campaign message copied.");
+    } catch {
+      window.prompt("Copy campaign message:", message);
+    }
+  };
+
+  const copyCampaignBatch = async () => {
+    const list = buckets[campaign] || [];
+    const text = [
+      "Have Us Clean Campaign — " + campaignMeta[campaign].label,
+      "",
+      ...list.map((p, i) => (i + 1) + ". " + p.name + " — " + (p.email || "No email") + "\n" + buildMessage(p, campaign)),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Campaign batch copied.");
+    } catch {
+      window.prompt("Copy campaign batch:", text);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const activeList = buckets[campaign] || [];
+  const meta = campaignMeta[campaign];
+
+  const clientCard = (profile) => (
+    <div key={profile.key} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{profile.name}</div>
+          {profile.email && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>✉️ {profile.email}</div>}
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>Last service: {profile.last?.date || "—"} · {profile.lastAge} days ago</div>
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 22, fontWeight: 900, color: C.accent }}>{cur}{profile.ltv}</div>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>LTV</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+        {badge(profile.recurring, profile.recurring === "One-Time" ? C.muted : C.accent)}
+        {profile.rebookDue && badge("Rebook due", C.accent)}
+        {profile.needsFollowUp && badge("Follow-up", C.gold)}
+        {profile.missingReview && badge("Review", C.purple)}
+        {profile.missingReferral && badge("Referral", C.blue)}
+      </div>
+
+      <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+        {buildMessage(profile, campaign)}
+      </div>
+
+      <button type="button" onClick={() => copyMessage(profile, campaign)} style={{ minHeight: 42, width: "100%", borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer", marginTop: 10 }}>
+        📋 Copy Message
+      </button>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📣 Campaign Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Automated rebooking, follow-up, review, and referral campaigns.</div>
+        </div>
+        <button type="button" onClick={copyCampaignBatch} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Campaign Batch
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Rebooking", buckets.rebook.length, "Due clients", C.accent)}
+        {stat("Follow-Ups", buckets.followup.length, "Needs touchpoint", C.gold)}
+        {stat("Reviews", buckets.review.length, "Missing reviews", C.purple)}
+        {stat("Referrals", buckets.referral.length, "Referral asks", C.blue)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {Object.entries(campaignMeta).map(([id, m]) => (
+          <button key={id} type="button" onClick={() => setCampaign(id)} style={{ ...S.btn(campaign === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {m.icon} {m.label} ({buckets[id].length})
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: meta.color, marginBottom: 12 }}>{meta.icon} {meta.label} Campaign</div>
+        {activeList.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No clients in this campaign right now.</div>
+        ) : (
+          activeList.map(clientCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -7371,6 +7581,7 @@ export default function App() {
       { id:"com",        label:"🏢 Commercial",    desc:"Commercial proposals" },
       { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
       { id:"customer_crm", label:"👤 CRM", desc:"Customer profiles and lifetime value" },
+      { id:"campaign_center", label:"📣 Campaigns", desc:"Rebooking and follow-up campaigns" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -7576,6 +7787,7 @@ export default function App() {
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="customer_crm" && <CustomerCRM jobs={regionJobs} region={activeRegion} />}
+        {tab==="campaign_center" && <CampaignCenter jobs={regionJobs} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
