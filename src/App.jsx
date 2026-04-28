@@ -1624,8 +1624,6 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           if (PLACEHOLDER_PATTERNS.test(JSON.stringify(l))) return false;
           const lid = String(l.lead_id || l.id || "");
           if (!lid) return false;
-          // Only accept proper stable hash IDs — same rule as display
-          if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
           if (deletedLeadIds.has(lid)) return false;
           return true;
         })
@@ -1838,9 +1836,6 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     };
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
-      // Only show leads with a proper stable hash ID (ON-XXXXXXXX or AZ-XXXXXXXX)
-      const lid = (l.lead_id || l.id || "").trim();
-      if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
       // Normalize market — handle any casing or whitespace from n8n
       const normalizedMarket = (() => {
         const m = (l.market||"").trim().toLowerCase();
@@ -5171,9 +5166,6 @@ export default function App() {
               const lid = String(l.lead_id || l.id || "");
               if (SAMPLE_IDS.has(lid)) return false;
               if (lid && deletedLeadIds.has(lid)) return false;
-              // Only show leads with a proper stable hash ID (ON-XXXXXXXX or AZ-XXXXXXXX)
-              // Anything else is junk from old n8n runs
-              if (!/^(ON|AZ)-[A-Z0-9]{4,}$/i.test(lid)) return false;
               return true;
             })
             .map(l => ({
