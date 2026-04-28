@@ -3558,17 +3558,35 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
-            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={async ()=>{
-              if(window.confirm("Delete this lead permanently?")) {
-                const lid = String(editLead.id || "");
-                setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
-                try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-                setShowEditForm(false);setEditLead(null);
-              }
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+              setConfirmDrawerOpen(true);
             }}>🗑 Delete Lead</button>
           </div>
         </Modal>
       )}
+
+      {/* ── ConfirmDrawer — commercial edit modal lead delete ── */}
+      <ConfirmDrawer
+        open={confirmDrawerOpen}
+        title="Delete this lead?"
+        message="This cannot be undone. The lead will be permanently removed."
+        confirmLabel="Yes, Delete"
+        cancelLabel="Keep Lead"
+        variant="danger"
+        onConfirm={async () => {
+          const lid = String(editLead?.id || "");
+          setConfirmDrawerOpen(false);
+          setResLeads(ls => {
+            const next = ls.filter(l => l.id !== editLead?.id);
+            dbSet(DB_KEYS.leadsRes, next);
+            return next;
+          });
+          try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+          setShowEditForm(false);
+          setEditLead(null);
+        }}
+        onCancel={() => setConfirmDrawerOpen(false)}
+      />
       {viewLead && (
         <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
           {(() => { const q=calcComQuote(viewLead, region); return (
@@ -6568,6 +6586,9 @@ function Jobs({ jobs, setJobs, partners }) {
   const [filter, setFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
+  const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
+  const [pendingCompleteId, setPendingCompleteId] = useState(null);
+  const [summaryText, setSummaryText] = useState("");
   const [newJob, setNewJob] = useState({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: "scheduled", pay: 0 });
 
   const filtered = filter === "all" ? jobs : jobs.filter(j => j.status === filter);
@@ -6660,9 +6681,10 @@ function Jobs({ jobs, setJobs, partners }) {
               <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
                 {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>▶ Start Job</button>}
                 {job.status === "in-progress" && (
-                  <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E" }} onClick={() => {
-                    const summary = window.prompt("Enter end-of-job summary:");
-                    if (summary) { updateSummary(job.id, summary); updateStatus(job.id, "completed"); }
+                  <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", minHeight: 44 }} onClick={() => {
+                    setPendingCompleteId(job.id);
+                    setSummaryText("");
+                    setSummaryDrawerOpen(true);
                   }}>✅ Complete Job</button>
                 )}
                 <button style={styles.btn("ghost")} onClick={() => setSelectedJob(job)}>📸 Photos & Details</button>
@@ -6671,6 +6693,44 @@ function Jobs({ jobs, setJobs, partners }) {
           );
         })}
       </div>
+
+      {/* ── Summary drawer — replaces window.prompt for job completion ── */}
+      {summaryDrawerOpen && (
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:600, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
+          onClick={e => { if(e.target===e.currentTarget) setSummaryDrawerOpen(false); }}>
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:"16px 16px 0 0", padding:"24px 20px", width:"100%", maxWidth:480, boxSizing:"border-box", paddingBottom:"max(20px,env(safe-area-inset-bottom,20px))" }}>
+            <div style={{ width:36, height:4, borderRadius:2, background:C.border, margin:"0 auto 20px" }} />
+            <div style={{ fontSize:18, fontWeight:800, color:C.text, marginBottom:8 }}>✅ Complete Job</div>
+            <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Add an end-of-job summary (optional)</div>
+            <textarea
+              value={summaryText}
+              onChange={e => setSummaryText(e.target.value)}
+              placeholder="e.g. Client was happy. Carpet came out great. No issues."
+              rows={4}
+              style={{ width:"100%", background:C.card, border:`1px solid ${C.border}`, borderRadius:10, padding:"12px 14px", color:C.text, fontSize:14, fontFamily:"inherit", resize:"vertical", boxSizing:"border-box", outline:"none" }}
+              autoFocus
+            />
+            <div style={{ display:"flex", flexDirection:"column", gap:10, marginTop:16 }}>
+              <button style={{ padding:14, borderRadius:10, border:"none", background:C.gold, color:"#0A0F1E", fontSize:15, fontWeight:800, cursor:"pointer", minHeight:44 }}
+                onClick={() => {
+                  if(pendingCompleteId) {
+                    if(summaryText.trim()) updateSummary(pendingCompleteId, summaryText.trim());
+                    updateStatus(pendingCompleteId, "completed");
+                  }
+                  setSummaryDrawerOpen(false);
+                  setPendingCompleteId(null);
+                  setSummaryText("");
+                }}>
+                Mark as Completed
+              </button>
+              <button style={{ padding:14, borderRadius:10, border:`1px solid ${C.border}`, background:"transparent", color:C.muted, fontSize:15, fontWeight:600, cursor:"pointer", minHeight:44 }}
+                onClick={() => { setSummaryDrawerOpen(false); setPendingCompleteId(null); setSummaryText(""); }}>
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showModal && (
         <Modal title="Book New Job" onClose={() => setShowModal(false)}>
