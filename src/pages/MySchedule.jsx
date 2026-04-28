@@ -282,7 +282,7 @@ export default function MySchedule({
               📍 Check In
             </button>
           ) : !alreadyOut ? (
-            {checklistComplete(job) ? (
+            checklistComplete(job) ? (
               <button style={st.btnCheckOut} onClick={() => handleCheckOut(job)}>
                 ✅ Check Out
               </button>
@@ -298,7 +298,7 @@ export default function MySchedule({
               >
                 🔒 Checklist Required
               </button>
-            )}
+            )
           ) : (
             <div style={st.btnDisabled}>✅ Checked Out</div>
           )}
