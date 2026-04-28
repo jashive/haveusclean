@@ -53,7 +53,7 @@ export const REGIONS = {
   ON: {
     id: "ON",
     country: "CA",
-    flag: "🇨🇦",
+    flag: "\u{1F1E8}\u{1F1E6}",
     label: "Ontario, Canada",
     currency: "CAD",
     currencySymbol: "CA$",
@@ -64,7 +64,7 @@ export const REGIONS = {
   AZ: {
     id: "AZ",
     country: "US",
-    flag: "🇺🇸",
+    flag: "\u{1F1FA}\u{1F1F8}",
     label: "Arizona, USA",
     currency: "USD",
     currencySymbol: "$",
