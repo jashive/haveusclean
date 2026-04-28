@@ -11150,6 +11150,274 @@ function DailyOpsMode({ jobs = [], partners = [], coldLeads = [], region, setTab
   );
 }
 
+
+function LeadCaptureIntegration({ resLeads = [], jobs = [], region, setTab }) {
+  const [filter, setFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const leadName = (lead) => lead.name || lead.client || lead.fullName || lead.customerName || "New Lead";
+  const leadEmail = (lead) => lead.email || lead.customerEmail || "";
+  const leadPhone = (lead) => lead.phone || lead.customerPhone || "";
+  const leadAddress = (lead) => lead.address || lead.serviceAddress || "";
+  const leadSource = (lead) => lead.source || lead.howFound || lead.channel || "Website/Form";
+  const leadStatus = (lead) => lead.status || lead.stage || "new";
+  const leadCreated = (lead) => lead.createdAt || lead.created || lead.date || lead.submittedAt || "";
+
+  const estimateValue = (lead) => {
+    if (lead.estimatedPrice || lead.price || lead.quote) return Number(lead.estimatedPrice || lead.price || lead.quote) || 0;
+    const rooms = Number(lead.rooms || lead.bedrooms || 0);
+    const baths = Number(lead.bathrooms || lead.baths || 0);
+    const base = 120;
+    return base + rooms * 25 + baths * 35;
+  };
+
+  const normalized = (resLeads || []).map((lead, idx) => {
+    const name = leadName(lead);
+    const email = leadEmail(lead);
+    const phone = leadPhone(lead);
+    const address = leadAddress(lead);
+    const status = leadStatus(lead);
+    const created = leadCreated(lead);
+    const age = daysSince(created);
+    const value = estimateValue(lead);
+    const hasContact = !!(email || phone);
+    const hasAddress = !!address;
+    const matchedJob = jobs.find((job) =>
+      (email && job.email === email) ||
+      (name && job.client === name) ||
+      (address && job.address === address)
+    );
+
+    const missing = [];
+    if (!hasContact) missing.push("contact");
+    if (!hasAddress) missing.push("address");
+    if (!lead.serviceType && !lead.type) missing.push("service type");
+
+    let score = 40;
+    if (hasContact) score += 20;
+    if (hasAddress) score += 15;
+    if (value >= 250) score += 10;
+    if (status === "new" || status === "quote") score += 10;
+    if (age <= 1) score += 10;
+    if (matchedJob) score -= 30;
+    score = Math.max(0, Math.min(100, score));
+
+    return {
+      raw: lead,
+      id: lead.id || lead.leadId || "lead-" + idx,
+      name,
+      email,
+      phone,
+      address,
+      source: leadSource(lead),
+      status,
+      created,
+      age,
+      value,
+      missing,
+      matchedJob,
+      score,
+      hot: score >= 75 && !matchedJob,
+      stale: age >= 3 && !matchedJob,
+      ready: hasContact && hasAddress && !matchedJob,
+    };
+  }).sort((a, b) => b.score - a.score || b.value - a.value);
+
+  const visible = normalized.filter((lead) => {
+    if (filter === "hot") return lead.hot;
+    if (filter === "ready") return lead.ready;
+    if (filter === "missing") return lead.missing.length > 0;
+    if (filter === "stale") return lead.stale;
+    if (filter === "converted") return !!lead.matchedJob;
+    return true;
+  });
+
+  const hotLeads = normalized.filter((l) => l.hot);
+  const readyLeads = normalized.filter((l) => l.ready);
+  const missingInfo = normalized.filter((l) => l.missing.length > 0);
+  const staleLeads = normalized.filter((l) => l.stale);
+  const converted = normalized.filter((l) => l.matchedJob);
+  const pipelineValue = normalized.filter((l) => !l.matchedJob).reduce((sum, l) => sum + l.value, 0);
+
+  const buildFollowUp = (lead) => {
+    const first = String(lead.name || "there").split(" ")[0] || "there";
+    if (lead.missing.length > 0) {
+      return "Hi " + first + ", this is Have Us Clean. Thanks for your cleaning request. I just need a little more information (" + lead.missing.join(", ") + ") so we can prepare your quote and help get you scheduled.";
+    }
+    return "Hi " + first + ", this is Have Us Clean. Thanks for requesting cleaning service. We can prepare your quote and help get you scheduled. What day/time works best for your cleaning?";
+  };
+
+  const buildConversionChecklist = (lead) => [
+    "Lead Conversion Checklist — " + lead.name,
+    "",
+    "1. Confirm contact info: " + (lead.email || lead.phone || "missing"),
+    "2. Confirm service address: " + (lead.address || "missing"),
+    "3. Confirm service type/details.",
+    "4. Prepare quote: " + cur + lead.value,
+    "5. Add/update CRM profile.",
+    "6. Create job once customer accepts.",
+    "7. Assign partner and route through dispatch.",
+  ].join("\n");
+
+  const copyText = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(label + " copied.");
+    } catch {
+      window.prompt("Copy " + label.toLowerCase() + ":", text);
+    }
+  };
+
+  const copyIntakeBrief = async () => {
+    const lines = [
+      "Have Us Clean Lead Capture Brief",
+      "",
+      "Total leads: " + normalized.length,
+      "Hot leads: " + hotLeads.length,
+      "Ready to convert: " + readyLeads.length,
+      "Missing info: " + missingInfo.length,
+      "Stale leads: " + staleLeads.length,
+      "Converted/matched jobs: " + converted.length,
+      "Open pipeline value: " + cur + pipelineValue,
+      "",
+      "Priority leads:",
+      ...normalized.slice(0, 10).map((lead, i) =>
+        (i + 1) + ". " + lead.name + " — score " + lead.score + " — " + cur + lead.value + " — " + (lead.email || lead.phone || "no contact")
+      ),
+    ].join("\n");
+    await copyText(lines, "Intake brief");
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const leadCard = (lead) => {
+    const color = lead.hot ? C.accent : lead.stale ? C.gold : lead.matchedJob ? C.muted : C.blue;
+
+    return (
+      <div key={lead.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{lead.name}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{lead.source} · {lead.status} · {lead.age === 9999 ? "unknown age" : lead.age + " day(s) old"}</div>
+            {lead.email && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>✉️ {lead.email}</div>}
+            {lead.phone && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>☎️ {lead.phone}</div>}
+            {lead.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {lead.address}</div>}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{lead.score}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>score</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Value</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>{cur}{lead.value}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>CRM</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: lead.ready ? C.accent : C.gold }}>{lead.ready ? "Ready" : "Needs info"}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Job</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: lead.matchedJob ? C.accent : C.muted }}>{lead.matchedJob ? "Matched" : "Not created"}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {lead.hot && badge("Hot lead", C.accent)}
+          {lead.ready && badge("Ready to convert", C.blue)}
+          {lead.stale && badge("Stale", C.gold)}
+          {lead.matchedJob && badge("Job exists", C.muted)}
+          {lead.missing.map((m) => badge("Missing " + m, C.gold))}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          {buildFollowUp(lead)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => copyText(buildFollowUp(lead), "Follow-up message")} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Copy Msg
+          </button>
+          <button type="button" onClick={() => copyText(buildConversionChecklist(lead), "Checklist")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Checklist
+          </button>
+          <button type="button" onClick={() => setTab && setTab("intake")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Intake
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📥 Lead Capture Integration</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Turn website/form leads into CRM records, quote actions, and job-start workflows.</div>
+        </div>
+        <button type="button" onClick={copyIntakeBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Intake Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Leads", normalized.length, "Captured", C.accent)}
+        {stat("Hot", hotLeads.length, "Prioritize", hotLeads.length ? C.accent : C.muted)}
+        {stat("Ready", readyLeads.length, "Can convert", C.blue)}
+        {stat("Pipeline", cur + pipelineValue, "Open value", C.purple)}
+        {stat("Missing Info", missingInfo.length, "Needs follow-up", missingInfo.length ? C.gold : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["all", "All"],
+          ["hot", "Hot"],
+          ["ready", "Ready"],
+          ["missing", "Missing Info"],
+          ["stale", "Stale"],
+          ["converted", "Converted"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Lead Queue</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No leads in this view. Connect forms or add leads in Intake.</div>
+        ) : (
+          visible.map(leadCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -11736,6 +12004,7 @@ export default function App() {
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
+      { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -11957,6 +12226,7 @@ export default function App() {
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
