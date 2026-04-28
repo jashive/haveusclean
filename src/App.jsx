@@ -40,7 +40,7 @@ import {
   COM_FREQ_DISCOUNTS,
 } from "./lib/pricing";
 
-import StatusBadge from "./components/StatusBadge.jsx";
+import StatusBadge from "./components/StatusBadge";
 
 // Active region — keep this in App.jsx for now
 let ACTIVE_REGION = REGIONS.ON;
