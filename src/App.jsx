@@ -7670,6 +7670,214 @@ function FinancialDashboard({ jobs = [], partners = [], coldLeads = [], region }
   );
 }
 
+
+function ScaleCommandCenter({ jobs = [], partners = [], coldLeads = [], regions = {}, activeRegion }) {
+  const [view, setView] = useState("all");
+  const regionList = Object.values(regions || {}).length ? Object.values(regions || {}) : [activeRegion].filter(Boolean);
+
+  const regionJobs = (regionId) => jobs.filter((job) => !regionId || !job.region || job.region === regionId);
+  const regionPartners = (regionId) => partners.filter((p) => !regionId || !p.region || p.region === regionId);
+  const regionLeads = (regionId) => coldLeads.filter((lead) => !regionId || !lead.region || lead.region === regionId || lead.market === regionId);
+
+  const calcRegion = (region) => {
+    const id = region?.id || "ALL";
+    const rJobs = id === "ALL" ? jobs : regionJobs(id);
+    const rPartners = id === "ALL" ? partners : regionPartners(id);
+    const rLeads = id === "ALL" ? coldLeads : regionLeads(id);
+    const completed = rJobs.filter((j) => j.status === "completed");
+    const active = rJobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+    const unassigned = active.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+    const revenue = rJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    const partnerPay = rJobs.reduce((sum, j) => sum + (j.partnerPay || j.pay || 0), 0);
+    const profit = rJobs.reduce((sum, j) => sum + (j.profit ?? ((j.clientPrice || 0) - (j.partnerPay || j.pay || 0))), 0);
+    const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+    const qualityRisk = completed.filter((j) => ["issue", "callback"].includes(j.qualityStatus)).length;
+    const proofGaps = completed.filter((j) => {
+      const before = (j.beforePics || []).length;
+      const after = (j.afterPics || []).length;
+      return !j.checkIn || !j.checkOut || before === 0 || after === 0;
+    }).length;
+    const activePartners = rPartners.filter((p) => p.onboarded && ["available", "active"].includes(p.status)).length;
+    const onboarding = rPartners.filter((p) => !p.onboarded || p.status === "onboarding").length;
+    const capacityGap = Math.max(0, active.length - activePartners);
+    const pipeline = rLeads.reduce((sum, lead) => {
+      const score = Number(lead.priority_score || lead.priorityScore || 50);
+      return sum + (lead.value || 500 + score * 10);
+    }, 0);
+
+    let score = 50;
+    score += margin >= 35 ? 15 : margin >= 20 ? 8 : -8;
+    score += capacityGap === 0 ? 12 : -capacityGap * 6;
+    score += unassigned.length === 0 ? 10 : -unassigned.length * 4;
+    score += qualityRisk === 0 ? 8 : -qualityRisk * 6;
+    score += proofGaps === 0 ? 8 : -proofGaps * 4;
+    score += pipeline > 0 ? 7 : 0;
+    score = Math.max(0, Math.min(100, Math.round(score)));
+
+    return {
+      id,
+      label: region?.label || id,
+      flag: region?.flag || "📍",
+      cur: region?.currencySymbol || "$",
+      jobs: rJobs,
+      completed,
+      active,
+      unassigned,
+      revenue,
+      partnerPay,
+      profit,
+      margin,
+      qualityRisk,
+      proofGaps,
+      partners: rPartners,
+      activePartners,
+      onboarding,
+      capacityGap,
+      pipeline,
+      score,
+    };
+  };
+
+  const allSummary = calcRegion({ id: "ALL", label: "All Regions", flag: "🌎", currencySymbol: activeRegion?.currencySymbol || "$" });
+  const summaries = regionList.map(calcRegion);
+  const visible = view === "all" ? summaries : summaries.filter((s) => s.id === view);
+
+  const scoreColor = (score) => score >= 80 ? C.accent : score >= 60 ? C.gold : C.red || "#FF6B6B";
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const copyScaleBrief = async () => {
+    const lines = [
+      "Have Us Clean Scale Brief",
+      "",
+      "Total jobs: " + allSummary.jobs.length,
+      "Total revenue: " + allSummary.cur + allSummary.revenue,
+      "Total profit: " + allSummary.cur + allSummary.profit,
+      "Total margin: " + allSummary.margin + "%",
+      "Active partners: " + allSummary.activePartners,
+      "Capacity gap: " + allSummary.capacityGap,
+      "Pipeline: " + allSummary.cur + allSummary.pipeline,
+      "",
+      "Region breakdown:",
+      ...summaries.map((s) =>
+        "- " + s.label + ": score " + s.score + ", revenue " + s.cur + s.revenue + ", profit " + s.cur + s.profit + ", margin " + s.margin + "%, capacity gap " + s.capacityGap
+      ),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Scale brief copied.");
+    } catch {
+      window.prompt("Copy scale brief:", lines);
+    }
+  };
+
+  const regionCard = (s) => {
+    const color = scoreColor(s.score);
+    return (
+      <div key={s.id} style={{ background: C.surface, border: `1px solid ${color}44`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.text }}>{s.flag} {s.label}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{s.jobs.length} job(s) · {s.partners.length} partner(s)</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 28, fontWeight: 900, color }}>{s.score}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>readiness</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Revenue</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{s.cur}{s.revenue}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Profit</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: s.profit >= 0 ? C.blue : (C.red || "#FF6B6B") }}>{s.cur}{s.profit}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Margin</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: s.margin >= 35 ? C.accent : C.gold }}>{s.margin}%</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Pipeline</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.purple }}>{s.cur}{s.pipeline}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(s.activePartners + " active partners", C.accent)}
+          {badge(s.onboarding + " onboarding", C.gold)}
+          {s.capacityGap > 0 && badge(s.capacityGap + " capacity gap", C.red || "#FF6B6B")}
+          {s.unassigned.length > 0 && badge(s.unassigned.length + " unassigned", C.gold)}
+          {s.qualityRisk > 0 && badge(s.qualityRisk + " quality risk", C.red || "#FF6B6B")}
+          {s.proofGaps > 0 && badge(s.proofGaps + " proof gaps", C.gold)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Recommendation:</strong>{" "}
+          {s.capacityGap > 0
+            ? "Recruit/onboard more partners before adding volume."
+            : s.qualityRisk > 0
+              ? "Stabilize quality before scaling demand."
+              : s.margin < 25
+                ? "Review pricing and partner pay before expanding."
+                : "Region is ready for additional demand generation."}
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🌎 Scale Command Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Multi-region performance, staffing, risk, pipeline, and readiness.</div>
+        </div>
+        <button type="button" onClick={copyScaleBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Scale Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Total Revenue", allSummary.cur + allSummary.revenue, "All regions", C.accent)}
+        {stat("Total Profit", allSummary.cur + allSummary.profit, allSummary.margin + "% margin", allSummary.profit >= 0 ? C.blue : (C.red || "#FF6B6B"))}
+        {stat("Active Partners", allSummary.activePartners, "Ready capacity", C.purple)}
+        {stat("Capacity Gap", allSummary.capacityGap, "Jobs vs partners", allSummary.capacityGap ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Pipeline", allSummary.cur + allSummary.pipeline, "B2B lead value", C.gold)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setView("all")} style={{ ...S.btn(view === "all" ? "primary" : "ghost"), minHeight: 40 }}>All</button>
+        {summaries.map((s) => (
+          <button key={s.id} type="button" onClick={() => setView(s.id)} style={{ ...S.btn(view === s.id ? "primary" : "ghost"), minHeight: 40 }}>
+            {s.flag} {s.id}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Region Scorecards</div>
+        {visible.map(regionCard)}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -8245,6 +8453,7 @@ export default function App() {
       { id:"recurring_revenue", label:"🔁 Subscriptions", desc:"Recurring revenue system" },
       { id:"b2b_pipeline", label:"🏢 B2B Pipeline", desc:"Property manager and commercial sales pipeline" },
       { id:"financial_dashboard", label:"📊 Finance", desc:"Profit and revenue intelligence" },
+      { id:"scale_center", label:"🌎 Scale", desc:"Multi-region scale command center" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -8454,6 +8663,7 @@ export default function App() {
         {tab==="recurring_revenue" && <RecurringRevenue jobs={regionJobs} region={activeRegion} />}
         {tab==="b2b_pipeline" && <B2BSalesPipeline jobs={regionJobs} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="financial_dashboard" && <FinancialDashboard jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} />}
+        {tab==="scale_center" && <ScaleCommandCenter jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
