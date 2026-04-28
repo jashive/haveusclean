@@ -8623,6 +8623,333 @@ function OwnerDashboard({ jobs=[], partners=[], region }) {
     </div>
   );
 }
+
+function BusinessAlertsCenter({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [filter, setFilter] = useState("all");
+  const [dismissed, setDismissed] = useState({});
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+  const inProgressNoCheckIn = todayJobs.filter((job) => job.status === "in-progress" && !job.checkIn);
+  const completedNoCheckout = todayJobs.filter((job) => job.status === "completed" && !job.checkOut);
+
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    return { ...p, completed, last, recurring, age, dueDays, overdue: completed.length > 0 && age >= dueDays };
+  });
+
+  const recurringOverdue = profiles.filter((p) => p.recurring !== "One-Time" && p.overdue);
+  const rebookDue = profiles.filter((p) => p.overdue);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const onboardingPartners = partners.filter((p) => !p.onboarded || p.status === "onboarding");
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const revenue = jobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const profit = jobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(lead.status || "New"));
+  const pipelineValue = pipelineFollowups.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const alerts = [];
+
+  const addAlert = (alert) => {
+    if (alert.count > 0 || alert.force) alerts.push(alert);
+  };
+
+  addAlert({
+    id: "unassigned",
+    severity: "urgent",
+    icon: "🧭",
+    title: "Unassigned active jobs",
+    count: unassignedJobs.length,
+    value: unassignedJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+    module: "auto_assign",
+    message: "Active jobs need partners assigned before execution.",
+  });
+
+  addAlert({
+    id: "dispatch",
+    severity: "urgent",
+    icon: "🚦",
+    title: "Same-day dispatch risks",
+    count: dispatchRisks.length,
+    value: dispatchRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+    module: "dispatch_center",
+    message: "Today jobs have missing partner, route, time, or address data.",
+  });
+
+  addAlert({
+    id: "gps",
+    severity: "warning",
+    icon: "📍",
+    title: "GPS/check-in inconsistencies",
+    count: inProgressNoCheckIn.length + completedNoCheckout.length,
+    value: 0,
+    module: "myschedule",
+    message: "In-progress or completed jobs may be missing check-in/check-out data.",
+  });
+
+  addAlert({
+    id: "recurring",
+    severity: "urgent",
+    icon: "🔁",
+    title: "Recurring clients overdue",
+    count: recurringOverdue.length,
+    value: recurringOverdue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+    module: "recurring_revenue",
+    message: "Recurring customers are past their expected booking interval.",
+  });
+
+  addAlert({
+    id: "proof",
+    severity: "warning",
+    icon: "📸",
+    title: "Proof gaps",
+    count: proofGaps.length,
+    value: proofGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+    module: "proof_archive",
+    message: "Completed jobs are missing GPS or before/after proof.",
+  });
+
+  addAlert({
+    id: "quality",
+    severity: "urgent",
+    icon: "⚠️",
+    title: "Quality issues / callbacks",
+    count: qualityRisks.length,
+    value: qualityRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+    module: "recovery",
+    message: "Quality issues may create churn, refunds, or bad reviews.",
+  });
+
+  addAlert({
+    id: "capacity",
+    severity: "warning",
+    icon: "👥",
+    title: "Capacity gap",
+    count: capacityGap,
+    value: 0,
+    module: "hiring_pipeline",
+    message: "Active job volume exceeds available partner capacity.",
+  });
+
+  addAlert({
+    id: "campaigns",
+    severity: "info",
+    icon: "📣",
+    title: "Campaign opportunities",
+    count: followupGaps.length + reviewGaps.length + referralGaps.length + rebookDue.length,
+    value: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+    module: "campaign_center",
+    message: "Customers are ready for rebooking, follow-up, reviews, or referrals.",
+  });
+
+  addAlert({
+    id: "b2b",
+    severity: "info",
+    icon: "🏢",
+    title: "B2B follow-ups due",
+    count: pipelineFollowups.length,
+    value: pipelineValue,
+    module: "b2b_pipeline",
+    message: "Commercial leads are waiting for follow-up.",
+  });
+
+  addAlert({
+    id: "margin",
+    severity: margin < 30 && revenue > 0 ? "warning" : "info",
+    icon: "📊",
+    title: "Margin check",
+    count: margin < 30 && revenue > 0 ? 1 : 0,
+    value: revenue,
+    module: "financial_dashboard",
+    message: "Gross margin is below target. Review pricing, pay, and job mix.",
+  });
+
+  const severityRank = { urgent: 1, warning: 2, info: 3 };
+  const visibleAlerts = alerts
+    .filter((a) => filter === "all" ? true : a.severity === filter)
+    .filter((a) => !dismissed[a.id])
+    .sort((a, b) => severityRank[a.severity] - severityRank[b.severity] || b.value - a.value);
+
+  const urgentCount = alerts.filter((a) => a.severity === "urgent" && !dismissed[a.id]).length;
+  const warningCount = alerts.filter((a) => a.severity === "warning" && !dismissed[a.id]).length;
+  const infoCount = alerts.filter((a) => a.severity === "info" && !dismissed[a.id]).length;
+  const alertValue = alerts.filter((a) => !dismissed[a.id]).reduce((sum, a) => sum + (a.value || 0), 0);
+
+  const severityColor = (severity) =>
+    severity === "urgent" ? (C.red || "#FF6B6B") : severity === "warning" ? C.gold : C.blue;
+
+  const copyDigest = async () => {
+    const lines = [
+      "Have Us Clean Alerts Digest",
+      "",
+      "Urgent: " + urgentCount,
+      "Warnings: " + warningCount,
+      "Info: " + infoCount,
+      "Alert value: " + cur + alertValue,
+      "",
+      ...visibleAlerts.map((a, i) =>
+        (i + 1) + ". " + a.icon + " " + a.title + "\n" +
+        "   Severity: " + a.severity.toUpperCase() + "\n" +
+        "   Count: " + a.count + "\n" +
+        "   Value: " + cur + (a.value || 0) + "\n" +
+        "   Action: " + a.message
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Alert digest copied.");
+    } catch {
+      window.prompt("Copy alert digest:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const alertCard = (alert) => {
+    const color = severityColor(alert.severity);
+
+    return (
+      <div key={alert.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color }}>{alert.icon} {alert.severity.toUpperCase()}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{alert.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{alert.message}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{alert.count}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>items</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(alert.severity, color)}
+          {badge("Value " + cur + (alert.value || 0), alert.value ? C.accent : C.muted)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => setTab && setTab(alert.module)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Open Module
+          </button>
+          <button type="button" onClick={() => setDismissed((prev) => ({ ...prev, [alert.id]: true }))} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Dismiss
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🚨 Alerts System</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Urgent alerts across dispatch, revenue, staffing, quality, proof, and growth.</div>
+        </div>
+        <button type="button" onClick={copyDigest} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Alert Digest
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Urgent", urgentCount, "Needs action", urgentCount ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Warnings", warningCount, "Watch closely", warningCount ? C.gold : C.accent)}
+        {stat("Info", infoCount, "Growth signals", C.blue)}
+        {stat("Alert Value", cur + alertValue, "Revenue at stake", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["all", "All"],
+          ["urgent", "Urgent"],
+          ["warning", "Warnings"],
+          ["info", "Info"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+        <button type="button" onClick={() => setDismissed({})} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+          Reset Dismissed
+        </button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Active Alerts</div>
+        {visibleAlerts.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No alerts in this view.</div>
+        ) : (
+          visibleAlerts.map(alertCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -9202,6 +9529,7 @@ export default function App() {
       { id:"ai_growth_engine", label:"🧠 AI Engine", desc:"Daily growth and operations action brain" },
       { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
       { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },
+      { id:"alerts_center", label:"🚨 Alerts", desc:"Business alerts system" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -9415,6 +9743,7 @@ export default function App() {
         {tab==="ai_growth_engine" && <AIGrowthEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="automation_center" && <AutomationTriggerCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
+        {tab==="alerts_center" && <BusinessAlertsCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
