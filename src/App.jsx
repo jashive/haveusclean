@@ -5446,6 +5446,148 @@ function ManagerBriefing({ jobs = [], partners = [], region, setTab }) {
   );
 }
 
+
+function PartnerScorecards({ jobs = [], partners = [], region }) {
+  const cur = region?.currencySymbol || "$";
+
+  const partnerJobs = (partner) =>
+    jobs.filter((job) => (job.partnerIds || [job.partnerId]).includes(partner.id));
+
+  const partnerStats = partners.map((partner) => {
+    const all = partnerJobs(partner);
+    const completed = all.filter((job) => job.status === "completed");
+    const active = all.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+    const earnings = completed.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+    const issues = completed.filter((job) => job.qualityStatus === "issue").length;
+    const callbacks = completed.filter((job) => job.qualityStatus === "callback").length;
+
+    const proofComplete = completed.filter((job) => {
+      const before = (job.beforePics || []).length;
+      const after = (job.afterPics || []).length;
+      return !!job.checkIn && !!job.checkOut && before > 0 && after > 0;
+    }).length;
+
+    const proofRate = completed.length ? Math.round((proofComplete / completed.length) * 100) : 0;
+    const qualityPenalty = issues * 12 + callbacks * 18;
+    const activityScore = Math.min(30, completed.length * 3);
+    const proofScore = Math.round(proofRate * 0.35);
+    const ratingScore = Math.round((partner.rating || 0) * 7);
+    const score = Math.max(0, Math.min(100, activityScore + proofScore + ratingScore - qualityPenalty));
+
+    return {
+      partner,
+      all,
+      active,
+      completed,
+      earnings,
+      issues,
+      callbacks,
+      proofComplete,
+      proofRate,
+      score,
+    };
+  }).sort((a, b) => b.score - a.score);
+
+  const avgScore = partnerStats.length
+    ? Math.round(partnerStats.reduce((sum, p) => sum + p.score, 0) / partnerStats.length)
+    : 0;
+
+  const topPartner = partnerStats[0]?.partner;
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const scoreColor = (score) => score >= 80 ? C.accent : score >= 60 ? C.gold : C.red || "#FF6B6B";
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>👷 Partner Scorecards</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Performance, proof quality, earnings, and recovery risk by partner.</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Partners", partners.length, "Active roster", C.accent)}
+        {stat("Avg Score", avgScore, "Team performance", scoreColor(avgScore))}
+        {stat("Top Partner", topPartner?.name?.split(" ")[0] || "—", topPartner ? "Highest score" : "No data", C.blue)}
+        {stat("Completed Jobs", jobs.filter((j) => j.status === "completed").length, "All partners", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Partner Ranking</div>
+
+        {partnerStats.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No partners found.</div>
+        ) : (
+          partnerStats.map((row, idx) => {
+            const p = row.partner;
+            const color = scoreColor(row.score);
+
+            return (
+              <div key={p.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
+                    <div style={{ width: 38, height: 38, borderRadius: 12, background: `${color}22`, color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>
+                      #{idx + 1}
+                    </div>
+                    <div>
+                      <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{p.name}</div>
+                      <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>{p.status || "partner"} · ⭐ {p.rating || "—"} · {p.region || "All regions"}</div>
+                    </div>
+                  </div>
+
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 28, fontWeight: 900, color }}>{row.score}</div>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>score</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 14 }}>
+                  <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Completed</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{row.completed.length}</div>
+                  </div>
+                  <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Active</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{row.active.length}</div>
+                  </div>
+                  <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Earnings</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{cur}{row.earnings}</div>
+                  </div>
+                  <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+                    <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Proof Rate</div>
+                    <div style={{ fontSize: 20, fontWeight: 900, color: row.proofRate >= 80 ? C.accent : C.gold }}>{row.proofRate}%</div>
+                  </div>
+                </div>
+
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+                  {badge(row.issues + " issues", row.issues ? C.gold : C.accent)}
+                  {badge(row.callbacks + " callbacks", row.callbacks ? (C.red || "#FF6B6B") : C.accent)}
+                  {badge(row.proofComplete + "/" + row.completed.length + " full proof", row.proofRate >= 80 ? C.accent : C.gold)}
+                </div>
+              </div>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -5998,6 +6140,7 @@ export default function App() {
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
       { id:"briefing",  label:"🌅 Briefing",     desc:"Morning command center" },
+      { id:"partner_scorecards", label:"👷 Scorecards", desc:"Partner performance scorecards" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
@@ -6171,6 +6314,7 @@ export default function App() {
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="briefing"       && <ManagerBriefing jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="partner_scorecards" && <PartnerScorecards jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
