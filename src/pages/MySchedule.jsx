@@ -30,6 +30,7 @@ export default function MySchedule({
   onCheckIn  = () => {},
   onCheckOut = () => {},
   onPhotoUpload = () => {},
+  onToggleChecklist = () => {},
 }) {
   const [activeTab, setActiveTab] = useState("today");
   const [checkedIn, setCheckedIn] = useState({});
@@ -129,6 +130,49 @@ export default function MySchedule({
     if (input) input.click();
   };
 
+
+
+  const getChecklistItems = (job) => {
+    const base = [
+      "Arrive and confirm access",
+      "Walkthrough before starting",
+      "Kitchen cleaned",
+      "Bathrooms cleaned",
+      "Dusting completed",
+      "Floors vacuumed / swept",
+      "Floors mopped",
+      "Final walkthrough",
+    ];
+
+    const deep = [
+      "Baseboards/detail areas checked",
+      "Buildup/detail spots addressed",
+      "High-touch surfaces sanitized",
+    ];
+
+    const move = [
+      "Inside cabinets/drawers checked",
+      "Closets checked",
+      "Empty-unit final scan completed",
+    ];
+
+    const type = job?.type || "";
+    if (type.includes("Deep")) return [...base, ...deep];
+    if (type.includes("Move")) return [...base, ...move];
+    return base;
+  };
+
+  const getChecklistState = (job) => job.checklist || {};
+
+  const checklistDoneCount = (job) => {
+    const state = getChecklistState(job);
+    return getChecklistItems(job).filter((item) => state[item]).length;
+  };
+
+  const checklistTotalCount = (job) => getChecklistItems(job).length;
+
+  const checklistComplete = (job) =>
+    checklistDoneCount(job) === checklistTotalCount(job);
 
   const openPhotoPreview = (job, type) => {
     const photos = type === "before" ? (job.beforePics || []) : (job.afterPics || []);
@@ -255,6 +299,74 @@ export default function MySchedule({
             ✅ In: {local?.time || job.checkIn} · Out: {local?.checkOutTime || job.checkOut}
           </div>
         )}
+      </div>
+    );
+  };
+
+
+  const ChecklistBox = ({ job }) => {
+    const items = getChecklistItems(job);
+    const state = getChecklistState(job);
+    const done = checklistDoneCount(job);
+    const total = checklistTotalCount(job);
+
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: 8,
+            alignItems: "center",
+            marginBottom: 10,
+          }}
+        >
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>
+            ✅ Cleaning Checklist
+          </div>
+          <div style={{ fontSize: 12, color: done === total ? C.accent : C.muted, fontWeight: 800 }}>
+            {done}/{total}
+          </div>
+        </div>
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((item) => {
+            const checked = !!state[item];
+            return (
+              <button
+                key={item}
+                type="button"
+                onClick={() => onToggleChecklist(job, item)}
+                style={{
+                  minHeight: 44,
+                  borderRadius: 10,
+                  border: `1px solid ${checked ? C.accent + "66" : C.border}`,
+                  background: checked ? C.accentDim : C.card,
+                  color: checked ? C.accent : C.text,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  textAlign: "left",
+                  padding: "10px 12px",
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                }}
+              >
+                <span>{checked ? "✅" : "⬜"}</span>
+                <span>{item}</span>
+              </button>
+            );
+          })}
+        </div>
       </div>
     );
   };
@@ -400,6 +512,7 @@ export default function MySchedule({
           </button>
         </div>
 
+        {showGps && <ChecklistBox job={job} />}
         {showGps && <GpsActions job={job} />}
       </div>
     );
