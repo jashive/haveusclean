@@ -356,6 +356,7 @@ export default function MySchedule({
 
 
 
+
   const ChecklistBox = ({ job }) => {
     const items = getChecklistItems(job);
     const state = getChecklistState(job);
