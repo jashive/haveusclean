@@ -10444,6 +10444,227 @@ function CommunicationEngine({ jobs = [], partners = [], coldLeads = [], region,
   );
 }
 
+
+function PartnerAppMode({ jobs = [], partners = [], region, setTab }) {
+  const [partnerId, setPartnerId] = useState(partners[0]?.id || "");
+  const [view, setView] = useState("today");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date().toISOString().split("T")[0];
+
+  const selectedPartner = partners.find((p) => String(p.id) === String(partnerId)) || partners[0] || null;
+  const selectedId = selectedPartner?.id || partnerId;
+
+  const partnerJobs = jobs
+    .filter((job) => !selectedId || (job.partnerIds || [job.partnerId]).includes(selectedId))
+    .sort((a, b) => {
+      const dateA = a.date || "9999-99-99";
+      const dateB = b.date || "9999-99-99";
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      const routeA = a.routeOrder || 999;
+      const routeB = b.routeOrder || 999;
+      if (routeA !== routeB) return routeA - routeB;
+      return String(a.time || "").localeCompare(String(b.time || ""));
+    });
+
+  const todayJobs = partnerJobs.filter((job) => job.date === today);
+  const upcomingJobs = partnerJobs.filter((job) => job.date && job.date > today && job.status !== "completed");
+  const completedJobs = partnerJobs.filter((job) => job.status === "completed");
+
+  const visibleJobs = view === "today" ? todayJobs : view === "upcoming" ? upcomingJobs : completedJobs;
+
+  const todayPay = todayJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const upcomingPay = upcomingJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const completedPay = completedJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+
+  const proofStatus = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+    const gps = !!job.checkIn && !!job.checkOut;
+    const complete = gps && before > 0 && after > 0 && checklist > 0;
+    return { before, after, checklist, gps, complete };
+  };
+
+  const jobReadiness = (job) => {
+    const missing = [];
+    if (!job.address) missing.push("address");
+    if (!job.time) missing.push("time");
+    if (!job.routeOrder) missing.push("route");
+    if (!job.checkIn && job.status === "in-progress") missing.push("check-in");
+    const proof = proofStatus(job);
+    if (job.status === "completed" && !proof.complete) missing.push("proof");
+    return missing;
+  };
+
+  const copyBrief = async () => {
+    const name = selectedPartner?.name || "Partner";
+    const lines = [
+      "Have Us Clean Partner Brief",
+      "",
+      "Partner: " + name,
+      "Today jobs: " + todayJobs.length,
+      "Today pay: " + cur + todayPay,
+      "Upcoming pay: " + cur + upcomingPay,
+      "",
+      "Today route:",
+      ...(todayJobs.length ? todayJobs.map((job, i) =>
+        (job.routeOrder || i + 1) + ". " +
+        (job.time || "Time TBD") + " — " +
+        (job.client || "Job") + " — " +
+        (job.address || "No address") + " — pay " + cur + (job.partnerPay || job.pay || 0)
+      ) : ["No jobs scheduled today."]),
+      "",
+      "Reminder: check in, upload before photos, complete checklist, upload after photos, and check out.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Partner brief copied.");
+    } catch {
+      window.prompt("Copy partner brief:", lines);
+    }
+  };
+
+  const openMap = (job) => {
+    if (!job.address) return alert("No address on this job.");
+    window.open("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(job.address), "_blank");
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const jobCard = (job, idx) => {
+    const proof = proofStatus(job);
+    const missing = jobReadiness(job);
+    const statusColor = job.status === "completed" ? C.accent : job.status === "in-progress" ? C.gold : C.blue;
+
+    return (
+      <div key={job.id} style={{ background: C.surface, border: `1px solid ${missing.length ? C.gold + "66" : C.border}`, borderRadius: 18, padding: 16, marginBottom: 14 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ width: 42, height: 42, borderRadius: 14, background: `${statusColor}22`, color: statusColor, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>
+              {job.routeOrder || idx + 1}
+            </div>
+            <div>
+              <div style={{ fontSize: 17, fontWeight: 900, color: C.text }}>{job.client}</div>
+              <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>{job.date || "No date"} · {job.time || "Time TBD"}</div>
+              {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {job.address}</div>}
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 22, fontWeight: 900, color: C.accent }}>{cur}{job.partnerPay || job.pay || 0}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>pay</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(105px,1fr))", gap: 8, marginTop: 14 }}>
+          <div style={{ background: C.card, borderRadius: 12, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>GPS</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: proof.gps ? C.accent : C.gold }}>{proof.gps ? "Complete" : job.checkIn ? "Checked in" : "Pending"}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 12, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Photos</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: proof.before && proof.after ? C.accent : C.gold }}>{proof.before} before · {proof.after} after</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 12, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Checklist</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: proof.checklist ? C.accent : C.gold }}>{proof.checklist} done</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(job.status || "scheduled", statusColor)}
+          {proof.complete && badge("Proof complete", C.accent)}
+          {missing.map((m) => badge("Needs " + m, C.gold))}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => openMap(job)} style={{ minHeight: 44, borderRadius: 12, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 900, cursor: "pointer" }}>
+            🗺️ Map
+          </button>
+          <button type="button" onClick={() => setTab && setTab("myschedule")} style={{ minHeight: 44, borderRadius: 12, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            📅 My Schedule
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📱 Partner App Mode</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Cleaner-focused mobile view for routes, pay, proof, checklist, and daily work.</div>
+        </div>
+        <button type="button" onClick={copyBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Partner Brief
+        </button>
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>Select Partner</div>
+        <select
+          value={selectedId || ""}
+          onChange={(e) => setPartnerId(e.target.value)}
+          style={{ width: "100%", minHeight: 46, borderRadius: 12, border: `1px solid ${C.border}`, background: C.surface, color: C.text, padding: "10px 12px", fontSize: 14 }}
+        >
+          {partners.map((p) => (
+            <option key={p.id} value={p.id}>{p.name || "Partner " + p.id}</option>
+          ))}
+        </select>
+
+        {selectedPartner && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+            {badge(selectedPartner.status || "status unknown", selectedPartner.status === "available" ? C.accent : C.gold)}
+            {badge(selectedPartner.onboarded ? "Onboarded" : "Onboarding", selectedPartner.onboarded ? C.accent : C.gold)}
+            {selectedPartner.rating && badge("Rating " + selectedPartner.rating, C.blue)}
+          </div>
+        )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,160px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today", todayJobs.length, cur + todayPay + " pay", C.accent)}
+        {stat("Upcoming", upcomingJobs.length, cur + upcomingPay + " pay", C.blue)}
+        {stat("Completed", completedJobs.length, cur + completedPay + " earned", C.purple)}
+        {stat("Proof Gaps", partnerJobs.filter((j) => j.status === "completed" && !proofStatus(j).complete).length, "Need cleanup", C.gold)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["today", "Today"],
+          ["upcoming", "Upcoming"],
+          ["completed", "Completed"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setView(id)} style={{ ...S.btn(view === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>{view === "today" ? "Today’s Jobs" : view === "upcoming" ? "Upcoming Jobs" : "Completed Jobs"}</div>
+        {visibleJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No jobs in this view.</div>
+        ) : (
+          visibleJobs.map(jobCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -11028,6 +11249,7 @@ export default function App() {
       { id:"real_automation", label:"⚡ Auto-Run", desc:"Real automation layer" },
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
+      { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -11246,6 +11468,7 @@ export default function App() {
         {tab==="real_automation" && <RealAutomationLayer jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
