@@ -9200,8 +9200,8 @@ export default function App() {
       { id:"financial_dashboard", label:"📊 Finance", desc:"Profit and revenue intelligence" },
       { id:"scale_center", label:"🌎 Scale", desc:"Multi-region scale command center" },
       { id:"ai_growth_engine", label:"🧠 AI Engine", desc:"Daily growth and operations action brain" },
-      { id:"automation_center"},
-{ id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" , label:"⚙️ Automation", desc:"Automation trigger center" },
+      { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
+      { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },, label:"⚙️ Automation", desc:"Automation trigger center" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -9413,8 +9413,8 @@ export default function App() {
         {tab==="financial_dashboard" && <FinancialDashboard jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="scale_center" && <ScaleCommandCenter jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} />}
         {tab==="ai_growth_engine" && <AIGrowthEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
-        {tab==="automation_center" && <AutomationTriggerCenter
-        {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />} jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="automation_center" && <AutomationTriggerCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
