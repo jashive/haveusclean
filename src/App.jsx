@@ -5838,11 +5838,31 @@ export default function App() {
 
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
-        {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} 
-        {tab==="proof_archive" && <MySchedule jobs={regionJobs} partners={regionPartners} region={activeRegion} mode="archive" onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} onPhotoUpload={handleMySchedulePhotoUpload} onToggleChecklist={handleMyScheduleChecklistToggle} />}
-              onPhotoUpload={handleMySchedulePhotoUpload} 
-              onToggleChecklist={handleMyScheduleChecklistToggle} />}
-        {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="myschedule" && (
+          <MySchedule
+            jobs={regionJobs}
+            partners={regionPartners}
+            region={activeRegion}
+            onCheckIn={handleMyScheduleCheckIn}
+            onCheckOut={handleMyScheduleCheckOut}
+            onPhotoUpload={handleMySchedulePhotoUpload}
+            onToggleChecklist={handleMyScheduleChecklistToggle}
+          />
+        )}
+
+        {tab==="proof_archive" && (
+          <MySchedule
+            jobs={regionJobs}
+            partners={regionPartners}
+            region={activeRegion}
+            mode="archive"
+            onCheckIn={handleMyScheduleCheckIn}
+            onCheckOut={handleMyScheduleCheckOut}
+            onPhotoUpload={handleMySchedulePhotoUpload}
+            onToggleChecklist={handleMyScheduleChecklistToggle}
+          />
+        )}
+{tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
