@@ -5518,6 +5518,24 @@ export default function App() {
       reader.readAsDataURL(file);
     });
 
+
+  const handleMyScheduleChecklistToggle = (job, item) => {
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) => {
+        if (j.id !== job.id) return j;
+
+        const current = j.checklist || {};
+        return {
+          ...j,
+          checklist: {
+            ...current,
+            [item]: !current[item],
+          },
+        };
+      })
+    );
+  };
+
   const handleMySchedulePhotoUpload = async (job, type, files) => {
     const list = Array.from(files || []);
     if (list.length === 0) return;
@@ -5820,7 +5838,8 @@ export default function App() {
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} 
-              onPhotoUpload={handleMySchedulePhotoUpload} />}
+              onPhotoUpload={handleMySchedulePhotoUpload} 
+              onToggleChecklist={handleMyScheduleChecklistToggle} />}
         {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
