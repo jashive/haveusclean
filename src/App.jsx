@@ -6586,6 +6586,220 @@ function SmartPricingEngine(){
  );
 }
 
+
+function CustomerCRM({ jobs = [], region }) {
+  const [query, setQuery] = useState("");
+  const [selectedClient, setSelectedClient] = useState(null);
+  const cur = region?.currencySymbol || "$";
+
+  const clientKey = (job) =>
+    (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          name: job.client || "Unknown Client",
+          email: job.email || "",
+          address: job.address || "",
+          jobs: [],
+        };
+      }
+
+      acc[key].jobs.push(job);
+      if (job.address && !acc[key].address) acc[key].address = job.address;
+      if (job.email && !acc[key].email) acc[key].email = job.email;
+      return acc;
+    }, {})
+  ).map((profile) => {
+    const sortedJobs = [...profile.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sortedJobs.filter((j) => j.status === "completed");
+    const active = sortedJobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+    const lifetimeValue = sortedJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    const profit = sortedJobs.reduce((sum, j) => sum + (j.profit || 0), 0);
+    const lastJob = sortedJobs[0];
+    const lastCompleted = completed[0];
+    const needsFollowUp = completed.some((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
+    const missingReview = completed.some((j) => j.reviewStatus !== "received");
+    const missingReferral = completed.some((j) => j.referralStatus !== "received");
+    const qualityRisk = completed.some((j) => ["issue", "callback"].includes(j.qualityStatus));
+    const recurring = sortedJobs.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+
+    return {
+      ...profile,
+      jobs: sortedJobs,
+      completed,
+      active,
+      lifetimeValue,
+      profit,
+      lastJob,
+      lastCompleted,
+      needsFollowUp,
+      missingReview,
+      missingReferral,
+      qualityRisk,
+      recurring,
+    };
+  }).sort((a, b) => b.lifetimeValue - a.lifetimeValue);
+
+  const filtered = profiles.filter((p) => {
+    const q = query.trim().toLowerCase();
+    if (!q) return true;
+    return [p.name, p.email, p.address, p.recurring].filter(Boolean).join(" ").toLowerCase().includes(q);
+  });
+
+  const totalLTV = profiles.reduce((sum, p) => sum + p.lifetimeValue, 0);
+  const repeatClients = profiles.filter((p) => p.jobs.length > 1).length;
+  const followUps = profiles.filter((p) => p.needsFollowUp).length;
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const copyClientNote = async (profile) => {
+    const firstName = (profile.name || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+    const message = [
+      "Client CRM Note — " + profile.name,
+      "",
+      "Lifetime value: " + cur + profile.lifetimeValue,
+      "Jobs: " + profile.jobs.length,
+      "Last service: " + (profile.lastJob?.date || "No date"),
+      "Recurring: " + profile.recurring,
+      "",
+      "Suggested message:",
+      "Hi " + firstName + ", this is Have Us Clean. I wanted to check in and see if you need another cleaning booked. We would be happy to help with your next service.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Client CRM note copied.");
+    } catch {
+      window.prompt("Copy client note:", message);
+    }
+  };
+
+  const profileCard = (profile) => (
+    <div key={profile.key} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{profile.name}</div>
+          {profile.email && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>✉️ {profile.email}</div>}
+          {profile.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {profile.address}</div>}
+        </div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ fontSize: 24, fontWeight: 900, color: C.accent }}>{cur}{profile.lifetimeValue}</div>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>LTV</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+        <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Jobs</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{profile.jobs.length}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Completed</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{profile.completed.length}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Profit</div>
+          <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{cur}{profile.profit}</div>
+        </div>
+        <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Last Service</div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: C.text }}>{profile.lastJob?.date || "—"}</div>
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+        {badge(profile.recurring, profile.recurring === "One-Time" ? C.muted : C.accent)}
+        {profile.needsFollowUp && badge("Follow-up needed", C.gold)}
+        {profile.missingReview && badge("Review opportunity", C.purple)}
+        {profile.missingReferral && badge("Referral opportunity", C.blue)}
+        {profile.qualityRisk && badge("Quality risk", C.red || "#FF6B6B")}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+        <button type="button" onClick={() => setSelectedClient(profile)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+          👤 View Profile
+        </button>
+        <button type="button" onClick={() => copyClientNote(profile)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+          📋 Copy Note
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>👤 Customer CRM</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Client profiles, lifetime value, service history, and growth opportunities.</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Clients", profiles.length, "Unique profiles", C.accent)}
+        {stat("Total LTV", cur + totalLTV, "Known revenue", C.blue)}
+        {stat("Repeat Clients", repeatClients, "2+ jobs", C.purple)}
+        {stat("Follow-Ups", followUps, "Need touchpoint", followUps ? C.gold : C.accent)}
+      </div>
+
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search clients..."
+        style={{ width: "100%", minHeight: 44, borderRadius: 12, border: `1px solid ${C.border}`, background: C.surface, color: C.text, padding: "10px 12px", fontSize: 14, marginBottom: 14 }}
+      />
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Client Profiles</div>
+        {filtered.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No clients found.</div>
+        ) : (
+          filtered.map(profileCard)
+        )}
+      </div>
+
+      {selectedClient && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.86)", zIndex: 10000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }} onClick={() => setSelectedClient(null)}>
+          <div style={{ width: "100%", maxWidth: 720, maxHeight: "90vh", overflow: "auto", background: C.card, border: `1px solid ${C.border}`, borderRadius: 16, padding: 16 }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{selectedClient.name}</div>
+                <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>{selectedClient.email || "No email"} · {cur}{selectedClient.lifetimeValue} LTV</div>
+              </div>
+              <button type="button" onClick={() => setSelectedClient(null)} style={{ width: 40, height: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.surface, color: C.text, fontSize: 22, cursor: "pointer" }}>×</button>
+            </div>
+
+            <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 10 }}>Job History</div>
+            {selectedClient.jobs.map((job) => (
+              <div key={job.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+                <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{job.type}</div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{job.date || "No date"} · {job.time || "Time TBD"} · {job.status}</div>
+                <div style={{ fontSize: 12, color: C.accent, marginTop: 3 }}>{cur}{job.clientPrice || 0}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -7156,6 +7370,7 @@ export default function App() {
       { id:"res",        label:"🏠 Residential",   desc:"Leads, quotes & booking" },
       { id:"com",        label:"🏢 Commercial",    desc:"Commercial proposals" },
       { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
+      { id:"customer_crm", label:"👤 CRM", desc:"Customer profiles and lifetime value" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -7360,6 +7575,7 @@ export default function App() {
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTab} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
+        {tab==="customer_crm" && <CustomerCRM jobs={regionJobs} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
