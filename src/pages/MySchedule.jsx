@@ -119,6 +119,16 @@ export default function MySchedule({
   };
 
 
+
+  const handlePhotoPlaceholder = (type, job) => {
+    alert(
+      type +
+        " photos for " +
+        (job?.client || "this job") +
+        "\n\nCamera/upload wiring comes in Phase 2F-B."
+    );
+  };
+
   const getPartners = (job) =>
     (job.partnerIds || [job.partnerId]).map(id => partners.find(p => p.id === id)).filter(Boolean);
 
@@ -230,6 +240,51 @@ export default function MySchedule({
           {cur}{job.partnerPay || job.pay || 0}
           <span style={{ fontSize: 12, fontWeight: 400, color: C.muted, marginLeft: 6 }}>partner pay</span>
         </div>
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginTop: 10,
+          }}
+        >
+          <button
+            type="button"
+            style={{
+              minHeight: 46,
+              borderRadius: 10,
+              border: `1px solid ${C.border}`,
+              background: C.surface,
+              color: C.text,
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: "pointer",
+              padding: "10px 12px",
+            }}
+            onClick={() => handlePhotoPlaceholder("Before", job)}
+          >
+            📷 Before Photos ({(job.beforePics || []).length})
+          </button>
+
+          <button
+            type="button"
+            style={{
+              minHeight: 46,
+              borderRadius: 10,
+              border: `1px solid ${C.border}`,
+              background: C.surface,
+              color: C.text,
+              fontSize: 14,
+              fontWeight: 800,
+              cursor: "pointer",
+              padding: "10px 12px",
+            }}
+            onClick={() => handlePhotoPlaceholder("After", job)}
+          >
+            🖼️ After Photos ({(job.afterPics || []).length})
+          </button>
+        </div>
+
         {showGps && <GpsActions job={job} />}
       </div>
     );
