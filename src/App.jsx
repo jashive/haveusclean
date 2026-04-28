@@ -6513,6 +6513,79 @@ function DispatchCommandCenter({ jobs = [], partners = [], region, setTab }) {
   );
 }
 
+
+function SmartPricingEngine(){
+ const [hours,setHours]=useState(2);
+ const [difficulty,setDifficulty]=useState("standard");
+ const [urgency,setUrgency]=useState("normal");
+
+ const baseRate=50;
+
+ const difficultyMult={
+  light:0.8,
+  standard:1,
+  heavy:1.4
+ };
+
+ const urgencyMult={
+  normal:1,
+  rush:1.25,
+  emergency:1.5
+ };
+
+ const price=Math.round(
+  hours*baseRate*
+  difficultyMult[difficulty]*
+  urgencyMult[urgency]
+ );
+
+ const upsells=[
+  {label:"Deep Clean",price:80},
+  {label:"Fridge",price:25},
+  {label:"Oven",price:30}
+ ];
+
+ return (
+  <div>
+   <h2>💰 Smart Pricing</h2>
+
+   <div>
+    Hours:
+    <input type="number" value={hours} onChange={e=>setHours(Number(e.target.value))}/>
+   </div>
+
+   <div>
+    Difficulty:
+    <select onChange={e=>setDifficulty(e.target.value)}>
+     <option value="light">Light</option>
+     <option value="standard">Standard</option>
+     <option value="heavy">Heavy</option>
+    </select>
+   </div>
+
+   <div>
+    Urgency:
+    <select onChange={e=>setUrgency(e.target.value)}>
+     <option value="normal">Normal</option>
+     <option value="rush">Rush</option>
+     <option value="emergency">Emergency</option>
+    </select>
+   </div>
+
+   <h3>Price: $ {price}</h3>
+
+   <div>
+    Upsell Suggestions:
+    {upsells.map(u=>(
+      <div key={u.label}>
+        {u.label} +$ {u.price}
+      </div>
+    ))}
+   </div>
+  </div>
+ );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
