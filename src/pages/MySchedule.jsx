@@ -31,6 +31,7 @@ export default function MySchedule({
   onCheckOut = () => {},
   onPhotoUpload = () => {},
   onToggleChecklist = () => {},
+  onUpdateQuality = () => {},
   mode = "schedule",
 }) {
   const [activeTab, setActiveTab] = useState("today");
@@ -785,6 +786,75 @@ export default function MySchedule({
     );
   };
 
+
+  const qualityMeta = (status) => {
+    const map = {
+      clear: { label: "Clear", icon: "✅", color: C.accent },
+      issue: { label: "Issue", icon: "⚠️", color: C.gold },
+      callback: { label: "Callback Needed", icon: "☎️", color: C.red || "#FF6B6B" },
+      resolved: { label: "Resolved", icon: "🛠️", color: C.blue },
+    };
+
+    return map[status || "clear"] || map.clear;
+  };
+
+  const QualityControls = ({ job }) => {
+    const meta = qualityMeta(job.qualityStatus);
+
+    const btn = (status, label) => {
+      const m = qualityMeta(status);
+      return (
+        <button
+          type="button"
+          onClick={() => onUpdateQuality(job, status)}
+          style={{
+            minHeight: 40,
+            borderRadius: 10,
+            border: `1px solid ${m.color}44`,
+            background: job.qualityStatus === status ? `${m.color}22` : C.surface,
+            color: job.qualityStatus === status ? m.color : C.text,
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: "pointer",
+            padding: "8px 10px",
+          }}
+        >
+          {m.icon} {label}
+        </button>
+      );
+    };
+
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: C.surface,
+          border: `1px solid ${meta.color}44`,
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>Quality Status</div>
+          <span style={st.badge(meta.color)}>{meta.icon} {meta.label}</span>
+        </div>
+
+        {job.qualityUpdatedAt && (
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+            Updated: {new Date(job.qualityUpdatedAt).toLocaleString()}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {btn("issue", "Mark Issue")}
+          {btn("callback", "Callback")}
+          {btn("resolved", "Resolved")}
+          {btn("clear", "Clear")}
+        </div>
+      </div>
+    );
+  };
+
   const ProofArchive = () => {
     const [query, setQuery] = useState("");
 
@@ -900,6 +970,8 @@ export default function MySchedule({
                     <strong style={{ color: C.text }}>Photos</strong><br />{beforeCount} before · {afterCount} after
                   </div>
                 </div>
+
+                <QualityControls job={job} />
 
                 <div
                   style={{
