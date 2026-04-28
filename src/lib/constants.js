@@ -1,6 +1,35 @@
-export const BRAND = { ... };
+export const BRAND = {
+  name: "Have Us Clean",
+  tagline: "Mid-Market Cleaning · Toronto & GTA",
+  version: "4.0.0",
+  color: "#00D4AA",
+  logoMark: "🧹",
+  supportEmail: "haveusclean@gmail.com",
+  website: "https://haveusclean.ca",
+  businessName: "Have Us Clean",
+  market: "Toronto & GTA",
+  position: "Mid-market",
+};
 
-export const C = { ... };
+export const C = {
+  bg: "#0A0F1E",
+  surface: "#111827",
+  card: "#1A2235",
+  border: "#1E2D45",
+  accent: "#00D4AA",
+  accentDim: "#00D4AA22",
+  gold: "#FFB800",
+  goldDim: "#FFB80022",
+  red: "#FF4757",
+  redDim: "#FF475722",
+  blue: "#3B82F6",
+  blueDim: "#3B82F622",
+  purple: "#A78BFA",
+  purpleDim: "#A78BFA22",
+  text: "#F0F6FF",
+  muted: "#8899AA",
+  dim: "#445566",
+};
 
 export const HUC_STATUSES = [
   "New",
@@ -20,7 +49,30 @@ export const HUC_STATUS_COLOR = {
   Lost: C.dim,
 };
 
-export const REGIONS = { ... };
+export const REGIONS = {
+  ON: {
+    id: "ON",
+    country: "CA",
+    flag: "🇨🇦",
+    label: "Ontario, Canada",
+    currency: "CAD",
+    currencySymbol: "CA$",
+    locale: "en-CA",
+    tax: { name: "HST", rate: 0.13 },
+    partnerCostPerHour: 30,
+  },
+  AZ: {
+    id: "AZ",
+    country: "US",
+    flag: "🇺🇸",
+    label: "Arizona, USA",
+    currency: "USD",
+    currencySymbol: "$",
+    locale: "en-US",
+    tax: { name: "TPT", rate: 0.086, serviceTaxable: false },
+    partnerCostPerHour: 25,
+  },
+};
 
 export const DAYS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
 
