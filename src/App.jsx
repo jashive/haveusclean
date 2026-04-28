@@ -4851,7 +4851,7 @@ function PartnerView({ jobs, partners, region }) {
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-export default // ─── System Diagnostic Component ─────────────────────────────────────────────
+// ─── System Diagnostic Component ─────────────────────────────────────────────
 function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   const [results, setResults] = useState([]);
   const [running, setRunning] = useState(false);
@@ -4991,7 +4991,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   );
 }
 
-function App() {
+export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
   const [partners, setPartners] = useState(initPartners);
