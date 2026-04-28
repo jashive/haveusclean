@@ -29,6 +29,7 @@ export default function MySchedule({
   region,
   onCheckIn  = () => {},
   onCheckOut = () => {},
+  onPhotoUpload = () => {},
 }) {
   const [activeTab, setActiveTab] = useState("today");
   const [checkedIn, setCheckedIn] = useState({}); // local optimistic state until real GPS wired
@@ -120,13 +121,20 @@ export default function MySchedule({
 
 
 
-  const handlePhotoPlaceholder = (type, job) => {
-    alert(
-      type +
-        " photos for " +
-        (job?.client || "this job") +
-        "\n\nCamera/upload wiring comes in Phase 2F-B."
-    );
+  const photoInputId = (job, type) => `photo-${type}-${job.id}`;
+
+  const openPhotoPicker = (type, job) => {
+    const input = document.getElementById(photoInputId(job, type));
+    if (input) input.click();
+  };
+
+  const handlePhotoFiles = (type, job, files) => {
+    const fileList = Array.from(files || []);
+    if (fileList.length === 0) return;
+
+    if (typeof onPhotoUpload === "function") {
+      onPhotoUpload(job, type, fileList);
+    }
   };
 
   const getPartners = (job) =>
@@ -240,6 +248,24 @@ export default function MySchedule({
           {cur}{job.partnerPay || job.pay || 0}
           <span style={{ fontSize: 12, fontWeight: 400, color: C.muted, marginLeft: 6 }}>partner pay</span>
         </div>
+        <input
+          id={photoInputId(job, "before")}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => { handlePhotoFiles("before", job, e.target.files); e.target.value = ""; }}
+        />
+        <input
+          id={photoInputId(job, "after")}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          multiple
+          style={{ display: "none" }}
+          onChange={(e) => { handlePhotoFiles("after", job, e.target.files); e.target.value = ""; }}
+        />
         <div
           style={{
             display: "grid",
@@ -261,7 +287,7 @@ export default function MySchedule({
               cursor: "pointer",
               padding: "10px 12px",
             }}
-            onClick={() => handlePhotoPlaceholder("Before", job)}
+            onClick={() => openPhotoPicker("before", job)}
           >
             📷 Before Photos ({(job.beforePics || []).length})
           </button>
@@ -279,7 +305,7 @@ export default function MySchedule({
               cursor: "pointer",
               padding: "10px 12px",
             }}
-            onClick={() => handlePhotoPlaceholder("After", job)}
+            onClick={() => openPhotoPicker("after", job)}
           >
             🖼️ After Photos ({(job.afterPics || []).length})
           </button>
