@@ -10966,6 +10966,190 @@ function MultiRegionExpansionEngine({ jobs = [], partners = [], coldLeads = [], 
   );
 }
 
+
+function DailyOpsMode({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [lastRun, setLastRun] = useState(null);
+  const cur = region?.currencySymbol || "$";
+  const today = new Date().toISOString().split("T")[0];
+
+  const todayJobs = jobs.filter((job) => job.date === today);
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const revenueToday = todayJobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const payToday = todayJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const profitToday = todayJobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(lead.status || "New"));
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const opsScore = Math.max(0, Math.min(100,
+    100
+    - unassignedJobs.length * 12
+    - dispatchRisks.length * 10
+    - qualityRisks.length * 8
+    - proofGaps.length * 4
+    - capacityGap * 8
+  ));
+
+  const scoreColor = opsScore >= 80 ? C.accent : opsScore >= 60 ? C.gold : C.red || "#FF6B6B";
+
+  const commandModules = [
+    { id: "ai_decision_engine", icon: "🧠", label: "AI Decisions", desc: "See what to decide first", count: 0, color: C.accent },
+    { id: "real_automation", icon: "⚡", label: "Auto-Run", desc: "Run enabled automations", count: 0, color: C.accent },
+    { id: "alerts_center", icon: "🚨", label: "Alerts", desc: "Clear urgent warnings", count: unassignedJobs.length + dispatchRisks.length + qualityRisks.length, color: C.gold },
+    { id: "dispatch_center", icon: "🚦", label: "Dispatch", desc: "Same-day job control", count: todayJobs.length, color: C.blue },
+    { id: "workflow_console", icon: "🤖", label: "Workflows", desc: "Run repeatable SOPs", count: 0, color: C.purple },
+    { id: "communication_engine", icon: "💬", label: "Comms", desc: "Send/copy messages", count: pipelineFollowups.length, color: C.blue },
+    { id: "owner_dashboard", icon: "👑", label: "Owner", desc: "CEO health view", count: 0, color: C.accent },
+  ];
+
+  const runBusinessToday = () => {
+    setLastRun(new Date().toISOString());
+  };
+
+  const copyDailyOpsBrief = async () => {
+    const lines = [
+      "Have Us Clean Daily Ops Brief",
+      "",
+      "Region: " + (region?.label || region?.id || "Current"),
+      "Ops score: " + opsScore + "/100",
+      "Today jobs: " + todayJobs.length,
+      "Today revenue: " + cur + revenueToday,
+      "Today partner pay: " + cur + payToday,
+      "Today profit: " + cur + profitToday,
+      "",
+      "Risks:",
+      "- Unassigned jobs: " + unassignedJobs.length,
+      "- Dispatch risks: " + dispatchRisks.length,
+      "- Quality risks: " + qualityRisks.length,
+      "- Proof gaps: " + proofGaps.length,
+      "- Capacity gap: " + capacityGap,
+      "- B2B follow-ups: " + pipelineFollowups.length,
+      "",
+      "Daily command sequence:",
+      "1. Open AI Decisions.",
+      "2. Run Auto-Run.",
+      "3. Clear Alerts.",
+      "4. Check Dispatch.",
+      "5. Run Workflows.",
+      "6. Use Comms.",
+      "7. Review Owner Dashboard.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Daily Ops brief copied.");
+    } catch {
+      window.prompt("Copy Daily Ops brief:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const moduleCard = (mod, idx) => (
+    <button
+      key={mod.id}
+      type="button"
+      onClick={() => setTab && setTab(mod.id)}
+      style={{
+        textAlign: "left",
+        background: C.surface,
+        border: `1px solid ${mod.color}44`,
+        borderLeft: `4px solid ${mod.color}`,
+        borderRadius: 14,
+        padding: 14,
+        cursor: "pointer",
+        color: C.text,
+        width: "100%"
+      }}
+    >
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900 }}>{mod.icon} {idx + 1}. {mod.label}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{mod.desc}</div>
+        </div>
+        {mod.count > 0 && badge(String(mod.count), mod.color)}
+      </div>
+    </button>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🚀 Daily Ops Mode</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Your one-screen command cockpit for running Have Us Clean today.</div>
+        </div>
+        <button type="button" onClick={copyDailyOpsBrief} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+          📋 Copy Brief
+        </button>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${scoreColor}55`, borderLeft: `5px solid ${scoreColor}`, borderRadius: 18, padding: 18, marginBottom: 18 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 14, alignItems: "center", flexWrap: "wrap" }}>
+          <div>
+            <div style={{ fontSize: 13, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".08em" }}>Business readiness today</div>
+            <div style={{ fontSize: 42, fontWeight: 900, color: scoreColor, marginTop: 4 }}>{opsScore}/100</div>
+            <div style={{ fontSize: 13, color: C.muted }}>{lastRun ? "Last run: " + new Date(lastRun).toLocaleString() : "Not run this session yet"}</div>
+          </div>
+          <button type="button" onClick={runBusinessToday} style={{ ...S.btn("primary"), minHeight: 52 }}>
+            ▶ Run My Business Today
+          </button>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 14 }}>
+          {badge(todayJobs.length + " jobs today", C.blue)}
+          {badge(unassignedJobs.length + " unassigned", unassignedJobs.length ? C.gold : C.accent)}
+          {badge(dispatchRisks.length + " dispatch risks", dispatchRisks.length ? C.gold : C.accent)}
+          {badge(capacityGap + " capacity gap", capacityGap ? (C.red || "#FF6B6B") : C.accent)}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today Jobs", todayJobs.length, "Dispatch load", C.blue)}
+        {stat("Revenue", cur + revenueToday, "Today", C.accent)}
+        {stat("Profit", cur + profitToday, "After partner pay", profitToday >= 0 ? C.accent : (C.red || "#FF6B6B"))}
+        {stat("Alerts", unassignedJobs.length + dispatchRisks.length + qualityRisks.length, "Needs attention", unassignedJobs.length + dispatchRisks.length + qualityRisks.length ? C.gold : C.accent)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Daily Command Sequence</div>
+        <div style={{ display: "grid", gap: 10 }}>
+          {commandModules.map(moduleCard)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -11551,6 +11735,7 @@ export default function App() {
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
+      { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -11771,6 +11956,7 @@ export default function App() {
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
