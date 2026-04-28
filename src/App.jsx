@@ -9703,6 +9703,468 @@ function RealAutomationLayer({ jobs = [], partners = [], coldLeads = [], region,
   );
 }
 
+
+function AIDecisionEngine({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [accepted, setAccepted] = useState({});
+  const [filter, setFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const routeGaps = activeJobs.filter((job) => !job.routeOrder);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+
+  const revenue = jobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const partnerPay = jobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const profit = jobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+  const avgJob = jobs.length ? Math.round(revenue / jobs.length) : 0;
+
+  const lowMarginJobs = jobs.filter((job) => {
+    const price = job.clientPrice || 0;
+    const pay = job.partnerPay || job.pay || 0;
+    const p = job.profit ?? (price - pay);
+    const m = price ? Math.round((p / price) * 100) : 0;
+    return price > 0 && m < 30;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", email: job.email || "", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    const ltv = sorted.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    return { ...p, completed, last, recurring, age, dueDays, due: completed.length > 0 && age >= dueDays, ltv };
+  });
+
+  const rebookDue = profiles.filter((p) => p.due);
+  const recurringOverdue = profiles.filter((p) => p.recurring !== "One-Time" && p.due);
+  const highValueClients = profiles.filter((p) => p.ltv >= avgJob * 2).sort((a,b)=>b.ltv-a.ltv);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const onboardingPartners = partners.filter((p) => !p.onboarded || p.status === "onboarding");
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+  const partnerIssues = partners.map((p) => {
+    const pj = completedJobs.filter((j) => (j.partnerIds || [j.partnerId]).includes(p.id));
+    const issues = pj.filter((j) => ["issue", "callback"].includes(j.qualityStatus)).length;
+    const issueRate = pj.length ? Math.round((issues / pj.length) * 100) : 0;
+    return { partner: p, jobs: pj.length, issues, issueRate };
+  }).filter((x) => x.jobs >= 2 && x.issueRate >= 25);
+
+  const pipelineDeals = coldLeads.map((lead, idx) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    const value = lead.value || 500 + score * 10;
+    const status = lead.status || "New";
+    const probability = status === "Won" ? 100 : status === "Meeting Booked" ? 55 : status === "Follow Up" ? 35 : status === "Contacted" ? 20 : 10;
+    return {
+      id: lead.lead_id || lead.id || idx,
+      company: lead.company || lead.name || "Unknown Company",
+      status,
+      value,
+      probability,
+      weighted: Math.round(value * probability / 100),
+    };
+  });
+  const pipelineFollowups = pipelineDeals.filter((d) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(d.status));
+  const weightedPipeline = pipelineDeals.reduce((sum, d) => sum + d.weighted, 0);
+
+  const decisions = [];
+
+  const addDecision = (d) => decisions.push(d);
+
+  if (margin < 30 && revenue > 0) {
+    addDecision({
+      id: "raise_prices",
+      area: "Pricing",
+      icon: "💰",
+      title: "Raise or review pricing on low-margin work",
+      decision: "Increase pricing or reduce labor cost on services/jobs below 30% margin.",
+      reason: "Current margin is " + margin + "% and " + lowMarginJobs.length + " job(s) are below target.",
+      impact: revenue,
+      confidence: lowMarginJobs.length > 0 ? 86 : 72,
+      risk: "Medium",
+      tab: "financial_dashboard",
+      color: C.gold,
+    });
+  }
+
+  if (unassignedJobs.length > 0) {
+    addDecision({
+      id: "assign_now",
+      area: "Operations",
+      icon: "🧭",
+      title: "Prioritize auto-assignment before new sales push",
+      decision: "Assign all active unassigned jobs before adding more demand.",
+      reason: unassignedJobs.length + " active job(s) are missing partner assignment.",
+      impact: unassignedJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      confidence: 94,
+      risk: "High",
+      tab: "auto_assign",
+      color: C.red || "#FF6B6B",
+    });
+  }
+
+  if (dispatchRisks.length > 0 || routeGaps.length > 0) {
+    addDecision({
+      id: "route_first",
+      area: "Scheduling",
+      icon: "🗺️",
+      title: "Resolve route/dispatch gaps before field work",
+      decision: "Apply route order and clear dispatch risks before the day starts.",
+      reason: dispatchRisks.length + " dispatch risk(s) and " + routeGaps.length + " route gap(s) detected.",
+      impact: todayJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      confidence: 91,
+      risk: "High",
+      tab: "dispatch_center",
+      color: C.gold,
+    });
+  }
+
+  if (recurringOverdue.length > 0) {
+    addDecision({
+      id: "save_recurring",
+      area: "Retention",
+      icon: "🔁",
+      title: "Protect recurring clients before chasing one-time work",
+      decision: "Contact overdue recurring clients today and confirm next service.",
+      reason: recurringOverdue.length + " recurring client(s) are overdue.",
+      impact: recurringOverdue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      confidence: 88,
+      risk: "Medium",
+      tab: "recurring_revenue",
+      color: C.accent,
+    });
+  }
+
+  if (rebookDue.length > 0) {
+    addDecision({
+      id: "rebook_due",
+      area: "Revenue",
+      icon: "📣",
+      title: "Run rebooking campaign for past clients",
+      decision: "Send rebooking messages to clients due for another cleaning.",
+      reason: rebookDue.length + " client(s) are due based on service interval.",
+      impact: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      confidence: 82,
+      risk: "Low",
+      tab: "campaign_center",
+      color: C.blue,
+    });
+  }
+
+  if (pipelineFollowups.length > 0) {
+    addDecision({
+      id: "b2b_followups",
+      area: "Sales",
+      icon: "🏢",
+      title: "Push B2B deals already in motion",
+      decision: "Follow up contacted/proposal-stage B2B deals before prospecting cold.",
+      reason: pipelineFollowups.length + " B2B deal(s) are in active follow-up stages.",
+      impact: pipelineFollowups.reduce((sum, d) => sum + d.weighted, 0),
+      confidence: 79,
+      risk: "Low",
+      tab: "b2b_pipeline",
+      color: C.purple,
+    });
+  }
+
+  if (capacityGap > 0) {
+    addDecision({
+      id: "hire_capacity",
+      area: "Staffing",
+      icon: "👥",
+      title: "Increase partner capacity before scaling volume",
+      decision: "Onboard or recruit at least " + capacityGap + " additional partner(s).",
+      reason: "Active job count exceeds active partner capacity.",
+      impact: 0,
+      confidence: 84,
+      risk: "High",
+      tab: "hiring_pipeline",
+      color: C.red || "#FF6B6B",
+    });
+  }
+
+  if (qualityRisks.length > 0) {
+    addDecision({
+      id: "quality_recovery",
+      area: "Quality",
+      icon: "⚠️",
+      title: "Prioritize recovery for quality issues",
+      decision: "Handle callback/issue jobs before requesting reviews from those clients.",
+      reason: qualityRisks.length + " quality risk(s) detected.",
+      impact: qualityRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      confidence: 90,
+      risk: "High",
+      tab: "recovery",
+      color: C.gold,
+    });
+  }
+
+  if (partnerIssues.length > 0) {
+    addDecision({
+      id: "coach_partners",
+      area: "Team",
+      icon: "👷",
+      title: "Coach partners with elevated issue rates",
+      decision: "Review scorecards and coaching recommendations for partners with recurring issues.",
+      reason: partnerIssues.length + " partner(s) have elevated issue rates.",
+      impact: 0,
+      confidence: 76,
+      risk: "Medium",
+      tab: "partner_scorecards",
+      color: C.purple,
+    });
+  }
+
+  if (proofGaps.length > 0) {
+    addDecision({
+      id: "proof_before_payment",
+      area: "Proof",
+      icon: "📸",
+      title: "Complete proof before pushing payment/reviews",
+      decision: "Resolve missing proof reports before requesting payment confidence or reviews.",
+      reason: proofGaps.length + " completed job(s) have proof gaps.",
+      impact: proofGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      confidence: 83,
+      risk: "Medium",
+      tab: "proof_archive",
+      color: C.gold,
+    });
+  }
+
+  if (reviewGaps.length + referralGaps.length > 0 && qualityRisks.length === 0) {
+    addDecision({
+      id: "ask_reviews",
+      area: "Growth",
+      icon: "⭐",
+      title: "Ask for reviews and referrals from clean completions",
+      decision: "Run review/referral asks for completed jobs with no active quality risk.",
+      reason: (reviewGaps.length + referralGaps.length) + " review/referral opportunity(s) available.",
+      impact: 0,
+      confidence: 70,
+      risk: "Low",
+      tab: "campaign_center",
+      color: C.accent,
+    });
+  }
+
+  if (highValueClients.length > 0) {
+    addDecision({
+      id: "vip_clients",
+      area: "Customer",
+      icon: "👤",
+      title: "Protect high-value client relationships",
+      decision: "Review top client profiles and proactively offer recurring service.",
+      reason: highValueClients.length + " client(s) show higher-than-average lifetime value.",
+      impact: highValueClients.reduce((sum, p) => sum + p.ltv, 0),
+      confidence: 74,
+      risk: "Low",
+      tab: "customer_crm",
+      color: C.blue,
+    });
+  }
+
+  const sorted = decisions.sort((a, b) => {
+    const riskRank = { High: 3, Medium: 2, Low: 1 };
+    return riskRank[b.risk] - riskRank[a.risk] || b.confidence - a.confidence || b.impact - a.impact;
+  });
+
+  const visible = sorted.filter((d) => filter === "all" ? true : d.area === filter);
+  const acceptedCount = Object.values(accepted).filter(Boolean).length;
+  const totalImpact = sorted.reduce((sum, d) => sum + (d.impact || 0), 0);
+  const highRisk = sorted.filter((d) => d.risk === "High").length;
+  const avgConfidence = sorted.length ? Math.round(sorted.reduce((sum, d) => sum + d.confidence, 0) / sorted.length) : 0;
+
+  const acceptDecision = (decision) => {
+    setAccepted((prev) => ({ ...prev, [decision.id]: true }));
+  };
+
+  const copyDecision = async (decision) => {
+    const payload = {
+      decision: decision.title,
+      area: decision.area,
+      recommendation: decision.decision,
+      reason: decision.reason,
+      impact: decision.impact,
+      confidence: decision.confidence,
+      risk: decision.risk,
+      module: decision.tab,
+      generatedAt: new Date().toISOString(),
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Decision payload copied.");
+    } catch {
+      window.prompt("Copy decision payload:", text);
+    }
+  };
+
+  const copyDecisionMemo = async () => {
+    const lines = [
+      "Have Us Clean AI Decision Memo",
+      "",
+      "Decisions: " + sorted.length,
+      "High-risk decisions: " + highRisk,
+      "Average confidence: " + avgConfidence + "%",
+      "Estimated impact: " + cur + totalImpact,
+      "Accepted this session: " + acceptedCount,
+      "",
+      ...sorted.map((d, i) =>
+        (i + 1) + ". " + d.icon + " " + d.title + "\n" +
+        "   Area: " + d.area + "\n" +
+        "   Decision: " + d.decision + "\n" +
+        "   Reason: " + d.reason + "\n" +
+        "   Impact: " + cur + (d.impact || 0) + "\n" +
+        "   Confidence: " + d.confidence + "%\n" +
+        "   Risk: " + d.risk
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Decision memo copied.");
+    } catch {
+      window.prompt("Copy decision memo:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const riskColor = (risk) => risk === "High" ? (C.red || "#FF6B6B") : risk === "Medium" ? C.gold : C.accent;
+
+  const decisionCard = (decision) => {
+    const acceptedState = !!accepted[decision.id];
+    return (
+      <div key={decision.id} style={{ background: C.surface, border: `1px solid ${decision.color}55`, borderLeft: `4px solid ${decision.color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: decision.color }}>{decision.icon} {decision.area}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{decision.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{decision.reason}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: decision.color }}>{decision.confidence}%</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>confidence</div>
+          </div>
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Decision:</strong> {decision.decision}
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(decision.risk + " risk", riskColor(decision.risk))}
+          {badge("Impact " + cur + (decision.impact || 0), decision.impact ? C.blue : C.muted)}
+          {acceptedState && badge("Accepted", C.accent)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => setTab && setTab(decision.tab)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Open
+          </button>
+          <button type="button" onClick={() => acceptDecision(decision)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Accept
+          </button>
+          <button type="button" onClick={() => copyDecision(decision)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            JSON
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const areas = ["all", ...Array.from(new Set(sorted.map((d) => d.area)))];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🧠 AI Decision Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Smart recommendations for pricing, scheduling, staffing, retention, sales, and operations.</div>
+        </div>
+        <button type="button" onClick={copyDecisionMemo} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Decision Memo
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Decisions", sorted.length, "AI recommendations", C.accent)}
+        {stat("High Risk", highRisk, "Act first", highRisk ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Confidence", avgConfidence + "%", "Average", avgConfidence >= 80 ? C.accent : C.gold)}
+        {stat("Impact", cur + totalImpact, "Estimated value", C.blue)}
+        {stat("Accepted", acceptedCount, "This session", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {areas.map((area) => (
+          <button key={area} type="button" onClick={() => setFilter(area)} style={{ ...S.btn(filter === area ? "primary" : "ghost"), minHeight: 40 }}>
+            {area === "all" ? "All" : area}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Recommended Decisions</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No decisions in this view.</div>
+        ) : (
+          visible.map(decisionCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -10285,6 +10747,7 @@ export default function App() {
       { id:"alerts_center", label:"🚨 Alerts", desc:"Business alerts system" },
       { id:"workflow_console", label:"🤖 Workflows", desc:"Workflow automation console" },
       { id:"real_automation", label:"⚡ Auto-Run", desc:"Real automation layer" },
+      { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -10501,6 +10964,7 @@ export default function App() {
         {tab==="alerts_center" && <BusinessAlertsCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="workflow_console" && <WorkflowAutomationConsole jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="real_automation" && <RealAutomationLayer jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
