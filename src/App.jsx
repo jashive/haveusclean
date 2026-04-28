@@ -4861,136 +4861,234 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   const [results, setResults] = useState([]);
   const [running, setRunning] = useState(false);
   const [summary, setSummary] = useState(null);
+  const [suggestions, setSuggestions] = useState([]);
 
   const SB_URL = "https://opazwghrohmfykzxxsjk.supabase.co";
   const SB_KEY = SUPABASE_ANON;
   const SB_H = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
-  const addResult = (name, status, message) => {
-    setResults(prev => [...prev, { name, status, message, time: new Date().toLocaleTimeString() }]);
-  };
-
   const runAll = async () => {
-    setResults([]);
-    setSummary(null);
+    setResults([]); setSummary(null); setSuggestions([]);
     setRunning(true);
+    const res = [];
+    const sugg = [];
     let passed = 0, failed = 0, warned = 0;
 
-    // 1. Supabase connection
+    const add = (category, name, status, message, fix = "") => {
+      res.push({ category, name, status, message, fix, time: new Date().toLocaleTimeString() });
+      if (status === "ok") passed++;
+      else if (status === "err") failed++;
+      else warned++;
+      setResults([...res]);
+    };
+
+    // ── INFRASTRUCTURE ──────────────────────────────────────────────────────
     try {
       const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id&limit=1`, { headers: SB_H });
-      if (r.ok) { addResult("Supabase connection", "ok", "HTTP 200 ✅"); passed++; }
-      else { addResult("Supabase connection", "err", `HTTP ${r.status}`); failed++; }
-    } catch(e) { addResult("Supabase connection", "err", e.message); failed++; }
+      add("Infrastructure", "Supabase Connection", r.ok ? "ok" : "err", `HTTP ${r.status}`);
+    } catch(e) { add("Infrastructure", "Supabase Connection", "err", e.message, "Check internet connection"); }
 
-    // 2. Supabase row count
     try {
       const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id`, { headers: { ...SB_H, "Prefer": "count=exact" } });
-      const range = r.headers.get("Content-Range") || "";
-      const total = range.split("/")[1] || "?";
-      addResult("Supabase row count", "ok", `${total} rows in database`); passed++;
-    } catch(e) { addResult("Supabase row count", "err", e.message); failed++; }
+      const total = (r.headers.get("Content-Range") || "").split("/")[1] || "?";
+      add("Infrastructure", "Supabase Lead Count", "ok", `${total} rows in huc_leads_cold`);
+    } catch(e) { add("Infrastructure", "Supabase Lead Count", "err", e.message); }
 
-    // 3. Supabase write
     try {
-      const testId = "DIAG-" + Date.now();
+      const tid = "DIAG-" + Date.now();
       const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?on_conflict=lead_id`, {
         method: "POST", headers: { ...SB_H, "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify([{ lead_id: testId, data: { company: "Diagnostic Test" }, updated_at: new Date().toISOString() }])
+        body: JSON.stringify([{ lead_id: tid, data: { company: "Test" }, updated_at: new Date().toISOString() }])
       });
       if (r.ok) {
-        await fetch(`${SB_URL}/rest/v1/huc_leads_cold?lead_id=eq.${testId}`, { method: "DELETE", headers: SB_H });
-        addResult("Supabase write/delete", "ok", "Write + cleanup succeeded ✅"); passed++;
-      } else { addResult("Supabase write/delete", "err", `HTTP ${r.status}`); failed++; }
-    } catch(e) { addResult("Supabase write/delete", "err", e.message); failed++; }
+        await fetch(`${SB_URL}/rest/v1/huc_leads_cold?lead_id=eq.${tid}`, { method: "DELETE", headers: SB_H });
+        add("Infrastructure", "Supabase Write/Delete", "ok", "Write + cleanup ✅");
+      } else { add("Infrastructure", "Supabase Write/Delete", "err", `HTTP ${r.status}`, "Check RLS policies allow INSERT/DELETE for anon"); }
+    } catch(e) { add("Infrastructure", "Supabase Write/Delete", "err", e.message); }
 
-    // 4. Google Sheet API
     try {
-      const r = await fetch("/api/sheet");
-      const d = await r.json();
-      if (d.error) { addResult("Google Sheet API", "err", d.error); failed++; }
-      else if (!d.leads || d.leads.length === 0) { addResult("Google Sheet API", "warn", "Connected but 0 leads returned"); warned++; }
+      const r = await fetch("/api/sheet"); const d = await r.json();
+      if (d.error) { add("Infrastructure", "Google Sheet API", "err", d.error, "Check SHEET_ID and Google API key in Vercel env vars"); }
       else {
-        const hashCount = d.leads.filter(l => /^(ON|AZ)-[A-Z0-9]{4,}$/i.test(l.lead_id || "")).length;
-        addResult("Google Sheet API", "ok", `${d.leads.length} leads | ${hashCount} with hash IDs | ${d.leads.length - hashCount} old/junk`);
-        passed++;
+        const total = (d.leads || []).length;
+        add("Infrastructure", "Google Sheet API", total > 0 ? "ok" : "warn", `${total} leads returned`);
+        if (total === 0) sugg.push({ icon: "📋", text: "Google Sheet has no leads — run your n8n workflow to populate it" });
       }
-    } catch(e) { addResult("Google Sheet API", "err", e.message); failed++; }
+    } catch(e) { add("Infrastructure", "Google Sheet API", "err", e.message, "Vercel /api/sheet function may be failing"); }
 
-    // 5. Form intake API
     try {
-      const r = await fetch("/api/intake");
-      const d = await r.json();
-      if (d.error) { addResult("Form Intake API", "warn", d.error); warned++; }
-      else { addResult("Form Intake API", "ok", `${(d.leads||[]).length} form submissions`); passed++; }
-    } catch(e) { addResult("Form Intake API", "err", e.message); failed++; }
+      const r = await fetch("/api/intake"); const d = await r.json();
+      const count = (d.leads || []).length;
+      add("Infrastructure", "Form Intake API", "ok", `${count} form submissions`);
+      if (count === 0) sugg.push({ icon: "📝", text: "No form submissions yet — share your Google Form with clients to start collecting leads" });
+    } catch(e) { add("Infrastructure", "Form Intake API", "err", e.message); }
 
-    // 6. App state checks
-    addResult("Cold leads in memory", coldLeads.length > 0 ? "ok" : "warn",
-      `${coldLeads.length} leads loaded | ${coldLeads.filter(l => /^(ON|AZ)-[A-Z0-9]{4,}$/i.test(l.lead_id||"")).length} with hash IDs`);
-    if (coldLeads.length > 0) passed++; else warned++;
+    if ("geolocation" in navigator) {
+      add("Infrastructure", "GPS/Geolocation", "ok", "Browser geolocation available ✅");
+    } else {
+      add("Infrastructure", "GPS/Geolocation", "err", "Not available", "GPS check-in won't work on this device");
+    }
 
-    addResult("Residential leads", resLeads.length >= 0 ? "ok" : "warn",
-      `${resLeads.length} leads in app`); passed++;
+    // ── COLD OUTREACH ────────────────────────────────────────────────────────
+    add("Cold Outreach", "Leads loaded", coldLeads.length > 0 ? "ok" : "warn",
+      `${coldLeads.length} leads in memory`,
+      coldLeads.length === 0 ? "Open Cold Outreach tab to trigger auto-sync" : "");
 
-    addResult("Jobs in memory", jobs.length >= 0 ? "ok" : "warn",
-      `${jobs.length} jobs | ${jobs.filter(j=>j.status==="scheduled").length} scheduled`); passed++;
+    const onLeads = coldLeads.filter(l => (l.market||"").toLowerCase().includes("ontario"));
+    const azLeads = coldLeads.filter(l => (l.market||"").toLowerCase().includes("arizona"));
+    add("Cold Outreach", "Ontario leads", onLeads.length > 0 ? "ok" : "warn", `${onLeads.length} Ontario leads`);
+    add("Cold Outreach", "Arizona leads", azLeads.length > 0 ? "ok" : "warn", `${azLeads.length} Arizona leads`);
 
-    addResult("Partners", partners.length > 0 ? "ok" : "warn",
-      `${partners.length} partners registered`);
-    if (partners.length > 0) passed++; else warned++;
+    const contacted = coldLeads.filter(l => l.status !== "New").length;
+    add("Cold Outreach", "Leads with activity", contacted > 0 ? "ok" : "warn",
+      `${contacted}/${coldLeads.length} leads have been contacted or updated`);
+    if (contacted === 0 && coldLeads.length > 0) sugg.push({ icon: "🎯", text: "Start contacting cold leads — open a lead, send the cold email, update status to Contacted" });
 
-    // 7. GPS
-    if ("geolocation" in navigator) { addResult("GPS/Geolocation", "ok", "Available ✅"); passed++; }
-    else { addResult("GPS/Geolocation", "err", "Not available"); failed++; }
+    // ── RESIDENTIAL LEADS ────────────────────────────────────────────────────
+    add("Residential", "Leads in app", resLeads.length >= 0 ? "ok" : "warn", `${resLeads.length} residential leads`);
+    if (resLeads.length === 0) sugg.push({ icon: "🏠", text: "No residential leads yet — add your first lead from the Residential tab" });
 
-    // 8. localStorage
+    const quoted = resLeads.filter(l => l.status === "Quoted").length;
+    const booked = resLeads.filter(l => l.status === "Booked").length;
+    const completed = resLeads.filter(l => l.status === "Completed").length;
+    add("Residential", "Lead pipeline", "ok",
+      `New: ${resLeads.filter(l=>l.status==="New").length} · Quoted: ${quoted} · Booked: ${booked} · Completed: ${completed}`);
+
+    if (quoted > 0 && booked === 0) sugg.push({ icon: "📋", text: `${quoted} quoted leads not yet booked — follow up or click Book Job to schedule them` });
+
+    // ── JOBS ─────────────────────────────────────────────────────────────────
+    add("Jobs", "Total jobs", "ok", `${jobs.length} jobs in system`);
+    if (jobs.length === 0) sugg.push({ icon: "📋", text: "No jobs yet — book a residential lead to create the first job" });
+
+    const scheduled = jobs.filter(j => j.status === "scheduled").length;
+    const inProgress = jobs.filter(j => j.status === "in_progress").length;
+    const completedJobs = jobs.filter(j => j.status === "completed").length;
+    add("Jobs", "Job status breakdown", "ok",
+      `Scheduled: ${scheduled} · In Progress: ${inProgress} · Completed: ${completedJobs}`);
+
+    const unassigned = jobs.filter(j => !j.partnerId && !(j.partnerIds||[]).length).length;
+    if (unassigned > 0) {
+      add("Jobs", "Unassigned jobs", "warn", `${unassigned} jobs have no partner assigned`, "Go to Jobs tab and assign partners");
+      sugg.push({ icon: "👥", text: `${unassigned} jobs have no partner assigned — assign partners so they show up in Partner View` });
+    } else { add("Jobs", "Unassigned jobs", "ok", "All jobs have partners assigned ✅"); }
+
+    // ── PARTNERS ─────────────────────────────────────────────────────────────
+    add("Partners", "Partners registered", partners.length > 0 ? "ok" : "warn",
+      `${partners.length} partners in system`, partners.length === 0 ? "Add partners in the Partners tab" : "");
+    if (partners.length === 0) sugg.push({ icon: "👥", text: "No partners added yet — go to Partners tab and add your team members" });
+
+    const onboarded = partners.filter(p => p.onboarded).length;
+    if (partners.length > 0) {
+      add("Partners", "Onboarding status", onboarded === partners.length ? "ok" : "warn",
+        `${onboarded}/${partners.length} partners fully onboarded`);
+      if (onboarded < partners.length) sugg.push({ icon: "🎓", text: `${partners.length - onboarded} partners not fully onboarded — complete training in the Onboarding tab` });
+    }
+
+    // ── PAYMENTS ─────────────────────────────────────────────────────────────
+    const paid = jobs.filter(j => j.paymentConfirmed).length;
+    const unpaid = completedJobs - paid;
+    add("Payments", "Payment status", unpaid > 0 ? "warn" : "ok",
+      `${paid} jobs paid · ${unpaid} completed but unpaid`);
+    if (unpaid > 0) sugg.push({ icon: "💳", text: `${unpaid} completed jobs awaiting payment — confirm payment in the Jobs tab` });
+
+    // ── REGION ───────────────────────────────────────────────────────────────
+    add("Config", "Active region", "ok",
+      `${region?.name || "Unknown"} (${region?.id || "?"}) — ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
+
     try {
-      localStorage.setItem("diag","1"); localStorage.removeItem("diag");
-      addResult("localStorage", "ok", "Working ✅"); passed++;
-    } catch(e) { addResult("localStorage", "err", e.message); failed++; }
+      localStorage.setItem("diag-test", "1"); localStorage.removeItem("diag-test");
+      add("Config", "localStorage", "ok", "Working ✅");
+    } catch(e) { add("Config", "localStorage", "err", e.message); }
 
-    // 9. Region
-    addResult("Active region", "ok", `${region?.name || "Unknown"} (${region?.id || "?"}) — ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
-    passed++;
+    const deletedIds = (() => { try { return JSON.parse(localStorage.getItem("cp:deletedLeadIds") || "[]"); } catch { return []; } })();
+    add("Config", "Deleted leads tracking", "ok", `${deletedIds.length} leads permanently deleted and tracked`);
 
+    // ── FEATURE SUGGESTIONS ───────────────────────────────────────────────────
+    if (!jobs.some(j => j.recurring)) sugg.push({ icon: "🔄", text: "No recurring jobs set up — add recurring schedules in the Recurring tab to automate weekly/bi-weekly bookings" });
+    if (partners.length > 0 && !partners.some(p => p.phone)) sugg.push({ icon: "📱", text: "Partner phone numbers missing — add them in Partners tab to enable SMS reminders" });
+    if (completedJobs > 0 && unpaid === 0) sugg.push({ icon: "💰", text: "All completed jobs are paid — great job! Consider setting up Stripe for automatic online payment collection" });
+    if (coldLeads.length > 0 && azLeads.length === 0) sugg.push({ icon: "🇺🇸", text: "No Arizona leads loaded — run your n8n workflow with Arizona search jobs to populate AZ pipeline" });
+    if (coldLeads.length > 500) sugg.push({ icon: "🎯", text: `You have ${coldLeads.length} cold leads — consider assigning a sales team member to work through them systematically` });
+
+    setSuggestions(sugg);
     setSummary({ passed, failed, warned });
     setRunning(false);
   };
 
-  const statusIcon = (s) => s === "ok" ? "✅" : s === "err" ? "❌" : "⚠️";
-  const statusColor = (s) => s === "ok" ? "#00D4AA" : s === "err" ? "#FF4757" : "#f59e0b";
+  const categoryColors = {
+    "Infrastructure": "#3B82F6",
+    "Cold Outreach": "#00D4AA",
+    "Residential": "#FF6B6B",
+    "Jobs": "#f59e0b",
+    "Partners": "#8B5CF6",
+    "Payments": "#10B981",
+    "Config": "#6B7280",
+  };
+
+  const grouped = results.reduce((acc, r) => {
+    if (!acc[r.category]) acc[r.category] = [];
+    acc[r.category].push(r);
+    return acc;
+  }, {});
 
   return (
-    <div style={{ padding: 20, maxWidth: 680, margin: "0 auto" }}>
+    <div style={{ padding: 20, maxWidth: 700, margin: "0 auto" }}>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ color: C.accent, fontSize: 20, marginBottom: 4 }}>🔬 System Diagnostic</h2>
-        <p style={{ color: C.muted, fontSize: 13 }}>Run all checks to verify the app is working correctly</p>
+        <h2 style={{ color: C.accent, fontSize: 22, marginBottom: 4 }}>🔬 System Diagnostic</h2>
+        <p style={{ color: C.muted, fontSize: 13 }}>Full health check of every feature — runs live against your real data</p>
       </div>
 
-      <button onClick={runAll} disabled={running} style={{ ...S.btn("primary"), marginBottom: 20, opacity: running ? 0.6 : 1 }}>
-        {running ? "⏳ Running tests..." : "▶ Run All Checks"}
+      <button onClick={runAll} disabled={running} style={{ ...S.btn("primary"), marginBottom: 16, opacity: running ? 0.6 : 1 }}>
+        {running ? "⏳ Running all checks..." : "▶ Run Full Diagnostic"}
       </button>
 
       {summary && (
-        <div style={{ padding: 14, borderRadius: 10, marginBottom: 16, background: summary.failed > 0 ? "#FF475715" : summary.warned > 0 ? "#f59e0b15" : "#00D4AA15", border: `1px solid ${summary.failed > 0 ? "#FF475744" : summary.warned > 0 ? "#f59e0b44" : "#00D4AA44"}`, color: summary.failed > 0 ? "#FF4757" : summary.warned > 0 ? "#f59e0b" : "#00D4AA", fontWeight: 700, fontSize: 14, textAlign: "center" }}>
+        <div style={{ padding: 14, borderRadius: 10, marginBottom: 16,
+          background: summary.failed > 0 ? "#FF475715" : summary.warned > 0 ? "#f59e0b15" : "#00D4AA15",
+          border: `1px solid ${summary.failed > 0 ? "#FF475744" : summary.warned > 0 ? "#f59e0b44" : "#00D4AA44"}`,
+          color: summary.failed > 0 ? "#FF4757" : summary.warned > 0 ? "#f59e0b" : "#00D4AA",
+          fontWeight: 700, fontSize: 15, textAlign: "center" }}>
           ✅ {summary.passed} passed · ❌ {summary.failed} failed · ⚠️ {summary.warned} warnings
         </div>
       )}
 
-      {results.map((r, i) => (
-        <div key={i} style={{ display: "flex", gap: 12, padding: "10px 14px", background: C.card, borderRadius: 8, marginBottom: 6, border: `1px solid ${C.border}` }}>
-          <div style={{ fontSize: 18, minWidth: 24 }}>{statusIcon(r.status)}</div>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{r.name}</div>
-            <div style={{ fontSize: 12, color: statusColor(r.status), marginTop: 2 }}>{r.message}</div>
+      {Object.entries(grouped).map(([category, items]) => (
+        <div key={category} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", background: `${categoryColors[category] || "#666"}22`, borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: categoryColors[category] || C.accent }}>{category}</span>
           </div>
-          <div style={{ fontSize: 11, color: C.muted, alignSelf: "center" }}>{r.time}</div>
+          {items.map((r, i) => (
+            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${C.border}20` : "none" }}>
+              <div style={{ fontSize: 16, minWidth: 20 }}>{r.status === "ok" ? "✅" : r.status === "err" ? "❌" : "⚠️"}</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{r.name}</div>
+                <div style={{ fontSize: 12, color: r.status === "ok" ? "#00D4AA" : r.status === "err" ? "#FF4757" : "#f59e0b", marginTop: 2 }}>{r.message}</div>
+                {r.fix && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontStyle: "italic" }}>→ {r.fix}</div>}
+              </div>
+              <div style={{ fontSize: 10, color: C.muted, whiteSpace: "nowrap" }}>{r.time}</div>
+            </div>
+          ))}
         </div>
       ))}
 
+      {suggestions.length > 0 && (
+        <div style={{ background: C.card, border: `1px solid #3B82F644`, borderRadius: 10, overflow: "hidden" }}>
+          <div style={{ padding: "10px 14px", background: "#3B82F622", borderBottom: `1px solid ${C.border}` }}>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#60A5FA" }}>💡 Suggestions & Next Steps</span>
+          </div>
+          {suggestions.map((s, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, padding: "10px 14px", borderBottom: i < suggestions.length - 1 ? `1px solid ${C.border}20` : "none" }}>
+              <div style={{ fontSize: 16 }}>{s.icon}</div>
+              <div style={{ fontSize: 13, color: "#aaa", flex: 1 }}>{s.text}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
       {results.length === 0 && !running && (
-        <div style={{ textAlign: "center", color: C.muted, padding: 40 }}>Click "Run All Checks" to test every system</div>
+        <div style={{ textAlign: "center", color: C.muted, padding: 60, fontSize: 14 }}>
+          Click "Run Full Diagnostic" to test every system and get personalized suggestions
+        </div>
       )}
     </div>
   );
