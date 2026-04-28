@@ -5519,6 +5519,21 @@ export default function App() {
     });
 
 
+
+  const handleMyScheduleQualityUpdate = (job, qualityStatus) => {
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              qualityStatus,
+              qualityUpdatedAt: new Date().toISOString(),
+            }
+          : j
+      )
+    );
+  };
+
   const handleMyScheduleChecklistToggle = (job, item) => {
     setJobsDB((prevJobs) =>
       prevJobs.map((j) => {
@@ -5847,6 +5862,7 @@ export default function App() {
             onCheckOut={handleMyScheduleCheckOut}
             onPhotoUpload={handleMySchedulePhotoUpload}
             onToggleChecklist={handleMyScheduleChecklistToggle}
+            onUpdateQuality={handleMyScheduleQualityUpdate}
           />
         )}
 
@@ -5860,6 +5876,7 @@ export default function App() {
             onCheckOut={handleMyScheduleCheckOut}
             onPhotoUpload={handleMySchedulePhotoUpload}
             onToggleChecklist={handleMyScheduleChecklistToggle}
+            onUpdateQuality={handleMyScheduleQualityUpdate}
           />
         )}
 {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
