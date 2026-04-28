@@ -2843,6 +2843,25 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
+
+  // Stable delete handler — lives outside the render loop so no stale closures
+  const handleDeleteRes = (id) => {
+    const deleteId = String(id);
+    setConfirmDeleteRes(null);
+    setResLeads(prev => {
+      const next = prev.filter(l => String(l.id) !== deleteId);
+      // Persist deleted ID to localStorage so it survives refresh
+      try {
+        const existing = JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]");
+        if (!existing.includes(deleteId)) {
+          localStorage.setItem("cp:leads_res_deleted", JSON.stringify([...existing, deleteId]));
+        }
+      } catch {}
+      return next;
+    });
+    // Delete from Supabase in background
+    sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(deleteId)}`, { method: "DELETE" }).catch(() => {});
+  };
   const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status:"New", assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
 
@@ -3096,12 +3115,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               {confirmDeleteRes === lead.id && (
                 <div style={{ marginTop:8, padding:"10px 12px", background:"#FF475720", border:"1px solid #FF475766", borderRadius:8, display:"flex", gap:8, alignItems:"center" }}>
                   <span style={{ fontSize:13, color:"#FF4757", flex:1 }}>Delete this lead?</span>
-                  <button style={{ background:"#FF4757", border:"none", color:"#fff", borderRadius:6, padding:"6px 14px", fontWeight:700, cursor:"pointer" }} onClick={async ()=>{
-                    const lid = String(lead.id || "");
-                    setConfirmDeleteRes(null);
-                    setResLeads(ls => ls.filter(l => l.id !== lead.id));
-                    try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-                  }}>Yes, Delete</button>
+                  <button style={{ background:"#FF4757", border:"none", color:"#fff", borderRadius:6, padding:"6px 14px", fontWeight:700, cursor:"pointer" }} onClick={()=> handleDeleteRes(confirmDeleteRes)}>Yes, Delete</button>
                   <button style={{ background:"#1e2d45", border:"none", color:"#aaa", borderRadius:6, padding:"6px 14px", cursor:"pointer" }} onClick={()=>setConfirmDeleteRes(null)}>Cancel</button>
                 </div>
               )}
@@ -5176,7 +5190,16 @@ export default function App() {
         if (savedPartners)  setPartners(savedPartners);
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
-        if (savedResLeads)  setResLeads(savedResLeads);
+        if (savedResLeads) {
+          // Filter out permanently deleted lead IDs
+          try {
+            const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
+            const filtered = deleted.size > 0
+              ? savedResLeads.filter(l => !deleted.has(String(l.id)))
+              : savedResLeads;
+            setResLeads(filtered);
+          } catch { setResLeads(savedResLeads); }
+        }
         if (savedColdLeads && savedColdLeads.length > 0) {
           // Strip out the hardcoded sample lead IDs that were stored in previous sessions
           const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
