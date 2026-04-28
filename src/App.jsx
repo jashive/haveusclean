@@ -5716,6 +5716,148 @@ function PartnerScorecards({ jobs = [], partners = [], region }) {
   );
 }
 
+
+function HiringPipeline({ partners = [], jobs = [], region }) {
+  const cur = region?.currencySymbol || "$";
+
+  const onboarding = partners.filter((p) => !p.onboarded || p.status === "onboarding");
+  const active = partners.filter((p) => p.onboarded && ["active", "available"].includes(p.status));
+  const available = partners.filter((p) => p.status === "available");
+  const needsWork = partners.filter((p) => p.onboarded && !["active", "available"].includes(p.status));
+
+  const partnerJobs = (partner) =>
+    jobs.filter((job) => (job.partnerIds || [job.partnerId]).includes(partner.id));
+
+  const activeJobsCount = jobs.filter((j) => ["scheduled", "in-progress"].includes(j.status)).length;
+  const hiringNeed = Math.max(0, activeJobsCount - active.length);
+  const capacityScore = active.length + onboarding.length;
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const copyHiringBrief = async () => {
+    const message = [
+      "Have Us Clean Hiring Pipeline Brief",
+      "",
+      "Region: " + (region?.label || region?.id || "Current"),
+      "Active partners: " + active.length,
+      "Available partners: " + available.length,
+      "Onboarding: " + onboarding.length,
+      "Hiring need: " + hiringNeed,
+      "",
+      "Recommended next step:",
+      hiringNeed > 0
+        ? "Recruit or onboard at least " + hiringNeed + " additional partner(s) to protect capacity."
+        : "Capacity is currently covered. Keep onboarding pipeline warm.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Hiring brief copied.");
+    } catch {
+      window.prompt("Copy hiring brief:", message);
+    }
+  };
+
+  const partnerCard = (p, statusLabel, color) => {
+    const assigned = partnerJobs(p);
+    const completed = assigned.filter((j) => j.status === "completed");
+    const activeJobs = assigned.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+    const earnings = completed.reduce((sum, j) => sum + (j.partnerPay || j.pay || 0), 0);
+
+    return (
+      <div key={p.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{p.name}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>⭐ {p.rating || "—"} · {p.region || "All regions"} · {cur}{p.payRate || 0}/hr</div>
+          </div>
+          {badge(statusLabel, color)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.surface, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Active Jobs</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{activeJobs.length}</div>
+          </div>
+          <div style={{ background: C.surface, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Completed</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{completed.length}</div>
+          </div>
+          <div style={{ background: C.surface, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Earnings</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{cur}{earnings}</div>
+          </div>
+        </div>
+
+        {!p.onboarded && (
+          <div style={{ marginTop: 10, fontSize: 12, color: C.gold, lineHeight: 1.5, padding: "8px 10px", background: `${C.gold}11`, borderRadius: 10, border: `1px solid ${C.gold}33` }}>
+            Next step: complete onboarding checklist, confirm availability, and assign starter job.
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>👥 Hiring Pipeline</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Capacity, onboarding, and partner readiness by region.</div>
+        </div>
+        <button type="button" onClick={copyHiringBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Hiring Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Active Partners", active.length, "Ready / available", C.accent)}
+        {stat("Onboarding", onboarding.length, "Pipeline", C.gold)}
+        {stat("Available", available.length, "Can take jobs", C.blue)}
+        {stat("Hiring Need", hiringNeed, "Capacity gap", hiringNeed ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Capacity Score", capacityScore, "Active + onboarding", C.purple)}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>🌱 Onboarding Pipeline</div>
+        {onboarding.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No partners currently onboarding.</div>
+        ) : (
+          onboarding.map((p) => partnerCard(p, "Onboarding", C.gold))
+        )}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>✅ Active Capacity</div>
+        {active.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No active partners found.</div>
+        ) : (
+          active.map((p) => partnerCard(p, p.status || "Active", C.accent))
+        )}
+      </div>
+
+      {needsWork.length > 0 && (
+        <div style={S.card}>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>⚠️ Needs Attention</div>
+          {needsWork.map((p) => partnerCard(p, p.status || "Needs Review", C.gold))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -6269,6 +6411,7 @@ export default function App() {
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
       { id:"briefing",  label:"🌅 Briefing",     desc:"Morning command center" },
       { id:"partner_scorecards", label:"👷 Scorecards", desc:"Partner performance scorecards" },
+      { id:"hiring_pipeline", label:"👥 Hiring", desc:"Hiring and onboarding pipeline" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
@@ -6443,6 +6586,7 @@ export default function App() {
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="briefing"       && <ManagerBriefing jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="partner_scorecards" && <PartnerScorecards jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
+        {tab==="hiring_pipeline" && <HiringPipeline partners={regionPartners} jobs={regionJobs} region={activeRegion} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
