@@ -5360,42 +5360,17 @@ export default function App() {
           });
         }
 
-        // ── Jobs: merge by id, never lose local jobs ──
-        const freshJobs = await sbGet("cp:jobs");
-        if (freshJobs && Array.isArray(freshJobs) && freshJobs.length > 0) {
-          setJobs(prev => {
-            const sbIds = new Set(freshJobs.map(j => String(j.id||"")));
-            const localOnly = (prev||[]).filter(j => !sbIds.has(String(j.id||"")));
-            const merged = [...freshJobs, ...localOnly];
-            // Deduplicate
-            const seen = new Set();
-            return merged.filter(j => {
-              const k = String(j.id||"");
-              if (seen.has(k)) return false;
-              seen.add(k);
-              return true;
-            });
-          });
-        }
+        // ── Jobs: DO NOT overwrite from Supabase sync ──
+        // Local state + localStorage IS the source of truth for jobs.
+        // Jobs are written TO Supabase for backup, never read back to overwrite local.
+        // Jobs are loaded from localStorage at boot only.
 
-        // ── Residential leads: merge + deduplicate ──
-        const freshRes = await sbGet("cp:leads_res");
-        if (freshRes && Array.isArray(freshRes) && freshRes.length > 0) {
-          setResLeads(prev => {
-            const sbIds = new Set(freshRes.map(l => String(l.id||l.email||"")));
-            const localOnly = (prev||[]).filter(l =>
-              !sbIds.has(String(l.id||l.email||"")) && l.source === "VA Quote Agent"
-            );
-            const merged = [...freshRes, ...localOnly];
-            const seen = new Set();
-            return merged.filter(l => {
-              const k = String(l.id||l.email||Math.random());
-              if (seen.has(k)) return false;
-              seen.add(k);
-              return true;
-            });
-          });
-        }
+
+        // ── Residential leads: DO NOT overwrite from Supabase sync ──
+        // Local state + localStorage IS the source of truth for residential leads.
+        // Supabase is write-only backup. Reading back would undo deletes/edits.
+        // Residential leads are loaded from localStorage at boot only.
+
       } catch { /* silent — offline ok */ }
     };
 
