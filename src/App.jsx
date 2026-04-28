@@ -7010,6 +7010,250 @@ function CampaignCenter({ jobs = [], region }) {
   );
 }
 
+
+function RecurringRevenue({ jobs = [], region }) {
+  const [filter, setFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const monthlyMultiplier = (frequency) => {
+    if (frequency === "Weekly") return 4.33;
+    if (frequency === "Bi-Weekly") return 2.17;
+    if (frequency === "Monthly") return 1;
+    return 0;
+  };
+
+  const daysUntil = (dateStr) => {
+    if (!dateStr) return null;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return null;
+    return Math.ceil((d - today) / 86400000);
+  };
+
+  const addDays = (dateStr, days) => {
+    const d = dateStr ? new Date(dateStr + "T00:00:00") : new Date();
+    if (Number.isNaN(d.getTime())) return "";
+    d.setDate(d.getDate() + days);
+    return d.toISOString().split("T")[0];
+  };
+
+  const inferredNextDate = (job) => {
+    if (job.nextDate) return job.nextDate;
+    if (job.recurring === "Weekly") return addDays(job.date, 7);
+    if (job.recurring === "Bi-Weekly") return addDays(job.date, 14);
+    if (job.recurring === "Monthly") return addDays(job.date, 30);
+    return "";
+  };
+
+  const plans = Object.values(
+    jobs
+      .filter((job) => job.recurring && job.recurring !== "One-Time")
+      .reduce((acc, job) => {
+        const key = clientKey(job) + "|" + job.recurring;
+        if (!acc[key]) {
+          acc[key] = {
+            key,
+            client: job.client || "Unknown Client",
+            email: job.email || "",
+            address: job.address || "",
+            frequency: job.recurring,
+            jobs: [],
+          };
+        }
+        acc[key].jobs.push(job);
+        if (job.email && !acc[key].email) acc[key].email = job.email;
+        if (job.address && !acc[key].address) acc[key].address = job.address;
+        return acc;
+      }, {})
+  ).map((plan) => {
+    const sorted = [...plan.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const latest = sorted[0];
+    const avgPrice = Math.round(sorted.reduce((sum, j) => sum + (j.clientPrice || 0), 0) / Math.max(1, sorted.length));
+    const monthlyRevenue = Math.round(avgPrice * monthlyMultiplier(plan.frequency));
+    const nextDate = inferredNextDate(latest);
+    const dueIn = daysUntil(nextDate);
+    const atRisk = dueIn !== null && dueIn < -3;
+    const dueSoon = dueIn !== null && dueIn <= 7 && dueIn >= -3;
+
+    return {
+      ...plan,
+      jobs: sorted,
+      latest,
+      avgPrice,
+      monthlyRevenue,
+      nextDate,
+      dueIn,
+      atRisk,
+      dueSoon,
+    };
+  }).sort((a, b) => b.monthlyRevenue - a.monthlyRevenue);
+
+  const visiblePlans = plans.filter((p) => {
+    if (filter === "risk") return p.atRisk;
+    if (filter === "soon") return p.dueSoon;
+    if (filter === "weekly") return p.frequency === "Weekly";
+    if (filter === "biweekly") return p.frequency === "Bi-Weekly";
+    if (filter === "monthly") return p.frequency === "Monthly";
+    return true;
+  });
+
+  const mrr = plans.reduce((sum, p) => sum + p.monthlyRevenue, 0);
+  const atRiskCount = plans.filter((p) => p.atRisk).length;
+  const dueSoonCount = plans.filter((p) => p.dueSoon).length;
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const buildRenewalMessage = (plan) => {
+    const firstName = (plan.client || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+    return "Hi " + firstName + ", this is Have Us Clean. You are on our " + plan.frequency + " cleaning schedule. Your next service is coming up" + (plan.nextDate ? " around " + plan.nextDate : "") + ". Would you like us to confirm your next appointment?";
+  };
+
+  const copyRenewal = async (plan) => {
+    const msg = buildRenewalMessage(plan);
+    try {
+      await navigator.clipboard.writeText(msg);
+      alert("Recurring service message copied.");
+    } catch {
+      window.prompt("Copy recurring service message:", msg);
+    }
+  };
+
+  const copyMRRBrief = async () => {
+    const lines = [
+      "Have Us Clean Recurring Revenue Brief",
+      "",
+      "Active recurring plans: " + plans.length,
+      "Projected MRR: " + cur + mrr,
+      "Due soon: " + dueSoonCount,
+      "At risk: " + atRiskCount,
+      "",
+      ...plans.map((p, i) =>
+        (i + 1) + ". " + p.client + " — " + p.frequency + " — " + cur + p.monthlyRevenue + "/mo — next: " + (p.nextDate || "TBD")
+      ),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Recurring revenue brief copied.");
+    } catch {
+      window.prompt("Copy recurring revenue brief:", lines);
+    }
+  };
+
+  const planCard = (plan) => {
+    const color = plan.atRisk ? (C.red || "#FF6B6B") : plan.dueSoon ? C.gold : C.accent;
+
+    return (
+      <div key={plan.key} style={{ background: C.surface, border: `1px solid ${color}44`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{plan.client}</div>
+            {plan.email && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>✉️ {plan.email}</div>}
+            {plan.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {plan.address}</div>}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{cur}{plan.monthlyRevenue}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>projected / mo</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Frequency</div>
+            <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{plan.frequency}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Avg Job</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{cur}{plan.avgPrice}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Next Date</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: C.text }}>{plan.nextDate || "TBD"}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>History</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.text }}>{plan.jobs.length}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(plan.frequency, C.accent)}
+          {plan.atRisk && badge("At risk", C.red || "#FF6B6B")}
+          {plan.dueSoon && badge("Due soon", C.gold)}
+          {plan.dueIn !== null && badge(plan.dueIn + " days", color)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          {buildRenewalMessage(plan)}
+        </div>
+
+        <button type="button" onClick={() => copyRenewal(plan)} style={{ minHeight: 42, width: "100%", borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer", marginTop: 10 }}>
+          📋 Copy Renewal Message
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🔁 Recurring Revenue</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Subscription-style cleaning plans, renewal risk, and projected monthly revenue.</div>
+        </div>
+        <button type="button" onClick={copyMRRBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy MRR Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Recurring Plans", plans.length, "Active subscriptions", C.accent)}
+        {stat("Projected MRR", cur + mrr, "Monthly recurring", C.blue)}
+        {stat("Due Soon", dueSoonCount, "Next 7 days", dueSoonCount ? C.gold : C.accent)}
+        {stat("At Risk", atRiskCount, "Past due plans", atRiskCount ? (C.red || "#FF6B6B") : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["all", "All"],
+          ["soon", "Due Soon"],
+          ["risk", "At Risk"],
+          ["weekly", "Weekly"],
+          ["biweekly", "Bi-Weekly"],
+          ["monthly", "Monthly"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Recurring Plans</div>
+        {visiblePlans.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No recurring plans in this view.</div>
+        ) : (
+          visiblePlans.map(planCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -7582,6 +7826,7 @@ export default function App() {
       { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
       { id:"customer_crm", label:"👤 CRM", desc:"Customer profiles and lifetime value" },
       { id:"campaign_center", label:"📣 Campaigns", desc:"Rebooking and follow-up campaigns" },
+      { id:"recurring_revenue", label:"🔁 Subscriptions", desc:"Recurring revenue system" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -7788,6 +8033,7 @@ export default function App() {
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="customer_crm" && <CustomerCRM jobs={regionJobs} region={activeRegion} />}
         {tab==="campaign_center" && <CampaignCenter jobs={regionJobs} region={activeRegion} />}
+        {tab==="recurring_revenue" && <RecurringRevenue jobs={regionJobs} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
