@@ -45,6 +45,10 @@ import {
 // Active region — keep this in App.jsx for now
 let ACTIVE_REGION = REGIONS.ON;
 
+function StatusBadge({ status, color, style = {} }) {
+  return <StatusBadgeBase status={status} color={color} style={style} />;
+}
+
 // ─── WORK ORDER GENERATOR ─────────────────────────────────────────────────────
 // Auto-generates a structured work order when a lead is booked
 function generateWorkOrder(job, lead, partner) {
