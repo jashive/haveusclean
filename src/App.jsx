@@ -9201,7 +9201,7 @@ export default function App() {
       { id:"scale_center", label:"🌎 Scale", desc:"Multi-region scale command center" },
       { id:"ai_growth_engine", label:"🧠 AI Engine", desc:"Daily growth and operations action brain" },
       { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
-      { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },, label:"⚙️ Automation", desc:"Automation trigger center" },
+      { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
