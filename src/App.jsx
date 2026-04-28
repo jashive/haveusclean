@@ -6049,7 +6049,7 @@ function AutoAssignEngine({ jobs = [], partners = [], setJobs, region }) {
 }
 
 
-function RoutePlanner({ jobs = [], partners = [], region, setTab }) {
+function RoutePlanner({ jobs = [], partners = [], region, setTab, setJobs }) {
   const [scope, setScope] = useState("today");
 
   const today = new Date().toISOString().split("T")[0];
@@ -6119,6 +6119,37 @@ function RoutePlanner({ jobs = [], partners = [], region, setTab }) {
     return list;
   });
 
+  const applyOptimizedRoute = () => {
+    if (!setJobs) {
+      alert("Route apply is not wired yet.");
+      return;
+    }
+
+    const appliedAt = new Date().toISOString();
+    const routeMeta = {};
+
+    optimizedJobs.forEach((job, index) => {
+      routeMeta[job.id] = {
+        routeOrder: index + 1,
+        routeGroup: (job.date || "No Date") + " · " + cityKey(job.address),
+        routeAppliedAt: appliedAt,
+      };
+    });
+
+    setJobs((prevJobs) =>
+      prevJobs.map((job) =>
+        routeMeta[job.id]
+          ? {
+              ...job,
+              ...routeMeta[job.id],
+            }
+          : job
+      )
+    );
+
+    alert("Optimized route order applied to " + optimizedJobs.length + " job(s).");
+  };
+
   const copyPlan = async () => {
     const lines = [
       "Have Us Clean Route Plan",
@@ -6172,9 +6203,14 @@ function RoutePlanner({ jobs = [], partners = [], region, setTab }) {
           <div style={S.h2}>🗺️ Route Planner</div>
           <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Optimize schedule order, dispatch readiness, and route risk.</div>
         </div>
-        <button type="button" onClick={copyPlan} style={{ ...S.btn("primary"), minHeight: 40 }}>
-          📋 Copy Route Plan
-        </button>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={applyOptimizedRoute} style={{ ...S.btn("primary"), minHeight: 40 }}>
+            ✅ Apply Optimized Route
+          </button>
+          <button type="button" onClick={copyPlan} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+            📋 Copy Route Plan
+          </button>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
@@ -6232,9 +6268,17 @@ function RoutePlanner({ jobs = [], partners = [], region, setTab }) {
                           <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{job.time || "Time TBD"} · {job.type} · {job.hours || "?"}h</div>
                           {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {job.address}</div>}
                           <div style={{ fontSize: 12, color: names ? C.text : C.gold, marginTop: 3 }}>👷 {names || "Unassigned"}</div>
+                          {job.routeAppliedAt && (
+                            <div style={{ fontSize: 11, color: C.accent, marginTop: 4 }}>
+                              ✅ Route applied {new Date(job.routeAppliedAt).toLocaleString()}
+                            </div>
+                          )}
                         </div>
                       </div>
-                      {badge(job.status || "scheduled", job.status === "in-progress" ? C.gold : C.blue)}
+                      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        {badge(job.status || "scheduled", job.status === "in-progress" ? C.gold : C.blue)}
+                        {job.routeOrder && badge("Route #" + job.routeOrder, C.accent)}
+                      </div>
                     </div>
 
                     <button type="button" onClick={() => openMaps(job)} style={{ marginTop: 10, minHeight: 40, width: "100%", borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
@@ -6983,7 +7027,7 @@ export default function App() {
         {tab==="partner_scorecards" && <PartnerScorecards jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="hiring_pipeline" && <HiringPipeline partners={regionPartners} jobs={regionJobs} region={activeRegion} />}
         {tab==="auto_assign" && <AutoAssignEngine jobs={regionJobs} partners={regionPartners} setJobs={setJobsDB} region={activeRegion} />}
-        {tab==="route_planner" && <RoutePlanner jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="route_planner" && <RoutePlanner jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} setJobs={setJobsDB} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
