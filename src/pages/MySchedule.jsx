@@ -31,6 +31,7 @@ export default function MySchedule({
   onCheckOut = () => {},
   onPhotoUpload = () => {},
   onToggleChecklist = () => {},
+  mode = "schedule",
 }) {
   const [activeTab, setActiveTab] = useState("today");
   const [checkedIn, setCheckedIn] = useState({});
@@ -443,7 +444,11 @@ export default function MySchedule({
     const total = checklistTotalCount(job);
     const proof = getCompletionProof(job);
 
-    return (
+    if (mode === "archive") {
+    return <ProofArchive />;
+  }
+
+  return (
       <div
         style={{
           marginTop: 12,
@@ -776,6 +781,170 @@ export default function MySchedule({
         {job.status === "completed" && <CompletionProofReport job={job} />}
                 {showGps && <ChecklistBox job={job} />}
         {showGps && <GpsActions job={job} />}
+      </div>
+    );
+  };
+
+  const ProofArchive = () => {
+    const [query, setQuery] = useState("");
+
+    const completed = myJobs
+      .filter((job) => job.status === "completed")
+      .filter((job) => {
+        const q = query.trim().toLowerCase();
+        if (!q) return true;
+
+        return [
+          job.client,
+          job.address,
+          job.type,
+          job.date,
+          job.summary,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+          .includes(q);
+      });
+
+    const completeProofCount = completed.filter((job) => getCompletionProof(job).complete).length;
+    const beforeTotal = completed.reduce((sum, job) => sum + (job.beforePics || []).length, 0);
+    const afterTotal = completed.reduce((sum, job) => sum + (job.afterPics || []).length, 0);
+
+    return (
+      <div style={{ padding: "16px", maxWidth: 860, margin: "0 auto", paddingBottom: 88 }}>
+        <div style={st.greeting}>📁 Proof Archive</div>
+        <div style={st.date}>Completed job proof reports and export history</div>
+
+        <div style={st.statsRow}>
+          <div style={st.statBox(C.accent)}>
+            <div style={st.statVal(C.accent)}>{completed.length}</div>
+            <div style={st.statLabel}>Completed</div>
+          </div>
+          <div style={st.statBox(C.gold)}>
+            <div style={st.statVal(C.gold)}>{completeProofCount}</div>
+            <div style={st.statLabel}>Full Proof</div>
+          </div>
+          <div style={st.statBox(C.blue)}>
+            <div style={st.statVal(C.blue)}>{beforeTotal}</div>
+            <div style={st.statLabel}>Before Photos</div>
+          </div>
+          <div style={st.statBox(C.purple)}>
+            <div style={st.statVal(C.purple)}>{afterTotal}</div>
+            <div style={st.statLabel}>After Photos</div>
+          </div>
+        </div>
+
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search completed jobs..."
+          style={{
+            width: "100%",
+            minHeight: 44,
+            borderRadius: 12,
+            border: `1px solid ${C.border}`,
+            background: C.surface,
+            color: C.text,
+            padding: "10px 12px",
+            fontSize: 14,
+            marginBottom: 14,
+          }}
+        />
+
+        {completed.length === 0 ? (
+          <Empty
+            icon="📁"
+            title="No completed proof reports yet"
+            body="Completed jobs with proof will appear here."
+          />
+        ) : (
+          completed.map((job) => {
+            const proof = getCompletionProof(job);
+            const beforeCount = (job.beforePics || []).length;
+            const afterCount = (job.afterPics || []).length;
+            const done = checklistDoneCount(job);
+            const total = checklistTotalCount(job);
+
+            return (
+              <div key={job.id} style={st.jobCard(job.status)}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+                  <div style={{ flex: 1 }}>
+                    <span style={st.badge(proof.complete ? C.accent : C.gold)}>
+                      {proof.complete ? "Full Proof" : "Needs Review"}
+                    </span>
+                    <div style={st.jobClient}>{job.client}</div>
+                    {job.address && <div style={st.jobMeta}>📍 {job.address}</div>}
+                    <div style={st.jobMeta}>🕐 {job.date || "Date TBD"} · {job.time || "Time TBD"} · {job.type}</div>
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  <div style={{ background: C.surface, borderRadius: 10, padding: 10, fontSize: 12, color: C.muted }}>
+                    <strong style={{ color: C.text }}>Check In</strong><br />{job.checkIn || "—"}
+                  </div>
+                  <div style={{ background: C.surface, borderRadius: 10, padding: 10, fontSize: 12, color: C.muted }}>
+                    <strong style={{ color: C.text }}>Check Out</strong><br />{job.checkOut || "—"}
+                  </div>
+                  <div style={{ background: C.surface, borderRadius: 10, padding: 10, fontSize: 12, color: C.muted }}>
+                    <strong style={{ color: C.text }}>Checklist</strong><br />{done}/{total}
+                  </div>
+                  <div style={{ background: C.surface, borderRadius: 10, padding: 10, fontSize: 12, color: C.muted }}>
+                    <strong style={{ color: C.text }}>Photos</strong><br />{beforeCount} before · {afterCount} after
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "1fr 1fr",
+                    gap: 8,
+                    marginTop: 12,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => setProofReport(job)}
+                    style={{
+                      minHeight: 44,
+                      borderRadius: 10,
+                      border: "none",
+                      background: C.accent,
+                      color: "#0A0F1E",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                    }}
+                  >
+                    👀 View Proof
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => exportClientProofReport(job)}
+                    style={{
+                      minHeight: 44,
+                      borderRadius: 10,
+                      border: `1px solid ${C.border}`,
+                      background: C.surface,
+                      color: C.text,
+                      fontWeight: 800,
+                      cursor: "pointer",
+                    }}
+                  >
+                    📤 Export
+                  </button>
+                </div>
+              </div>
+            );
+          })
+        )}
       </div>
     );
   };
