@@ -32,7 +32,8 @@ export default function MySchedule({
   onPhotoUpload = () => {},
 }) {
   const [activeTab, setActiveTab] = useState("today");
-  const [checkedIn, setCheckedIn] = useState({}); // local optimistic state until real GPS wired
+  const [checkedIn, setCheckedIn] = useState({});
+  const [photoPreview, setPhotoPreview] = useState(null); // local optimistic state until real GPS wired
 
   const cur = region?.currencySymbol || "$";
 
@@ -126,6 +127,49 @@ export default function MySchedule({
   const openPhotoPicker = (type, job) => {
     const input = document.getElementById(photoInputId(job, type));
     if (input) input.click();
+  };
+
+
+  const openPhotoPreview = (job, type) => {
+    const photos = type === "before" ? (job.beforePics || []) : (job.afterPics || []);
+
+    if (!photos.length) {
+      alert(
+        (type === "before" ? "Before" : "After") +
+          " photos for " +
+          (job?.client || "this job") +
+          "\n\nNo photos uploaded yet."
+      );
+      return;
+    }
+
+    setPhotoPreview({
+      job,
+      type,
+      photos,
+      index: 0,
+    });
+  };
+
+  const closePhotoPreview = () => setPhotoPreview(null);
+
+  const movePhotoPreview = (direction) => {
+    setPhotoPreview((prev) => {
+      if (!prev) return prev;
+      const total = prev.photos.length;
+      if (total <= 1) return prev;
+
+      return {
+        ...prev,
+        index: (prev.index + direction + total) % total,
+      };
+    });
+  };
+
+  const getPhotoSrc = (photo) => {
+    if (!photo) return "";
+    if (typeof photo === "string") return photo;
+    return photo.dataUrl || photo.url || photo.src || "";
   };
 
   const handlePhotoFiles = (type, job, files) => {
@@ -311,6 +355,51 @@ export default function MySchedule({
           </button>
         </div>
 
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "1fr 1fr",
+            gap: 8,
+            marginTop: 8,
+          }}
+        >
+          <button
+            type="button"
+            style={{
+              minHeight: 42,
+              borderRadius: 10,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.muted,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              padding: "9px 10px",
+            }}
+            onClick={() => openPhotoPreview(job, "before")}
+          >
+            👀 View Before
+          </button>
+
+          <button
+            type="button"
+            style={{
+              minHeight: 42,
+              borderRadius: 10,
+              border: `1px solid ${C.border}`,
+              background: "transparent",
+              color: C.muted,
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: "pointer",
+              padding: "9px 10px",
+            }}
+            onClick={() => openPhotoPreview(job, "after")}
+          >
+            👀 View After
+          </button>
+        </div>
+
         {showGps && <GpsActions job={job} />}
       </div>
     );
@@ -402,6 +491,146 @@ export default function MySchedule({
           : <Empty icon="🏆" title="No completed jobs yet" body="Completed jobs will show up here after you mark them done." />
       )}
 
+
+      {photoPreview && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.88)",
+            zIndex: 9999,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={closePhotoPreview}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "92vh",
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 16,
+              overflow: "hidden",
+              display: "flex",
+              flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div
+              style={{
+                padding: "12px 14px",
+                borderBottom: `1px solid ${C.border}`,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: 10,
+              }}
+            >
+              <div>
+                <div style={{ fontSize: 15, fontWeight: 800, color: C.text }}>
+                  {photoPreview.type === "before" ? "📷 Before Photos" : "🖼️ After Photos"}
+                </div>
+                <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                  {photoPreview.job?.client} · {photoPreview.index + 1} of {photoPreview.photos.length}
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={closePhotoPreview}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: `1px solid ${C.border}`,
+                  background: C.surface,
+                  color: C.text,
+                  fontSize: 22,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div
+              style={{
+                padding: 12,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minHeight: 260,
+                background: C.bg,
+              }}
+            >
+              {getPhotoSrc(photoPreview.photos[photoPreview.index]) ? (
+                <img
+                  src={getPhotoSrc(photoPreview.photos[photoPreview.index])}
+                  alt="Job upload preview"
+                  style={{
+                    maxWidth: "100%",
+                    maxHeight: "68vh",
+                    objectFit: "contain",
+                    borderRadius: 12,
+                  }}
+                />
+              ) : (
+                <div style={{ color: C.muted, padding: 40, textAlign: "center" }}>
+                  Preview unavailable for this photo.
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                padding: 12,
+                borderTop: `1px solid ${C.border}`,
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 8,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => movePhotoPreview(-1)}
+                disabled={photoPreview.photos.length <= 1}
+                style={{
+                  minHeight: 44,
+                  borderRadius: 10,
+                  border: `1px solid ${C.border}`,
+                  background: C.surface,
+                  color: photoPreview.photos.length <= 1 ? C.dim : C.text,
+                  fontWeight: 800,
+                  cursor: photoPreview.photos.length <= 1 ? "default" : "pointer",
+                }}
+              >
+                ← Previous
+              </button>
+
+              <button
+                type="button"
+                onClick={() => movePhotoPreview(1)}
+                disabled={photoPreview.photos.length <= 1}
+                style={{
+                  minHeight: 44,
+                  borderRadius: 10,
+                  border: `1px solid ${C.border}`,
+                  background: C.surface,
+                  color: photoPreview.photos.length <= 1 ? C.dim : C.text,
+                  fontWeight: 800,
+                  cursor: photoPreview.photos.length <= 1 ? "default" : "pointer",
+                }}
+              >
+                Next →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
