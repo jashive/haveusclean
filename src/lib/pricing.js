@@ -74,29 +74,14 @@ export const RES_ADDONS = [
 ];
 
 export const SQFT_HOURS = {
-  500: 1.5,
-  750: 2,
-  1000: 2.5,
-  1250: 3,
-  1500: 3.5,
-  1750: 4,
-  2000: 4.5,
-  2500: 5.5,
-  3000: 6.5,
-  3500: 7.5,
-  4000: 9,
-  5000: 11,
+  500: 1.5, 750: 2, 1000: 2.5, 1250: 3, 1500: 3.5,
+  1750: 4, 2000: 4.5, 2500: 5.5, 3000: 6.5, 3500: 7.5,
+  4000: 9, 5000: 11,
 };
 
 export const getSqftHours = (sqft) => {
-  const tiers = Object.keys(SQFT_HOURS)
-    .map(Number)
-    .sort((a, b) => a - b);
-
-  for (let t of tiers) {
-    if (sqft <= t) return SQFT_HOURS[t];
-  }
-
+  const tiers = Object.keys(SQFT_HOURS).map(Number).sort((a, b) => a - b);
+  for (let t of tiers) { if (sqft <= t) return SQFT_HOURS[t]; }
   return SQFT_HOURS[5000] + (sqft - 5000) / 500;
 };
 
