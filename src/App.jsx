@@ -7254,6 +7254,229 @@ function RecurringRevenue({ jobs = [], region }) {
   );
 }
 
+
+function B2BSalesPipeline({ jobs = [], coldLeads = [], region }) {
+  const [stageFilter, setStageFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+
+  const STAGES = [
+    { id: "New", label: "New", color: C.blue, probability: 10 },
+    { id: "Contacted", label: "Contacted", color: C.gold, probability: 20 },
+    { id: "Follow Up", label: "Follow Up", color: C.gold, probability: 35 },
+    { id: "Meeting Booked", label: "Meeting", color: C.purple, probability: 55 },
+    { id: "Proposal", label: "Proposal", color: C.blue, probability: 70 },
+    { id: "Won", label: "Won", color: C.accent, probability: 100 },
+    { id: "Lost", label: "Lost", color: C.muted, probability: 0 },
+  ];
+
+  const stageMeta = (stage) => STAGES.find((s) => s.id === stage) || STAGES[0];
+
+  const estimateValue = (lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    if ((lead.segment || lead.market || "").toLowerCase().includes("property")) return 1200 + score * 20;
+    if ((lead.segment || lead.market || "").toLowerCase().includes("medical")) return 900 + score * 15;
+    if ((lead.segment || lead.market || "").toLowerCase().includes("office")) return 650 + score * 12;
+    return 500 + score * 10;
+  };
+
+  const commercialJobAccounts = jobs
+    .filter((job) => String(job.type || "").toLowerCase().includes("commercial") || String(job.client || "").toLowerCase().includes("office"))
+    .map((job) => ({
+      id: "job-" + job.id,
+      company: job.client || "Commercial Account",
+      city: job.address || "",
+      segment: "Commercial Client",
+      buyer_title: "Existing customer",
+      pain_point: "Keep service consistent and expand recurring work",
+      first_offer: "Recurring janitorial / commercial cleaning plan",
+      status: job.status === "completed" ? "Won" : "Proposal",
+      source: "Jobs",
+      value: job.clientPrice || 750,
+      notes: job.summary || job.notes || "",
+    }));
+
+  const pipeline = [
+    ...coldLeads.map((lead, idx) => ({
+      id: lead.lead_id || lead.id || "lead-" + idx,
+      company: lead.company || lead.name || "Unknown Company",
+      city: lead.city || lead.location || "",
+      segment: lead.segment || lead.market || "B2B",
+      buyer_title: lead.buyer_title || lead.buyerTitle || "Decision maker",
+      pain_point: lead.pain_point || lead.painPoint || "Needs reliable cleaning support",
+      first_offer: lead.first_offer || lead.firstOffer || "Free cleaning quote / walkthrough",
+      status: lead.status || "New",
+      source: "Cold Outreach",
+      value: lead.value || estimateValue(lead),
+      notes: lead.notes || "",
+      cold_email: lead.cold_email || "",
+      follow_up_email: lead.follow_up_email || "",
+      call_opener: lead.call_opener || "",
+    })),
+    ...commercialJobAccounts,
+  ];
+
+  const visible = pipeline
+    .filter((deal) => stageFilter === "all" ? true : deal.status === stageFilter)
+    .sort((a, b) => (stageMeta(b.status).probability * b.value) - (stageMeta(a.status).probability * a.value));
+
+  const totalPipeline = pipeline.reduce((sum, deal) => sum + Number(deal.value || 0), 0);
+  const weightedPipeline = Math.round(pipeline.reduce((sum, deal) => sum + Number(deal.value || 0) * (stageMeta(deal.status).probability / 100), 0));
+  const wonValue = pipeline.filter((d) => d.status === "Won").reduce((sum, d) => sum + Number(d.value || 0), 0);
+  const followUps = pipeline.filter((d) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(d.status));
+
+  const buildMessage = (deal) => {
+    const title = deal.buyer_title || "there";
+    const company = deal.company || "your team";
+
+    if (deal.status === "New") {
+      return "Hi " + title + ", this is Have Us Clean. We help " + company + " keep spaces clean, reliable, and inspection-ready. Would you be open to a quick quote or walkthrough for your cleaning needs?";
+    }
+
+    if (deal.status === "Proposal") {
+      return "Hi " + title + ", following up on the cleaning proposal for " + company + ". We can help with reliable recurring cleaning, quality checks, and proof-of-work reporting. Would you like me to send the next steps?";
+    }
+
+    return "Hi " + title + ", this is Have Us Clean following up with " + company + ". I wanted to see if cleaning support is still a priority and whether we should schedule a quick walkthrough.";
+  };
+
+  const copyMessage = async (deal) => {
+    const msg = buildMessage(deal);
+    try {
+      await navigator.clipboard.writeText(msg);
+      alert("B2B outreach message copied.");
+    } catch {
+      window.prompt("Copy B2B outreach message:", msg);
+    }
+  };
+
+  const copyPipelineBrief = async () => {
+    const lines = [
+      "Have Us Clean B2B Pipeline Brief",
+      "",
+      "Deals: " + pipeline.length,
+      "Total pipeline: " + cur + totalPipeline,
+      "Weighted pipeline: " + cur + weightedPipeline,
+      "Won value: " + cur + wonValue,
+      "Follow-ups: " + followUps.length,
+      "",
+      ...visible.map((deal, i) =>
+        (i + 1) + ". " + deal.company + " — " + deal.status + " — " + cur + deal.value + " — " + deal.segment
+      ),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("B2B pipeline brief copied.");
+    } catch {
+      window.prompt("Copy B2B pipeline brief:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const dealCard = (deal) => {
+    const meta = stageMeta(deal.status);
+    const weighted = Math.round(Number(deal.value || 0) * (meta.probability / 100));
+
+    return (
+      <div key={deal.id} style={{ background: C.surface, border: `1px solid ${meta.color}44`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{deal.company}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{deal.segment} · {deal.city || "No city"} · {deal.source}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>Buyer: {deal.buyer_title}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: meta.color }}>{cur}{deal.value}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>deal value</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Stage</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: meta.color }}>{meta.label}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Probability</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: meta.color }}>{meta.probability}%</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Weighted</div>
+            <div style={{ fontSize: 20, fontWeight: 900, color: C.accent }}>{cur}{weighted}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(deal.status, meta.color)}
+          {badge(deal.segment, C.blue)}
+          {deal.status !== "Won" && deal.status !== "Lost" && badge("Follow-up opportunity", C.gold)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Pain point:</strong> {deal.pain_point}<br />
+          <strong style={{ color: C.text }}>Offer:</strong> {deal.first_offer}
+        </div>
+
+        <button type="button" onClick={() => copyMessage(deal)} style={{ minHeight: 42, width: "100%", borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer", marginTop: 10 }}>
+          📋 Copy Outreach Message
+        </button>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🏢 B2B Sales Pipeline</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Property managers, offices, commercial leads, deal stages, and pipeline value.</div>
+        </div>
+        <button type="button" onClick={copyPipelineBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Pipeline Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Deals", pipeline.length, "Total opportunities", C.accent)}
+        {stat("Pipeline", cur + totalPipeline, "Gross value", C.blue)}
+        {stat("Weighted", cur + weightedPipeline, "Probability adjusted", C.purple)}
+        {stat("Follow-Ups", followUps.length, "Needs action", followUps.length ? C.gold : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setStageFilter("all")} style={{ ...S.btn(stageFilter === "all" ? "primary" : "ghost"), minHeight: 40 }}>All</button>
+        {STAGES.map((stage) => (
+          <button key={stage.id} type="button" onClick={() => setStageFilter(stage.id)} style={{ ...S.btn(stageFilter === stage.id ? "primary" : "ghost"), minHeight: 40 }}>
+            {stage.label}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Pipeline Deals</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No deals in this stage.</div>
+        ) : (
+          visible.map(dealCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -7827,6 +8050,7 @@ export default function App() {
       { id:"customer_crm", label:"👤 CRM", desc:"Customer profiles and lifetime value" },
       { id:"campaign_center", label:"📣 Campaigns", desc:"Rebooking and follow-up campaigns" },
       { id:"recurring_revenue", label:"🔁 Subscriptions", desc:"Recurring revenue system" },
+      { id:"b2b_pipeline", label:"🏢 B2B Pipeline", desc:"Property manager and commercial sales pipeline" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -8034,6 +8258,7 @@ export default function App() {
         {tab==="customer_crm" && <CustomerCRM jobs={regionJobs} region={activeRegion} />}
         {tab==="campaign_center" && <CampaignCenter jobs={regionJobs} region={activeRegion} />}
         {tab==="recurring_revenue" && <RecurringRevenue jobs={regionJobs} region={activeRegion} />}
+        {tab==="b2b_pipeline" && <B2BSalesPipeline jobs={regionJobs} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
