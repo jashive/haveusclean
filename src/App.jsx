@@ -5499,6 +5499,44 @@ export default function App() {
         }
       );
     });
+
+  const readPhotoFileAsDataUrl = (file) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+
+      reader.onload = () =>
+        resolve({
+          id: `PHOTO-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          name: file.name,
+          type: file.type,
+          size: file.size,
+          dataUrl: reader.result,
+          createdAt: new Date().toISOString(),
+        });
+
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const handleMySchedulePhotoUpload = async (job, type, files) => {
+    const list = Array.from(files || []);
+    if (list.length === 0) return;
+
+    const photos = await Promise.all(list.map(readPhotoFileAsDataUrl));
+    const key = type === "before" ? "beforePics" : "afterPics";
+
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              [key]: [...(j[key] || []), ...photos],
+            }
+          : j
+      )
+    );
+  };
+
   const handleMyScheduleCheckIn = async (job) => {
     const now = new Date().toLocaleTimeString([], {
       hour: "2-digit",
@@ -5781,7 +5819,8 @@ export default function App() {
 
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
-        {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} />}
+        {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} 
+              onPhotoUpload={handleMySchedulePhotoUpload} />}
         {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
