@@ -3088,7 +3088,16 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
                 <button style={{...S.btn("ghost"), color:"#60A5FA"}} onClick={()=>{setEditLead({...lead});setShowEditForm(true);}}>✏️ Edit</button>
-                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={()=>{if(window.confirm("Delete this lead?")){setResLeads(ls=>{const next=ls.filter(l=>l.id!==lead.id);dbSet(DB_KEYS.leadsRes,next);return next;});}}}>🗑</button>
+                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={async ()=>{if(window.confirm("Delete this lead?")){
+                  const lid = String(lead.id || "");
+                  setResLeads(ls => {
+                    const next = ls.filter(l => l.id !== lead.id);
+                    dbSet(DB_KEYS.leadsRes, next);
+                    return next;
+                  });
+                  // Also delete directly from Supabase so sync never brings it back
+                  try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+                }}}>🗑</button>
                 {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
@@ -3203,9 +3212,11 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
-            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={async ()=>{
               if(window.confirm("Delete this lead permanently?")) {
+                const lid = String(editLead.id || "");
                 setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
+                try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
                 setShowEditForm(false);setEditLead(null);
               }
             }}>🗑 Delete Lead</button>
@@ -3505,9 +3516,11 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
-            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={async ()=>{
               if(window.confirm("Delete this lead permanently?")) {
+                const lid = String(editLead.id || "");
                 setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
+                try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
                 setShowEditForm(false);setEditLead(null);
               }
             }}>🗑 Delete Lead</button>
