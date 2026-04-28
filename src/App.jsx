@@ -6295,6 +6295,224 @@ function RoutePlanner({ jobs = [], partners = [], region, setTab, setJobs }) {
   );
 }
 
+
+function DispatchCommandCenter({ jobs = [], partners = [], region, setTab }) {
+  const today = new Date().toISOString().split("T")[0];
+  const cur = region?.currencySymbol || "$";
+
+  const todayJobs = jobs
+    .filter((job) => job.date === today)
+    .sort((a, b) => {
+      const roA = a.routeOrder || 999;
+      const roB = b.routeOrder || 999;
+      if (roA !== roB) return roA - roB;
+      return String(a.time || "").localeCompare(String(b.time || ""));
+    });
+
+  const scheduled = todayJobs.filter((j) => j.status === "scheduled");
+  const inProgress = todayJobs.filter((j) => j.status === "in-progress");
+  const completed = todayJobs.filter((j) => j.status === "completed");
+  const unassigned = todayJobs.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+  const noAddress = todayJobs.filter((j) => !j.address);
+  const noRoute = todayJobs.filter((j) => !j.routeOrder);
+  const checkedIn = todayJobs.filter((j) => !!j.checkIn);
+  const checkedOut = todayJobs.filter((j) => !!j.checkOut);
+
+  const revenue = todayJobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const partnerPay = todayJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const profit = todayJobs.reduce((sum, job) => sum + (job.profit || 0), 0);
+
+  const partnerNames = (job) =>
+    (job.partnerIds || [job.partnerId])
+      .filter(Boolean)
+      .map((id) => partners.find((p) => p.id === id)?.name)
+      .filter(Boolean)
+      .join(", ");
+
+  const proofStatus = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = job.checklist || {};
+    const checklistCount = Object.values(checklist).filter(Boolean).length;
+    const complete = !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklistCount > 0;
+    return { before, after, checklistCount, complete };
+  };
+
+  const risksForJob = (job) => {
+    const risks = [];
+    if (!(job.partnerIds || [job.partnerId]).filter(Boolean).length) risks.push("Unassigned");
+    if (!job.address) risks.push("Missing address");
+    if (!job.time) risks.push("Time TBD");
+    if (!job.routeOrder) risks.push("No route order");
+    if (job.status === "in-progress" && !job.checkIn) risks.push("In-progress without check-in");
+    if (job.status === "completed" && !proofStatus(job).complete) risks.push("Proof incomplete");
+    return risks;
+  };
+
+  const riskJobs = todayJobs.filter((job) => risksForJob(job).length > 0);
+
+  const copyDispatchBrief = async () => {
+    const lines = [
+      "Have Us Clean Dispatch Brief",
+      "",
+      "Region: " + (region?.label || region?.id || "Current"),
+      "Today jobs: " + todayJobs.length,
+      "Scheduled: " + scheduled.length,
+      "In progress: " + inProgress.length,
+      "Completed: " + completed.length,
+      "Unassigned: " + unassigned.length,
+      "Route gaps: " + noRoute.length,
+      "Address gaps: " + noAddress.length,
+      "Revenue: " + cur + revenue,
+      "Partner pay: " + cur + partnerPay,
+      "Profit: " + cur + profit,
+      "",
+      "Route board:",
+      ...todayJobs.map((job, idx) =>
+        (job.routeOrder || idx + 1) + ". " +
+        (job.time || "Time TBD") + " — " +
+        (job.client || "Job") + " — " +
+        (partnerNames(job) || "Unassigned") + " — " +
+        (job.address || "No address")
+      ),
+      "",
+      "Risks:",
+      ...(riskJobs.length ? riskJobs.map((job) => "- " + (job.client || "Job") + ": " + risksForJob(job).join(", ")) : ["- None"]),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Dispatch brief copied.");
+    } catch {
+      window.prompt("Copy dispatch brief:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const openMap = (job) => {
+    if (!job.address) return alert("No address on this job.");
+    window.open("https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(job.address), "_blank");
+  };
+
+  const jobCard = (job, idx) => {
+    const names = partnerNames(job);
+    const proof = proofStatus(job);
+    const risks = risksForJob(job);
+    const color = job.status === "completed" ? C.accent : job.status === "in-progress" ? C.gold : C.blue;
+
+    return (
+      <div key={job.id} style={{ background: C.surface, border: `1px solid ${risks.length ? (C.gold + "66") : C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div style={{ display: "flex", gap: 10 }}>
+            <div style={{ width: 38, height: 38, borderRadius: 12, background: `${color}22`, color, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 900 }}>
+              {job.routeOrder || idx + 1}
+            </div>
+            <div>
+              <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{job.client}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{job.time || "Time TBD"} · {job.type} · {job.hours || "?"}h</div>
+              {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {job.address}</div>}
+              <div style={{ fontSize: 12, color: names ? C.text : C.gold, marginTop: 3 }}>👷 {names || "Unassigned"}</div>
+            </div>
+          </div>
+          {badge(job.status || "scheduled", color)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>GPS</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: job.checkIn ? C.accent : C.gold }}>{job.checkIn ? "In " + job.checkIn : "Not in"}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Photos</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: proof.before && proof.after ? C.accent : C.gold }}>{proof.before} before · {proof.after} after</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Proof</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color: proof.complete ? C.accent : C.gold }}>{proof.complete ? "Complete" : "Pending"}</div>
+          </div>
+        </div>
+
+        {risks.length > 0 && (
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+            {risks.map((risk) => badge("⚠️ " + risk, C.gold))}
+          </div>
+        )}
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => openMap(job)} style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            🗺️ Map
+          </button>
+          <button type="button" onClick={() => setTab && setTab("myschedule")} style={{ minHeight: 40, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            📅 My Schedule
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🚦 Dispatch Command Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Same-day operations control for routes, assignments, GPS, proof, and risks.</div>
+        </div>
+        <button type="button" onClick={copyDispatchBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Dispatch Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today Jobs", todayJobs.length, "Same-day board", C.accent)}
+        {stat("In Progress", inProgress.length, "Currently active", C.gold)}
+        {stat("Unassigned", unassigned.length, "Needs partner", unassigned.length ? C.gold : C.accent)}
+        {stat("Risk Jobs", riskJobs.length, "Dispatch flags", riskJobs.length ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Revenue", cur + revenue, "Today", C.blue)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setTab && setTab("auto_assign")} style={{ ...S.btn("ghost"), minHeight: 40 }}>🧭 Auto Assign</button>
+        <button type="button" onClick={() => setTab && setTab("route_planner")} style={{ ...S.btn("ghost"), minHeight: 40 }}>🗺️ Routes</button>
+        <button type="button" onClick={() => setTab && setTab("myschedule")} style={{ ...S.btn("ghost"), minHeight: 40 }}>📅 My Schedule</button>
+      </div>
+
+      {riskJobs.length > 0 && (
+        <div style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>⚠️ Dispatch Risks</div>
+          {riskJobs.slice(0, 6).map((job) => (
+            <div key={"risk-" + job.id} style={{ background: C.surface, border: `1px solid ${C.gold}44`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: C.text }}>{job.client}</div>
+              <div style={{ fontSize: 12, color: C.gold, marginTop: 4 }}>{risksForJob(job).join(" · ")}</div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Today Dispatch Board</div>
+        {todayJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: 20 }}>No jobs scheduled today.</div>
+        ) : (
+          todayJobs.map(jobCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -6851,6 +7069,7 @@ export default function App() {
       { id:"hiring_pipeline", label:"👥 Hiring", desc:"Hiring and onboarding pipeline" },
       { id:"auto_assign", label:"🧭 Auto Assign", desc:"Automatic job assignment engine" },
       { id:"route_planner", label:"🗺️ Routes", desc:"Schedule optimization and route planning" },
+      { id:"dispatch_center", label:"🚦 Dispatch", desc:"Same-day operations control" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
@@ -7028,6 +7247,7 @@ export default function App() {
         {tab==="hiring_pipeline" && <HiringPipeline partners={regionPartners} jobs={regionJobs} region={activeRegion} />}
         {tab==="auto_assign" && <AutoAssignEngine jobs={regionJobs} partners={regionPartners} setJobs={setJobsDB} region={activeRegion} />}
         {tab==="route_planner" && <RoutePlanner jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} setJobs={setJobsDB} />}
+        {tab==="dispatch_center" && <DispatchCommandCenter jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
