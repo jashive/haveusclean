@@ -11418,6 +11418,281 @@ function LeadCaptureIntegration({ resLeads = [], jobs = [], region, setTab }) {
   );
 }
 
+
+function PaymentInvoicingLayer({ jobs = [], region, setTab }) {
+  const [filter, setFilter] = useState("all");
+  const [localStatus, setLocalStatus] = useState({});
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const proofComplete = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklistCount = Object.values(job.checklist || {}).filter(Boolean).length;
+    return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklistCount > 0;
+  };
+
+  const paymentStatus = (job) => {
+    const local = localStatus[job.id];
+    if (local) return local;
+    return job.paymentStatus || job.invoiceStatus || (job.status === "completed" ? "unpaid" : "not-ready");
+  };
+
+  const invoiceNumber = (job) => {
+    const id = String(job.id || "0000").replace(/[^a-zA-Z0-9]/g, "").slice(-6).toUpperCase();
+    return "HUC-" + (job.date || "DATE").replaceAll("-", "") + "-" + id;
+  };
+
+  const completed = jobs.filter((job) => job.status === "completed");
+  const invoiceReady = completed.filter((job) => proofComplete(job) && paymentStatus(job) !== "paid");
+  const proofBlocked = completed.filter((job) => !proofComplete(job) && paymentStatus(job) !== "paid");
+  const paid = completed.filter((job) => paymentStatus(job) === "paid");
+  const unpaid = completed.filter((job) => ["unpaid", "invoice-sent", "overdue"].includes(paymentStatus(job)));
+  const overdue = completed.filter((job) => paymentStatus(job) === "overdue" || (paymentStatus(job) !== "paid" && daysSince(job.date) >= 7));
+
+  const outstanding = unpaid.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const collected = paid.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const blockedValue = proofBlocked.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const overdueValue = overdue.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+
+  const visibleJobs = completed.filter((job) => {
+    const status = paymentStatus(job);
+    if (filter === "ready") return invoiceReady.includes(job);
+    if (filter === "unpaid") return unpaid.includes(job);
+    if (filter === "overdue") return overdue.includes(job);
+    if (filter === "paid") return paid.includes(job);
+    if (filter === "blocked") return proofBlocked.includes(job);
+    return true;
+  }).sort((a, b) => {
+    const rank = (job) => overdue.includes(job) ? 1 : invoiceReady.includes(job) ? 2 : proofBlocked.includes(job) ? 3 : paymentStatus(job) === "paid" ? 5 : 4;
+    return rank(a) - rank(b) || String(b.date || "").localeCompare(String(a.date || ""));
+  });
+
+  const setPaid = (job) => {
+    setLocalStatus((prev) => ({ ...prev, [job.id]: "paid" }));
+  };
+
+  const setInvoiceSent = (job) => {
+    setLocalStatus((prev) => ({ ...prev, [job.id]: "invoice-sent" }));
+  };
+
+  const setOverdue = (job) => {
+    setLocalStatus((prev) => ({ ...prev, [job.id]: "overdue" }));
+  };
+
+  const buildInvoice = (job) => {
+    const amount = job.clientPrice || 0;
+    const pay = job.partnerPay || job.pay || 0;
+    const profit = job.profit ?? (amount - pay);
+    return [
+      "Have Us Clean Invoice",
+      "",
+      "Invoice #: " + invoiceNumber(job),
+      "Client: " + (job.client || "Client"),
+      "Service Date: " + (job.date || "N/A"),
+      "Service Type: " + (job.type || "Cleaning Service"),
+      "Address: " + (job.address || "N/A"),
+      "",
+      "Description: Professional cleaning service",
+      "Amount Due: " + cur + amount,
+      "",
+      "Internal:",
+      "Partner Pay: " + cur + pay,
+      "Estimated Profit: " + cur + profit,
+      "",
+      "Thank you for choosing Have Us Clean."
+    ].join("\n");
+  };
+
+  const buildReminder = (job) => {
+    const first = String(job.client || "there").split(" ")[0] || "there";
+    return "Hi " + first + ", this is Have Us Clean. Your cleaning invoice for " + (job.date || "your recent service") + " is ready. The balance due is " + cur + (job.clientPrice || 0) + ". Please let us know if you have any questions. Thank you.";
+  };
+
+  const buildReceipt = (job) => {
+    return [
+      "Have Us Clean Payment Receipt",
+      "",
+      "Receipt for: " + (job.client || "Client"),
+      "Invoice #: " + invoiceNumber(job),
+      "Service Date: " + (job.date || "N/A"),
+      "Amount Paid: " + cur + (job.clientPrice || 0),
+      "",
+      "Thank you for your payment and for choosing Have Us Clean."
+    ].join("\n");
+  };
+
+  const copyText = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(label + " copied.");
+    } catch {
+      window.prompt("Copy " + label.toLowerCase() + ":", text);
+    }
+  };
+
+  const copyPaymentBrief = async () => {
+    const lines = [
+      "Have Us Clean Payment + Invoicing Brief",
+      "",
+      "Completed jobs: " + completed.length,
+      "Invoice ready: " + invoiceReady.length,
+      "Unpaid: " + unpaid.length,
+      "Overdue: " + overdue.length,
+      "Proof blocked: " + proofBlocked.length,
+      "Collected: " + cur + collected,
+      "Outstanding: " + cur + outstanding,
+      "Overdue value: " + cur + overdueValue,
+      "Blocked value: " + cur + blockedValue,
+      "",
+      "Priority collection queue:",
+      ...visibleJobs.slice(0, 12).map((job, i) =>
+        (i + 1) + ". " + (job.client || "Client") + " — " + (job.date || "No date") + " — " + cur + (job.clientPrice || 0) + " — " + paymentStatus(job)
+      ),
+    ].join("\n");
+    await copyText(lines, "Payment brief");
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const statusColor = (job) => {
+    const s = paymentStatus(job);
+    if (s === "paid") return C.accent;
+    if (overdue.includes(job)) return C.red || "#FF6B6B";
+    if (proofBlocked.includes(job)) return C.gold;
+    if (s === "invoice-sent") return C.blue;
+    return C.purple;
+  };
+
+  const jobCard = (job) => {
+    const s = paymentStatus(job);
+    const proof = proofComplete(job);
+    const amount = job.clientPrice || 0;
+    const color = statusColor(job);
+
+    return (
+      <div key={job.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{job.client || "Client"}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{job.date || "No date"} · {job.type || "Cleaning"} · {invoiceNumber(job)}</div>
+            {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {job.address}</div>}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{cur}{amount}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>invoice</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(s, color)}
+          {badge(proof ? "Proof complete" : "Proof blocked", proof ? C.accent : C.gold)}
+          {overdue.includes(job) && badge("Overdue", C.red || "#FF6B6B")}
+          {invoiceReady.includes(job) && badge("Invoice ready", C.blue)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          {proof
+            ? "Invoice can be sent. Use Copy Invoice or Reminder, then mark invoice sent/paid."
+            : "Payment is blocked until proof is complete. Open Proof Archive before invoicing."}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => copyText(buildInvoice(job), "Invoice")} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Invoice
+          </button>
+          <button type="button" onClick={() => copyText(buildReminder(job), "Reminder")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Reminder
+          </button>
+          <button type="button" onClick={() => copyText(buildReceipt(job), "Receipt")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Receipt
+          </button>
+          <button type="button" onClick={() => setInvoiceSent(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Sent
+          </button>
+          <button type="button" onClick={() => setPaid(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Paid
+          </button>
+          <button type="button" onClick={() => setOverdue(job)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Overdue
+          </button>
+        </div>
+
+        {!proof && (
+          <button type="button" onClick={() => setTab && setTab("proof_archive")} style={{ minHeight: 42, width: "100%", borderRadius: 10, border: `1px solid ${C.gold}66`, background: C.card, color: C.gold, fontWeight: 900, cursor: "pointer", marginTop: 8 }}>
+            Open Proof Archive
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>💳 Payment + Invoicing</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Invoice jobs, track balances, collect payments, and close the revenue loop.</div>
+        </div>
+        <button type="button" onClick={copyPaymentBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Payment Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Collected", cur + collected, paid.length + " paid", C.accent)}
+        {stat("Outstanding", cur + outstanding, unpaid.length + " unpaid", outstanding ? C.gold : C.accent)}
+        {stat("Overdue", cur + overdueValue, overdue.length + " job(s)", overdue.length ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Invoice Ready", invoiceReady.length, "Can send now", C.blue)}
+        {stat("Proof Blocked", cur + blockedValue, proofBlocked.length + " job(s)", proofBlocked.length ? C.gold : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["all", "All"],
+          ["ready", "Ready"],
+          ["unpaid", "Unpaid"],
+          ["overdue", "Overdue"],
+          ["blocked", "Proof Blocked"],
+          ["paid", "Paid"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Invoice + Collection Queue</div>
+        {visibleJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No jobs in this view.</div>
+        ) : (
+          visibleJobs.map(jobCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -12005,6 +12280,7 @@ export default function App() {
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
+      { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -12227,6 +12503,7 @@ export default function App() {
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
+        {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
