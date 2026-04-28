@@ -132,6 +132,45 @@ export default function MySchedule({
 
 
 
+
+  const getCompletionProof = (job) => {
+    const beforeCount = (job.beforePics || []).length;
+    const afterCount = (job.afterPics || []).length;
+    const done = checklistDoneCount(job);
+    const total = checklistTotalCount(job);
+
+    const checks = [
+      {
+        id: "checkin",
+        label: "Checked in",
+        done: !!job.checkIn || !!checkedIn[job.id]?.time,
+      },
+      {
+        id: "checklist",
+        label: `Checklist complete (${done}/${total})`,
+        done: checklistComplete(job),
+      },
+      {
+        id: "before",
+        label: `Before photo uploaded (${beforeCount})`,
+        done: beforeCount > 0,
+      },
+      {
+        id: "after",
+        label: `After photo uploaded (${afterCount})`,
+        done: afterCount > 0,
+      },
+    ];
+
+    return {
+      checks,
+      complete: checks.every((item) => item.done),
+      remaining: checks.filter((item) => !item.done),
+    };
+  };
+
+  const canCompleteJob = (job) => getCompletionProof(job).complete;
+
   const getChecklistItems = (job) => {
     const base = [
       "Arrive and confirm access",
@@ -237,16 +276,12 @@ export default function MySchedule({
   };
 
   const handleCheckOut = (job) => {
-    const done = checklistDoneCount(job);
-    const total = checklistTotalCount(job);
+    const proof = getCompletionProof(job);
 
-    if (done < total) {
+    if (!proof.complete) {
       alert(
-        "Please finish the checklist before checking out.\n\n" +
-          (total - done) +
-          " task" +
-          (total - done === 1 ? "" : "s") +
-          " remaining."
+        "Complete proof-of-work before checkout.\n\nRemaining:\n- " +
+          proof.remaining.map((item) => item.label).join("\n- ")
       );
       return;
     }
@@ -260,10 +295,8 @@ export default function MySchedule({
     const local = checkedIn[job.id];
     const alreadyIn = !!(local?.time || job.checkIn);
     const alreadyOut = !!(local?.checkOutTime || job.checkOut);
-    const done = checklistDoneCount(job);
-    const total = checklistTotalCount(job);
-    const isChecklistComplete = checklistComplete(job);
-    const remaining = Math.max(0, total - done);
+    const proof = getCompletionProof(job);
+    const isReadyToComplete = canCompleteJob(job);
 
     if (job.status === "completed") {
       return (
@@ -280,13 +313,15 @@ export default function MySchedule({
 
     return (
       <div>
+        <CompletionProofPanel job={job} />
+
         <div style={st.actionRow}>
           {!alreadyIn ? (
             <button style={st.btnCheckIn} onClick={() => handleCheckIn(job)}>
               📍 Check In
             </button>
           ) : !alreadyOut ? (
-            isChecklistComplete ? (
+            isReadyToComplete ? (
               <button style={st.btnCheckOut} onClick={() => handleCheckOut(job)}>
                 ✅ Check Out
               </button>
@@ -301,7 +336,7 @@ export default function MySchedule({
                 }}
                 onClick={() => handleCheckOut(job)}
               >
-                🔒 Checklist Required
+                🔒 Complete Proof First
               </button>
             )
           ) : (
@@ -321,7 +356,7 @@ export default function MySchedule({
           )}
         </div>
 
-        {alreadyIn && !alreadyOut && !isChecklistComplete && (
+        {alreadyIn && !alreadyOut && !isReadyToComplete && (
           <div
             style={{
               marginTop: 8,
@@ -334,14 +369,14 @@ export default function MySchedule({
               border: `1px solid ${C.gold}33`,
             }}
           >
-            🔒 Checkout unlocks when all checklist tasks are done. {remaining} task{remaining === 1 ? "" : "s"} remaining.
+            🔒 Checkout unlocks after: {proof.remaining.map((item) => item.label).join(", ")}.
           </div>
         )}
 
         {alreadyIn && !alreadyOut && (
           <div style={st.checkedInBar}>
             ✅ Checked in at {local?.time || job.checkIn}
-            <span style={{ fontSize: 11, color: C.muted, marginLeft: "auto" }}>GPS wired Phase 2D</span>
+            <span style={{ fontSize: 11, color: C.muted, marginLeft: "auto" }}>GPS captured</span>
           </div>
         )}
 
@@ -350,82 +385,6 @@ export default function MySchedule({
             ✅ In: {local?.time || job.checkIn} · Out: {local?.checkOutTime || job.checkOut}
           </div>
         )}
-      </div>
-    );
-  };
-
-
-
-
-
-  const ChecklistBox = ({ job }) => {
-    const items = getChecklistItems(job);
-    const state = getChecklistState(job);
-    const done = checklistDoneCount(job);
-    const total = checklistTotalCount(job);
-
-    return (
-      <div
-        style={{
-          marginTop: 12,
-          background: C.surface,
-          border: `1px solid ${C.border}`,
-          borderRadius: 12,
-          padding: 12,
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: 8,
-            alignItems: "center",
-            marginBottom: 10,
-          }}
-        >
-          <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>
-            ✅ Cleaning Checklist
-          </div>
-          <div style={{ fontSize: 12, color: done === total ? C.accent : C.muted, fontWeight: 800 }}>
-            {done}/{total}
-          </div>
-        </div>
-
-        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {items.map((item) => {
-            const checked = !!state[item];
-            return (
-              <button
-                key={item}
-                type="button"
-                onClick={() => onToggleChecklist(job, item)}
-                style={{
-                  minHeight: 44,
-                  borderRadius: 10,
-                  border: `1px solid ${checked ? C.accent + "66" : C.border}`,
-                  background: checked ? C.accentDim : C.card,
-                  color: checked ? C.accent : C.text,
-                  fontSize: 13,
-                  fontWeight: 700,
-                  textAlign: "left",
-                  padding: "10px 12px",
-                  cursor: "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                }}
-              >
-                <span>{checked ? "✅" : "⬜"}</span>
-                <span>{item}</span>
-              </button>
-            );
-          })}
-        {done < total && (
-          <div style={{ marginTop: 10, fontSize: 12, color: C.gold, lineHeight: 1.5 }}>
-            🔒 Checkout unlocks when all tasks are done.
-          </div>
-        )}
-        </div>
       </div>
     );
   };
