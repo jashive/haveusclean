@@ -10665,6 +10665,307 @@ function PartnerAppMode({ jobs = [], partners = [], region, setTab }) {
   );
 }
 
+
+function MultiRegionExpansionEngine({ jobs = [], partners = [], coldLeads = [], regions = {}, activeRegion, setTab }) {
+  const [selectedRegion, setSelectedRegion] = useState("all");
+  const curDefault = activeRegion?.currencySymbol || "$";
+  const regionList = Object.values(regions || {}).length ? Object.values(regions || {}) : [activeRegion].filter(Boolean);
+
+  const normalizeRegion = (r) => r?.id || r?.code || r?.label || "default";
+
+  const allRegionSummaries = regionList.map((region) => {
+    const id = normalizeRegion(region);
+    const cur = region?.currencySymbol || curDefault;
+
+    const rJobs = jobs.filter((j) => !j.region || j.region === id);
+    const rPartners = partners.filter((p) => !p.region || p.region === id);
+    const rLeads = coldLeads.filter((l) => !l.region || l.region === id || l.market === id);
+
+    const completed = rJobs.filter((j) => j.status === "completed");
+    const active = rJobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+    const unassigned = active.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+    const revenue = rJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    const partnerPay = rJobs.reduce((sum, j) => sum + (j.partnerPay || j.pay || 0), 0);
+    const profit = rJobs.reduce((sum, j) => sum + (j.profit ?? ((j.clientPrice || 0) - (j.partnerPay || j.pay || 0))), 0);
+    const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+    const activePartners = rPartners.filter((p) => p.onboarded && ["available", "active"].includes(p.status)).length;
+    const onboardingPartners = rPartners.filter((p) => !p.onboarded || p.status === "onboarding").length;
+    const capacityGap = Math.max(0, active.length - activePartners);
+
+    const qualityIssues = completed.filter((j) => ["issue", "callback"].includes(j.qualityStatus)).length;
+    const proofGaps = completed.filter((j) => {
+      const before = (j.beforePics || []).length;
+      const after = (j.afterPics || []).length;
+      return !j.checkIn || !j.checkOut || before === 0 || after === 0;
+    }).length;
+
+    const pipeline = rLeads.reduce((sum, lead) => {
+      const score = Number(lead.priority_score || lead.priorityScore || 50);
+      return sum + (lead.value || 500 + score * 10);
+    }, 0);
+
+    const b2bLeads = rLeads.length;
+    const hasOpsData = rJobs.length > 0;
+    const hasStaff = activePartners > 0;
+    const hasPipeline = pipeline > 0;
+    const qualityStable = qualityIssues === 0 && proofGaps <= 2;
+    const profitable = revenue === 0 ? false : margin >= 30;
+
+    let readiness = 25;
+    if (hasOpsData) readiness += 10;
+    if (hasStaff) readiness += 20;
+    if (capacityGap === 0) readiness += 15;
+    if (hasPipeline) readiness += 15;
+    if (qualityStable) readiness += 10;
+    if (profitable) readiness += 15;
+    readiness = Math.max(0, Math.min(100, readiness));
+
+    const gaps = [];
+    if (!hasStaff) gaps.push("Need active partners");
+    if (capacityGap > 0) gaps.push("Capacity gap: " + capacityGap);
+    if (!hasPipeline) gaps.push("Need lead pipeline");
+    if (!profitable && revenue > 0) gaps.push("Margin below target");
+    if (qualityIssues > 0) gaps.push("Quality issues");
+    if (proofGaps > 0) gaps.push("Proof gaps");
+    if (!hasOpsData) gaps.push("No operating history yet");
+
+    const launchStage = readiness >= 80 ? "Scale" : readiness >= 60 ? "Pilot" : readiness >= 40 ? "Prepare" : "Research";
+
+    return {
+      id,
+      label: region?.label || id,
+      flag: region?.flag || "📍",
+      cur,
+      jobs: rJobs,
+      partners: rPartners,
+      leads: rLeads,
+      completed,
+      active,
+      unassigned,
+      revenue,
+      partnerPay,
+      profit,
+      margin,
+      activePartners,
+      onboardingPartners,
+      capacityGap,
+      qualityIssues,
+      proofGaps,
+      pipeline,
+      b2bLeads,
+      readiness,
+      gaps,
+      launchStage,
+    };
+  }).sort((a, b) => b.readiness - a.readiness);
+
+  const visibleRegions = selectedRegion === "all" ? allRegionSummaries : allRegionSummaries.filter((r) => r.id === selectedRegion);
+  const totalRevenue = allRegionSummaries.reduce((sum, r) => sum + r.revenue, 0);
+  const totalPipeline = allRegionSummaries.reduce((sum, r) => sum + r.pipeline, 0);
+  const readyToScale = allRegionSummaries.filter((r) => r.launchStage === "Scale").length;
+  const needsPrep = allRegionSummaries.filter((r) => r.launchStage === "Prepare" || r.launchStage === "Research").length;
+
+  const colorForReadiness = (score) => score >= 80 ? C.accent : score >= 60 ? C.gold : C.red || "#FF6B6B";
+  const stageColor = (stage) => stage === "Scale" ? C.accent : stage === "Pilot" ? C.blue : stage === "Prepare" ? C.gold : C.muted;
+
+  const launchSteps = (r) => {
+    const steps = [];
+    if (r.activePartners < 2) steps.push("Recruit/onboard at least 2 active partners.");
+    if (r.capacityGap > 0) steps.push("Resolve capacity gap before adding demand.");
+    if (r.pipeline < 2500) steps.push("Build local B2B/property manager pipeline.");
+    if (r.margin < 30 && r.revenue > 0) steps.push("Review pricing and partner pay for margin target.");
+    if (r.qualityIssues > 0 || r.proofGaps > 0) steps.push("Stabilize proof and quality controls.");
+    steps.push("Run AI Engine, Alerts, Workflows, and Auto-Run daily.");
+    steps.push("Use Comms Engine for customer, partner, and B2B outreach.");
+    return steps;
+  };
+
+  const copyRegionPlan = async (r) => {
+    const lines = [
+      "Have Us Clean Region Launch Plan",
+      "",
+      "Region: " + r.label,
+      "Stage: " + r.launchStage,
+      "Readiness: " + r.readiness + "%",
+      "Revenue: " + r.cur + r.revenue,
+      "Profit: " + r.cur + r.profit,
+      "Margin: " + r.margin + "%",
+      "Pipeline: " + r.cur + r.pipeline,
+      "Active partners: " + r.activePartners,
+      "Capacity gap: " + r.capacityGap,
+      "",
+      "Gaps:",
+      ...(r.gaps.length ? r.gaps.map((g) => "- " + g) : ["- None"]),
+      "",
+      "Launch steps:",
+      ...launchSteps(r).map((s, i) => (i + 1) + ". " + s),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Region launch plan copied.");
+    } catch {
+      window.prompt("Copy region launch plan:", lines);
+    }
+  };
+
+  const copyExpansionPlaybook = async () => {
+    const lines = [
+      "Have Us Clean Multi-Region Expansion Playbook",
+      "",
+      "Regions: " + allRegionSummaries.length,
+      "Total revenue: " + curDefault + totalRevenue,
+      "Total pipeline: " + curDefault + totalPipeline,
+      "Ready to scale: " + readyToScale,
+      "Need prep/research: " + needsPrep,
+      "",
+      "Region priorities:",
+      ...allRegionSummaries.map((r, i) =>
+        (i + 1) + ". " + r.label + " — " + r.launchStage + " — " + r.readiness + "% readiness — revenue " + r.cur + r.revenue + " — pipeline " + r.cur + r.pipeline
+      ),
+      "",
+      "Standard launch sequence:",
+      "1. Validate demand with B2B and residential leads.",
+      "2. Recruit two active partners.",
+      "3. Run pilot jobs with proof/checklist enforcement.",
+      "4. Monitor margin, quality, dispatch, and capacity.",
+      "5. Turn on workflows, alerts, automation, and comms.",
+      "6. Scale once readiness is 80%+.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Expansion playbook copied.");
+    } catch {
+      window.prompt("Copy expansion playbook:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const regionCard = (r) => {
+    const color = colorForReadiness(r.readiness);
+
+    return (
+      <div key={r.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.text }}>{r.flag} {r.label}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{r.jobs.length} job(s) · {r.partners.length} partner(s) · {r.b2bLeads} lead(s)</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 28, fontWeight: 900, color }}>{r.readiness}%</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>readiness</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Stage</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: stageColor(r.launchStage) }}>{r.launchStage}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Revenue</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>{r.cur}{r.revenue}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Pipeline</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.blue }}>{r.cur}{r.pipeline}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Margin</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: r.margin >= 30 ? C.accent : C.gold }}>{r.margin}%</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(r.launchStage, stageColor(r.launchStage))}
+          {badge(r.activePartners + " active partners", r.activePartners ? C.accent : C.gold)}
+          {r.capacityGap > 0 && badge("Capacity gap " + r.capacityGap, C.red || "#FF6B6B")}
+          {r.unassigned.length > 0 && badge(r.unassigned.length + " unassigned", C.gold)}
+          {r.qualityIssues > 0 && badge(r.qualityIssues + " quality issue(s)", C.red || "#FF6B6B")}
+          {r.proofGaps > 0 && badge(r.proofGaps + " proof gap(s)", C.gold)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.text, marginBottom: 6 }}>Expansion Gaps</div>
+          {r.gaps.length === 0 ? (
+            <div style={{ color: C.muted, fontSize: 12 }}>No major gaps. Region is ready to push demand.</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+              {r.gaps.map((g, i) => <li key={i}>{g}</li>)}
+            </ul>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => copyRegionPlan(r)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Copy Plan
+          </button>
+          <button type="button" onClick={() => setTab && setTab("scale_center")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Scale
+          </button>
+          <button type="button" onClick={() => setTab && setTab("b2b_pipeline")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Pipeline
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🌍 Multi-Region Expansion Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Launch readiness, staffing gaps, pipeline, and expansion playbooks by region.</div>
+        </div>
+        <button type="button" onClick={copyExpansionPlaybook} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Playbook
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Regions", allRegionSummaries.length, "Expansion markets", C.accent)}
+        {stat("Ready to Scale", readyToScale, "80%+ readiness", readyToScale ? C.accent : C.gold)}
+        {stat("Total Pipeline", curDefault + totalPipeline, "Expansion demand", C.blue)}
+        {stat("Needs Prep", needsPrep, "Research/prep stage", needsPrep ? C.gold : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setSelectedRegion("all")} style={{ ...S.btn(selectedRegion === "all" ? "primary" : "ghost"), minHeight: 40 }}>All</button>
+        {allRegionSummaries.map((r) => (
+          <button key={r.id} type="button" onClick={() => setSelectedRegion(r.id)} style={{ ...S.btn(selectedRegion === r.id ? "primary" : "ghost"), minHeight: 40 }}>
+            {r.flag} {r.id}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Region Expansion Readiness</div>
+        {visibleRegions.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No regions found.</div>
+        ) : (
+          visibleRegions.map(regionCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -11250,6 +11551,7 @@ export default function App() {
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
+      { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -11469,6 +11771,7 @@ export default function App() {
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
