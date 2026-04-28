@@ -237,8 +237,22 @@ export default function MySchedule({
   };
 
   const handleCheckOut = (job) => {
+    const done = checklistDoneCount(job);
+    const total = checklistTotalCount(job);
+
+    if (done < total) {
+      alert(
+        "Please finish the checklist before checking out.\n\n" +
+          (total - done) +
+          " task" +
+          (total - done === 1 ? "" : "s") +
+          " remaining."
+      );
+      return;
+    }
+
     setCheckedIn(prev => ({ ...prev, [job.id]: { ...prev[job.id], checkOutTime: new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) } }));
-    onCheckOut(job.id);
+    onCheckOut(job);
   };
 
   // ─── GPS action buttons ──────────────────────────────────────────────
@@ -268,9 +282,23 @@ export default function MySchedule({
               📍 Check In
             </button>
           ) : !alreadyOut ? (
-            <button style={st.btnCheckOut} onClick={() => handleCheckOut(job)}>
-              ✅ Check Out
-            </button>
+            {checklistComplete(job) ? (
+              <button style={st.btnCheckOut} onClick={() => handleCheckOut(job)}>
+                ✅ Check Out
+              </button>
+            ) : (
+              <button
+                style={{
+                  ...st.btnDisabled,
+                  color: C.gold,
+                  border: `1px solid ${C.gold}44`,
+                  background: `${C.gold}11`,
+                }}
+                onClick={() => handleCheckOut(job)}
+              >
+                🔒 Checklist Required
+              </button>
+            )}
           ) : (
             <div style={st.btnDisabled}>✅ Checked Out</div>
           )}
@@ -366,6 +394,11 @@ export default function MySchedule({
               </button>
             );
           })}
+        {done < total && (
+          <div style={{ marginTop: 10, fontSize: 12, color: C.gold, lineHeight: 1.5 }}>
+            🔒 Checkout unlocks when all tasks are done.
+          </div>
+        )}
         </div>
       </div>
     );
