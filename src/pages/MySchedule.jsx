@@ -92,6 +92,33 @@ export default function MySchedule({
     catch { return d; }
   };
 
+  const handleCheckInClick = (job) => {
+    if (typeof onCheckIn === "function") {
+      onCheckIn(job);
+      return;
+    }
+
+    alert(
+      "Check In for " +
+        (job?.client || "this job") +
+        "\n\nGPS database wiring comes in the next phase."
+    );
+  };
+
+  const handleCheckOutClick = (job) => {
+    if (typeof onCheckOut === "function") {
+      onCheckOut(job);
+      return;
+    }
+
+    alert(
+      "Check Out for " +
+        (job?.client || "this job") +
+        "\n\nGPS database wiring comes in the next phase."
+    );
+  };
+
+
   const getPartners = (job) =>
     (job.partnerIds || [job.partnerId]).map(id => partners.find(p => p.id === id)).filter(Boolean);
 
