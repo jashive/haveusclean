@@ -5520,6 +5520,21 @@ export default function App() {
 
 
 
+
+  const handleMyScheduleFollowUpUpdate = (job, followUpStatus) => {
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              followUpStatus,
+              followUpUpdatedAt: new Date().toISOString(),
+            }
+          : j
+      )
+    );
+  };
+
   const handleMyScheduleQualityUpdate = (job, qualityStatus) => {
     setJobsDB((prevJobs) =>
       prevJobs.map((j) =>
@@ -5863,6 +5878,7 @@ export default function App() {
             onPhotoUpload={handleMySchedulePhotoUpload}
             onToggleChecklist={handleMyScheduleChecklistToggle}
             onUpdateQuality={handleMyScheduleQualityUpdate}
+            onUpdateFollowUp={handleMyScheduleFollowUpUpdate}
           />
         )}
 
@@ -5877,6 +5893,7 @@ export default function App() {
             onPhotoUpload={handleMySchedulePhotoUpload}
             onToggleChecklist={handleMyScheduleChecklistToggle}
             onUpdateQuality={handleMyScheduleQualityUpdate}
+            onUpdateFollowUp={handleMyScheduleFollowUpUpdate}
           />
         )}
 {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
