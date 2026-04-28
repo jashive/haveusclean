@@ -5169,6 +5169,85 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   );
 }
 
+
+function RevenueRecovery({ jobs = [], setTab }) {
+  const completed = jobs.filter((j) => j.status === "completed");
+  const issues = completed.filter((j) => j.qualityStatus === "issue");
+  const callbacks = completed.filter((j) => j.qualityStatus === "callback");
+  const unresolvedQuality = completed.filter((j) => ["issue", "callback"].includes(j.qualityStatus));
+  const followupsNeeded = completed.filter((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
+  const reviewsMissing = completed.filter((j) => j.reviewStatus !== "received");
+  const referralsMissing = completed.filter((j) => j.referralStatus !== "received");
+
+  const card = (title, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{title}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const jobRow = (job, label, color) => (
+    <div key={job.id + label} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text }}>{job.client}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{job.type} · {job.date || "No date"}</div>
+          {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {job.address}</div>}
+        </div>
+        <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+          {label}
+        </span>
+      </div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>💰 Revenue Recovery</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Find money left on the table after completed jobs.</div>
+        </div>
+        <button
+          type="button"
+          onClick={() => setTab && setTab("proof_archive")}
+          style={{ ...S.btn("primary"), minHeight: 40 }}
+        >
+          📁 Open Proof Archive
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {card("Unresolved Quality", unresolvedQuality.length, "Issues + callbacks", C.gold)}
+        {card("Callbacks", callbacks.length, "Needs customer recovery", C.red || "#FF6B6B")}
+        {card("Follow-Ups Needed", followupsNeeded.length, "Not sent / needed", C.blue)}
+        {card("Reviews Missing", reviewsMissing.length, "Review opportunity", C.purple)}
+        {card("Referrals Missing", referralsMissing.length, "Referral opportunity", C.accent)}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>🔥 Priority Recovery Queue</div>
+        {unresolvedQuality.length === 0 && followupsNeeded.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 14, textAlign: "center" }}>No urgent recovery items right now.</div>
+        ) : (
+          <>
+            {issues.slice(0, 5).map((job) => jobRow(job, "Issue", C.gold))}
+            {callbacks.slice(0, 5).map((job) => jobRow(job, "Callback", C.red || "#FF6B6B"))}
+            {followupsNeeded.slice(0, 5).map((job) => jobRow(job, "Follow-Up", C.blue))}
+          </>
+        )}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>⭐ Growth Opportunities</div>
+        {reviewsMissing.slice(0, 5).map((job) => jobRow(job, "Review Ask", C.purple))}
+        {referralsMissing.slice(0, 5).map((job) => jobRow(job, "Referral Ask", C.accent))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -5727,6 +5806,7 @@ export default function App() {
       { id:"recurring",  label:"🔄 Recurring",     desc:"Recurring job schedules" },
       { id:"gps",        label:"📍 GPS",           desc:"Check-in / check-out" },
       { id:"geo",        label:"🛡️ Geofence",     desc:"Location compliance" },
+      { id:"recovery",   label:"💰 Recovery",      desc:"Revenue recovery dashboard" },
     ]},
     { id:"quotes",   label:"💬 Quotes", color: C.gold, tabs:[
       { id:"res",        label:"🏠 Residential",   desc:"Leads, quotes & booking" },
@@ -5926,6 +6006,7 @@ export default function App() {
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
+        {tab==="recovery"       && <RevenueRecovery jobs={regionJobs} setTab={setTab} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTab} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
