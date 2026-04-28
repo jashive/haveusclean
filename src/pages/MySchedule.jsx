@@ -34,7 +34,8 @@ export default function MySchedule({
 }) {
   const [activeTab, setActiveTab] = useState("today");
   const [checkedIn, setCheckedIn] = useState({});
-  const [photoPreview, setPhotoPreview] = useState(null); // local optimistic state until real GPS wired
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [proofReport, setProofReport] = useState(null); // local optimistic state until real GPS wired
 
   const cur = region?.currencySymbol || "$";
 
@@ -290,6 +291,85 @@ export default function MySchedule({
     onCheckOut(job);
   };
 
+  const CompletionProofReport = ({ job }) => {
+    const beforeCount = (job.beforePics || []).length;
+    const afterCount = (job.afterPics || []).length;
+    const done = checklistDoneCount(job);
+    const total = checklistTotalCount(job);
+    const proof = getCompletionProof(job);
+
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: C.surface,
+          border: `1px solid ${C.accent}44`,
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div style={{ fontSize: 13, fontWeight: 800, color: C.accent, marginBottom: 10 }}>
+          📋 Completion Proof Report
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          <div style={{ fontSize: 12, color: C.muted }}>
+            <strong style={{ color: C.text }}>Check In</strong><br />
+            {job.checkIn || "—"}
+          </div>
+          <div style={{ fontSize: 12, color: C.muted }}>
+            <strong style={{ color: C.text }}>Check Out</strong><br />
+            {job.checkOut || "—"}
+          </div>
+          <div style={{ fontSize: 12, color: C.muted }}>
+            <strong style={{ color: C.text }}>Checklist</strong><br />
+            {done}/{total} complete
+          </div>
+          <div style={{ fontSize: 12, color: C.muted }}>
+            <strong style={{ color: C.text }}>Photos</strong><br />
+            {beforeCount} before · {afterCount} after
+          </div>
+        </div>
+
+        <div style={{ marginTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+          {proof.checks.map((item) => (
+            <div
+              key={item.id}
+              style={{
+                fontSize: 12,
+                color: item.done ? C.accent : C.gold,
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+              }}
+            >
+              <span>{item.done ? "✅" : "⚠️"}</span>
+              <span>{item.label}</span>
+            </div>
+          ))}
+        </div>
+
+        <button
+          type="button"
+          onClick={() => setProofReport(job)}
+          style={{
+            marginTop: 12,
+            minHeight: 44,
+            width: "100%",
+            borderRadius: 10,
+            border: "none",
+            background: C.accent,
+            color: "#0A0F1E",
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          👀 View Full Proof
+        </button>
+      </div>
+    );
+  };
+
   // ─── GPS action buttons ──────────────────────────────────────────────
   const GpsActions = ({ job }) => {
     const local = checkedIn[job.id];
@@ -530,7 +610,8 @@ export default function MySchedule({
           </button>
         </div>
 
-        {showGps && <ChecklistBox job={job} />}
+        {job.status === "completed" && <CompletionProofReport job={job} />}
+                {showGps && <ChecklistBox job={job} />}
         {showGps && <GpsActions job={job} />}
       </div>
     );
@@ -622,6 +703,131 @@ export default function MySchedule({
           : <Empty icon="🏆" title="No completed jobs yet" body="Completed jobs will show up here after you mark them done." />
       )}
 
+
+
+      {proofReport && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.88)",
+            zIndex: 10000,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: 16,
+          }}
+          onClick={() => setProofReport(null)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 720,
+              maxHeight: "92vh",
+              background: C.card,
+              border: `1px solid ${C.border}`,
+              borderRadius: 16,
+              overflow: "auto",
+              padding: 16,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 14 }}>
+              <div>
+                <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>
+                  📋 Job Completion Proof
+                </div>
+                <div style={{ fontSize: 13, color: C.muted, marginTop: 4 }}>
+                  {proofReport.client} · {proofReport.date || ""}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setProofReport(null)}
+                style={{
+                  width: 40,
+                  height: 40,
+                  borderRadius: 10,
+                  border: `1px solid ${C.border}`,
+                  background: C.surface,
+                  color: C.text,
+                  fontSize: 22,
+                  cursor: "pointer",
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ background: C.surface, borderRadius: 12, padding: 12, marginBottom: 12, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>Job Details</div>
+              <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.7 }}>
+                <div><strong style={{ color: C.text }}>Service:</strong> {proofReport.type}</div>
+                <div><strong style={{ color: C.text }}>Address:</strong> {proofReport.address || "—"}</div>
+                <div><strong style={{ color: C.text }}>Time:</strong> {proofReport.time || "—"}</div>
+                <div><strong style={{ color: C.text }}>Check In:</strong> {proofReport.checkIn || "—"}</div>
+                <div><strong style={{ color: C.text }}>Check Out:</strong> {proofReport.checkOut || "—"}</div>
+              </div>
+            </div>
+
+            <div style={{ background: C.surface, borderRadius: 12, padding: 12, marginBottom: 12, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>Checklist</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {getChecklistItems(proofReport).map((item) => {
+                  const checked = !!(proofReport.checklist || {})[item];
+                  return (
+                    <div key={item} style={{ fontSize: 12, color: checked ? C.accent : C.muted }}>
+                      {checked ? "✅" : "⬜"} {item}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div style={{ background: C.surface, borderRadius: 12, padding: 12, border: `1px solid ${C.border}` }}>
+              <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>Photos</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhotoPreview({ job: proofReport, type: "before", photos: proofReport.beforePics || [], index: 0 });
+                    setProofReport(null);
+                  }}
+                  style={{
+                    minHeight: 44,
+                    borderRadius: 10,
+                    border: `1px solid ${C.border}`,
+                    background: C.card,
+                    color: C.text,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  📷 Before ({(proofReport.beforePics || []).length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPhotoPreview({ job: proofReport, type: "after", photos: proofReport.afterPics || [], index: 0 });
+                    setProofReport(null);
+                  }}
+                  style={{
+                    minHeight: 44,
+                    borderRadius: 10,
+                    border: `1px solid ${C.border}`,
+                    background: C.card,
+                    color: C.text,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                  }}
+                >
+                  🖼️ After ({(proofReport.afterPics || []).length})
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {photoPreview && (
         <div
