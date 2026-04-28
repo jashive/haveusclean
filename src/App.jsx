@@ -7477,6 +7477,199 @@ function B2BSalesPipeline({ jobs = [], coldLeads = [], region }) {
   );
 }
 
+
+function FinancialDashboard({ jobs = [], partners = [], coldLeads = [], region }) {
+  const [scope, setScope] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const inScope = jobs.filter((job) => {
+    if (scope === "today") return job.date === todayStr;
+    if (scope === "completed") return job.status === "completed";
+    if (scope === "active") return ["scheduled", "in-progress"].includes(job.status);
+    return true;
+  });
+
+  const revenue = inScope.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const partnerPay = inScope.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+  const profit = inScope.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+  const avgJob = inScope.length ? Math.round(revenue / inScope.length) : 0;
+
+  const completed = inScope.filter((j) => j.status === "completed");
+  const pendingPayment = completed.filter((j) => j.paymentStatus && j.paymentStatus !== "paid");
+  const qualityLeakage = completed.filter((j) => ["issue", "callback"].includes(j.qualityStatus));
+  const missingFollowUp = completed.filter((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
+  const missingReviews = completed.filter((j) => j.reviewStatus !== "received");
+  const missingReferrals = completed.filter((j) => j.referralStatus !== "received");
+
+  const pipelineValue = coldLeads.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const groupBy = (items, keyFn) =>
+    Object.values(items.reduce((acc, item) => {
+      const key = keyFn(item) || "Unknown";
+      if (!acc[key]) acc[key] = { key, jobs: [], revenue: 0, partnerPay: 0, profit: 0 };
+      acc[key].jobs.push(item);
+      acc[key].revenue += item.clientPrice || 0;
+      acc[key].partnerPay += item.partnerPay || item.pay || 0;
+      acc[key].profit += item.profit ?? ((item.clientPrice || 0) - (item.partnerPay || item.pay || 0));
+      return acc;
+    }, {})).sort((a, b) => b.revenue - a.revenue);
+
+  const byService = groupBy(inScope, (job) => job.type);
+  const byClient = groupBy(inScope, (job) => job.client);
+  const byPartner = Object.values(inScope.reduce((acc, job) => {
+    const ids = (job.partnerIds || [job.partnerId]).filter(Boolean);
+    const names = ids.length
+      ? ids.map((id) => partners.find((p) => p.id === id)?.name || "Partner " + id)
+      : ["Unassigned"];
+
+    names.forEach((name) => {
+      if (!acc[name]) acc[name] = { key: name, jobs: [], revenue: 0, partnerPay: 0, profit: 0 };
+      acc[name].jobs.push(job);
+      acc[name].revenue += job.clientPrice || 0;
+      acc[name].partnerPay += job.partnerPay || job.pay || 0;
+      acc[name].profit += job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0));
+    });
+    return acc;
+  }, {})).sort((a, b) => b.revenue - a.revenue);
+
+  const copyFinanceBrief = async () => {
+    const lines = [
+      "Have Us Clean Financial Brief",
+      "",
+      "Scope: " + scope,
+      "Jobs: " + inScope.length,
+      "Revenue: " + cur + revenue,
+      "Partner pay: " + cur + partnerPay,
+      "Profit: " + cur + profit,
+      "Margin: " + margin + "%",
+      "Average job value: " + cur + avgJob,
+      "",
+      "Leakage / opportunities:",
+      "- Pending payment: " + pendingPayment.length,
+      "- Quality leakage: " + qualityLeakage.length,
+      "- Missing follow-up: " + missingFollowUp.length,
+      "- Missing reviews: " + missingReviews.length,
+      "- Missing referrals: " + missingReferrals.length,
+      "- B2B pipeline value: " + cur + pipelineValue,
+      "",
+      "Top services:",
+      ...byService.slice(0, 5).map((s, i) => (i + 1) + ". " + s.key + " — " + cur + s.revenue + " revenue / " + cur + s.profit + " profit"),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Finance brief copied.");
+    } catch {
+      window.prompt("Copy finance brief:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const table = (title, rows, color = C.accent) => (
+    <div style={{ ...S.card, marginBottom: 16 }}>
+      <div style={{ fontSize: 15, fontWeight: 900, color, marginBottom: 12 }}>{title}</div>
+      {rows.length === 0 ? (
+        <div style={{ color: C.muted, fontSize: 13, padding: 14, textAlign: "center" }}>No data.</div>
+      ) : (
+        rows.slice(0, 8).map((row) => {
+          const rowMargin = row.revenue ? Math.round((row.profit / row.revenue) * 100) : 0;
+          return (
+            <div key={row.key} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 900, color: C.text }}>{row.key}</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{row.jobs.length} job(s)</div>
+                </div>
+                <div style={{ textAlign: "right" }}>
+                  <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>{cur}{row.revenue}</div>
+                  <div style={{ fontSize: 11, color: C.muted }}>{rowMargin}% margin</div>
+                </div>
+              </div>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
+                {badge("Profit " + cur + row.profit, row.profit >= 0 ? C.accent : (C.red || "#FF6B6B"))}
+                {badge("Pay " + cur + row.partnerPay, C.blue)}
+              </div>
+            </div>
+          );
+        })
+      )}
+    </div>
+  );
+
+  const leakageCard = (title, count, body, color) => (
+    <div style={{ background: C.card, border: `1px solid ${color}44`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14 }}>
+      <div style={{ fontSize: 14, fontWeight: 900, color }}>{title}</div>
+      <div style={{ fontSize: 28, fontWeight: 900, color, marginTop: 4 }}>{count}</div>
+      <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>{body}</div>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📊 Financial Dashboard</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Revenue, profit, margin, leakage, and growth intelligence.</div>
+        </div>
+        <button type="button" onClick={copyFinanceBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Finance Brief
+        </button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["all", "All"],
+          ["today", "Today"],
+          ["active", "Active"],
+          ["completed", "Completed"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setScope(id)} style={{ ...S.btn(scope === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Revenue", cur + revenue, inScope.length + " job(s)", C.accent)}
+        {stat("Profit", cur + profit, "After partner pay", profit >= 0 ? C.blue : (C.red || "#FF6B6B"))}
+        {stat("Margin", margin + "%", "Gross margin", margin >= 35 ? C.accent : C.gold)}
+        {stat("Avg Job", cur + avgJob, "Average ticket", C.purple)}
+        {stat("Partner Pay", cur + partnerPay, "Field labor", C.gold)}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {leakageCard("Pending Payment", pendingPayment.length, "Completed jobs not marked paid.", C.gold)}
+        {leakageCard("Quality Leakage", qualityLeakage.length, "Issues/callbacks that may reduce profit.", C.red || "#FF6B6B")}
+        {leakageCard("Follow-Up Gaps", missingFollowUp.length, "Revenue retention touchpoints missing.", C.blue)}
+        {leakageCard("Review/Referral Gaps", missingReviews.length + missingReferrals.length, "Growth opportunities not captured.", C.purple)}
+      </div>
+
+      {table("Revenue by Service", byService, C.accent)}
+      {table("Revenue by Partner", byPartner, C.blue)}
+      {table("Top Clients by Revenue", byClient, C.purple)}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -8051,6 +8244,7 @@ export default function App() {
       { id:"campaign_center", label:"📣 Campaigns", desc:"Rebooking and follow-up campaigns" },
       { id:"recurring_revenue", label:"🔁 Subscriptions", desc:"Recurring revenue system" },
       { id:"b2b_pipeline", label:"🏢 B2B Pipeline", desc:"Property manager and commercial sales pipeline" },
+      { id:"financial_dashboard", label:"📊 Finance", desc:"Profit and revenue intelligence" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -8259,6 +8453,7 @@ export default function App() {
         {tab==="campaign_center" && <CampaignCenter jobs={regionJobs} region={activeRegion} />}
         {tab==="recurring_revenue" && <RecurringRevenue jobs={regionJobs} region={activeRegion} />}
         {tab==="b2b_pipeline" && <B2BSalesPipeline jobs={regionJobs} coldLeads={coldLeads} region={activeRegion} />}
+        {tab==="financial_dashboard" && <FinancialDashboard jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
