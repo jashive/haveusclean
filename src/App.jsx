@@ -1,53 +1,21 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import ConfirmDrawer from "./components/ConfirmDrawer";
 
-import StatusBadgeBase from "./components/StatusBadge";
+// ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
+const BRAND = {
+  name: "Have Us Clean",
+  tagline: "Mid-Market Cleaning · Toronto & GTA",
+  version: "4.0.0",
+  color: "#00D4AA",
+  logoMark: "🧹",
+  supportEmail: "haveusclean@gmail.com",
+  website: "https://haveusclean.ca",
+  businessName: "Have Us Clean",
+  market: "Toronto & GTA",
+  position: "Mid-market",
+};
 
-import {
-  BRAND,
-  C,
-  HUC_STATUSES,
-  HUC_STATUS_COLOR,
-  REGIONS,
-  DAYS,
-  JOB_TYPES,
-  UPSELL_OPTIONS,
-  avatarColors,
-} from "./lib/constants";
-
-import { fmt, fmtC } from "./lib/formatters";
-
-import {
-  PARTNER_SHARE,
-  COMPANY_SHARE,
-  PROFIT_MARGIN,
-  partnerPayFromPrice,
-  companyProfitFromPrice,
-  markupFactor,
-  getTeamSize,
-  getJobHours,
-  PARTNER_HOURLY_ON,
-  PARTNER_HOURLY_AZ,
-  FLOOR_PRICES,
-  RES_SERVICE_MULT,
-  CONDITION_MULT,
-  FREQ_DISCOUNTS,
-  RES_ADDONS,
-  SQFT_HOURS,
-  getSqftHours,
-  PARTNER_COST_PER_HOUR,
-  COM_SERVICE_COST_PER_SQFT,
-  COM_MIN_COST,
-  COM_ADDONS,
-  COM_FREQ_DISCOUNTS,
-} from "./lib/pricing";
-
-// Active region — keep this in App.jsx for now
-let ACTIVE_REGION = REGIONS.ON;
-
-function StatusBadge({ status, color, style = {} }) {
-  return <StatusBadgeBase status={status} color={color} style={style} />;
-}
 
 // ─── WORK ORDER GENERATOR ─────────────────────────────────────────────────────
 // Auto-generates a structured work order when a lead is booked
@@ -171,6 +139,281 @@ const HUC_ADDONS = [
   { id:"carpet",   label:"Carpet Cleaning",        priceRange:[60,120], costToUs:45, icon:"🛋", col:"AN" },
   { id:"pethair",  label:"Pet Hair / Heavy Detail",priceRange:[40,80],  costToUs:28, icon:"🐾", col:"AO" },
 ];
+
+// ─── HUC LEAD STATUSES (from operating system) ────────────────────────────────
+const HUC_STATUSES = ["New", "Quoted", "Follow Up", "Booked", "Completed", "Lost"];
+// Colors resolved after C is defined — see HUC_STATUS_COLOR below
+
+// ─── MULTI-REGION CONFIG ─────────────────────────────────────────────────────
+// Supports Canada (Ontario) and USA (Arizona) with correct tax, currency,
+// localized pricing benchmarks, labour laws, and compliance requirements.
+
+const REGIONS = {
+  "ON": {
+    id: "ON", country: "CA", flag: "🇨🇦", label: "Ontario, Canada",
+    currency: "CAD", currencySymbol: "CA$", locale: "en-CA",
+    // Tax: HST 13% (5% federal GST + 8% provincial) — cleaning services fully taxable
+    tax: { name: "HST", rate: 0.13, breakdown: { federal: 0.05, provincial: 0.08 },
+      filingBody: "CRA (Canada Revenue Agency)",
+      registrationThreshold: "$30,000 CAD annual taxable revenue",
+      filingFrequency: "Monthly / Quarterly / Annually (CRA assigned)",
+      notes: "Cleaning services are fully subject to HST in Ontario per CRA. Must display HST registration number on all invoices. Input Tax Credits (ITCs) available for commercial clients.",
+    },
+    // Partner pay benchmarks (Ontario minimum wage $17.20/hr as of Oct 2024)
+    partnerPayRange: { min: 25, mid: 30, max: 40 },
+    partnerCostPerHour: 30, // CAD — $30/hr per partner
+    // Market pricing benchmarks (research-verified, CAD)
+    residential: {
+      standardPerHour: { min: 35, max: 60 }, // GTA rates
+      flatRateSmall: { min: 150, max: 300 },  // <1500 sqft
+      flatRateLarge: { min: 300, max: 500 },  // 2000-3000 sqft
+      deepClean: { min: 200, max: 500 },
+      moveOut: { min: 250, max: 600 },
+    },
+    commercial: {
+      perHour: { min: 30, max: 60 },
+      perSqFt: { min: 0.10, max: 0.20 }, // CAD/sqft GTA
+    },
+    compliance: [
+      { item: "HST Registration (CRA)", required: ">$30k revenue", status: "required", link: "canada.ca/en/revenue-agency" },
+      { item: "Business Number (BN)", required: "All businesses", status: "required", link: "canada.ca" },
+      { item: "WSIB (Workplace Safety Insurance)", required: "If employing workers", status: "required", link: "wsib.ca" },
+      { item: "Ontario Business Registration", required: "Operating in ON", status: "required", link: "ontario.ca/page/business-registration" },
+      { item: "Employment Standards Act (ESA) compliance", required: "If using employees", status: "required", link: "ontario.ca/esa" },
+      { item: "Employer Health Tax (EHT)", required: ">$1M payroll", status: "conditional", link: "ontario.ca/eht" },
+      { item: "PIPEDA / Ontario Privacy Compliance", required: "Client data handling", status: "required", link: "priv.gc.ca" },
+    ],
+    invoiceRequirements: [
+      "Business legal name & address",
+      "HST Registration Number (must show on all invoices)",
+      "Date of service",
+      "Description of services",
+      "Pre-HST subtotal",
+      "HST amount (13% — do NOT show federal/provincial separately)",
+      "Total amount including HST",
+      "Payment terms",
+    ],
+    phoneFormat: "(xxx) xxx-xxxx",
+    addressFormat: "Street, City, ON, Postal Code",
+    sqftUnit: "sqft",
+    measurementSystem: "mixed", // Canada uses mixed (sqft for real estate, metric for distances)
+    payrollPeriod: "bi-weekly",
+    dateFormat: "YYYY-MM-DD",
+  },
+
+  "AZ": {
+    id: "AZ", country: "US", flag: "🇺🇸", label: "Arizona, USA",
+    currency: "USD", currencySymbol: "$", locale: "en-US",
+    // Tax: TPT (Transaction Privilege Tax) — state 5.6% + local
+    // Cleaning services: NOT taxable under TPT in Arizona (services generally exempt)
+    // Exception: if selling cleaning products/supplies separately, those are taxable
+    tax: {
+      name: "TPT", rate: 0.086, statePortion: 0.056, localPortion: 0.03,
+      note: "Phoenix combined rate used (8.6%). Scottsdale: 8.05%, Tempe: 8.1%, Mesa: 8.3%",
+      serviceTaxable: false, // cleaning services NOT subject to TPT in AZ
+      productsTaxable: true, // cleaning products sold separately ARE taxable
+      filingBody: "Arizona Department of Revenue (ADOR)",
+      registrationThreshold: "$100,000 economic nexus",
+      tptLicenseFee: "$12/year per location",
+      filingDue: "20th of the following month (electronic: last business day of month)",
+      notes: "Cleaning services are generally NOT subject to Arizona TPT. TPT applies if you sell tangible products. Register at AZTaxes.gov. $12/yr TPT license per location required.",
+    },
+    partnerPayRange: { min: 22, max: 32 },
+    partnerCostPerHour: 25, // USD — $25/hr per partner
+    residential: {
+      standardPerHour: { min: 25, max: 50 },
+      flatRateSmall: { min: 100, max: 200 },
+      flatRateLarge: { min: 200, max: 400 },
+      deepClean: { min: 150, max: 350 },
+      moveOut: { min: 180, max: 450 },
+    },
+    commercial: {
+      perHour: { min: 20, max: 45 },
+      perSqFt: { min: 0.07, max: 0.15 }, // USD/sqft
+    },
+    compliance: [
+      { item: "Arizona TPT License", required: "All businesses", status: "required", link: "aztaxes.gov" },
+      { item: "Arizona LLC / Corporation Registration", required: "Operating in AZ", status: "required", link: "azcc.gov" },
+      { item: "Federal EIN (Employer ID Number)", required: "If hiring workers", status: "required", link: "irs.gov" },
+      { item: "Arizona Employer Withholding Registration", required: "If employing workers", status: "required", link: "azdor.gov" },
+      { item: "Workers Compensation Insurance", required: "1+ employees", status: "required", link: "ica.state.az.us" },
+      { item: "AZ Registrar of Contractors License", required: "If any construction-adjacent work", status: "conditional", link: "roc.az.gov" },
+      { item: "City Business License (varies)", required: "Phoenix, Scottsdale, etc.", status: "required", link: "phoenix.gov" },
+    ],
+    invoiceRequirements: [
+      "Business legal name & address",
+      "Invoice number",
+      "Date of service",
+      "Description of services",
+      "Subtotal",
+      "Note: Cleaning services not subject to AZ TPT",
+      "If products sold: TPT at applicable combined rate",
+      "Total amount due",
+      "Payment terms",
+    ],
+    phoneFormat: "(xxx) xxx-xxxx",
+    addressFormat: "Street, City, AZ XXXXX",
+    sqftUnit: "sqft",
+    measurementSystem: "imperial",
+    payrollPeriod: "weekly or bi-weekly",
+    dateFormat: "MM/DD/YYYY",
+  },
+};
+
+// Active region — consumers of this context use useRegion() hook pattern via App state
+let ACTIVE_REGION = REGIONS["ON"]; // default, overridden by App state
+
+// Helper: format currency for active region
+const fmt = (amount, region = ACTIVE_REGION) =>
+  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:2, maximumFractionDigits:2 }).format(amount);
+
+// Helper: format currency compact (no decimals for large numbers)
+const fmtC = (amount, region = ACTIVE_REGION) =>
+  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:0, maximumFractionDigits:0 }).format(amount);
+
+// ─── COLOR SYSTEM ────────────────────────────────────────────────────────────
+const C = {
+  bg: "#0A0F1E", surface: "#111827", card: "#1A2235", border: "#1E2D45",
+  accent: "#00D4AA", accentDim: "#00D4AA22", gold: "#FFB800", goldDim: "#FFB80022",
+  red: "#FF4757", redDim: "#FF475722", blue: "#3B82F6", blueDim: "#3B82F622",
+  purple: "#A78BFA", purpleDim: "#A78BFA22",
+  text: "#F0F6FF", muted: "#8899AA", dim: "#445566",
+};
+
+// Resolve HUC status colors now that C is defined
+const HUC_STATUS_COLOR = {
+  "New":       C.blue,
+  "Quoted":    C.gold,
+  "Follow Up": "#FF6B6B",
+  "Booked":    C.accent,
+  "Completed": C.accent,
+  "Lost":      C.dim,
+};
+
+// ─── PROFIT MARGIN CONFIG ────────────────────────────────────────────────────
+// Have Us Clean pay structure:
+//   Partner earns 65% of the client price (pre-tax)
+//   Company keeps 35% of the client price (gross profit)
+const PARTNER_SHARE = 0.65;
+const COMPANY_SHARE = 0.35;
+const PROFIT_MARGIN = 0.35;
+
+const partnerPayFromPrice  = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
+const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
+const markupFactor = (cost) => Math.ceil(cost / (1 - PROFIT_MARGIN));
+
+// ─── TEAM SIZE BY SQFT ───────────────────────────────────────────────────────
+// 1 partner  → up to 1,000 sqft
+// 2 partners → 1,001–3,000 sqft
+// 3 partners → 3,001+ sqft
+const getTeamSize = (sqft) => {
+  if (!sqft || sqft <= 1000) return 1;
+  if (sqft <= 3000) return 2;
+  return 3;
+};
+
+// ─── HOURS BY SQFT (per team — team works together) ─────────────────────────
+// Production rate: 1,000 sqft/hr per team regardless of team size
+// Minimum 1.5h, rounded to nearest 0.5h
+const getJobHours = (sqft) => {
+  const raw = Math.max(1.5, (sqft || 900) / 1000);
+  return Math.round(raw * 2) / 2; // round to nearest 0.5
+};
+
+// ─── PARTNER HOURLY RATE ─────────────────────────────────────────────────────
+const PARTNER_HOURLY_ON = 30; // CAD per partner per hour (Ontario)
+const PARTNER_HOURLY_AZ = 25; // USD per partner per hour (Arizona)
+
+// ─── FLOOR PRICES BY DWELLING (market minimum — never go below these) ────────
+const FLOOR_PRICES = {
+  ON: {
+    "Apartment / Condo": { "1 Bed":140, "2 Bed":165, "3 Bed":205 },
+    "Semi / Townhouse":  { "Small":165, "Medium":205, "Large":245 },
+    "Detached House":    { "Small":185, "Medium":230, "Large":310 },
+  },
+  AZ: {
+    "Apartment / Condo": { "1 Bed":155, "2 Bed":185, "3 Bed":230 },
+    "Semi / Townhouse":  { "Small":185, "Medium":230, "Large":275 },
+    "Detached House":    { "Small":205, "Medium":255, "Large":345 },
+  },
+};
+
+// ─── PACKAGE MULTIPLIERS ─────────────────────────────────────────────────────
+const RES_SERVICE_MULT = {
+  "Refresh Clean":             1.00,
+  "Full Home Clean":           1.25,
+  "Deep Clean":                1.65,
+  "Move-In / Move-Out":        1.80,
+  "Kitchen & Bathroom Refresh":0.65,
+  "Pre-Sale Clean":            1.50,
+  "Post-Renovation Clean":     1.70,
+  "Office / Commercial":       1.20,
+};
+
+// ─── CONDITION MULTIPLIERS ───────────────────────────────────────────────────
+const CONDITION_MULT = {
+  "Light":   0.90,
+  "Average": 1.00,
+  "Heavy":   1.20,
+  "":        1.00,
+};
+
+// ─── FREQUENCY DISCOUNTS ─────────────────────────────────────────────────────
+const FREQ_DISCOUNTS = {
+  "One-Time":  0,
+  "Weekly":    0.15,
+  "Bi-Weekly": 0.10,
+  "Monthly":   0.05,
+};
+
+// ─── ADDON PRICES (fixed, market-tested) ────────────────────────────────────
+const RES_ADDONS = [
+  { id:"fridge",    label:"Inside Fridge",         clientPrice:50,  costToUs:20 },
+  { id:"oven",      label:"Inside Oven",            clientPrice:55,  costToUs:22 },
+  { id:"cabinets",  label:"Inside Cabinets",        clientPrice:65,  costToUs:26 },
+  { id:"windows",   label:"Interior Windows",       clientPrice:60,  costToUs:24 },
+  { id:"baseboards",label:"Baseboards / Detail",    clientPrice:55,  costToUs:22 },
+  { id:"carpet",    label:"Carpet Cleaning",        clientPrice:95,  costToUs:38 },
+  { id:"pethair",   label:"Pet Hair / Heavy Detail",clientPrice:65,  costToUs:26 },
+];
+
+// Legacy sqft hours table (kept for GPS / scheduling estimates)
+const SQFT_HOURS = {
+  500:1.5, 750:2, 1000:2.5, 1250:3, 1500:3.5, 1750:4,
+  2000:4.5, 2500:5.5, 3000:6.5, 3500:7.5, 4000:9, 5000:11,
+};
+const getSqftHours = (sqft) => {
+  const tiers = Object.keys(SQFT_HOURS).map(Number).sort((a,b)=>a-b);
+  for (let t of tiers) if (sqft <= t) return SQFT_HOURS[t];
+  return SQFT_HOURS[5000] + (sqft - 5000) / 500;
+};
+const PARTNER_COST_PER_HOUR = 30; // updated — used in scheduling estimates
+
+// Commercial rates (cost per sqft → markup for 30% margin)
+const COM_SERVICE_COST_PER_SQFT = {
+  "Office Clean": 0.07, "Janitorial (Daily)": 0.05, "Post-Construction": 0.14,
+  "Medical/Lab Facility": 0.18, "Retail / Showroom": 0.065, "Warehouse / Industrial": 0.045,
+};
+const COM_MIN_COST = {
+  "Office Clean": 120, "Janitorial (Daily)": 100, "Post-Construction": 280,
+  "Medical/Lab Facility": 350, "Retail / Showroom": 110, "Warehouse / Industrial": 140,
+};
+const COM_ADDONS = [
+  { id:"restrooms",  label:"Deep Restroom Sanitization", costToUs: 60 },
+  { id:"windows_ext",label:"Exterior Window Wash",       costToUs: 85 },
+  { id:"carpet_com", label:"Commercial Carpet Steam",    costToUs: 105 },
+  { id:"floor_strip",label:"Floor Strip & Wax",         costToUs: 140 },
+  { id:"pressure",   label:"Pressure Washing (exterior)",costToUs: 120 },
+  { id:"supply",     label:"Restroom Supply Restocking", costToUs: 28 },
+  { id:"trash",      label:"After-Hours Trash Removal",  costToUs: 42 },
+  { id:"disinfect",  label:"Full Disinfection Service",  costToUs: 90 },
+];
+const COM_FREQ_DISCOUNTS = { "One-Time":0, "Daily":0.18, "Weekly":0.13, "Bi-Weekly":0.08, "Monthly":0.04 };
+
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+const JOB_TYPES = ["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Move-Out","Kitchen & Bathroom Refresh","Post-Construction"];
+const UPSELL_OPTIONS = ["Inside Fridge","Inside Oven","Inside Cabinets","Interior Windows","Baseboards / Detail","Carpet Cleaning","Pet Hair / Heavy Detail"];
+const avatarColors = ["linear-gradient(135deg,#00D4AA,#0088FF)","linear-gradient(135deg,#FF6B6B,#FF8E53)","linear-gradient(135deg,#A78BFA,#EC4899)","linear-gradient(135deg,#FFB800,#FF6B6B)"];
 
 // ─── SAMPLE DATA (Have Us Clean — Toronto & GTA) ─────────────────────────────
 const initPartners = [
@@ -2598,6 +2841,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [editLead, setEditLead] = useState(null);
   const [showEditForm, setShowEditForm] = useState(false);
   const [confirmDeleteRes, setConfirmDeleteRes] = useState(null);
+  const [confirmDrawerOpen, setConfirmDrawerOpen] = useState(false); // ConfirmDrawer state
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -2992,17 +3236,35 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
-            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={async ()=>{
-              if(window.confirm("Delete this lead permanently?")) {
-                const lid = String(editLead.id || "");
-                setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
-                try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-                setShowEditForm(false);setEditLead(null);
-              }
+            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
+              setConfirmDrawerOpen(true);
             }}>🗑 Delete Lead</button>
           </div>
         </Modal>
       )}
+
+      {/* ── ConfirmDrawer — replaces window.confirm for edit modal lead delete ── */}
+      <ConfirmDrawer
+        open={confirmDrawerOpen}
+        title="Delete this lead?"
+        message="This cannot be undone. The lead will be permanently removed."
+        confirmLabel="Yes, Delete"
+        cancelLabel="Keep Lead"
+        variant="danger"
+        onConfirm={async () => {
+          const lid = String(editLead?.id || "");
+          setConfirmDrawerOpen(false);
+          setResLeads(ls => {
+            const next = ls.filter(l => l.id !== editLead?.id);
+            dbSet(DB_KEYS.leadsRes, next);
+            return next;
+          });
+          try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+          setShowEditForm(false);
+          setEditLead(null);
+        }}
+        onCancel={() => setConfirmDrawerOpen(false)}
+      />
       {viewLead && (
         <Modal title={`📄 Quote — ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
           <div>
