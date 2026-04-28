@@ -1,5 +1,7 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
 import React, { useState, useEffect, useRef, useCallback } from "react";
+
+import MySchedule from "./pages/MySchedule";
 import ConfirmDrawer from "./components/ConfirmDrawer";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
@@ -5471,6 +5473,47 @@ export default function App() {
     });
   }, []);
 
+  
+  const handleMyScheduleCheckIn = (job) => {
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              status: "in-progress",
+              checkIn: j.checkIn || now,
+              checkInCoords: j.checkInCoords || null,
+            }
+          : j
+      )
+    );
+  };
+
+  const handleMyScheduleCheckOut = (job) => {
+    const now = new Date().toLocaleTimeString([], {
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+
+    setJobsDB((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              status: "completed",
+              checkOut: j.checkOut || now,
+              checkOutCoords: j.checkOutCoords || null,
+            }
+          : j
+      )
+    );
+  };
+
   const setPartnersDB = useCallback((updater) => {
     setPartners(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -5538,6 +5581,7 @@ export default function App() {
   const NAV_GROUPS = [
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
+      { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
       { id:"jobs",       label:"📋 Jobs",          desc:"All jobs & work orders" },
       { id:"recurring",  label:"🔄 Recurring",     desc:"Recurring job schedules" },
@@ -5707,6 +5751,7 @@ export default function App() {
 
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="myschedule"    && <MySchedule       jobs={regionJobs}     partners={regionPartners} region={activeRegion} onCheckIn={handleMyScheduleCheckIn} onCheckOut={handleMyScheduleCheckOut} />}
         {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
