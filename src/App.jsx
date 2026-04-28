@@ -8950,6 +8950,379 @@ function BusinessAlertsCenter({ jobs = [], partners = [], coldLeads = [], region
   );
 }
 
+
+function WorkflowAutomationConsole({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [runs, setRuns] = useState({});
+  const [filter, setFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+  const routeGaps = activeJobs.filter((job) => !job.routeOrder);
+
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    return { ...p, completed, last, recurring, age, dueDays, due: completed.length > 0 && age >= dueDays };
+  });
+
+  const rebookDue = profiles.filter((p) => p.due);
+  const recurringOverdue = profiles.filter((p) => p.recurring !== "One-Time" && p.due);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const onboardingPartners = partners.filter((p) => !p.onboarded || p.status === "onboarding");
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(lead.status || "New"));
+  const pipelineValue = pipelineFollowups.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const revenue = jobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const profit = jobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+  const workflows = [
+    {
+      id: "daily_dispatch",
+      icon: "🚦",
+      title: "Daily Dispatch Workflow",
+      category: "Operations",
+      module: "dispatch_center",
+      count: dispatchRisks.length + unassignedJobs.length + routeGaps.length,
+      value: todayJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: dispatchRisks.length || unassignedJobs.length ? (C.red || "#FF6B6B") : C.accent,
+      steps: [
+        "Open Dispatch Command Center.",
+        "Resolve missing address, time, route, and partner alerts.",
+        "Open Auto Assign for unassigned jobs.",
+        "Open Route Planner and apply optimized route order.",
+        "Copy Dispatch Brief and send to the operations team.",
+      ],
+    },
+    {
+      id: "revenue_recovery",
+      icon: "⚠️",
+      title: "Revenue Recovery Workflow",
+      category: "Recovery",
+      module: "recovery",
+      count: qualityRisks.length,
+      value: qualityRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: qualityRisks.length ? C.gold : C.accent,
+      steps: [
+        "Open Revenue Recovery.",
+        "Review callbacks and issue jobs.",
+        "Copy recovery scripts.",
+        "Contact affected clients.",
+        "Mark follow-up actions for retention.",
+      ],
+    },
+    {
+      id: "client_growth",
+      icon: "📣",
+      title: "Client Growth Campaign Workflow",
+      category: "Growth",
+      module: "campaign_center",
+      count: rebookDue.length + followupGaps.length + reviewGaps.length + referralGaps.length,
+      value: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: rebookDue.length ? C.blue : C.accent,
+      steps: [
+        "Open Campaign Center.",
+        "Run rebooking campaign first.",
+        "Run follow-up messages for completed jobs.",
+        "Send review requests.",
+        "Send referral requests to happy clients.",
+      ],
+    },
+    {
+      id: "recurring_protection",
+      icon: "🔁",
+      title: "Recurring Revenue Protection Workflow",
+      category: "Retention",
+      module: "recurring_revenue",
+      count: recurringOverdue.length,
+      value: recurringOverdue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: recurringOverdue.length ? C.gold : C.accent,
+      steps: [
+        "Open Recurring Revenue.",
+        "Filter for at-risk or due-soon plans.",
+        "Copy renewal messages.",
+        "Confirm next service dates.",
+        "Protect weekly, bi-weekly, and monthly revenue.",
+      ],
+    },
+    {
+      id: "b2b_sales",
+      icon: "🏢",
+      title: "B2B Sales Follow-Up Workflow",
+      category: "Sales",
+      module: "b2b_pipeline",
+      count: pipelineFollowups.length,
+      value: pipelineValue,
+      color: pipelineFollowups.length ? C.purple : C.accent,
+      steps: [
+        "Open B2B Pipeline.",
+        "Filter Contacted, Follow Up, Meeting, and Proposal stages.",
+        "Copy outreach messages.",
+        "Move deals to next stage after contact.",
+        "Track weighted pipeline value.",
+      ],
+    },
+    {
+      id: "proof_quality",
+      icon: "📸",
+      title: "Proof + Quality Workflow",
+      category: "Quality",
+      module: "proof_archive",
+      count: proofGaps.length,
+      value: proofGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: proofGaps.length ? C.gold : C.accent,
+      steps: [
+        "Open Proof Archive.",
+        "Find jobs missing GPS, before photos, or after photos.",
+        "Complete proof status.",
+        "Use proof report for client confidence.",
+        "Coach partners if proof gaps repeat.",
+      ],
+    },
+    {
+      id: "staffing_capacity",
+      icon: "👥",
+      title: "Staffing Capacity Workflow",
+      category: "Staffing",
+      module: "hiring_pipeline",
+      count: capacityGap,
+      value: 0,
+      color: capacityGap ? (C.red || "#FF6B6B") : C.accent,
+      steps: [
+        "Open Hiring Pipeline.",
+        "Review active partners and onboarding partners.",
+        "Recruit or onboard for the capacity gap.",
+        "Assign starter jobs to new partners.",
+        "Watch partner scorecards after first jobs.",
+      ],
+    },
+    {
+      id: "owner_review",
+      icon: "👑",
+      title: "Owner Weekly Review Workflow",
+      category: "Owner",
+      module: "owner_dashboard",
+      count: margin < 30 && revenue > 0 ? 1 : 0,
+      value: revenue,
+      color: margin < 30 && revenue > 0 ? C.gold : C.accent,
+      steps: [
+        "Open Owner Dashboard.",
+        "Review weekly revenue and profit.",
+        "Check growth/decline signal.",
+        "Review top partners and retention.",
+        "Open Finance if margin is low.",
+      ],
+    },
+  ];
+
+  const visible = workflows
+    .filter((w) => filter === "all" ? true : w.category === filter)
+    .sort((a, b) => b.count - a.count || b.value - a.value);
+
+  const activeWorkflows = workflows.filter((w) => w.count > 0);
+  const totalValue = activeWorkflows.reduce((sum, w) => sum + (w.value || 0), 0);
+  const runCount = Object.values(runs).filter((r) => r.state === "run").length;
+
+  const markRun = (workflow) => {
+    setRuns((prev) => ({
+      ...prev,
+      [workflow.id]: {
+        state: "run",
+        at: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const copyWorkflow = async (workflow) => {
+    const text = [
+      workflow.icon + " " + workflow.title,
+      "",
+      "Category: " + workflow.category,
+      "Open module: " + workflow.module,
+      "Items: " + workflow.count,
+      "Value: " + cur + (workflow.value || 0),
+      "",
+      "SOP:",
+      ...workflow.steps.map((s, i) => (i + 1) + ". " + s),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Workflow SOP copied.");
+    } catch {
+      window.prompt("Copy workflow SOP:", text);
+    }
+  };
+
+  const copyDailyChecklist = async () => {
+    const lines = [
+      "Have Us Clean Daily Automation Checklist",
+      "",
+      "Active workflows: " + activeWorkflows.length,
+      "Workflow value: " + cur + totalValue,
+      "Run this session: " + runCount,
+      "",
+      ...workflows.map((w, i) =>
+        (i + 1) + ". " + w.icon + " " + w.title + "\n" +
+        "   Status: " + (w.count > 0 ? "READY (" + w.count + ")" : "IDLE") + "\n" +
+        "   Value: " + cur + (w.value || 0) + "\n" +
+        "   Module: " + w.module
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Daily automation checklist copied.");
+    } catch {
+      window.prompt("Copy daily automation checklist:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const workflowCard = (workflow) => {
+    const run = runs[workflow.id];
+    const ready = workflow.count > 0;
+
+    return (
+      <div key={workflow.id} style={{ background: C.surface, border: `1px solid ${workflow.color}55`, borderLeft: `4px solid ${workflow.color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: workflow.color }}>{workflow.icon} {workflow.category}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{workflow.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{ready ? "Ready to run" : "No action needed right now"}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: workflow.color }}>{workflow.count}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>items</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(ready ? "Ready" : "Idle", ready ? workflow.color : C.muted)}
+          {badge("Value " + cur + (workflow.value || 0), workflow.value ? C.accent : C.muted)}
+          {run?.at && badge("Ran " + new Date(run.at).toLocaleTimeString(), C.blue)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.text, marginBottom: 6 }}>SOP Steps</div>
+          <ol style={{ margin: 0, paddingLeft: 18, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+            {workflow.steps.map((step, i) => <li key={i}>{step}</li>)}
+          </ol>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => setTab && setTab(workflow.module)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Open
+          </button>
+          <button type="button" onClick={() => markRun(workflow)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Mark Run
+          </button>
+          <button type="button" onClick={() => copyWorkflow(workflow)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Copy SOP
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  const categories = ["all", ...Array.from(new Set(workflows.map((w) => w.category)))];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🤖 Workflow Automation Console</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Repeatable SOP workflows for dispatch, revenue, growth, quality, staffing, and owner review.</div>
+        </div>
+        <button type="button" onClick={copyDailyChecklist} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Daily Checklist
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Active Workflows", activeWorkflows.length, "Ready to run", activeWorkflows.length ? C.gold : C.accent)}
+        {stat("Workflow Value", cur + totalValue, "Revenue at stake", C.blue)}
+        {stat("Run Today", runCount, "Session tracking", C.accent)}
+        {stat("Idle", workflows.length - activeWorkflows.length, "No action needed", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {categories.map((cat) => (
+          <button key={cat} type="button" onClick={() => setFilter(cat)} style={{ ...S.btn(filter === cat ? "primary" : "ghost"), minHeight: 40 }}>
+            {cat === "all" ? "All" : cat}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Automation Workflows</div>
+        {visible.map(workflowCard)}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -9530,6 +9903,7 @@ export default function App() {
       { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
       { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },
       { id:"alerts_center", label:"🚨 Alerts", desc:"Business alerts system" },
+      { id:"workflow_console", label:"🤖 Workflows", desc:"Workflow automation console" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -9744,6 +10118,7 @@ export default function App() {
         {tab==="automation_center" && <AutomationTriggerCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="alerts_center" && <BusinessAlertsCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="workflow_console" && <WorkflowAutomationConsole jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
