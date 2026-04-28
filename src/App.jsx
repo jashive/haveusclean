@@ -8237,6 +8237,329 @@ function AIGrowthEngine({ jobs = [], partners = [], coldLeads = [], region, setT
   );
 }
 
+
+function AutomationTriggerCenter({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [status, setStatus] = useState({});
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const routeGaps = activeJobs.filter((job) => !job.routeOrder);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    return { ...p, completed, last, recurring, age, dueDays, rebookDue: completed.length > 0 && age >= dueDays };
+  });
+
+  const rebookDue = profiles.filter((p) => p.rebookDue);
+  const recurringAtRisk = profiles.filter((p) => p.recurring !== "One-Time" && p.rebookDue);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const onboardingPartners = partners.filter((p) => !p.onboarded || p.status === "onboarding");
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(lead.status || "New"));
+  const pipelineValue = pipelineFollowups.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const revenue = jobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const profit = jobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+  const triggers = [
+    {
+      id: "auto_assign",
+      icon: "🧭",
+      title: "Auto-assign unassigned jobs",
+      module: "auto_assign",
+      count: unassignedJobs.length,
+      value: unassignedJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: unassignedJobs.length ? C.gold : C.accent,
+      when: "When active jobs have no partner assigned.",
+      action: "Open Auto Assign and assign best-fit partners.",
+    },
+    {
+      id: "dispatch",
+      icon: "🚦",
+      title: "Resolve same-day dispatch risks",
+      module: "dispatch_center",
+      count: dispatchRisks.length,
+      value: dispatchRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: dispatchRisks.length ? (C.red || "#FF6B6B") : C.accent,
+      when: "When today jobs have missing route, time, address, or partner.",
+      action: "Open Dispatch Center and clear risk flags.",
+    },
+    {
+      id: "route_apply",
+      icon: "🗺️",
+      title: "Apply route optimization",
+      module: "route_planner",
+      count: routeGaps.length,
+      value: routeGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: routeGaps.length ? C.gold : C.accent,
+      when: "When active jobs do not have route order metadata.",
+      action: "Open Routes and apply optimized route order.",
+    },
+    {
+      id: "recurring",
+      icon: "🔁",
+      title: "Recover at-risk recurring clients",
+      module: "recurring_revenue",
+      count: recurringAtRisk.length,
+      value: recurringAtRisk.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: recurringAtRisk.length ? C.gold : C.accent,
+      when: "When recurring clients are past their expected booking interval.",
+      action: "Open Subscriptions and copy/send renewal messages.",
+    },
+    {
+      id: "campaigns",
+      icon: "📣",
+      title: "Run rebooking/follow-up campaigns",
+      module: "campaign_center",
+      count: rebookDue.length + followupGaps.length + reviewGaps.length + referralGaps.length,
+      value: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: (rebookDue.length + followupGaps.length + reviewGaps.length + referralGaps.length) ? C.blue : C.accent,
+      when: "When customers are due for rebooking, follow-up, reviews, or referrals.",
+      action: "Open Campaigns and copy/send campaign batches.",
+    },
+    {
+      id: "recovery",
+      icon: "⚠️",
+      title: "Run quality recovery actions",
+      module: "recovery",
+      count: qualityRisks.length,
+      value: qualityRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: qualityRisks.length ? C.gold : C.accent,
+      when: "When completed jobs have issues or callbacks.",
+      action: "Open Recovery and complete customer recovery actions.",
+    },
+    {
+      id: "proof",
+      icon: "📸",
+      title: "Complete proof gaps",
+      module: "proof_archive",
+      count: proofGaps.length,
+      value: proofGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: proofGaps.length ? C.gold : C.accent,
+      when: "When completed jobs lack GPS or before/after proof.",
+      action: "Open Proof Archive and resolve missing proof.",
+    },
+    {
+      id: "hiring",
+      icon: "👥",
+      title: "Trigger hiring/onboarding actions",
+      module: "hiring_pipeline",
+      count: capacityGap,
+      value: 0,
+      color: capacityGap ? (C.red || "#FF6B6B") : C.accent,
+      when: "When active job load exceeds available partner capacity.",
+      action: "Open Hiring Pipeline and recruit/onboard additional partners.",
+    },
+    {
+      id: "b2b",
+      icon: "🏢",
+      title: "Trigger B2B follow-up sequence",
+      module: "b2b_pipeline",
+      count: pipelineFollowups.length,
+      value: pipelineValue,
+      color: pipelineFollowups.length ? C.purple : C.accent,
+      when: "When B2B deals are contacted, in follow-up, meeting, or proposal stage.",
+      action: "Open B2B Pipeline and copy/send outreach messages.",
+    },
+    {
+      id: "finance",
+      icon: "📊",
+      title: "Review low-margin financial signals",
+      module: "financial_dashboard",
+      count: margin < 30 && revenue > 0 ? 1 : 0,
+      value: revenue,
+      color: margin < 30 && revenue > 0 ? C.gold : C.accent,
+      when: "When gross margin is below target.",
+      action: "Open Finance and review pricing, pay, and low-margin services.",
+    },
+  ];
+
+  const activeTriggers = triggers.filter((t) => t.count > 0);
+  const totalValue = activeTriggers.reduce((sum, t) => sum + (t.value || 0), 0);
+
+  const markTriggered = (trigger) => {
+    setStatus((prev) => ({
+      ...prev,
+      [trigger.id]: {
+        state: "triggered",
+        at: new Date().toISOString(),
+      },
+    }));
+  };
+
+  const copyRunbook = async () => {
+    const lines = [
+      "Have Us Clean Automation Runbook",
+      "",
+      "Active triggers: " + activeTriggers.length,
+      "Opportunity value: " + cur + totalValue,
+      "",
+      ...triggers.map((t, i) =>
+        (i + 1) + ". " + t.icon + " " + t.title + "\n" +
+        "   Count: " + t.count + "\n" +
+        "   Value: " + cur + (t.value || 0) + "\n" +
+        "   When: " + t.when + "\n" +
+        "   Action: " + t.action
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Automation runbook copied.");
+    } catch {
+      window.prompt("Copy automation runbook:", lines);
+    }
+  };
+
+  const copyTrigger = async (trigger) => {
+    const text = [
+      trigger.icon + " " + trigger.title,
+      "",
+      "Count: " + trigger.count,
+      "Value: " + cur + (trigger.value || 0),
+      "When: " + trigger.when,
+      "Action: " + trigger.action,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Trigger copied.");
+    } catch {
+      window.prompt("Copy trigger:", text);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const triggerCard = (trigger) => {
+    const triggered = status[trigger.id]?.state === "triggered";
+    return (
+      <div key={trigger.id} style={{ background: C.surface, border: `1px solid ${trigger.color}55`, borderLeft: `4px solid ${trigger.color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: trigger.color }}>{trigger.icon} Automation Trigger</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{trigger.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{trigger.when}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: trigger.color }}>{trigger.count}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>items</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge("Value " + cur + (trigger.value || 0), trigger.value ? C.accent : C.muted)}
+          {badge(triggered ? "Triggered" : trigger.count > 0 ? "Ready" : "Idle", triggered ? C.accent : trigger.count > 0 ? trigger.color : C.muted)}
+          {status[trigger.id]?.at && badge(new Date(status[trigger.id].at).toLocaleTimeString(), C.blue)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Action:</strong> {trigger.action}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => setTab && setTab(trigger.module)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Open
+          </button>
+          <button type="button" onClick={() => markTriggered(trigger)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Trigger
+          </button>
+          <button type="button" onClick={() => copyTrigger(trigger)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Copy
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>⚙️ Automation Trigger Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Turn AI recommendations into trackable operations, growth, and recovery triggers.</div>
+        </div>
+        <button type="button" onClick={copyRunbook} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Runbook
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Active Triggers", activeTriggers.length, "Ready to run", activeTriggers.length ? C.gold : C.accent)}
+        {stat("Opportunity", cur + totalValue, "Trigger value", C.blue)}
+        {stat("Triggered", Object.values(status).filter((s) => s.state === "triggered").length, "This session", C.accent)}
+        {stat("Idle", triggers.length - activeTriggers.length, "No action needed", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Automation Triggers</div>
+        {triggers.map(triggerCard)}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -8814,6 +9137,7 @@ export default function App() {
       { id:"financial_dashboard", label:"📊 Finance", desc:"Profit and revenue intelligence" },
       { id:"scale_center", label:"🌎 Scale", desc:"Multi-region scale command center" },
       { id:"ai_growth_engine", label:"🧠 AI Engine", desc:"Daily growth and operations action brain" },
+      { id:"automation_center", label:"⚙️ Automation", desc:"Automation trigger center" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -9025,6 +9349,7 @@ export default function App() {
         {tab==="financial_dashboard" && <FinancialDashboard jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} />}
         {tab==="scale_center" && <ScaleCommandCenter jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} />}
         {tab==="ai_growth_engine" && <AIGrowthEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="automation_center" && <AutomationTriggerCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
