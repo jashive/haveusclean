@@ -5858,6 +5858,196 @@ function HiringPipeline({ partners = [], jobs = [], region }) {
   );
 }
 
+
+function AutoAssignEngine({ jobs = [], partners = [], setJobs, region }) {
+  const [filter, setFilter] = useState("unassigned");
+
+  const activeJobs = jobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+  const assignableJobs = jobs.filter((j) => j.status !== "completed");
+  const unassignedJobs = assignableJobs.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+
+  const partnerWorkload = (partner) =>
+    activeJobs.filter((job) => (job.partnerIds || [job.partnerId]).includes(partner.id)).length;
+
+  const partnerQualityRisk = (partner) =>
+    jobs.filter((job) =>
+      (job.partnerIds || [job.partnerId]).includes(partner.id) &&
+      ["issue", "callback"].includes(job.qualityStatus)
+    ).length;
+
+  const dayName = (dateStr) => {
+    try {
+      return new Date((dateStr || "") + "T00:00:00").toLocaleDateString("en-US", { weekday: "short" });
+    } catch {
+      return "";
+    }
+  };
+
+  const scorePartnerForJob = (partner, job) => {
+    let score = 0;
+    const reasons = [];
+
+    if (partner.onboarded) {
+      score += 20;
+      reasons.push("onboarded");
+    } else {
+      score -= 35;
+      reasons.push("not onboarded");
+    }
+
+    if (!partner.region || !job.region || partner.region === job.region) {
+      score += 20;
+      reasons.push("region match");
+    } else {
+      score -= 10;
+      reasons.push("different region");
+    }
+
+    const day = dayName(job.date);
+    if ((partner.availability || []).includes(day)) {
+      score += 18;
+      reasons.push("available " + day);
+    } else if ((partner.availability || []).length === 0) {
+      score += 4;
+      reasons.push("availability unknown");
+    } else {
+      score -= 8;
+      reasons.push("not listed " + day);
+    }
+
+    const workload = partnerWorkload(partner);
+    score += Math.max(0, 18 - workload * 6);
+    reasons.push(workload + " active");
+
+    const rating = Number(partner.rating || 0);
+    score += Math.round(rating * 6);
+    reasons.push("rating " + (rating || "new"));
+
+    const risk = partnerQualityRisk(partner);
+    score -= risk * 10;
+    if (risk > 0) reasons.push(risk + " risk");
+
+    if (partner.status === "available") score += 15;
+    if (partner.status === "busy") score -= 8;
+    if (partner.status === "onboarding") score -= 15;
+
+    return { partner, score, reasons };
+  };
+
+  const rankedPartnersForJob = (job) =>
+    partners.map((partner) => scorePartnerForJob(partner, job)).sort((a, b) => b.score - a.score);
+
+  const bestMatch = (job) => rankedPartnersForJob(job)[0];
+
+  const assignBest = (job) => {
+    const match = bestMatch(job);
+    if (!match?.partner) {
+      alert("No partner available to assign.");
+      return;
+    }
+
+    setJobs((prevJobs) =>
+      prevJobs.map((j) =>
+        j.id === job.id
+          ? {
+              ...j,
+              partnerId: match.partner.id,
+              partnerIds: [match.partner.id],
+              autoAssignedAt: new Date().toISOString(),
+              autoAssignedScore: match.score,
+            }
+          : j
+      )
+    );
+  };
+
+  const visibleJobs = filter === "all" ? assignableJobs : unassignedJobs;
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🧭 Auto Assignment Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Rank partners and assign jobs based on fit, availability, workload, and quality risk.</div>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Assignable Jobs", assignableJobs.length, "Not completed", C.accent)}
+        {stat("Unassigned", unassignedJobs.length, "Need partner", unassignedJobs.length ? C.gold : C.accent)}
+        {stat("Partners", partners.length, "Roster", C.blue)}
+        {stat("Active Jobs", activeJobs.length, "Workload", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setFilter("unassigned")} style={{ ...S.btn(filter === "unassigned" ? "primary" : "ghost"), minHeight: 40 }}>Unassigned</button>
+        <button type="button" onClick={() => setFilter("all")} style={{ ...S.btn(filter === "all" ? "primary" : "ghost"), minHeight: 40 }}>All Assignable</button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Jobs to Assign</div>
+        {visibleJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No jobs in this view.</div>
+        ) : visibleJobs.map((job) => {
+          const currentIds = (job.partnerIds || [job.partnerId]).filter(Boolean);
+          const currentNames = currentIds.map((id) => partners.find((p) => p.id === id)?.name).filter(Boolean);
+          const ranked = rankedPartnersForJob(job);
+          const top = ranked[0];
+          const color = top?.score >= 70 ? C.accent : top?.score >= 45 ? C.gold : C.red || "#FF6B6B";
+
+          return (
+            <div key={job.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 10 }}>
+                <div>
+                  <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{job.client}</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{job.type} · {job.date || "Date TBD"} · {job.time || "Time TBD"}</div>
+                  {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>📍 {job.address}</div>}
+                </div>
+                {currentNames.length ? badge("Assigned: " + currentNames.join(", "), C.blue) : badge("Unassigned", C.gold)}
+              </div>
+
+              {top && (
+                <div style={{ background: C.card, borderRadius: 12, padding: 12, marginBottom: 10 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+                    <div>
+                      <div style={{ fontSize: 13, fontWeight: 900, color }}>Best Match</div>
+                      <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginTop: 3 }}>{top.partner.name}</div>
+                      <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{top.reasons.slice(0, 4).join(" · ")}</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontSize: 26, fontWeight: 900, color }}>{top.score}</div>
+                      <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>fit score</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button type="button" onClick={() => assignBest(job)} disabled={!top} style={{ minHeight: 42, borderRadius: 10, border: "none", background: top ? C.accent : C.border, color: top ? "#0A0F1E" : C.muted, fontWeight: 900, cursor: top ? "pointer" : "default" }}>🧭 Assign Best</button>
+                <button type="button" onClick={() => alert(ranked.slice(0, 5).map((r, i) => (i + 1) + ". " + r.partner.name + " — " + r.score + "\n" + r.reasons.join(", ")).join("\n\n"))} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>📊 View Ranking</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -6412,6 +6602,7 @@ export default function App() {
       { id:"briefing",  label:"🌅 Briefing",     desc:"Morning command center" },
       { id:"partner_scorecards", label:"👷 Scorecards", desc:"Partner performance scorecards" },
       { id:"hiring_pipeline", label:"👥 Hiring", desc:"Hiring and onboarding pipeline" },
+      { id:"auto_assign", label:"🧭 Auto Assign", desc:"Automatic job assignment engine" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
@@ -6587,6 +6778,7 @@ export default function App() {
         {tab==="briefing"       && <ManagerBriefing jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="partner_scorecards" && <PartnerScorecards jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="hiring_pipeline" && <HiringPipeline partners={regionPartners} jobs={regionJobs} region={activeRegion} />}
+        {tab==="auto_assign" && <AutoAssignEngine jobs={regionJobs} partners={regionPartners} setJobs={setJobsDB} region={activeRegion} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
