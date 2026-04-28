@@ -32,6 +32,7 @@ export default function MySchedule({
   onPhotoUpload = () => {},
   onToggleChecklist = () => {},
   onUpdateQuality = () => {},
+  onUpdateFollowUp = () => {},
   mode = "schedule",
 }) {
   const [activeTab, setActiveTab] = useState("today");
@@ -798,6 +799,116 @@ export default function MySchedule({
     return map[status || "clear"] || map.clear;
   };
 
+
+  const followUpMeta = (status) => {
+    const map = {
+      none: { label: "Not Sent", icon: "⏳", color: C.muted },
+      needed: { label: "Follow-Up Needed", icon: "📌", color: C.gold },
+      sent: { label: "Sent", icon: "✅", color: C.accent },
+      review: { label: "Review Requested", icon: "⭐", color: C.blue },
+    };
+
+    return map[status || "none"] || map.none;
+  };
+
+  const buildFollowUpMessage = (job) => {
+    const firstName = (job.client || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+    const beforeCount = (job.beforePics || []).length;
+    const afterCount = (job.afterPics || []).length;
+
+    return `Hi ${firstName}, this is Have Us Clean. Your ${job.type || "cleaning"} is complete at ${job.address || "your property"}.
+
+We completed the checklist, captured proof of work, and uploaded ${beforeCount} before photo(s) and ${afterCount} after photo(s).
+
+Thank you for trusting Have Us Clean. If everything looks good, we would really appreciate a quick review or referral. If anything needs attention, reply here and we will take care of it.`;
+  };
+
+  const copyFollowUpMessage = async (job) => {
+    const message = buildFollowUpMessage(job);
+
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Follow-up message copied to clipboard.");
+    } catch {
+      window.prompt("Copy follow-up message:", message);
+    }
+  };
+
+  const FollowUpControls = ({ job }) => {
+    const meta = followUpMeta(job.followUpStatus);
+
+    const btn = (status, label) => {
+      const m = followUpMeta(status);
+      return (
+        <button
+          type="button"
+          onClick={() => onUpdateFollowUp(job, status)}
+          style={{
+            minHeight: 40,
+            borderRadius: 10,
+            border: `1px solid ${m.color}44`,
+            background: job.followUpStatus === status ? `${m.color}22` : C.surface,
+            color: job.followUpStatus === status ? m.color : C.text,
+            fontSize: 12,
+            fontWeight: 800,
+            cursor: "pointer",
+            padding: "8px 10px",
+          }}
+        >
+          {m.icon} {label}
+        </button>
+      );
+    };
+
+    return (
+      <div
+        style={{
+          marginTop: 12,
+          background: C.surface,
+          border: `1px solid ${meta.color}44`,
+          borderRadius: 12,
+          padding: 12,
+        }}
+      >
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ fontSize: 13, fontWeight: 800, color: C.text }}>Customer Follow-Up</div>
+          <span style={st.badge(meta.color)}>{meta.icon} {meta.label}</span>
+        </div>
+
+        {job.followUpUpdatedAt && (
+          <div style={{ fontSize: 11, color: C.muted, marginBottom: 10 }}>
+            Updated: {new Date(job.followUpUpdatedAt).toLocaleString()}
+          </div>
+        )}
+
+        <button
+          type="button"
+          onClick={() => copyFollowUpMessage(job)}
+          style={{
+            minHeight: 44,
+            width: "100%",
+            borderRadius: 10,
+            border: "none",
+            background: C.accent,
+            color: "#0A0F1E",
+            fontWeight: 900,
+            cursor: "pointer",
+            marginBottom: 8,
+          }}
+        >
+          📋 Copy Follow-Up Message
+        </button>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+          {btn("needed", "Needed")}
+          {btn("sent", "Sent")}
+          {btn("review", "Review Ask")}
+          {btn("none", "Reset")}
+        </div>
+      </div>
+    );
+  };
+
   const QualityControls = ({ job }) => {
     const meta = qualityMeta(job.qualityStatus);
 
@@ -972,6 +1083,8 @@ export default function MySchedule({
                 </div>
 
                 <QualityControls job={job} />
+
+                <FollowUpControls job={job} />
 
                 <div
                   style={{
