@@ -168,10 +168,6 @@ const HUC_ADDONS = [
   { id:"pethair",  label:"Pet Hair / Heavy Detail",priceRange:[40,80],  costToUs:28, icon:"🐾", col:"AO" },
 ];
 
-// Active region — consumers of this context use useRegion() hook pattern via App state
-let ACTIVE_REGION = REGIONS["ON"]; // default, overridden by App state
-
-
 // ─── SAMPLE DATA (Have Us Clean — Toronto & GTA) ─────────────────────────────
 const initPartners = [
   { id:1, name:"Maria Santos",  phone:"(416) 555-0101", email:"maria@haveusclean.com",  status:"active",    rating:4.9, jobsDone:47, payRate:26, availability:["Mon","Tue","Wed","Thu","Fri"], onboarded:true,  avatar:"MS", region:"ON" },
