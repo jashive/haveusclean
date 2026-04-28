@@ -9323,6 +9323,386 @@ function WorkflowAutomationConsole({ jobs = [], partners = [], coldLeads = [], r
   );
 }
 
+
+function RealAutomationLayer({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [runLog, setRunLog] = useState([]);
+  const [autoEnabled, setAutoEnabled] = useState({
+    dispatch: true,
+    campaigns: true,
+    recurring: true,
+    b2b: true,
+    recovery: true,
+    hiring: false,
+    finance: false,
+    proof: true,
+  });
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+  const routeGaps = activeJobs.filter((job) => !job.routeOrder);
+
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", email: job.email || "", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    return { ...p, completed, last, recurring, age, dueDays, due: completed.length > 0 && age >= dueDays };
+  });
+
+  const rebookDue = profiles.filter((p) => p.due);
+  const recurringOverdue = profiles.filter((p) => p.recurring !== "One-Time" && p.due);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(lead.status || "New"));
+  const pipelineValue = pipelineFollowups.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const revenue = jobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+  const profit = jobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+  const automations = [
+    {
+      id: "dispatch",
+      icon: "🚦",
+      title: "Daily Dispatch Auto-Run",
+      module: "dispatch_center",
+      cadence: "Daily 7:00 AM",
+      count: dispatchRisks.length + unassignedJobs.length + routeGaps.length,
+      value: todayJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: dispatchRisks.length || unassignedJobs.length ? (C.red || "#FF6B6B") : C.accent,
+      steps: ["Check today's jobs", "Detect missing assignment/route/address/time", "Prepare dispatch brief", "Route to Auto Assign or Route Planner"],
+      output: "Dispatch brief + route/assignment action list",
+    },
+    {
+      id: "campaigns",
+      icon: "📣",
+      title: "Customer Campaign Auto-Run",
+      module: "campaign_center",
+      cadence: "Daily 10:00 AM",
+      count: rebookDue.length + followupGaps.length + reviewGaps.length + referralGaps.length,
+      value: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: rebookDue.length ? C.blue : C.accent,
+      steps: ["Find rebooking clients", "Find follow-up gaps", "Find review/referral opportunities", "Prepare campaign messages"],
+      output: "Campaign batch message list",
+    },
+    {
+      id: "recurring",
+      icon: "🔁",
+      title: "Recurring Revenue Auto-Run",
+      module: "recurring_revenue",
+      cadence: "Daily 9:00 AM",
+      count: recurringOverdue.length,
+      value: recurringOverdue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: recurringOverdue.length ? C.gold : C.accent,
+      steps: ["Scan recurring clients", "Detect overdue intervals", "Prepare renewal message", "Flag at-risk MRR"],
+      output: "Recurring revenue recovery list",
+    },
+    {
+      id: "b2b",
+      icon: "🏢",
+      title: "B2B Pipeline Auto-Run",
+      module: "b2b_pipeline",
+      cadence: "Weekdays 8:30 AM",
+      count: pipelineFollowups.length,
+      value: pipelineValue,
+      color: pipelineFollowups.length ? C.purple : C.accent,
+      steps: ["Scan active B2B pipeline", "Find follow-up stages", "Rank weighted opportunity", "Prepare outreach messages"],
+      output: "B2B follow-up queue",
+    },
+    {
+      id: "recovery",
+      icon: "⚠️",
+      title: "Revenue Recovery Auto-Run",
+      module: "recovery",
+      cadence: "Hourly during business hours",
+      count: qualityRisks.length,
+      value: qualityRisks.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: qualityRisks.length ? C.gold : C.accent,
+      steps: ["Scan quality/callback jobs", "Estimate revenue at risk", "Prepare recovery script", "Route to Recovery module"],
+      output: "Recovery action queue",
+    },
+    {
+      id: "proof",
+      icon: "📸",
+      title: "Proof Audit Auto-Run",
+      module: "proof_archive",
+      cadence: "Daily 5:00 PM",
+      count: proofGaps.length,
+      value: proofGaps.reduce((sum, j) => sum + (j.clientPrice || 0), 0),
+      color: proofGaps.length ? C.gold : C.accent,
+      steps: ["Scan completed jobs", "Detect missing GPS/photos", "Flag incomplete proof", "Route to Proof Archive"],
+      output: "Proof gap list",
+    },
+    {
+      id: "hiring",
+      icon: "👥",
+      title: "Hiring Capacity Auto-Run",
+      module: "hiring_pipeline",
+      cadence: "Weekly Monday",
+      count: capacityGap,
+      value: 0,
+      color: capacityGap ? (C.red || "#FF6B6B") : C.accent,
+      steps: ["Compare active jobs to active partners", "Find capacity gap", "Prepare hiring action", "Route to Hiring Pipeline"],
+      output: "Hiring capacity recommendation",
+    },
+    {
+      id: "finance",
+      icon: "📊",
+      title: "Finance Margin Auto-Run",
+      module: "financial_dashboard",
+      cadence: "Weekly Friday",
+      count: margin < 30 && revenue > 0 ? 1 : 0,
+      value: revenue,
+      color: margin < 30 && revenue > 0 ? C.gold : C.accent,
+      steps: ["Calculate revenue/profit/margin", "Detect low margin", "Flag pricing/pay review", "Route to Finance"],
+      output: "Finance margin review brief",
+    },
+  ];
+
+  const enabledAutomations = automations.filter((a) => autoEnabled[a.id]);
+  const runnable = automations.filter((a) => autoEnabled[a.id] && a.count > 0);
+  const totalValue = runnable.reduce((sum, a) => sum + (a.value || 0), 0);
+
+  const runAutomation = (automation) => {
+    const entry = {
+      id: Date.now() + "-" + automation.id,
+      automationId: automation.id,
+      title: automation.title,
+      count: automation.count,
+      value: automation.value,
+      at: new Date().toISOString(),
+      status: automation.count > 0 ? "action-needed" : "clear",
+      output: automation.output,
+    };
+    setRunLog((prev) => [entry, ...prev].slice(0, 30));
+  };
+
+  const runAll = () => {
+    const targets = automations.filter((a) => autoEnabled[a.id]);
+    const now = new Date().toISOString();
+    const entries = targets.map((a) => ({
+      id: now + "-" + a.id,
+      automationId: a.id,
+      title: a.title,
+      count: a.count,
+      value: a.value,
+      at: now,
+      status: a.count > 0 ? "action-needed" : "clear",
+      output: a.output,
+    }));
+    setRunLog((prev) => [...entries, ...prev].slice(0, 30));
+  };
+
+  const toggleAutomation = (id) => {
+    setAutoEnabled((prev) => ({ ...prev, [id]: !prev[id] }));
+  };
+
+  const copyPayload = async (automation) => {
+    const payload = {
+      automation: automation.title,
+      id: automation.id,
+      cadence: automation.cadence,
+      enabled: !!autoEnabled[automation.id],
+      count: automation.count,
+      value: automation.value || 0,
+      output: automation.output,
+      steps: automation.steps,
+      module: automation.module,
+      generatedAt: new Date().toISOString(),
+    };
+
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Automation payload copied.");
+    } catch {
+      window.prompt("Copy automation payload:", text);
+    }
+  };
+
+  const copyDailyReport = async () => {
+    const lines = [
+      "Have Us Clean Auto-Run Report",
+      "",
+      "Enabled automations: " + enabledAutomations.length,
+      "Runnable now: " + runnable.length,
+      "Opportunity value: " + cur + totalValue,
+      "Runs logged: " + runLog.length,
+      "",
+      ...automations.map((a, i) =>
+        (i + 1) + ". " + a.icon + " " + a.title + "\n" +
+        "   Enabled: " + (autoEnabled[a.id] ? "Yes" : "No") + "\n" +
+        "   Cadence: " + a.cadence + "\n" +
+        "   Items: " + a.count + "\n" +
+        "   Value: " + cur + (a.value || 0) + "\n" +
+        "   Output: " + a.output
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Auto-run report copied.");
+    } catch {
+      window.prompt("Copy auto-run report:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const automationCard = (automation) => {
+    const enabled = !!autoEnabled[automation.id];
+    const hasWork = automation.count > 0;
+    const lastRun = runLog.find((r) => r.automationId === automation.id);
+
+    return (
+      <div key={automation.id} style={{ background: C.surface, border: `1px solid ${automation.color}55`, borderLeft: `4px solid ${automation.color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: automation.color }}>{automation.icon} {automation.cadence}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{automation.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{automation.output}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: automation.color }}>{automation.count}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>items</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(enabled ? "Enabled" : "Paused", enabled ? C.accent : C.muted)}
+          {badge(hasWork ? "Runnable" : "Clear", hasWork ? automation.color : C.accent)}
+          {badge("Value " + cur + (automation.value || 0), automation.value ? C.blue : C.muted)}
+          {lastRun && badge("Last run " + new Date(lastRun.at).toLocaleTimeString(), C.purple)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.text, marginBottom: 6 }}>Auto-run Steps</div>
+          <ol style={{ margin: 0, paddingLeft: 18, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+            {automation.steps.map((step, i) => <li key={i}>{step}</li>)}
+          </ol>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => toggleAutomation(automation.id)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: enabled ? C.card : C.surface, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            {enabled ? "Pause" : "Enable"}
+          </button>
+          <button type="button" onClick={() => runAutomation(automation)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Run
+          </button>
+          <button type="button" onClick={() => setTab && setTab(automation.module)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Open
+          </button>
+          <button type="button" onClick={() => copyPayload(automation)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            JSON
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>⚡ Real Automation Layer</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Auto-run workflows that monitor the business and prepare execution queues.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={runAll} style={{ ...S.btn("primary"), minHeight: 40 }}>
+            ▶ Run Enabled
+          </button>
+          <button type="button" onClick={copyDailyReport} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+            📋 Copy Report
+          </button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Enabled", enabledAutomations.length, "Auto-runs on", C.accent)}
+        {stat("Runnable", runnable.length, "Action needed", runnable.length ? C.gold : C.accent)}
+        {stat("Opportunity", cur + totalValue, "Queue value", C.blue)}
+        {stat("Run Log", runLog.length, "Session events", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Automation Jobs</div>
+        {automations.map(automationCard)}
+      </div>
+
+      {runLog.length > 0 && (
+        <div style={{ ...S.card, marginTop: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Run Log</div>
+          {runLog.slice(0, 10).map((entry) => (
+            <div key={entry.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: entry.status === "action-needed" ? C.gold : C.accent }}>{entry.title}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{new Date(entry.at).toLocaleString()} · {entry.count} item(s) · {cur}{entry.value || 0}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{entry.output}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -9904,6 +10284,7 @@ export default function App() {
       { id:"owner_dashboard", label:"👑 Owner", desc:"CEO view" },
       { id:"alerts_center", label:"🚨 Alerts", desc:"Business alerts system" },
       { id:"workflow_console", label:"🤖 Workflows", desc:"Workflow automation console" },
+      { id:"real_automation", label:"⚡ Auto-Run", desc:"Real automation layer" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -10119,6 +10500,7 @@ export default function App() {
         {tab==="owner_dashboard" && <OwnerDashboard jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
         {tab==="alerts_center" && <BusinessAlertsCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="workflow_console" && <WorkflowAutomationConsole jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="real_automation" && <RealAutomationLayer jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
