@@ -10165,6 +10165,285 @@ function AIDecisionEngine({ jobs = [], partners = [], coldLeads = [], region, se
   );
 }
 
+
+function CommunicationEngine({ jobs = [], partners = [], coldLeads = [], region, setTab }) {
+  const [channel, setChannel] = useState("customer");
+  const [tone, setTone] = useState("friendly");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const firstName = (name) => String(name || "there").split(" ")[0].replace(/[—-].*$/, "").trim() || "there";
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const followupGaps = completedJobs.filter((job) => !job.followUpStatus || job.followUpStatus === "none" || job.followUpStatus === "needed");
+  const reviewGaps = completedJobs.filter((job) => job.reviewStatus !== "received");
+  const referralGaps = completedJobs.filter((job) => job.referralStatus !== "received");
+  const proofGaps = completedJobs.filter((job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    return !job.checkIn || !job.checkOut || before === 0 || after === 0;
+  });
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", email: job.email || "", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    const ltv = sorted.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+    return { ...p, completed, last, recurring, age, dueDays, ltv, due: completed.length > 0 && age >= dueDays };
+  });
+
+  const rebookDue = profiles.filter((p) => p.due);
+  const recurringDue = profiles.filter((p) => p.recurring !== "One-Time" && p.due);
+  const highValueClients = profiles.filter((p) => p.ltv > 0).sort((a,b)=>b.ltv-a.ltv).slice(0,10);
+  const pipelineFollowups = coldLeads.filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal", "New"].includes(lead.status || "New"));
+
+  const partnerDispatchList = partners.map((p) => {
+    const partnerJobs = todayJobs.filter((j) => (j.partnerIds || [j.partnerId]).includes(p.id));
+    return { partner: p, jobs: partnerJobs };
+  }).filter((x) => x.jobs.length > 0);
+
+  const tonePrefix = tone === "professional"
+    ? "Hello"
+    : tone === "warm"
+      ? "Hi"
+      : "Hey";
+
+  const templates = {
+    customer: {
+      label: "Customer Follow-Up",
+      icon: "👤",
+      color: C.blue,
+      source: followupGaps,
+      tab: "campaign_center",
+      build: (job) => tonePrefix + " " + firstName(job.client) + ", this is Have Us Clean. I wanted to follow up on your recent cleaning and make sure everything looked good. If anything needs attention, reply here and we will take care of it.",
+    },
+    rebook: {
+      label: "Rebooking",
+      icon: "🔄",
+      color: C.accent,
+      source: rebookDue,
+      tab: "campaign_center",
+      build: (profile) => tonePrefix + " " + firstName(profile.name) + ", this is Have Us Clean. It has been about " + profile.age + " day(s) since your last cleaning. Would you like us to book your next service?",
+    },
+    recurring: {
+      label: "Recurring Renewal",
+      icon: "🔁",
+      color: C.accent,
+      source: recurringDue,
+      tab: "recurring_revenue",
+      build: (profile) => tonePrefix + " " + firstName(profile.name) + ", this is Have Us Clean. You are on our " + profile.recurring + " schedule and your next cleaning looks due. Would you like us to confirm your next appointment?",
+    },
+    review: {
+      label: "Review Request",
+      icon: "⭐",
+      color: C.purple,
+      source: reviewGaps,
+      tab: "campaign_center",
+      build: (job) => tonePrefix + " " + firstName(job.client) + ", thank you again for choosing Have Us Clean. If you were happy with the service, would you be willing to leave us a quick review? It really helps our small business grow.",
+    },
+    referral: {
+      label: "Referral Ask",
+      icon: "🤝",
+      color: C.blue,
+      source: referralGaps,
+      tab: "campaign_center",
+      build: (job) => tonePrefix + " " + firstName(job.client) + ", thank you again for trusting Have Us Clean. If you know a friend, neighbour, property manager, or business owner who could use reliable cleaning help, we would be grateful for the referral.",
+    },
+    recovery: {
+      label: "Recovery / Issue",
+      icon: "⚠️",
+      color: C.gold,
+      source: qualityRisks,
+      tab: "recovery",
+      build: (job) => tonePrefix + " " + firstName(job.client) + ", this is Have Us Clean. I saw there may have been an issue with your service and I want to make it right. Please reply with what needs attention and we will work to fix it quickly.",
+    },
+    b2b: {
+      label: "B2B Outreach",
+      icon: "🏢",
+      color: C.purple,
+      source: pipelineFollowups,
+      tab: "b2b_pipeline",
+      build: (lead) => tonePrefix + " " + (lead.buyer_title || lead.buyerTitle || "there") + ", this is Have Us Clean. We help " + (lead.company || "local businesses") + " keep spaces clean, reliable, and inspection-ready. Would you be open to a quick quote or walkthrough?",
+    },
+    partner: {
+      label: "Partner Dispatch",
+      icon: "👷",
+      color: C.accent,
+      source: partnerDispatchList,
+      tab: "dispatch_center",
+      build: (item) => tonePrefix + " " + firstName(item.partner.name) + ", here is your Have Us Clean schedule for today: " + item.jobs.map((j, i) => (i + 1) + ". " + (j.time || "Time TBD") + " — " + j.client + " — " + (j.address || "No address")).join(" | ") + ". Please remember check-in, photos, checklist, and check-out.",
+    },
+    proof: {
+      label: "Proof Gap",
+      icon: "📸",
+      color: C.gold,
+      source: proofGaps,
+      tab: "proof_archive",
+      build: (job) => "Proof reminder: " + (job.client || "Job") + " is missing required proof. Please complete GPS check-in/out, before photos, after photos, and checklist before closing this job.",
+    },
+  };
+
+  const activeTemplate = templates[channel] || templates.customer;
+  const messages = activeTemplate.source.map((item, idx) => ({
+    id: channel + "-" + idx,
+    item,
+    text: activeTemplate.build(item),
+  }));
+
+  const copyText = async (text, label = "Message") => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(label + " copied.");
+    } catch {
+      window.prompt("Copy " + label.toLowerCase() + ":", text);
+    }
+  };
+
+  const copyBatch = async () => {
+    const text = [
+      "Have Us Clean Communication Batch — " + activeTemplate.label,
+      "Tone: " + tone,
+      "Messages: " + messages.length,
+      "",
+      ...messages.map((m, i) => (i + 1) + ". " + m.text),
+    ].join("\n\n");
+    await copyText(text, "Batch");
+  };
+
+  const copyAllTemplates = async () => {
+    const text = Object.entries(templates).map(([id, t]) => {
+      const example = t.source[0] ? t.build(t.source[0]) : "No current recipient in this category.";
+      return t.icon + " " + t.label + "\nCategory: " + id + "\nCurrent count: " + t.source.length + "\nExample: " + example;
+    }).join("\n\n");
+    await copyText(text, "Template library");
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const recipientLabel = (item) => {
+    if (item?.partner) return item.partner.name;
+    if (item?.company) return item.company;
+    if (item?.name) return item.name;
+    if (item?.client) return item.client;
+    return "Recipient";
+  };
+
+  const messageCard = (message) => (
+    <div key={message.id} style={{ background: C.surface, border: `1px solid ${activeTemplate.color}44`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 12, fontWeight: 900, color: activeTemplate.color }}>{activeTemplate.icon} {activeTemplate.label}</div>
+          <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{recipientLabel(message.item)}</div>
+        </div>
+        {badge(tone, activeTemplate.color)}
+      </div>
+
+      <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 13, color: C.muted, lineHeight: 1.6 }}>
+        {message.text}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginTop: 12 }}>
+        <button type="button" onClick={() => copyText(message.text, "Message")} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+          Copy Message
+        </button>
+        <button type="button" onClick={() => setTab && setTab(activeTemplate.tab)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+          Open Module
+        </button>
+      </div>
+    </div>
+  );
+
+  const totalMessages = Object.values(templates).reduce((sum, t) => sum + t.source.length, 0);
+  const revenueTouchpoints = rebookDue.length + recurringDue.length + pipelineFollowups.length;
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>💬 Communication Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Copy-ready communication for customers, partners, B2B leads, recovery, reviews, referrals, and dispatch.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={copyBatch} style={{ ...S.btn("primary"), minHeight: 40 }}>📋 Copy Batch</button>
+          <button type="button" onClick={copyAllTemplates} style={{ ...S.btn("ghost"), minHeight: 40 }}>📚 Copy Library</button>
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Messages", totalMessages, "Available now", C.accent)}
+        {stat("Revenue Touchpoints", revenueTouchpoints, "Rebook / B2B / recurring", C.blue)}
+        {stat("Recovery", qualityRisks.length, "Issue messages", qualityRisks.length ? C.gold : C.accent)}
+        {stat("Partner Dispatch", partnerDispatchList.length, "Partner updates", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {Object.entries(templates).map(([id, t]) => (
+          <button key={id} type="button" onClick={() => setChannel(id)} style={{ ...S.btn(channel === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {t.icon} {t.label} ({t.source.length})
+          </button>
+        ))}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {["friendly", "professional", "warm"].map((t) => (
+          <button key={t} type="button" onClick={() => setTone(t)} style={{ ...S.btn(tone === t ? "primary" : "ghost"), minHeight: 40 }}>
+            {t}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: activeTemplate.color, marginBottom: 12 }}>
+          {activeTemplate.icon} {activeTemplate.label}
+        </div>
+        {messages.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No current messages in this category.</div>
+        ) : (
+          messages.map(messageCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -10748,6 +11027,7 @@ export default function App() {
       { id:"workflow_console", label:"🤖 Workflows", desc:"Workflow automation console" },
       { id:"real_automation", label:"⚡ Auto-Run", desc:"Real automation layer" },
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
+      { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
     { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
@@ -10965,6 +11245,7 @@ export default function App() {
         {tab==="workflow_console" && <WorkflowAutomationConsole jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="real_automation" && <RealAutomationLayer jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
