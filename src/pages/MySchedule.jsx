@@ -291,6 +291,151 @@ export default function MySchedule({
     onCheckOut(job);
   };
 
+
+  const escapeReportHtml = (value) =>
+    String(value ?? "")
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+
+  const renderReportPhotos = (photos = []) => {
+    if (!photos.length) {
+      return '<div class="empty">No photos uploaded</div>';
+    }
+
+    return photos
+      .map((photo, index) => {
+        const src = getPhotoSrc(photo);
+        if (!src) return '<div class="empty">Photo preview unavailable</div>';
+
+        return `
+          <div class="photo">
+            <img src="${src}" alt="Job photo ${index + 1}" />
+            <div class="caption">Photo ${index + 1}</div>
+          </div>
+        `;
+      })
+      .join("");
+  };
+
+  const exportClientProofReport = (job) => {
+    const beforePhotos = job.beforePics || [];
+    const afterPhotos = job.afterPics || [];
+    const checklistItems = getChecklistItems(job);
+    const proof = getCompletionProof(job);
+
+    const checklistHtml = checklistItems
+      .map((item) => {
+        const checked = !!(job.checklist || {})[item];
+        return `
+          <div class="check ${checked ? "done" : ""}">
+            <span>${checked ? "✓" : "□"}</span>
+            <span>${escapeReportHtml(item)}</span>
+          </div>
+        `;
+      })
+      .join("");
+
+    const proofHtml = proof.checks
+      .map((item) => `
+        <div class="check ${item.done ? "done" : ""}">
+          <span>${item.done ? "✓" : "!"}</span>
+          <span>${escapeReportHtml(item.label)}</span>
+        </div>
+      `)
+      .join("");
+
+    const html = `<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Have Us Clean Proof Report - ${escapeReportHtml(job.client)}</title>
+<style>
+  *{box-sizing:border-box}
+  body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Arial,sans-serif;margin:0;background:#f5f7fb;color:#111827;padding:28px}
+  .wrap{max-width:900px;margin:0 auto;background:white;border-radius:18px;overflow:hidden;box-shadow:0 10px 30px rgba(15,23,42,.10)}
+  .head{background:#0A0F1E;color:white;padding:28px}
+  .brand{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:#00D4AA;font-weight:800;margin-bottom:8px}
+  h1{font-size:28px;margin:0 0 8px}
+  .sub{color:#CBD5E1;font-size:14px;line-height:1.5}
+  .body{padding:24px}
+  .grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px;margin-bottom:20px}
+  .card{border:1px solid #E5E7EB;border-radius:14px;padding:16px;background:#FAFAFA}
+  .label{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:#64748B;font-weight:800;margin-bottom:4px}
+  .value{font-size:15px;font-weight:800;color:#111827}
+  .section{margin-top:24px}
+  .section h2{font-size:18px;margin:0 0 12px;color:#0F172A}
+  .check{display:flex;gap:10px;align-items:flex-start;padding:9px 10px;border:1px solid #E5E7EB;border-radius:10px;margin-bottom:8px;color:#64748B}
+  .check.done{color:#047857;background:#ECFDF5;border-color:#A7F3D0}
+  .photos{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px}
+  .photo{border:1px solid #E5E7EB;border-radius:14px;overflow:hidden;background:#FAFAFA}
+  .photo img{display:block;width:100%;height:180px;object-fit:cover}
+  .caption{font-size:12px;color:#64748B;padding:8px 10px}
+  .empty{border:1px dashed #CBD5E1;border-radius:14px;padding:20px;color:#64748B;text-align:center;background:#F8FAFC}
+  .foot{padding:18px 24px;background:#F8FAFC;color:#64748B;font-size:12px;border-top:1px solid #E5E7EB}
+  .print{position:fixed;right:18px;bottom:18px;border:none;border-radius:999px;background:#00D4AA;color:#0A0F1E;font-weight:900;padding:14px 18px;cursor:pointer;box-shadow:0 8px 20px rgba(0,0,0,.18)}
+  @media print{body{background:white;padding:0}.wrap{box-shadow:none;border-radius:0}.print{display:none}.photo img{height:auto;max-height:260px}}
+  @media(max-width:680px){body{padding:12px}.grid{grid-template-columns:1fr}.head{padding:22px}.body{padding:18px}}
+</style>
+</head>
+<body>
+<button class="print" onclick="window.print()">Print / Save PDF</button>
+<div class="wrap">
+  <div class="head">
+    <div class="brand">Have Us Clean</div>
+    <h1>Job Completion Proof</h1>
+    <div class="sub">${escapeReportHtml(job.client)}<br />${escapeReportHtml(job.address || "")}</div>
+  </div>
+  <div class="body">
+    <div class="grid">
+      <div class="card"><div class="label">Service</div><div class="value">${escapeReportHtml(job.type || "Cleaning Service")}</div></div>
+      <div class="card"><div class="label">Date / Time</div><div class="value">${escapeReportHtml(job.date || "—")} · ${escapeReportHtml(job.time || "—")}</div></div>
+      <div class="card"><div class="label">Check In</div><div class="value">${escapeReportHtml(job.checkIn || "—")}</div></div>
+      <div class="card"><div class="label">Check Out</div><div class="value">${escapeReportHtml(job.checkOut || "—")}</div></div>
+      <div class="card"><div class="label">Before Photos</div><div class="value">${beforePhotos.length}</div></div>
+      <div class="card"><div class="label">After Photos</div><div class="value">${afterPhotos.length}</div></div>
+    </div>
+
+    <div class="section">
+      <h2>Proof Requirements</h2>
+      ${proofHtml}
+    </div>
+
+    <div class="section">
+      <h2>Cleaning Checklist</h2>
+      ${checklistHtml}
+    </div>
+
+    <div class="section">
+      <h2>Before Photos</h2>
+      <div class="photos">${renderReportPhotos(beforePhotos)}</div>
+    </div>
+
+    <div class="section">
+      <h2>After Photos</h2>
+      <div class="photos">${renderReportPhotos(afterPhotos)}</div>
+    </div>
+  </div>
+  <div class="foot">
+    Generated by Have Us Clean operating system on ${new Date().toLocaleString()}.
+  </div>
+</div>
+</body>
+</html>`;
+
+    const reportWindow = window.open("", "_blank", "noopener,noreferrer");
+    if (!reportWindow) {
+      alert("Pop-up blocked. Please allow pop-ups to export the proof report.");
+      return;
+    }
+
+    reportWindow.document.open();
+    reportWindow.document.write(html);
+    reportWindow.document.close();
+  };
+
   const CompletionProofReport = ({ job }) => {
     const beforeCount = (job.beforePics || []).length;
     const afterCount = (job.afterPics || []).length;
@@ -365,6 +510,24 @@ export default function MySchedule({
           }}
         >
           👀 View Full Proof
+        </button>
+
+        <button
+          type="button"
+          onClick={() => exportClientProofReport(job)}
+          style={{
+            marginTop: 8,
+            minHeight: 44,
+            width: "100%",
+            borderRadius: 10,
+            border: `1px solid ${C.border}`,
+            background: C.surface,
+            color: C.text,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          📤 Export Client Proof
         </button>
       </div>
     );
@@ -786,6 +949,23 @@ export default function MySchedule({
 
             <div style={{ background: C.surface, borderRadius: 12, padding: 12, border: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 13, fontWeight: 800, color: C.text, marginBottom: 8 }}>Photos</div>
+              <button
+                type="button"
+                onClick={() => exportClientProofReport(proofReport)}
+                style={{
+                  minHeight: 44,
+                  gridColumn: "1 / -1",
+                  borderRadius: 10,
+                  border: "none",
+                  background: C.accent,
+                  color: "#0A0F1E",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                }}
+              >
+                📤 Export Printable Report
+              </button>
+
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
                 <button
                   type="button"
