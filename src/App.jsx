@@ -1667,20 +1667,21 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const manualLeads = prevLeads.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
       const combined = [...manualLeads, ...merged];
 
-      // ── Step 3: Deduplicate by company name ──
-      const companyMap = new Map();
+      // ── Step 3: Deduplicate by lead_id — n8n guarantees unique stable IDs per business ──
+      const leadMap = new Map();
       for (const lead of combined) {
-        const key = (lead.company || "").trim().toLowerCase();
+        const key = String(lead.lead_id || lead.id || "").trim();
         if (!key) continue;
-        const existing = companyMap.get(key);
+        const existing = leadMap.get(key);
         if (!existing) {
-          companyMap.set(key, lead);
+          leadMap.set(key, lead);
         } else {
+          // Keep version with more data (edited status, notes, outreach content)
           const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
-          if (score(lead) > score(existing)) companyMap.set(key, lead);
+          if (score(lead) > score(existing)) leadMap.set(key, lead);
         }
       }
-      const final = Array.from(companyMap.values());
+      const final = Array.from(leadMap.values());
 
       // ── Step 4: Update React state (pure — no side effects) ──
       setColdLeads(final);
@@ -1752,16 +1753,25 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     setLoadingSheet(false);
   };
 
-  const deleteLead = (id) => {
+  const deleteLead = async (id) => {
     if (!id) return;
+    const lid = String(id);
     // 1. Remove from local state immediately
-    setLeads(ls => ls.filter(l => l.lead_id !== id && l.id !== id));
-    if (viewLead?.lead_id === id || viewLead?.id === id) setViewLead(null);
-    // 2. Permanently track this ID so the 15s sync never brings it back
-    setDeletedLeadIds(prev => new Set([...prev, String(id)]));
-    // 3. Delete from Supabase
-    sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
-    sbFetch(`huc_leads_cold?id=eq.${encodeURIComponent(id)}`, { method:"DELETE" }).catch(()=>{});
+    setLeads(ls => ls.filter(l => l.lead_id !== lid && l.id !== lid));
+    if (viewLead?.lead_id === lid || viewLead?.id === lid) setViewLead(null);
+    // 2. Permanently track — persisted to localStorage so survives refresh
+    setDeletedLeadIds(prev => {
+      const next = new Set([...prev, lid]);
+      try { localStorage.setItem("cp:deletedLeadIds", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+    // 3. Delete from Supabase — await so we know it succeeded
+    try {
+      await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" });
+    } catch {}
+    try {
+      await sbFetch(`huc_leads_cold?id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" });
+    } catch {}
   };
 
   // Auto-delete incomplete leads — only runs when leads array changes
@@ -2821,7 +2831,7 @@ const SAMPLE_RES_LEADS = [
 
 function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads, setTab = () => {} }) {
   // Use lifted state; seed with sample data if empty
-  const leads = resLeads.length > 0 ? resLeads : SAMPLE_RES_LEADS;
+  const leads = resLeads;
   const setLeads = (updater) => {
     setResLeads(typeof updater === "function" ? updater(leads) : updater);
   };
@@ -3078,7 +3088,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
                 <button style={{...S.btn("ghost"), color:"#60A5FA"}} onClick={()=>{setEditLead({...lead});setShowEditForm(true);}}>✏️ Edit</button>
-                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={()=>{if(window.confirm("Delete this lead?"))setLeads(ls=>ls.filter(l=>l.id!==lead.id));}}>🗑</button>
+                <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={()=>{if(window.confirm("Delete this lead?")){setResLeads(ls=>{const next=ls.filter(l=>l.id!==lead.id);dbSet(DB_KEYS.leadsRes,next);return next;});}}}>🗑</button>
                 {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
@@ -3188,14 +3198,14 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             </div>
             <div style={{ display:"flex", gap:8, marginTop:16 }}>
               <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
-                setLeads(ls=>ls.map(l=>l.id===editLead.id?editLead:l));
+                setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
             <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
               if(window.confirm("Delete this lead permanently?")) {
-                setLeads(ls=>ls.filter(l=>l.id!==editLead.id));
+                setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
               }
             }}>🗑 Delete Lead</button>
@@ -3490,14 +3500,14 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
             </div>
             <div style={{ display:"flex", gap:8, marginTop:16 }}>
               <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
-                setLeads(ls=>ls.map(l=>l.id===editLead.id?editLead:l));
+                setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
               }}>💾 Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
             <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
               if(window.confirm("Delete this lead permanently?")) {
-                setLeads(ls=>ls.filter(l=>l.id!==editLead.id));
+                setResLeads(ls=>{const next=ls.filter(l=>l.id!==editLead.id);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
               }
             }}>🗑 Delete Lead</button>
@@ -4256,7 +4266,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
       return;
     }
     // Search resLeads, SAMPLE_RES_LEADS, and jobs by email
-    const allLeads = resLeads.length > 0 ? resLeads : SAMPLE_RES_LEADS;
+    const allLeads = resLeads;
     const matchedLead = allLeads.find(l => l.email?.toLowerCase() === email);
     const matchedJob  = jobs.find(j => j.email?.toLowerCase() === email);
     const name = matchedLead?.name || matchedJob?.client;
@@ -4995,7 +5005,20 @@ export default function App() {
   const [coldLeads, setColdLeads] = useState([]); // load from Supabase on boot
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
   const [coldFilterMkt, setColdFilterMkt] = useState("All"); // persists market filter
-  const [deletedLeadIds, setDeletedLeadIds] = useState(new Set()); // tracks permanently deleted leads
+  const [deletedLeadIds, setDeletedLeadIds] = useState(() => {
+    // Load from localStorage so deletes survive page refresh
+    try {
+      const saved = localStorage.getItem("cp:deletedLeadIds");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  }); // tracks permanently deleted leads
+
+  // Persist deletedLeadIds to localStorage whenever it changes
+  useEffect(() => {
+    try {
+      localStorage.setItem("cp:deletedLeadIds", JSON.stringify([...deletedLeadIds]));
+    } catch {}
+  }, [deletedLeadIds]);
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
   // ── DB state ──
@@ -5287,6 +5310,8 @@ export default function App() {
       if (added.length)   logActivity("JOB_ADDED",   added.map(j => j.client).join(", "));
       if (removed.length) logActivity("JOB_DELETED",  removed.map(j => j.client).join(", "));
       if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} → ${j.status}`).join(", "));
+      // Write to Supabase immediately so changes persist across refreshes
+      dbSet(DB_KEYS.jobs, next).catch(() => {});
       return next;
     });
   }, []);
