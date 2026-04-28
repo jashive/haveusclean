@@ -1,7 +1,7 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
 import React, { useState, useEffect, useRef, useCallback } from "react";
 
-import StatusBadge from './components/StatusBadge';
+import StatusBadgeBase from "./components/StatusBadge";
 
 import {
   BRAND,
@@ -41,8 +41,6 @@ import {
   COM_ADDONS,
   COM_FREQ_DISCOUNTS,
 } from "./lib/pricing";
-
-import StatusBadge from "./components/StatusBadge";
 
 // Active region — keep this in App.jsx for now
 let ACTIVE_REGION = REGIONS.ON;
