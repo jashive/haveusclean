@@ -5447,11 +5447,106 @@ function ManagerBriefing({ jobs = [], partners = [], region, setTab }) {
 }
 
 
+
 function PartnerScorecards({ jobs = [], partners = [], region }) {
   const cur = region?.currencySymbol || "$";
 
   const partnerJobs = (partner) =>
     jobs.filter((job) => (job.partnerIds || [job.partnerId]).includes(partner.id));
+
+  const buildCoaching = (row) => {
+    const notes = [];
+
+    if (row.completed.length === 0) {
+      notes.push({
+        type: "Onboarding",
+        icon: "🌱",
+        color: C.blue,
+        text: "Assign a starter job or shadow shift so this partner can build activity history.",
+      });
+    }
+
+    if (row.proofRate < 80 && row.completed.length > 0) {
+      notes.push({
+        type: "Proof Process",
+        icon: "📸",
+        color: C.gold,
+        text: "Coach on completing check-in/out and before/after photos on every job.",
+      });
+    }
+
+    if (row.issues > 0) {
+      notes.push({
+        type: "Quality",
+        icon: "⚠️",
+        color: C.gold,
+        text: "Review recent quality issues and reinforce checklist standards before next shift.",
+      });
+    }
+
+    if (row.callbacks > 0) {
+      notes.push({
+        type: "Callback Risk",
+        icon: "☎️",
+        color: C.red || "#FF6B6B",
+        text: "Schedule a coaching conversation focused on preventing repeat callbacks.",
+      });
+    }
+
+    if (row.score >= 85) {
+      notes.push({
+        type: "Growth",
+        icon: "🏆",
+        color: C.accent,
+        text: "High performer. Consider priority scheduling, leadership responsibilities, or review/referral work.",
+      });
+    }
+
+    if (row.active.length === 0 && row.completed.length > 0) {
+      notes.push({
+        type: "Utilization",
+        icon: "📅",
+        color: C.blue,
+        text: "No active jobs assigned. Consider adding this partner to upcoming bookings.",
+      });
+    }
+
+    if (notes.length === 0) {
+      notes.push({
+        type: "Stable",
+        icon: "✅",
+        color: C.accent,
+        text: "Performance looks stable. Keep monitoring proof quality and client outcomes.",
+      });
+    }
+
+    return notes;
+  };
+
+  const copyCoachingNote = async (row) => {
+    const p = row.partner;
+    const notes = buildCoaching(row);
+    const message = [
+      "Partner Coaching Note — " + p.name,
+      "",
+      "Score: " + row.score,
+      "Completed jobs: " + row.completed.length,
+      "Proof rate: " + row.proofRate + "%",
+      "Issues: " + row.issues,
+      "Callbacks: " + row.callbacks,
+      "Earnings: " + cur + row.earnings,
+      "",
+      "Recommended coaching:",
+      ...notes.map((n) => "- " + n.type + ": " + n.text),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(message);
+      alert("Partner coaching note copied.");
+    } catch {
+      window.prompt("Copy partner coaching note:", message);
+    }
+  };
 
   const partnerStats = partners.map((partner) => {
     const all = partnerJobs(partner);
@@ -5493,6 +5588,7 @@ function PartnerScorecards({ jobs = [], partners = [], region }) {
     : 0;
 
   const topPartner = partnerStats[0]?.partner;
+  const coachingCount = partnerStats.reduce((sum, row) => sum + buildCoaching(row).filter((n) => n.type !== "Stable" && n.type !== "Growth").length, 0);
 
   const stat = (label, value, sub, color = C.accent) => (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
@@ -5515,19 +5611,20 @@ function PartnerScorecards({ jobs = [], partners = [], region }) {
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
         <div>
           <div style={S.h2}>👷 Partner Scorecards</div>
-          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Performance, proof quality, earnings, and recovery risk by partner.</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Performance, proof quality, earnings, recovery risk, and coaching recommendations.</div>
         </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
         {stat("Partners", partners.length, "Active roster", C.accent)}
         {stat("Avg Score", avgScore, "Team performance", scoreColor(avgScore))}
+        {stat("Coaching Items", coachingCount, "Needs attention", coachingCount ? C.gold : C.accent)}
         {stat("Top Partner", topPartner?.name?.split(" ")[0] || "—", topPartner ? "Highest score" : "No data", C.blue)}
         {stat("Completed Jobs", jobs.filter((j) => j.status === "completed").length, "All partners", C.purple)}
       </div>
 
       <div style={S.card}>
-        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Partner Ranking</div>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Partner Ranking & Coaching</div>
 
         {partnerStats.length === 0 ? (
           <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No partners found.</div>
@@ -5535,6 +5632,7 @@ function PartnerScorecards({ jobs = [], partners = [], region }) {
           partnerStats.map((row, idx) => {
             const p = row.partner;
             const color = scoreColor(row.score);
+            const notes = buildCoaching(row);
 
             return (
               <div key={p.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
@@ -5578,6 +5676,36 @@ function PartnerScorecards({ jobs = [], partners = [], region }) {
                   {badge(row.issues + " issues", row.issues ? C.gold : C.accent)}
                   {badge(row.callbacks + " callbacks", row.callbacks ? (C.red || "#FF6B6B") : C.accent)}
                   {badge(row.proofComplete + "/" + row.completed.length + " full proof", row.proofRate >= 80 ? C.accent : C.gold)}
+                </div>
+
+                <div style={{ marginTop: 12, background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12 }}>
+                  <div style={{ fontSize: 13, fontWeight: 900, color: C.text, marginBottom: 8 }}>🧠 Coaching Recommendations</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {notes.map((note, i) => (
+                      <div key={i} style={{ border: `1px solid ${note.color}44`, background: `${note.color}11`, borderRadius: 10, padding: 10 }}>
+                        <div style={{ fontSize: 12, fontWeight: 900, color: note.color }}>{note.icon} {note.type}</div>
+                        <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>{note.text}</div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => copyCoachingNote(row)}
+                    style={{
+                      marginTop: 10,
+                      minHeight: 40,
+                      width: "100%",
+                      borderRadius: 10,
+                      border: "none",
+                      background: C.accent,
+                      color: "#0A0F1E",
+                      fontWeight: 900,
+                      cursor: "pointer",
+                    }}
+                  >
+                    📋 Copy Coaching Note
+                  </button>
                 </div>
               </div>
             );
