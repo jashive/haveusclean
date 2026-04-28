@@ -5305,6 +5305,147 @@ function RevenueRecovery({ jobs = [], setTab }) {
   );
 }
 
+
+function ManagerBriefing({ jobs = [], partners = [], region, setTab }) {
+  const today = new Date().toISOString().split("T")[0];
+  const cur = region?.currencySymbol || "$";
+
+  const todayJobs = jobs.filter((j) => j.date === today);
+  const scheduled = todayJobs.filter((j) => j.status === "scheduled");
+  const inProgress = todayJobs.filter((j) => j.status === "in-progress");
+  const completedToday = todayJobs.filter((j) => j.status === "completed");
+  const completedAll = jobs.filter((j) => j.status === "completed");
+
+  const revenueToday = todayJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+  const profitToday = todayJobs.reduce((sum, j) => sum + (j.profit || 0), 0);
+  const partnerPayToday = todayJobs.reduce((sum, j) => sum + (j.partnerPay || j.pay || 0), 0);
+
+  const qualityRisks = completedAll.filter((j) => ["issue", "callback"].includes(j.qualityStatus));
+  const followupsNeeded = completedAll.filter((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
+  const missingReviews = completedAll.filter((j) => j.reviewStatus !== "received");
+  const missingReferrals = completedAll.filter((j) => j.referralStatus !== "received");
+
+  const proofNeeds = completedAll.filter((j) => {
+    const before = (j.beforePics || []).length;
+    const after = (j.afterPics || []).length;
+    const checked = !!j.checkIn && !!j.checkOut;
+    return !checked || before === 0 || after === 0;
+  });
+
+  const openJobs = todayJobs.filter((j) => j.status !== "completed");
+
+  const copyBriefing = async () => {
+    const lines = [
+      "Have Us Clean Morning Briefing",
+      "",
+      "Today jobs: " + todayJobs.length,
+      "Scheduled: " + scheduled.length,
+      "In progress: " + inProgress.length,
+      "Completed today: " + completedToday.length,
+      "Projected revenue today: " + cur + revenueToday,
+      "Projected profit today: " + cur + profitToday,
+      "",
+      "Priorities:",
+      "- Open jobs today: " + openJobs.length,
+      "- Quality risks: " + qualityRisks.length,
+      "- Follow-ups needed: " + followupsNeeded.length,
+      "- Missing reviews: " + missingReviews.length,
+      "- Missing referrals: " + missingReferrals.length,
+      "- Proof gaps: " + proofNeeds.length,
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Morning briefing copied.");
+    } catch {
+      window.prompt("Copy morning briefing:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const action = (title, count, body, tab, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start" }}>
+        <div>
+          <div style={{ fontSize: 14, fontWeight: 900, color }}>{title}</div>
+          <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, marginTop: 4 }}>{body}</div>
+        </div>
+        <div style={{ fontSize: 24, fontWeight: 900, color }}>{count}</div>
+      </div>
+      <button
+        type="button"
+        onClick={() => setTab && setTab(tab)}
+        style={{ marginTop: 10, minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.surface, color: C.text, fontWeight: 800, cursor: "pointer", padding: "8px 12px" }}
+      >
+        Open
+      </button>
+    </div>
+  );
+
+  const jobLine = (job) => {
+    const partnerNames = (job.partnerIds || [job.partnerId])
+      .map((id) => partners.find((p) => p.id === id)?.name)
+      .filter(Boolean)
+      .join(", ");
+
+    return (
+      <div key={job.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text }}>{job.client}</div>
+        <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{job.time || "Time TBD"} · {job.type} · {job.status}</div>
+        {partnerNames && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>👷 {partnerNames}</div>}
+        {job.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {job.address}</div>}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🌅 Morning Command Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Daily briefing for operations, proof, recovery, and growth.</div>
+        </div>
+        <button type="button" onClick={copyBriefing} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Briefing
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today Jobs", todayJobs.length, "Scheduled + active", C.accent)}
+        {stat("In Progress", inProgress.length, "Currently active", C.gold)}
+        {stat("Revenue", cur + revenueToday, "Projected today", C.blue)}
+        {stat("Profit", cur + profitToday, "Projected today", C.purple)}
+        {stat("Partner Pay", cur + partnerPayToday, "Projected today", C.accent)}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>🚨 Manager Priorities</div>
+        {action("Open jobs today", openJobs.length, "Make sure scheduled/in-progress jobs are covered.", "myschedule", C.accent)}
+        {action("Quality risks", qualityRisks.length, "Issues and callbacks that need recovery.", "recovery", C.gold)}
+        {action("Follow-ups needed", followupsNeeded.length, "Completed jobs that need customer touchpoint.", "proof_archive", C.blue)}
+        {action("Proof gaps", proofNeeds.length, "Completed jobs missing check-in/out or before/after proof.", "proof_archive", C.red || "#FF6B6B")}
+        {action("Review/referral opportunities", missingReviews.length + missingReferrals.length, "Growth asks waiting to be sent or received.", "recovery", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>📅 Today’s Job Board</div>
+        {todayJobs.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, textAlign: "center", padding: 20 }}>No jobs scheduled today.</div>
+        ) : (
+          todayJobs.map(jobLine)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -5856,6 +5997,7 @@ export default function App() {
   const NAV_GROUPS = [
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
+      { id:"briefing",  label:"🌅 Briefing",     desc:"Morning command center" },
       { id:"myschedule", label:"📅 My Schedule", desc:"Cleaner-first today schedule" },
       { id:"proof_archive", label:"📁 Proof Archive", desc:"Completed proof reports" },
       { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
@@ -6028,6 +6170,7 @@ export default function App() {
 
       <main style={S.main}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="briefing"       && <ManagerBriefing jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="myschedule" && (
           <MySchedule
             jobs={regionJobs}
