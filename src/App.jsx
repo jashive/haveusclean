@@ -5170,6 +5170,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
 }
 
 
+
 function RevenueRecovery({ jobs = [], setTab }) {
   const completed = jobs.filter((j) => j.status === "completed");
   const issues = completed.filter((j) => j.qualityStatus === "issue");
@@ -5178,6 +5179,23 @@ function RevenueRecovery({ jobs = [], setTab }) {
   const followupsNeeded = completed.filter((j) => !j.followUpStatus || j.followUpStatus === "none" || j.followUpStatus === "needed");
   const reviewsMissing = completed.filter((j) => j.reviewStatus !== "received");
   const referralsMissing = completed.filter((j) => j.referralStatus !== "received");
+
+  const actionItems = [
+    ...callbacks.map((job) => ({ job, priority: 1, type: "Callback", icon: "☎️", color: C.red || "#FF6B6B", script: `Hi ${job.client?.split(" ")[0] || "there"}, this is Have Us Clean. I wanted to personally follow up about your recent service and make sure we take care of anything that needs attention.` })),
+    ...issues.map((job) => ({ job, priority: 2, type: "Quality Issue", icon: "⚠️", color: C.gold, script: `Hi ${job.client?.split(" ")[0] || "there"}, this is Have Us Clean. I saw your job was flagged for quality follow-up. We take that seriously and want to make it right.` })),
+    ...followupsNeeded.map((job) => ({ job, priority: 3, type: "Follow-Up", icon: "📌", color: C.blue, script: `Hi ${job.client?.split(" ")[0] || "there"}, this is Have Us Clean. Your cleaning is complete, and I wanted to check that everything looks good.` })),
+    ...reviewsMissing.slice(0, 8).map((job) => ({ job, priority: 4, type: "Review Ask", icon: "⭐", color: C.purple, script: `Hi ${job.client?.split(" ")[0] || "there"}, if you were happy with your Have Us Clean service, would you be willing to leave us a quick review? It really helps our small business grow.` })),
+    ...referralsMissing.slice(0, 8).map((job) => ({ job, priority: 5, type: "Referral Ask", icon: "🤝", color: C.accent, script: `Hi ${job.client?.split(" ")[0] || "there"}, if you know a friend, neighbour, property manager, or business owner who could use reliable cleaning help, we would be grateful for the referral.` })),
+  ].sort((a, b) => a.priority - b.priority);
+
+  const copyText = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Script copied to clipboard.");
+    } catch {
+      window.prompt("Copy this script:", text);
+    }
+  };
 
   const card = (title, value, sub, color = C.accent) => (
     <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
@@ -5202,28 +5220,67 @@ function RevenueRecovery({ jobs = [], setTab }) {
     </div>
   );
 
+  const actionRow = (item, idx) => (
+    <div key={item.type + item.job.id + idx} style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${item.color}`, borderRadius: 12, padding: 14, marginBottom: 10 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "flex-start", marginBottom: 8 }}>
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 900, color: item.color }}>{item.icon} Priority {item.priority}: {item.type}</div>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginTop: 4 }}>{item.job.client}</div>
+          <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{item.job.type} · {item.job.date || "No date"}</div>
+        </div>
+        <span style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>#{idx + 1}</span>
+      </div>
+
+      <div style={{ fontSize: 12, color: C.muted, lineHeight: 1.5, background: C.surface, borderRadius: 10, padding: 10, marginBottom: 10 }}>
+        {item.script}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => copyText(item.script)}
+          style={{ minHeight: 40, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}
+        >
+          📋 Copy Script
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab && setTab("proof_archive")}
+          style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.surface, color: C.text, fontWeight: 800, cursor: "pointer" }}
+        >
+          📁 Proof Archive
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
         <div>
           <div style={S.h2}>💰 Revenue Recovery</div>
-          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Find money left on the table after completed jobs.</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Daily action plan to recover revenue, reviews, referrals, and client trust.</div>
         </div>
-        <button
-          type="button"
-          onClick={() => setTab && setTab("proof_archive")}
-          style={{ ...S.btn("primary"), minHeight: 40 }}
-        >
+        <button type="button" onClick={() => setTab && setTab("proof_archive")} style={{ ...S.btn("primary"), minHeight: 40 }}>
           📁 Open Proof Archive
         </button>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,180px),1fr))", gap: 12, marginBottom: 18 }}>
+        {card("Daily Actions", actionItems.length, "Prioritized queue", C.accent)}
         {card("Unresolved Quality", unresolvedQuality.length, "Issues + callbacks", C.gold)}
         {card("Callbacks", callbacks.length, "Needs customer recovery", C.red || "#FF6B6B")}
-        {card("Follow-Ups Needed", followupsNeeded.length, "Not sent / needed", C.blue)}
         {card("Reviews Missing", reviewsMissing.length, "Review opportunity", C.purple)}
         {card("Referrals Missing", referralsMissing.length, "Referral opportunity", C.accent)}
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>✅ Today’s Recovery Action Plan</div>
+        {actionItems.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 14, textAlign: "center" }}>No recovery actions today.</div>
+        ) : (
+          actionItems.slice(0, 12).map(actionRow)
+        )}
       </div>
 
       <div style={{ ...S.card, marginBottom: 16 }}>
