@@ -13686,6 +13686,290 @@ function SystemTestCenter({ jobs = [], partners = [], coldLeads = [], resLeads =
   );
 }
 
+
+function ActionAuditCenter({ jobs = [], partners = [], coldLeads = [], resLeads = [], region, setTab }) {
+  const [lastRun, setLastRun] = useState(null);
+  const [filter, setFilter] = useState("all");
+  const cur = region?.currencySymbol || "$";
+  const today = new Date().toISOString().split("T")[0];
+
+  const completedJobs = jobs.filter((j) => j.status === "completed");
+  const activeJobs = jobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+  const todayJobs = jobs.filter((j) => j.date === today);
+  const unpaidJobs = completedJobs.filter((j) => (j.paymentStatus || j.invoiceStatus || "unpaid") !== "paid");
+  const paidJobs = completedJobs.filter((j) => (j.paymentStatus || j.invoiceStatus || "") === "paid");
+  const unassignedJobs = activeJobs.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+
+  const proofComplete = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+    return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklist > 0;
+  };
+
+  const proofGaps = completedJobs.filter((j) => !proofComplete(j));
+  const badColdLeads = coldLeads.filter((lead) => {
+    const status = String(lead.status || "").toLowerCase();
+    const name = lead.company || lead.name || "";
+    return status.includes("bad") || status.includes("dead") || status.includes("disqualified") || status.includes("invalid") || !name;
+  });
+
+  const staleColdLeads = coldLeads.filter((lead) => {
+    const status = String(lead.status || "New");
+    return ["New", "Contacted", "Follow Up"].includes(status);
+  });
+
+  const emptyResLeads = resLeads.filter((lead) => !(lead.name || lead.client || lead.fullName || lead.customerName) && !(lead.email || lead.phone));
+
+  const revenue = jobs.reduce((s, j) => s + (j.clientPrice || 0), 0);
+  const outstanding = unpaidJobs.reduce((s, j) => s + (j.clientPrice || 0), 0);
+
+  const mk = (area, action, status, severity, evidence, expected, fix, tab) => ({
+    area, action, status, severity, evidence, expected, fix, tab
+  });
+
+  const tests = [
+    mk("Leads", "Residential lead delete / archive", resLeads.length ? "warn" : "warn", "high",
+      resLeads.length + " residential lead(s) loaded; app needs confirmed delete/archive behavior.",
+      "Bad/duplicate residential leads should be removable from the active list and stay removed after refresh/deploy.",
+      "Add permanent delete/archive handlers for resLeads using setResLeads and storage/API persistence.",
+      "lead_capture_integration"
+    ),
+    mk("Leads", "Cold lead permanent delete", badColdLeads.length || coldLeads.length ? "fail" : "warn", "critical",
+      badColdLeads.length + " obvious bad cold lead(s); " + coldLeads.length + " cold lead(s) total.",
+      "Bad cold leads must be permanently deleted or archived so they stop appearing in Sales Engine/B2B Pipeline.",
+      "Add deleteColdLead(id) and archiveColdLead(id) actions, persist to localStorage/API, and remove from Sales/B2B queues.",
+      "b2b_pipeline"
+    ),
+    mk("Leads", "Cold lead qualification workflow", staleColdLeads.length ? "warn" : "pass", "medium",
+      staleColdLeads.length + " cold lead(s) still in New/Contacted/Follow Up style stages.",
+      "Each lead should have a clear state: New, Contacted, Follow Up, Meeting, Proposal, Won, Lost, Archived, Bad Lead.",
+      "Add status controls and exclude Archived/Bad Lead from active queues.",
+      "sales_execution_engine"
+    ),
+    mk("Jobs", "Job delete/cancel workflow", jobs.length ? "warn" : "warn", "high",
+      jobs.length + " job(s) loaded.",
+      "Wrong/test jobs should be cancellable or archived without breaking revenue/KPI history.",
+      "Add cancel/archive job action and hide archived jobs from active ops while preserving reporting if needed.",
+      "dashboard"
+    ),
+    mk("Dispatch", "Assignment workflow", unassignedJobs.length ? "warn" : "pass", "high",
+      unassignedJobs.length + " active unassigned job(s).",
+      "Every scheduled/in-progress job should have a partner assignment before dispatch.",
+      "Add clear assign/unassign controls and validate before daily dispatch.",
+      "dispatch_center"
+    ),
+    mk("Field Ops", "Proof completion lock", proofGaps.length ? "warn" : "pass", "high",
+      proofGaps.length + " completed job(s) missing proof.",
+      "Completed jobs should require check-in, before photos, checklist, after photos, and check-out before payment/review.",
+      "Keep Field Flow; add persistence so workflow completion survives refresh.",
+      "real_partner_workflow"
+    ),
+    mk("Payments", "Mark paid persistence", paidJobs.length || unpaidJobs.length ? "warn" : "warn", "critical",
+      paidJobs.length + " paid / " + unpaidJobs.length + " unpaid completed job(s).",
+      "Paid/unpaid/overdue status must persist after refresh and be tied to Stripe confirmation.",
+      "Connect Stripe payment links first; then add paymentStatus persistence and optional webhook update.",
+      "payment_invoicing"
+    ),
+    mk("Payments", "Stripe live payment wiring", "warn", "critical",
+      "Integration layer exists but live Stripe links/API are not confirmed in-app.",
+      "Invoice/reminder actions should include actual Stripe payment links.",
+      "Add Stripe payment link fields and inject links into invoice/reminder templates.",
+      "integration_layer"
+    ),
+    mk("Sales", "Sales action completion persistence", coldLeads.length || resLeads.length ? "warn" : "medium", "medium",
+      (coldLeads.length + resLeads.length) + " total sales/lead records.",
+      "Done/followed-up lead actions should persist and change queue state.",
+      "Add lastContacted, nextFollowUp, outcome, and archive/bad-lead fields.",
+      "sales_execution_engine"
+    ),
+    mk("Automation", "Auto-run actions are simulated", "warn", "medium",
+      "Auto-Pilot and Real Automation loops exist, but they do not yet send real emails/SMS/invoices.",
+      "Auto-run loops should either execute via API or produce a clearly approved batch.",
+      "Keep owner approval gates; connect Twilio/email/Stripe after manual validation.",
+      "auto_pilot_engine"
+    ),
+    mk("Comms", "Message copy works but send is manual", "warn", "medium",
+      "Comms Engine prepares messages; live send is not connected.",
+      "Customer/partner/B2B messages should send through chosen SMS/email provider.",
+      "Add provider choice: Gmail/Outlook, Twilio, or manual copy mode.",
+      "communication_engine"
+    ),
+    mk("KPI", "KPI accuracy depends on data discipline", jobs.length ? "pass" : "warn", "medium",
+      "Revenue " + cur + revenue + "; outstanding " + cur + outstanding + ".",
+      "KPI should reflect real jobs, payment statuses, and lead stages.",
+      "After delete/archive/payment persistence, KPI Intel becomes reliable.",
+      "kpi_owner_intelligence"
+    ),
+    mk("Growth", "Growth flywheel requires real conversion events", jobs.length || resLeads.length ? "warn" : "warn", "medium",
+      "Jobs " + jobs.length + "; residential leads " + resLeads.length + ".",
+      "Lead → job → paid → repeat should be tracked with real state changes.",
+      "Add conversion timestamps and source tracking.",
+      "growth_flywheel"
+    ),
+    mk("Scale", "Scaling should wait until home workflow is stable", "pass", "medium",
+      "City/region scorecards exist.",
+      "Only scale once delete/archive, payment, lead intake, and field proof workflows are stable.",
+      "Use City Scale after 14-day live operating test.",
+      "multi_city_scaling"
+    )
+  ];
+
+  const visible = tests.filter((t) => filter === "all" ? true : t.status === filter || t.severity === filter);
+  const pass = tests.filter((t) => t.status === "pass").length;
+  const warn = tests.filter((t) => t.status === "warn").length;
+  const fail = tests.filter((t) => t.status === "fail").length;
+  const critical = tests.filter((t) => t.severity === "critical").length;
+  const score = Math.round((pass / tests.length) * 100);
+
+  const priorityFixes = tests
+    .filter((t) => t.status === "fail" || t.severity === "critical")
+    .map((t) => t.fix);
+
+  const copyReport = async () => {
+    const lines = [
+      "Have Us Clean Action Audit Report",
+      "",
+      "Score: " + score + "/100",
+      "Pass: " + pass,
+      "Warn: " + warn,
+      "Fail: " + fail,
+      "Critical items: " + critical,
+      "Last run: " + (lastRun ? new Date(lastRun).toLocaleString() : "Not run in this session"),
+      "",
+      "Business snapshot:",
+      "- Jobs: " + jobs.length,
+      "- Active jobs: " + activeJobs.length,
+      "- Today jobs: " + todayJobs.length,
+      "- Completed jobs: " + completedJobs.length,
+      "- Partners: " + partners.length,
+      "- Residential leads: " + resLeads.length,
+      "- Cold leads: " + coldLeads.length,
+      "- Bad cold leads detected: " + badColdLeads.length,
+      "- Empty residential leads detected: " + emptyResLeads.length,
+      "- Unassigned active jobs: " + unassignedJobs.length,
+      "- Proof gaps: " + proofGaps.length,
+      "- Paid jobs: " + paidJobs.length,
+      "- Unpaid jobs: " + unpaidJobs.length,
+      "- Revenue: " + cur + revenue,
+      "- Outstanding: " + cur + outstanding,
+      "",
+      "Priority fixes:",
+      ...priorityFixes.map((f, i) => (i + 1) + ". " + f),
+      "",
+      "Audit detail:",
+      ...tests.map((t, i) =>
+        (i + 1) + ". [" + t.status.toUpperCase() + " / " + t.severity.toUpperCase() + "] " + t.area + " — " + t.action + "\n" +
+        "   Evidence: " + t.evidence + "\n" +
+        "   Expected: " + t.expected + "\n" +
+        "   Fix: " + t.fix
+      ),
+      "",
+      "Conclusion:",
+      "The structure is built. The next development work should focus on persistence and real actions, especially permanent delete/archive for cold leads and residential leads, payment status persistence, and Stripe link wiring."
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Action audit report copied.");
+    } catch {
+      window.prompt("Copy action audit report:", lines);
+    }
+  };
+
+  const colorFor = (status) => status === "pass" ? C.accent : status === "warn" ? C.gold : C.red || "#FF6B6B";
+  const severityColor = (sev) => sev === "critical" ? (C.red || "#FF6B6B") : sev === "high" ? C.gold : sev === "medium" ? C.blue : C.muted;
+  const scoreColor = score >= 70 ? C.accent : score >= 45 ? C.gold : C.red || "#FF6B6B";
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const auditCard = (test, idx) => {
+    const color = colorFor(test.status);
+    return (
+      <div key={idx} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color }}>{test.area}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{test.action}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{test.evidence}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ color, fontSize: 12, fontWeight: 900, textTransform: "uppercase" }}>{test.status}</div>
+            <div style={{ color: severityColor(test.severity), fontSize: 11, fontWeight: 900, textTransform: "uppercase", marginTop: 4 }}>{test.severity}</div>
+          </div>
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Expected:</strong> {test.expected}<br />
+          <strong style={{ color: C.text }}>Recommended fix:</strong> {test.fix}
+        </div>
+
+        {test.tab && (
+          <button type="button" onClick={() => setTab && setTab(test.tab)} style={{ minHeight: 40, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer", marginTop: 10 }}>
+            Open Related Module
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🛠️ Action Audit Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Tests whether workflows/actions are actually usable, persistent, and business-ready.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={() => setLastRun(new Date().toISOString())} style={{ ...S.btn("primary"), minHeight: 40 }}>▶ Run Audit</button>
+          <button type="button" onClick={copyReport} style={{ ...S.btn("ghost"), minHeight: 40 }}>📋 Copy Report</button>
+        </div>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${scoreColor}55`, borderLeft: `5px solid ${scoreColor}`, borderRadius: 18, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".08em" }}>Functional Readiness Score</div>
+        <div style={{ fontSize: 46, fontWeight: 900, color: scoreColor, marginTop: 4 }}>{score}/100</div>
+        <div style={{ fontSize: 13, color: C.muted }}>{lastRun ? "Last audit: " + new Date(lastRun).toLocaleString() : "Click Run Audit to timestamp this session."}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,145px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Pass", pass, "Ready", C.accent)}
+        {stat("Warn", warn, "Needs work", warn ? C.gold : C.accent)}
+        {stat("Fail", fail, "Broken/unsafe", fail ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Critical", critical, "Fix first", critical ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Cold Leads", coldLeads.length, badColdLeads.length + " bad detected", badColdLeads.length ? C.gold : C.blue)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 10 }}>Main Finding</div>
+        <div style={{ background: C.surface, border: `1px solid ${C.gold}55`, borderRadius: 12, padding: 12, color: C.muted, fontSize: 13, lineHeight: 1.5 }}>
+          The app has the operating structure, but the next code work should shift from adding dashboards to making core actions permanent: delete/archive bad leads, persist status changes, wire Stripe links, and make sales/payment/field state survive refresh.
+        </div>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, margin: "14px 0", flexWrap: "wrap" }}>
+        {["all", "fail", "warn", "pass", "critical", "high", "medium"].map((id) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {id === "all" ? "All" : id.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Functional Action Audit</div>
+        {visible.map(auditCard)}
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -14271,6 +14555,7 @@ export default function App() {
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
+      { id:"action_audit_center", label:"🛠️ Action Audit", desc:"Functional action audit center" },
       { id:"system_test_center", label:"🧪 QA Tests", desc:"System test center" },
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
@@ -14502,6 +14787,7 @@ export default function App() {
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="action_audit_center" && <ActionAuditCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="system_test_center" && <SystemTestCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
