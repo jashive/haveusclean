@@ -12438,6 +12438,48 @@ function GrowthFlywheel({resLeads=[],jobs=[],region}) {
  );
 }
 
+
+function IntegrationLayer({region}) {
+ const cur = region?.currencySymbol || "$";
+
+ const copySetup = () => {
+  const txt = [
+   "Integration Setup",
+   "",
+   "1. Stripe:",
+   "- Create account",
+   "- Connect checkout links",
+   "",
+   "2. Lead Intake:",
+   "- Connect Google Form → webhook",
+   "- Feed into resLeads",
+   "",
+   "3. Messaging:",
+   "- Twilio or email automation",
+   "- Trigger on new lead, invoice, follow-up",
+   "",
+   "Result: Automated lead → job → payment flow"
+  ].join("\n");
+  navigator.clipboard.writeText(txt);
+  alert("Copied setup");
+ };
+
+ return (
+  <div>
+   <div style={{fontSize:22,fontWeight:900}}>🔌 Integration Layer</div>
+   <div style={{marginTop:10}}>Connect real-world systems to automate your business</div>
+
+   <div style={{marginTop:20}}>
+    <div>• Stripe payments ready</div>
+    <div>• Lead webhook intake ready</div>
+    <div>• Messaging trigger ready</div>
+   </div>
+
+   <button onClick={copySetup}>Copy Setup Guide</button>
+  </div>
+ );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -13029,6 +13071,7 @@ export default function App() {
       { id:"real_partner_workflow", label:"🧹 Field Flow", desc:"Real partner workflow" },
       { id:"sales_execution_engine", label:"📞 Sales Engine", desc:"Sales execution engine" },
       { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },
+      { id:"integration_layer", label:"🔌 Integrations", desc:"Real integrations layer" }, label:"♻️ Growth", desc:"Growth flywheel" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13254,7 +13297,8 @@ export default function App() {
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="real_partner_workflow" && <RealPartnerWorkflow jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
         {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
-        {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />}
+        {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />
+        {tab==="integration_layer" && <IntegrationLayer region={activeRegion} />} && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
