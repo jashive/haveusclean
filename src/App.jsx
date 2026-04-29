@@ -13027,8 +13027,8 @@ export default function App() {
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
       { id:"real_partner_workflow", label:"🧹 Field Flow", desc:"Real partner workflow" },
-      { id:"sales_execution_engine",
-      { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },, label:"📞 Sales Engine", desc:"Sales execution engine" },
+      { id:"sales_execution_engine", label:"📞 Sales Engine", desc:"Sales execution engine" },
+      { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13253,8 +13253,8 @@ export default function App() {
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="real_partner_workflow" && <RealPartnerWorkflow jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
-        {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />
-        {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />} && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
+        {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
+        {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
