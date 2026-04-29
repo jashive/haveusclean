@@ -13158,6 +13158,334 @@ function KPIOwnerIntelligence({ jobs = [], partners = [], coldLeads = [], resLea
   );
 }
 
+
+function MultiCityScalingSystem({ jobs = [], partners = [], coldLeads = [], resLeads = [], regions = {}, activeRegion, setTab }) {
+  const [selected, setSelected] = useState("all");
+  const curDefault = activeRegion?.currencySymbol || "$";
+  const regionList = Object.values(regions || {}).length ? Object.values(regions || {}) : [activeRegion].filter(Boolean);
+
+  const regionId = (region) => region?.id || region?.code || region?.label || "default";
+
+  const citySummaries = regionList.map((region) => {
+    const id = regionId(region);
+    const cur = region?.currencySymbol || curDefault;
+
+    const cityJobs = jobs.filter((job) => !job.region || job.region === id);
+    const cityPartners = partners.filter((p) => !p.region || p.region === id);
+    const cityColdLeads = coldLeads.filter((lead) => !lead.region || lead.region === id || lead.market === id);
+    const cityResLeads = resLeads.filter((lead) => !lead.region || lead.region === id || lead.market === id);
+
+    const completed = cityJobs.filter((job) => job.status === "completed");
+    const active = cityJobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+    const unassigned = active.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+
+    const revenue = cityJobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0);
+    const partnerPay = cityJobs.reduce((sum, job) => sum + (job.partnerPay || job.pay || 0), 0);
+    const profit = cityJobs.reduce((sum, job) => sum + (job.profit ?? ((job.clientPrice || 0) - (job.partnerPay || job.pay || 0))), 0);
+    const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+
+    const activePartners = cityPartners.filter((p) => p.onboarded && ["available", "active"].includes(p.status)).length;
+    const onboardingPartners = cityPartners.filter((p) => !p.onboarded || p.status === "onboarding").length;
+    const capacityGap = Math.max(0, active.length - activePartners);
+
+    const proofComplete = (job) => {
+      const before = (job.beforePics || []).length;
+      const after = (job.afterPics || []).length;
+      const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+      return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklist > 0;
+    };
+
+    const proofGaps = completed.filter((job) => !proofComplete(job)).length;
+    const qualityIssues = completed.filter((job) => ["issue", "callback"].includes(job.qualityStatus)).length;
+    const unpaid = completed.filter((job) => (job.paymentStatus || job.invoiceStatus || "unpaid") !== "paid").length;
+
+    const b2bPipeline = cityColdLeads.reduce((sum, lead) => {
+      const score = Number(lead.priority_score || lead.priorityScore || 50);
+      return sum + (lead.value || 500 + score * 10);
+    }, 0);
+    const residentialPipeline = cityResLeads.reduce((sum, lead) => sum + (lead.estimatedPrice || lead.price || lead.quote || 180), 0);
+    const pipeline = b2bPipeline + residentialPipeline;
+
+    let operatingScore = 50;
+    operatingScore += margin >= 30 ? 12 : revenue > 0 ? -8 : 0;
+    operatingScore += activePartners >= 2 ? 15 : activePartners === 1 ? 8 : -10;
+    operatingScore += capacityGap === 0 ? 10 : -capacityGap * 5;
+    operatingScore += unassigned.length === 0 ? 8 : -unassigned.length * 4;
+    operatingScore += qualityIssues === 0 ? 8 : -qualityIssues * 6;
+    operatingScore += proofGaps === 0 ? 7 : -proofGaps * 3;
+    operatingScore += pipeline > 0 ? 10 : -5;
+    operatingScore += cityJobs.length > 0 ? 5 : -5;
+    operatingScore = Math.max(0, Math.min(100, Math.round(operatingScore)));
+
+    const stage = operatingScore >= 85 ? "Scale"
+      : operatingScore >= 70 ? "Manager-Ready"
+      : operatingScore >= 55 ? "Pilot"
+      : operatingScore >= 35 ? "Setup"
+      : "Research";
+
+    const gaps = [];
+    if (activePartners < 2) gaps.push("Need 2+ active partners");
+    if (capacityGap > 0) gaps.push("Capacity gap " + capacityGap);
+    if (pipeline <= 0) gaps.push("Need sales pipeline");
+    if (unassigned.length > 0) gaps.push(unassigned.length + " unassigned active job(s)");
+    if (margin < 30 && revenue > 0) gaps.push("Margin under target");
+    if (qualityIssues > 0) gaps.push(qualityIssues + " quality issue(s)");
+    if (proofGaps > 0) gaps.push(proofGaps + " proof gap(s)");
+    if (unpaid > 0) gaps.push(unpaid + " unpaid job(s)");
+    if (cityJobs.length === 0) gaps.push("No job history yet");
+
+    return {
+      id,
+      label: region?.label || id,
+      flag: region?.flag || "📍",
+      cur,
+      cityJobs,
+      cityPartners,
+      cityColdLeads,
+      cityResLeads,
+      completed,
+      active,
+      unassigned,
+      revenue,
+      partnerPay,
+      profit,
+      margin,
+      activePartners,
+      onboardingPartners,
+      capacityGap,
+      proofGaps,
+      qualityIssues,
+      unpaid,
+      b2bPipeline,
+      residentialPipeline,
+      pipeline,
+      operatingScore,
+      stage,
+      gaps,
+    };
+  }).sort((a, b) => b.operatingScore - a.operatingScore);
+
+  const visible = selected === "all" ? citySummaries : citySummaries.filter((city) => city.id === selected);
+  const totalRevenue = citySummaries.reduce((sum, c) => sum + c.revenue, 0);
+  const totalProfit = citySummaries.reduce((sum, c) => sum + c.profit, 0);
+  const totalPipeline = citySummaries.reduce((sum, c) => sum + c.pipeline, 0);
+  const scaleReady = citySummaries.filter((c) => c.stage === "Scale" || c.stage === "Manager-Ready").length;
+  const needsSetup = citySummaries.filter((c) => c.stage === "Setup" || c.stage === "Research").length;
+
+  const scoreColor = (score) => score >= 85 ? C.accent : score >= 70 ? C.blue : score >= 55 ? C.gold : C.red || "#FF6B6B";
+  const stageColor = (stage) => stage === "Scale" ? C.accent : stage === "Manager-Ready" ? C.blue : stage === "Pilot" ? C.gold : C.muted;
+
+  const cityLaunchSteps = (city) => {
+    const steps = [];
+    if (city.activePartners < 2) steps.push("Recruit/onboard at least two reliable active partners.");
+    if (city.pipeline <= 0) steps.push("Build a starter pipeline: property managers, offices, Airbnb hosts, residential leads.");
+    if (city.cityJobs.length === 0) steps.push("Run 3 to 5 pilot jobs to test pricing, proof, dispatch, and partner performance.");
+    if (city.margin < 30 && city.revenue > 0) steps.push("Tune city pricing and partner pay until margin is above 30%.");
+    if (city.qualityIssues > 0 || city.proofGaps > 0) steps.push("Stabilize field quality and proof workflow before scaling.");
+    if (city.unpaid > 0) steps.push("Clear payment collection before adding volume.");
+    steps.push("Assign a city manager or accountable operator.");
+    steps.push("Run Daily Ops, Auto-Pilot, KPI Intel, Payments, Sales Engine, and Field Flow every operating day.");
+    return steps;
+  };
+
+  const copyCityBrief = async (city) => {
+    const lines = [
+      "Have Us Clean Multi-City Launch Brief",
+      "",
+      "City/Region: " + city.label,
+      "Stage: " + city.stage,
+      "Operating score: " + city.operatingScore + "/100",
+      "Revenue: " + city.cur + city.revenue,
+      "Profit: " + city.cur + city.profit,
+      "Margin: " + city.margin + "%",
+      "Pipeline: " + city.cur + city.pipeline,
+      "Active partners: " + city.activePartners,
+      "Capacity gap: " + city.capacityGap,
+      "Unassigned jobs: " + city.unassigned.length,
+      "Quality issues: " + city.qualityIssues,
+      "Proof gaps: " + city.proofGaps,
+      "Unpaid jobs: " + city.unpaid,
+      "",
+      "Gaps:",
+      ...(city.gaps.length ? city.gaps.map((g) => "- " + g) : ["- No major gaps"]),
+      "",
+      "Launch/scale steps:",
+      ...cityLaunchSteps(city).map((s, i) => (i + 1) + ". " + s),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("City launch brief copied.");
+    } catch {
+      window.prompt("Copy city launch brief:", lines);
+    }
+  };
+
+  const copyScalePlan = async () => {
+    const lines = [
+      "Have Us Clean Multi-City Scaling Plan",
+      "",
+      "Cities/regions: " + citySummaries.length,
+      "Scale/manager ready: " + scaleReady,
+      "Need setup/research: " + needsSetup,
+      "Total revenue: " + curDefault + totalRevenue,
+      "Total profit: " + curDefault + totalProfit,
+      "Total pipeline: " + curDefault + totalPipeline,
+      "",
+      "City scoreboard:",
+      ...citySummaries.map((city, i) =>
+        (i + 1) + ". " + city.label + " — " + city.stage + " — " + city.operatingScore + "/100 — revenue " + city.cur + city.revenue + " — pipeline " + city.cur + city.pipeline
+      ),
+      "",
+      "Standard city clone playbook:",
+      "1. Choose city and define service radius.",
+      "2. Recruit 2+ active partners.",
+      "3. Build sales list and lead capture source.",
+      "4. Run pilot jobs with proof/checklist/payment enforcement.",
+      "5. Turn on Daily Ops, Auto-Pilot, KPI Intel, Payments, Sales, and Field Flow.",
+      "6. Assign city manager once operating score is 70+.",
+      "7. Scale ad spend/outreach once operating score is 85+.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Multi-city scale plan copied.");
+    } catch {
+      window.prompt("Copy scale plan:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const cityCard = (city) => {
+    const color = scoreColor(city.operatingScore);
+
+    return (
+      <div key={city.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.text }}>{city.flag} {city.label}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+              {city.cityJobs.length} job(s) · {city.cityPartners.length} partner(s) · {city.cityColdLeads.length + city.cityResLeads.length} lead(s)
+            </div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 30, fontWeight: 900, color }}>{city.operatingScore}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>score</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Stage</div>
+            <div style={{ fontSize: 15, fontWeight: 900, color: stageColor(city.stage) }}>{city.stage}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Revenue</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>{city.cur}{city.revenue}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Profit</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: city.profit >= 0 ? C.accent : C.red || "#FF6B6B" }}>{city.cur}{city.profit}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Pipeline</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.blue }}>{city.cur}{city.pipeline}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(city.stage, stageColor(city.stage))}
+          {badge(city.activePartners + " active partners", city.activePartners >= 2 ? C.accent : C.gold)}
+          {city.capacityGap > 0 && badge("Capacity gap " + city.capacityGap, C.red || "#FF6B6B")}
+          {city.unassigned.length > 0 && badge(city.unassigned.length + " unassigned", C.gold)}
+          {city.margin > 0 && badge(city.margin + "% margin", city.margin >= 30 ? C.accent : C.gold)}
+          {city.qualityIssues > 0 && badge(city.qualityIssues + " quality issue(s)", C.red || "#FF6B6B")}
+          {city.proofGaps > 0 && badge(city.proofGaps + " proof gap(s)", C.gold)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.text, marginBottom: 6 }}>City Manager Priorities</div>
+          {city.gaps.length === 0 ? (
+            <div style={{ color: C.muted, fontSize: 12 }}>No major gaps. City can push volume and manager accountability.</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 18, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+              {city.gaps.slice(0, 6).map((gap, i) => <li key={i}>{gap}</li>)}
+            </ul>
+          )}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(110px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => copyCityBrief(city)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Copy Brief
+          </button>
+          <button type="button" onClick={() => setTab && setTab("daily_ops")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Daily Ops
+          </button>
+          <button type="button" onClick={() => setTab && setTab("kpi_owner_intelligence")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            KPI
+          </button>
+          <button type="button" onClick={() => setTab && setTab("sales_execution_engine")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Sales
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🏙️ Multi-City Scaling System</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>City scorecards, manager priorities, clone playbook, and launch readiness.</div>
+        </div>
+        <button type="button" onClick={copyScalePlan} style={{ ...S.btn("primary"), minHeight: 40 }}>📋 Copy Scale Plan</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Cities", citySummaries.length, "Markets", C.accent)}
+        {stat("Ready", scaleReady, "Manager/scale ready", scaleReady ? C.accent : C.gold)}
+        {stat("Revenue", curDefault + totalRevenue, "All cities", C.blue)}
+        {stat("Profit", curDefault + totalProfit, "All cities", totalProfit >= 0 ? C.accent : C.red || "#FF6B6B")}
+        {stat("Pipeline", curDefault + totalPipeline, "Demand pool", C.purple)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        <button type="button" onClick={() => setSelected("all")} style={{ ...S.btn(selected === "all" ? "primary" : "ghost"), minHeight: 40 }}>All</button>
+        {citySummaries.map((city) => (
+          <button key={city.id} type="button" onClick={() => setSelected(city.id)} style={{ ...S.btn(selected === city.id ? "primary" : "ghost"), minHeight: 40 }}>
+            {city.flag} {city.id}
+          </button>
+        ))}
+        <button type="button" onClick={() => setTab && setTab("multi_region_expansion")} style={{ ...S.btn("ghost"), minHeight: 40 }}>Expansion</button>
+        <button type="button" onClick={() => setTab && setTab("scale_center")} style={{ ...S.btn("ghost"), minHeight: 40 }}>Scale</button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>City Operating Scorecards</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No cities found.</div>
+        ) : (
+          visible.map(cityCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -13752,6 +14080,7 @@ export default function App() {
       { id:"integration_layer", label:"🔌 Integrations", desc:"Real integrations layer" },
       { id:"auto_pilot_engine", label:"✈️ Auto-Pilot", desc:"Auto-pilot engine" },
       { id:"kpi_owner_intelligence", label:"📈 KPI Intel", desc:"KPI and owner intelligence" },
+      { id:"multi_city_scaling", label:"🏙️ City Scale", desc:"Multi-city scaling system" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13981,6 +14310,7 @@ export default function App() {
         {tab==="integration_layer" && <IntegrationLayer region={activeRegion} />}
         {tab==="auto_pilot_engine" && <AutoPilotEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="kpi_owner_intelligence" && <KPIOwnerIntelligence jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="multi_city_scaling" && <MultiCityScalingSystem jobs={jobs} partners={partners} coldLeads={coldLeads} resLeads={resLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
