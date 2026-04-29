@@ -12907,6 +12907,257 @@ function AutoPilotEngine({ jobs = [], partners = [], coldLeads = [], resLeads = 
   );
 }
 
+
+function KPIOwnerIntelligence({ jobs = [], partners = [], coldLeads = [], resLeads = [], region, setTab }) {
+  const [range, setRange] = useState("week");
+  const cur = region?.currencySymbol || "$";
+  const now = new Date();
+
+  const parseDate = (dateStr) => {
+    const d = new Date((dateStr || "") + "T00:00:00");
+    return Number.isNaN(d.getTime()) ? null : d;
+  };
+
+  const daysAgo = (days) => {
+    const d = new Date(now);
+    d.setDate(d.getDate() - days);
+    return d;
+  };
+
+  const inWindow = (job, days) => {
+    const d = parseDate(job.date);
+    return d && d >= daysAgo(days) && d <= now;
+  };
+
+  const inPrevWindow = (job, days) => {
+    const d = parseDate(job.date);
+    const start = daysAgo(days * 2);
+    const end = daysAgo(days);
+    return d && d >= start && d < end;
+  };
+
+  const days = range === "month" ? 30 : 7;
+  const label = range === "month" ? "30 days" : "7 days";
+
+  const currentJobs = jobs.filter((job) => inWindow(job, days));
+  const previousJobs = jobs.filter((job) => inPrevWindow(job, days));
+  const completed = currentJobs.filter((j) => j.status === "completed");
+  const active = jobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+
+  const sumRevenue = (arr) => arr.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+  const sumPay = (arr) => arr.reduce((sum, j) => sum + (j.partnerPay || j.pay || 0), 0);
+  const sumProfit = (arr) => arr.reduce((sum, j) => sum + (j.profit ?? ((j.clientPrice || 0) - (j.partnerPay || j.pay || 0))), 0);
+
+  const revenue = sumRevenue(currentJobs);
+  const prevRevenue = sumRevenue(previousJobs);
+  const partnerPay = sumPay(currentJobs);
+  const profit = sumProfit(currentJobs);
+  const prevProfit = sumProfit(previousJobs);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+  const prevMargin = prevRevenue ? Math.round((prevProfit / prevRevenue) * 100) : 0;
+  const revenueTrend = prevRevenue ? Math.round(((revenue - prevRevenue) / prevRevenue) * 100) : revenue > 0 ? 100 : 0;
+  const profitTrend = prevProfit ? Math.round(((profit - prevProfit) / Math.abs(prevProfit || 1)) * 100) : profit > 0 ? 100 : 0;
+
+  const paidJobs = completed.filter((j) => (j.paymentStatus || j.invoiceStatus || "") === "paid");
+  const unpaidJobs = completed.filter((j) => (j.paymentStatus || j.invoiceStatus || "unpaid") !== "paid");
+  const paymentRate = completed.length ? Math.round((paidJobs.length / completed.length) * 100) : 0;
+  const outstanding = unpaidJobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+
+  const proofComplete = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+    return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklist > 0;
+  };
+
+  const proofGaps = completed.filter((j) => !proofComplete(j));
+  const proofRate = completed.length ? Math.round(((completed.length - proofGaps.length) / completed.length) * 100) : 0;
+  const qualityIssues = completed.filter((j) => ["issue", "callback"].includes(j.qualityStatus));
+  const qualityRate = completed.length ? Math.round(((completed.length - qualityIssues.length) / completed.length) * 100) : 100;
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const capacityGap = Math.max(0, active.length - activePartners.length);
+
+  const clientCounts = jobs.reduce((acc, job) => {
+    const key = (job.email || job.client || "Unknown").toLowerCase();
+    if (!acc[key]) acc[key] = { name: job.client || "Unknown", jobs: 0, revenue: 0 };
+    acc[key].jobs += 1;
+    acc[key].revenue += job.clientPrice || 0;
+    return acc;
+  }, {});
+  const repeatClients = Object.values(clientCounts).filter((c) => c.jobs > 1);
+  const retentionRate = Object.keys(clientCounts).length ? Math.round((repeatClients.length / Object.keys(clientCounts).length) * 100) : 0;
+
+  const openLeads = (resLeads || []).length + (coldLeads || []).length;
+  const b2bPipeline = (coldLeads || []).reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+  const leadToJobRate = openLeads ? Math.round((jobs.length / openLeads) * 100) : 0;
+
+  const partnerStats = partners.map((p) => {
+    const pj = currentJobs.filter((j) => (j.partnerIds || [j.partnerId]).includes(p.id));
+    const rev = sumRevenue(pj);
+    const issues = pj.filter((j) => ["issue", "callback"].includes(j.qualityStatus)).length;
+    const proofs = pj.filter((j) => j.status === "completed" && proofComplete(j)).length;
+    return { partner: p, jobs: pj.length, revenue: rev, issues, proofs };
+  }).sort((a, b) => b.revenue - a.revenue);
+
+  let score = 50;
+  score += revenueTrend >= 0 ? 10 : -10;
+  score += profitTrend >= 0 ? 10 : -10;
+  score += margin >= 35 ? 15 : margin >= 25 ? 8 : -10;
+  score += paymentRate >= 80 ? 10 : paymentRate >= 60 ? 4 : -10;
+  score += proofRate >= 80 ? 8 : -8;
+  score += qualityRate >= 90 ? 8 : -8;
+  score += capacityGap === 0 ? 7 : -capacityGap * 5;
+  score += retentionRate >= 25 ? 7 : 0;
+  score = Math.max(0, Math.min(100, Math.round(score)));
+
+  const scoreColor = score >= 80 ? C.accent : score >= 60 ? C.gold : C.red || "#FF6B6B";
+
+  const forecast = {
+    revenue: Math.round((revenue / days) * 30),
+    profit: Math.round((profit / days) * 30),
+    jobs: Math.round((currentJobs.length / days) * 30),
+  };
+
+  const actions = [];
+  if (margin < 30) actions.push("Review pricing and partner pay to lift margin above 30%.");
+  if (paymentRate < 80) actions.push("Run payment reminders and tighten invoice follow-up.");
+  if (proofRate < 80) actions.push("Enforce proof completion before payment/review requests.");
+  if (qualityIssues.length > 0) actions.push("Run recovery workflow for quality/callback jobs.");
+  if (capacityGap > 0) actions.push("Recruit/onboard " + capacityGap + " more active partner(s).");
+  if (revenueTrend < 0) actions.push("Increase sales calls and rebooking campaigns this week.");
+  if (retentionRate < 25) actions.push("Push rebooking and recurring service offers to past clients.");
+  if (actions.length === 0) actions.push("Maintain cadence: daily ops, sales follow-ups, payment collection, and review/referral asks.");
+
+  const copyReport = async () => {
+    const lines = [
+      "Have Us Clean KPI + Owner Intelligence Report",
+      "",
+      "Range: " + label,
+      "Owner health score: " + score + "/100",
+      "",
+      "Revenue: " + cur + revenue + " (" + revenueTrend + "% vs previous)",
+      "Profit: " + cur + profit + " (" + profitTrend + "% vs previous)",
+      "Margin: " + margin + "%",
+      "Partner pay: " + cur + partnerPay,
+      "Payment rate: " + paymentRate + "%",
+      "Outstanding: " + cur + outstanding,
+      "Proof rate: " + proofRate + "%",
+      "Quality rate: " + qualityRate + "%",
+      "Retention rate: " + retentionRate + "%",
+      "B2B pipeline: " + cur + b2bPipeline,
+      "",
+      "30-day forecast:",
+      "- Revenue: " + cur + forecast.revenue,
+      "- Profit: " + cur + forecast.profit,
+      "- Jobs: " + forecast.jobs,
+      "",
+      "Owner actions:",
+      ...actions.map((a, i) => (i + 1) + ". " + a),
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Owner KPI report copied.");
+    } catch {
+      window.prompt("Copy owner KPI report:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📈 KPI + Owner Intelligence</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Owner-level KPIs, trends, forecasts, and action priorities.</div>
+        </div>
+        <button type="button" onClick={copyReport} style={{ ...S.btn("primary"), minHeight: 40 }}>📋 Copy Owner Report</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["week", "7 Days"],
+          ["month", "30 Days"],
+        ].map(([id, labelText]) => (
+          <button key={id} type="button" onClick={() => setRange(id)} style={{ ...S.btn(range === id ? "primary" : "ghost"), minHeight: 40 }}>{labelText}</button>
+        ))}
+        <button type="button" onClick={() => setTab && setTab("owner_dashboard")} style={{ ...S.btn("ghost"), minHeight: 40 }}>Owner Dashboard</button>
+        <button type="button" onClick={() => setTab && setTab("financial_dashboard")} style={{ ...S.btn("ghost"), minHeight: 40 }}>Finance</button>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${scoreColor}55`, borderLeft: `5px solid ${scoreColor}`, borderRadius: 18, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".08em" }}>Owner Health Score</div>
+        <div style={{ fontSize: 46, fontWeight: 900, color: scoreColor, marginTop: 4 }}>{score}/100</div>
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(revenueTrend + "% revenue trend", revenueTrend >= 0 ? C.accent : C.gold)}
+          {badge(margin + "% margin", margin >= 30 ? C.accent : C.gold)}
+          {badge(paymentRate + "% payment rate", paymentRate >= 80 ? C.accent : C.gold)}
+          {badge(proofRate + "% proof rate", proofRate >= 80 ? C.accent : C.gold)}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Revenue", cur + revenue, revenueTrend + "% vs prev", revenueTrend >= 0 ? C.accent : C.gold)}
+        {stat("Profit", cur + profit, profitTrend + "% vs prev", profit >= 0 ? C.accent : C.red || "#FF6B6B")}
+        {stat("Margin", margin + "%", "Target 30%+", margin >= 30 ? C.accent : C.gold)}
+        {stat("Outstanding", cur + outstanding, unpaidJobs.length + " unpaid", outstanding ? C.gold : C.accent)}
+        {stat("Forecast", cur + forecast.revenue, "30-day revenue", C.blue)}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Jobs", currentJobs.length, label, C.blue)}
+        {stat("Payment Rate", paymentRate + "%", paidJobs.length + "/" + completed.length, paymentRate >= 80 ? C.accent : C.gold)}
+        {stat("Quality Rate", qualityRate + "%", qualityIssues.length + " issue(s)", qualityRate >= 90 ? C.accent : C.gold)}
+        {stat("Retention", retentionRate + "%", repeatClients.length + " repeat clients", retentionRate >= 25 ? C.accent : C.blue)}
+        {stat("Pipeline", cur + b2bPipeline, coldLeads.length + " B2B leads", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Owner Action Priorities</div>
+        {actions.map((action, i) => (
+          <div key={i} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8, color: C.muted, fontSize: 13 }}>
+            <strong style={{ color: C.accent }}>{i + 1}.</strong> {action}
+          </div>
+        ))}
+      </div>
+
+      <div style={{ ...S.card, marginTop: 16 }}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Top Partner Snapshot</div>
+        {partnerStats.slice(0, 6).length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13 }}>No partner activity in this range.</div>
+        ) : partnerStats.slice(0, 6).map((p) => (
+          <div key={p.partner.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 10 }}>
+              <div>
+                <div style={{ fontWeight: 900, color: C.text }}>{p.partner.name || "Partner"}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>{p.jobs} job(s) · {p.issues} issue(s)</div>
+              </div>
+              <div style={{ fontWeight: 900, color: C.accent }}>{cur}{p.revenue}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -13500,6 +13751,7 @@ export default function App() {
       { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },
       { id:"integration_layer", label:"🔌 Integrations", desc:"Real integrations layer" },
       { id:"auto_pilot_engine", label:"✈️ Auto-Pilot", desc:"Auto-pilot engine" },
+      { id:"kpi_owner_intelligence", label:"📈 KPI Intel", desc:"KPI and owner intelligence" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13728,6 +13980,7 @@ export default function App() {
         {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="integration_layer" && <IntegrationLayer region={activeRegion} />}
         {tab==="auto_pilot_engine" && <AutoPilotEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="kpi_owner_intelligence" && <KPIOwnerIntelligence jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
