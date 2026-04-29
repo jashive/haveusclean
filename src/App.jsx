@@ -12369,6 +12369,75 @@ function SalesExecutionEngine({ coldLeads = [], resLeads = [], jobs = [], region
   );
 }
 
+
+function GrowthFlywheel({resLeads=[],jobs=[],region}) {
+ const cur = region?.currencySymbol || "$";
+
+ const totalLeads = resLeads.length;
+ const totalJobs = jobs.length;
+ const paidJobs = jobs.filter(j=>j.paymentStatus==="paid").length;
+
+ const conversion = totalLeads ? Math.round((totalJobs/totalLeads)*100) : 0;
+ const paymentRate = totalJobs ? Math.round((paidJobs/totalJobs)*100) : 0;
+
+ const repeatCustomers = {};
+ jobs.forEach(j=>{
+   if(!repeatCustomers[j.client]) repeatCustomers[j.client]=0;
+   repeatCustomers[j.client]++;
+ });
+ const repeatCount = Object.values(repeatCustomers).filter(c=>c>1).length;
+
+ const revenue = jobs.reduce((s,j)=>s+(j.clientPrice||0),0);
+
+ const growthActions = [
+  conversion < 40 && "Improve lead follow-up speed",
+  paymentRate < 80 && "Tighten invoicing + collection",
+  repeatCount < totalJobs*0.3 && "Launch rebooking campaigns",
+  revenue < 5000 && "Increase daily sales calls"
+ ].filter(Boolean);
+
+ const copyPlan = () => {
+  const txt = [
+   "Growth Flywheel Plan",
+   "",
+   "Leads: "+totalLeads,
+   "Jobs: "+totalJobs,
+   "Conversion: "+conversion+"%",
+   "Payment Rate: "+paymentRate+"%",
+   "Repeat Customers: "+repeatCount,
+   "Revenue: "+cur+revenue,
+   "",
+   "Next Actions:",
+   ...growthActions
+  ].join("\n");
+  navigator.clipboard.writeText(txt);
+  alert("Copied growth plan");
+ };
+
+ return (
+  <div>
+   <div style={{fontSize:22,fontWeight:900}}>♻️ Growth Flywheel</div>
+   <div style={{marginTop:10}}>System that compounds leads → jobs → revenue → repeat</div>
+
+   <div style={{display:"grid",gridTemplateColumns:"repeat(2,1fr)",gap:10,marginTop:20}}>
+    <div>Leads: {totalLeads}</div>
+    <div>Jobs: {totalJobs}</div>
+    <div>Conversion: {conversion}%</div>
+    <div>Paid Rate: {paymentRate}%</div>
+    <div>Repeat: {repeatCount}</div>
+    <div>Revenue: {cur}{revenue}</div>
+   </div>
+
+   <div style={{marginTop:20}}>
+    <div style={{fontWeight:900}}>Growth Actions</div>
+    {growthActions.map((a,i)=><div key={i}>• {a}</div>)}
+   </div>
+
+   <button onClick={copyPlan}>Copy Growth Plan</button>
+  </div>
+ );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -12958,7 +13027,8 @@ export default function App() {
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
       { id:"real_partner_workflow", label:"🧹 Field Flow", desc:"Real partner workflow" },
-      { id:"sales_execution_engine", label:"📞 Sales Engine", desc:"Sales execution engine" },
+      { id:"sales_execution_engine",
+      { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },, label:"📞 Sales Engine", desc:"Sales execution engine" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13183,7 +13253,8 @@ export default function App() {
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="real_partner_workflow" && <RealPartnerWorkflow jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
-        {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
+        {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />
+        {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />} && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
