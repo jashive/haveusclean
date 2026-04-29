@@ -12005,6 +12005,370 @@ function RealPartnerWorkflow({ jobs = [], partners = [], region, setTab }) {
   );
 }
 
+
+function SalesExecutionEngine({ coldLeads = [], resLeads = [], jobs = [], region, setTab }) {
+  const [filter, setFilter] = useState("today");
+  const [completed, setCompleted] = useState({});
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr);
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const leadName = (lead) => lead.name || lead.client || lead.fullName || lead.customerName || lead.company || "Lead";
+  const leadEmail = (lead) => lead.email || lead.customerEmail || "";
+  const leadPhone = (lead) => lead.phone || lead.customerPhone || "";
+  const leadAddress = (lead) => lead.address || lead.serviceAddress || lead.city || "";
+  const leadStatus = (lead) => lead.status || lead.stage || "New";
+  const leadCreated = (lead) => lead.createdAt || lead.created || lead.date || lead.submittedAt || "";
+  const firstName = (name) => String(name || "there").split(" ")[0] || "there";
+
+  const estimateLeadValue = (lead, type) => {
+    if (lead.value || lead.estimatedPrice || lead.price || lead.quote) return Number(lead.value || lead.estimatedPrice || lead.price || lead.quote) || 0;
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    if (type === "b2b") return 500 + score * 10;
+    const rooms = Number(lead.rooms || lead.bedrooms || 0);
+    const baths = Number(lead.bathrooms || lead.baths || 0);
+    return 120 + rooms * 25 + baths * 35;
+  };
+
+  const stageProbability = (status) => {
+    if (status === "Won") return 100;
+    if (status === "Proposal") return 70;
+    if (status === "Meeting Booked") return 55;
+    if (status === "Follow Up") return 35;
+    if (status === "Contacted") return 20;
+    return 10;
+  };
+
+  const residentialItems = (resLeads || []).map((lead, idx) => {
+    const name = leadName(lead);
+    const email = leadEmail(lead);
+    const phone = leadPhone(lead);
+    const address = leadAddress(lead);
+    const status = leadStatus(lead);
+    const age = daysSince(leadCreated(lead));
+    const value = estimateLeadValue(lead, "residential");
+    const matchedJob = jobs.find((job) =>
+      (email && job.email === email) ||
+      (name && job.client === name) ||
+      (address && job.address === address)
+    );
+    const score = Math.max(0, Math.min(100,
+      45 +
+      (email || phone ? 20 : 0) +
+      (address ? 15 : 0) +
+      (value >= 250 ? 10 : 0) +
+      (age <= 1 ? 10 : age >= 5 ? -15 : 0) -
+      (matchedJob ? 40 : 0)
+    ));
+
+    return {
+      id: "res-" + (lead.id || lead.leadId || idx),
+      sourceType: "Residential",
+      name,
+      company: "",
+      email,
+      phone,
+      address,
+      status,
+      age,
+      value,
+      weighted: Math.round(value * 0.45),
+      score,
+      matchedJob,
+      raw: lead,
+    };
+  });
+
+  const b2bItems = (coldLeads || []).map((lead, idx) => {
+    const status = leadStatus(lead);
+    const value = estimateLeadValue(lead, "b2b");
+    const probability = stageProbability(status);
+    const age = daysSince(leadCreated(lead));
+    const score = Math.max(0, Math.min(100,
+      35 +
+      probability +
+      (value >= 1000 ? 10 : 0) +
+      (["Follow Up", "Meeting Booked", "Proposal"].includes(status) ? 15 : 0) +
+      (age >= 3 ? 8 : 0)
+    ));
+
+    return {
+      id: "b2b-" + (lead.lead_id || lead.id || idx),
+      sourceType: "B2B",
+      name: lead.buyer_title || lead.buyerTitle || "Decision Maker",
+      company: lead.company || lead.name || "Unknown Company",
+      email: lead.email || "",
+      phone: lead.phone || "",
+      address: lead.city || lead.location || "",
+      status,
+      age,
+      value,
+      weighted: Math.round(value * probability / 100),
+      score,
+      raw: lead,
+    };
+  });
+
+  const allItems = [...b2bItems, ...residentialItems].sort((a, b) => b.score - a.score || b.weighted - a.weighted);
+  const todayList = allItems.filter((item) => !item.matchedJob && item.score >= 55);
+  const hotList = allItems.filter((item) => !item.matchedJob && item.score >= 75);
+  const followupList = allItems.filter((item) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal"].includes(item.status));
+  const closeReady = allItems.filter((item) => ["Meeting Booked", "Proposal"].includes(item.status) || (item.sourceType === "Residential" && item.score >= 80));
+  const staleList = allItems.filter((item) => !item.matchedJob && item.age >= 5);
+
+  const visible = (filter === "hot" ? hotList :
+    filter === "followup" ? followupList :
+    filter === "close" ? closeReady :
+    filter === "stale" ? staleList :
+    filter === "all" ? allItems : todayList
+  ).filter((item) => !completed[item.id]);
+
+  const openPipelineValue = allItems.filter((item) => !item.matchedJob).reduce((sum, item) => sum + item.value, 0);
+  const weightedValue = allItems.filter((item) => !item.matchedJob).reduce((sum, item) => sum + item.weighted, 0);
+
+  const nextBestAction = (item) => {
+    if (item.matchedJob) return "Already converted. Review job and payment status.";
+    if (item.sourceType === "Residential" && item.score >= 80) return "Call now and ask for booking date/time.";
+    if (item.status === "Proposal") return "Follow up to close proposal and ask for yes/no decision.";
+    if (item.status === "Meeting Booked") return "Confirm meeting/walkthrough and prepare quote.";
+    if (item.status === "Follow Up") return "Send follow-up and ask if cleaning support is still a priority.";
+    if (item.status === "Contacted") return "Make second touchpoint with short value message.";
+    if (item.age >= 5) return "Send urgency follow-up or mark cold if no response.";
+    return "Make first contact and qualify need, budget, timing, and location.";
+  };
+
+  const buildCallScript = (item) => {
+    if (item.sourceType === "B2B") {
+      return [
+        "B2B Call Script — " + item.company,
+        "",
+        "Hi " + (item.name || "there") + ", this is Have Us Clean.",
+        "We help property managers, offices, and businesses keep spaces clean, reliable, and inspection-ready.",
+        "I’m calling to see if you currently need cleaning support or would be open to a quick quote/walkthrough.",
+        "",
+        "Qualify:",
+        "1. What type of space do you manage?",
+        "2. How often do you need cleaning?",
+        "3. Are you happy with your current provider?",
+        "4. When would you like service to start?",
+        "",
+        "Next action: " + nextBestAction(item)
+      ].join("\n");
+    }
+
+    return [
+      "Residential Call Script — " + item.name,
+      "",
+      "Hi " + firstName(item.name) + ", this is Have Us Clean.",
+      "Thanks for requesting cleaning service. I wanted to confirm a few details so we can quote and schedule you.",
+      "",
+      "Qualify:",
+      "1. What type of cleaning do you need?",
+      "2. What is the full service address?",
+      "3. How many bedrooms/bathrooms or rooms?",
+      "4. What day/time works best?",
+      "",
+      "Next action: " + nextBestAction(item)
+    ].join("\n");
+  };
+
+  const buildFollowup = (item) => {
+    if (item.sourceType === "B2B") {
+      return "Hi " + (item.name || "there") + ", this is Have Us Clean following up with " + item.company + ". We can help with reliable commercial cleaning, proof-of-work reporting, and recurring service. Would you be open to a quick quote or walkthrough this week?";
+    }
+    return "Hi " + firstName(item.name) + ", this is Have Us Clean following up on your cleaning request. We can prepare your quote and help get you scheduled. What day/time works best?";
+  };
+
+  const buildClosePlan = (item) => [
+    "Sales Close Plan",
+    "",
+    "Lead: " + (item.company || item.name),
+    "Type: " + item.sourceType,
+    "Status: " + item.status,
+    "Score: " + item.score,
+    "Value: " + cur + item.value,
+    "Weighted: " + cur + item.weighted,
+    "",
+    "Next Best Action:",
+    nextBestAction(item),
+    "",
+    "Close Steps:",
+    "1. Confirm need.",
+    "2. Confirm decision maker.",
+    "3. Confirm timing.",
+    "4. Confirm service details.",
+    "5. Present quote or walkthrough.",
+    "6. Ask for booking/approval.",
+    "7. Convert into job and route through operations."
+  ].join("\n");
+
+  const copyText = async (text, label) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      alert(label + " copied.");
+    } catch {
+      window.prompt("Copy " + label.toLowerCase() + ":", text);
+    }
+  };
+
+  const copySalesBrief = async () => {
+    const lines = [
+      "Have Us Clean Sales Execution Brief",
+      "",
+      "Today's sales list: " + todayList.length,
+      "Hot leads: " + hotList.length,
+      "Follow-ups: " + followupList.length,
+      "Close-ready: " + closeReady.length,
+      "Stale: " + staleList.length,
+      "Open pipeline: " + cur + openPipelineValue,
+      "Weighted pipeline: " + cur + weightedValue,
+      "",
+      "Priority call list:",
+      ...todayList.slice(0, 15).map((item, i) =>
+        (i + 1) + ". " + (item.company || item.name) + " — " + item.sourceType + " — score " + item.score + " — " + cur + item.value + " — " + nextBestAction(item)
+      ),
+    ].join("\n");
+    await copyText(lines, "Sales brief");
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const itemCard = (item) => {
+    const color = item.score >= 75 ? C.accent : item.score >= 55 ? C.gold : C.blue;
+    const title = item.company || item.name;
+
+    return (
+      <div key={item.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{item.sourceType} · {item.status} · {item.age === 9999 ? "unknown age" : item.age + " day(s) old"}</div>
+            {item.email && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>✉️ {item.email}</div>}
+            {item.phone && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>☎️ {item.phone}</div>}
+            {item.address && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>📍 {item.address}</div>}
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color }}>{item.score}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>urgency</div>
+          </div>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 12 }}>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Value</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.accent }}>{cur}{item.value}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Weighted</div>
+            <div style={{ fontSize: 18, fontWeight: 900, color: C.blue }}>{cur}{item.weighted}</div>
+          </div>
+          <div style={{ background: C.card, borderRadius: 10, padding: 10 }}>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>Source</div>
+            <div style={{ fontSize: 13, fontWeight: 900, color }}>{item.sourceType}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(item.sourceType, item.sourceType === "B2B" ? C.purple : C.blue)}
+          {item.score >= 75 && badge("Hot", C.accent)}
+          {["Meeting Booked", "Proposal"].includes(item.status) && badge("Close-ready", C.accent)}
+          {item.age >= 5 && badge("Stale", C.gold)}
+          {item.matchedJob && badge("Converted", C.muted)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12, fontSize: 12, color: C.muted, lineHeight: 1.5 }}>
+          <strong style={{ color: C.text }}>Next Best Action:</strong> {nextBestAction(item)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(115px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => copyText(buildCallScript(item), "Call script")} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Call Script
+          </button>
+          <button type="button" onClick={() => copyText(buildFollowup(item), "Follow-up")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Follow-Up
+          </button>
+          <button type="button" onClick={() => copyText(buildClosePlan(item), "Close plan")} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Close Plan
+          </button>
+          <button type="button" onClick={() => setCompleted((prev) => ({ ...prev, [item.id]: true }))} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Done
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>📞 Sales Execution Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Daily call list, follow-up queue, next-best-action prompts, and close plans.</div>
+        </div>
+        <button type="button" onClick={copySalesBrief} style={{ ...S.btn("primary"), minHeight: 40 }}>
+          📋 Copy Sales Brief
+        </button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Today", todayList.length, "Call list", C.accent)}
+        {stat("Hot", hotList.length, "Top priority", hotList.length ? C.accent : C.muted)}
+        {stat("Close-Ready", closeReady.length, "Ask for yes/no", C.blue)}
+        {stat("Pipeline", cur + openPipelineValue, "Open value", C.purple)}
+        {stat("Weighted", cur + weightedValue, "Likely value", C.gold)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+        {[
+          ["today", "Today"],
+          ["hot", "Hot"],
+          ["followup", "Follow-Up"],
+          ["close", "Close-Ready"],
+          ["stale", "Stale"],
+          ["all", "All"],
+        ].map(([id, label]) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {label}
+          </button>
+        ))}
+        <button type="button" onClick={() => setTab && setTab("b2b_pipeline")} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+          B2B Pipeline
+        </button>
+        <button type="button" onClick={() => setTab && setTab("lead_capture_integration")} style={{ ...S.btn("ghost"), minHeight: 40 }}>
+          Lead Capture
+        </button>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Sales Action Queue</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No sales actions in this view.</div>
+        ) : (
+          visible.map(itemCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -12594,6 +12958,7 @@ export default function App() {
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
       { id:"real_partner_workflow", label:"🧹 Field Flow", desc:"Real partner workflow" },
+      { id:"sales_execution_engine", label:"📞 Sales Engine", desc:"Sales execution engine" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -12818,6 +13183,7 @@ export default function App() {
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="real_partner_workflow" && <RealPartnerWorkflow jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
