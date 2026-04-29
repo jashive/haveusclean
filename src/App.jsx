@@ -12480,6 +12480,433 @@ function IntegrationLayer({region}) {
  );
 }
 
+
+function AutoPilotEngine({ jobs = [], partners = [], coldLeads = [], resLeads = [], region, setTab }) {
+  const [enabled, setEnabled] = useState({
+    lead_capture: true,
+    sales_followup: true,
+    dispatch_ops: true,
+    field_proof: true,
+    payments: true,
+    rebooking: true,
+    recovery: true,
+    owner_report: false,
+  });
+  const [approvals, setApprovals] = useState({});
+  const [runLog, setRunLog] = useState([]);
+  const cur = region?.currencySymbol || "$";
+  const today = new Date();
+  const todayStr = today.toISOString().split("T")[0];
+
+  const daysSince = (dateStr) => {
+    if (!dateStr) return 9999;
+    const d = new Date(dateStr + "T00:00:00");
+    if (Number.isNaN(d.getTime())) return 9999;
+    return Math.floor((today - d) / 86400000);
+  };
+
+  const clientKey = (job) => (job.email || job.client || "Unknown Client").toLowerCase().trim();
+
+  const todayJobs = jobs.filter((job) => job.date === todayStr);
+  const activeJobs = jobs.filter((job) => ["scheduled", "in-progress"].includes(job.status));
+  const completedJobs = jobs.filter((job) => job.status === "completed");
+  const unassignedJobs = activeJobs.filter((job) => !(job.partnerIds || [job.partnerId]).filter(Boolean).length);
+  const dispatchRisks = todayJobs.filter((job) => {
+    const noPartner = !(job.partnerIds || [job.partnerId]).filter(Boolean).length;
+    return noPartner || !job.address || !job.time || !job.routeOrder;
+  });
+
+  const proofComplete = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+    return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklist > 0;
+  };
+
+  const proofGaps = completedJobs.filter((job) => !proofComplete(job));
+  const qualityRisks = completedJobs.filter((job) => ["issue", "callback"].includes(job.qualityStatus));
+  const unpaidJobs = completedJobs.filter((job) => (job.paymentStatus || job.invoiceStatus || "unpaid") !== "paid");
+  const invoiceReady = unpaidJobs.filter((job) => proofComplete(job));
+  const overduePayments = unpaidJobs.filter((job) => daysSince(job.date) >= 7);
+
+  const profiles = Object.values(
+    jobs.reduce((acc, job) => {
+      const key = clientKey(job);
+      if (!acc[key]) acc[key] = { key, name: job.client || "Unknown Client", email: job.email || "", jobs: [] };
+      acc[key].jobs.push(job);
+      return acc;
+    }, {})
+  ).map((p) => {
+    const sorted = [...p.jobs].sort((a, b) => String(b.date || "").localeCompare(String(a.date || "")));
+    const completed = sorted.filter((j) => j.status === "completed");
+    const last = completed[0] || sorted[0];
+    const recurring = sorted.find((j) => j.recurring && j.recurring !== "One-Time")?.recurring || "One-Time";
+    let dueDays = 30;
+    if (recurring === "Weekly") dueDays = 7;
+    if (recurring === "Bi-Weekly") dueDays = 14;
+    if (recurring === "Monthly") dueDays = 30;
+    const age = daysSince(last?.date);
+    return { ...p, completed, last, recurring, age, dueDays, due: completed.length > 0 && age >= dueDays };
+  });
+
+  const rebookDue = profiles.filter((p) => p.due);
+  const recurringDue = profiles.filter((p) => p.recurring !== "One-Time" && p.due);
+
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+  const capacityGap = Math.max(0, activeJobs.length - activePartners.length);
+
+  const openResidentialLeads = (resLeads || []).filter((lead) => {
+    const name = lead.name || lead.client || lead.fullName || lead.customerName || "";
+    const email = lead.email || lead.customerEmail || "";
+    const address = lead.address || lead.serviceAddress || "";
+    return !jobs.find((job) =>
+      (email && job.email === email) ||
+      (name && job.client === name) ||
+      (address && job.address === address)
+    );
+  });
+
+  const salesFollowups = (coldLeads || []).filter((lead) => ["Contacted", "Follow Up", "Meeting Booked", "Proposal", "New"].includes(lead.status || "New"));
+  const salesValue = salesFollowups.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const revenueAtStake =
+    invoiceReady.reduce((s, j) => s + (j.clientPrice || 0), 0) +
+    overduePayments.reduce((s, j) => s + (j.clientPrice || 0), 0) +
+    rebookDue.reduce((s, p) => s + (p.last?.clientPrice || 0), 0) +
+    salesValue;
+
+  const loops = [
+    {
+      id: "lead_capture",
+      icon: "📥",
+      title: "Lead Capture Auto-Pilot",
+      cadence: "Every 15 minutes",
+      module: "lead_capture_integration",
+      approval: false,
+      count: openResidentialLeads.length,
+      value: openResidentialLeads.reduce((sum, lead) => sum + (lead.estimatedPrice || lead.price || lead.quote || 180), 0),
+      color: openResidentialLeads.length ? C.blue : C.accent,
+      action: "Detect new form/website leads, score them, and prepare quote/CRM/job-start actions.",
+      outputs: ["New lead queue", "Missing info prompts", "Quote-ready checklist"],
+    },
+    {
+      id: "sales_followup",
+      icon: "📞",
+      title: "Sales Follow-Up Auto-Pilot",
+      cadence: "Weekdays 9:00 AM",
+      module: "sales_execution_engine",
+      approval: true,
+      count: salesFollowups.length,
+      value: salesValue,
+      color: salesFollowups.length ? C.purple : C.accent,
+      action: "Build the daily call list, rank deals, and prepare scripts/follow-ups.",
+      outputs: ["Daily call queue", "Next-best action", "Close plans"],
+    },
+    {
+      id: "dispatch_ops",
+      icon: "🚦",
+      title: "Dispatch Auto-Pilot",
+      cadence: "Daily 6:30 AM",
+      module: "dispatch_center",
+      approval: false,
+      count: dispatchRisks.length + unassignedJobs.length + capacityGap,
+      value: todayJobs.reduce((sum, job) => sum + (job.clientPrice || 0), 0),
+      color: dispatchRisks.length || unassignedJobs.length ? C.gold : C.accent,
+      action: "Check today jobs, assignments, routes, capacity, and same-day risk.",
+      outputs: ["Dispatch risk queue", "Assignment queue", "Route priority"],
+    },
+    {
+      id: "field_proof",
+      icon: "🧹",
+      title: "Field Workflow Auto-Pilot",
+      cadence: "During active jobs",
+      module: "real_partner_workflow",
+      approval: false,
+      count: proofGaps.length,
+      value: proofGaps.reduce((sum, job) => sum + (job.clientPrice || 0), 0),
+      color: proofGaps.length ? C.gold : C.accent,
+      action: "Detect missing proof, checklist, check-in, and check-out before completion/payment.",
+      outputs: ["Blocked job list", "Partner proof reminders", "Completion readiness"],
+    },
+    {
+      id: "payments",
+      icon: "💳",
+      title: "Payment Auto-Pilot",
+      cadence: "Daily 4:00 PM",
+      module: "payment_invoicing",
+      approval: true,
+      count: invoiceReady.length + overduePayments.length,
+      value: invoiceReady.reduce((s, j) => s + (j.clientPrice || 0), 0) + overduePayments.reduce((s, j) => s + (j.clientPrice || 0), 0),
+      color: invoiceReady.length || overduePayments.length ? C.gold : C.accent,
+      action: "Prepare invoices, payment reminders, overdue messages, and collection priorities.",
+      outputs: ["Invoice batch", "Payment reminders", "Overdue collection queue"],
+    },
+    {
+      id: "rebooking",
+      icon: "🔁",
+      title: "Rebooking Auto-Pilot",
+      cadence: "Daily 10:00 AM",
+      module: "communication_engine",
+      approval: true,
+      count: rebookDue.length + recurringDue.length,
+      value: rebookDue.reduce((sum, p) => sum + (p.last?.clientPrice || 0), 0),
+      color: rebookDue.length ? C.blue : C.accent,
+      action: "Find clients due for rebooking and prepare customer/recurring renewal messages.",
+      outputs: ["Rebooking message batch", "Recurring renewal queue", "Retention prompts"],
+    },
+    {
+      id: "recovery",
+      icon: "⚠️",
+      title: "Recovery Auto-Pilot",
+      cadence: "Hourly when issues exist",
+      module: "recovery",
+      approval: true,
+      count: qualityRisks.length,
+      value: qualityRisks.reduce((sum, job) => sum + (job.clientPrice || 0), 0),
+      color: qualityRisks.length ? C.red || "#FF6B6B" : C.accent,
+      action: "Detect callback/quality jobs and prepare recovery steps before churn/refund risk grows.",
+      outputs: ["Recovery queue", "Client recovery script", "Partner coaching flag"],
+    },
+    {
+      id: "owner_report",
+      icon: "👑",
+      title: "Owner Report Auto-Pilot",
+      cadence: "Weekly Friday",
+      module: "owner_dashboard",
+      approval: false,
+      count: 1,
+      value: revenueAtStake,
+      color: C.accent,
+      action: "Compile the owner summary from ops, sales, payments, growth, and alerts.",
+      outputs: ["Weekly owner brief", "Growth/decline signal", "Next week priorities"],
+    },
+  ];
+
+  const enabledLoops = loops.filter((loop) => enabled[loop.id]);
+  const runnableLoops = loops.filter((loop) => enabled[loop.id] && loop.count > 0);
+  const needsApproval = runnableLoops.filter((loop) => loop.approval && !approvals[loop.id]);
+  const autopilotScore = Math.round(
+    (enabledLoops.length / loops.length) * 50 +
+    (runnableLoops.length ? 25 : 35) -
+    needsApproval.length * 5 +
+    (capacityGap === 0 ? 10 : 0)
+  );
+
+  const safeScore = Math.max(0, Math.min(100, autopilotScore));
+  const scoreColor = safeScore >= 80 ? C.accent : safeScore >= 60 ? C.gold : C.red || "#FF6B6B";
+
+  const toggleLoop = (id) => setEnabled((prev) => ({ ...prev, [id]: !prev[id] }));
+  const approveLoop = (id) => setApprovals((prev) => ({ ...prev, [id]: true }));
+
+  const runLoop = (loop) => {
+    if (loop.approval && !approvals[loop.id]) {
+      alert("Owner approval required before this loop runs.");
+      return;
+    }
+
+    const entry = {
+      id: Date.now() + "-" + loop.id,
+      loopId: loop.id,
+      title: loop.title,
+      count: loop.count,
+      value: loop.value,
+      at: new Date().toISOString(),
+      status: loop.count > 0 ? "ran-action-queue" : "ran-clear",
+    };
+    setRunLog((prev) => [entry, ...prev].slice(0, 30));
+  };
+
+  const runEnabled = () => {
+    const now = new Date().toISOString();
+    const entries = enabledLoops
+      .filter((loop) => !loop.approval || approvals[loop.id])
+      .map((loop) => ({
+        id: now + "-" + loop.id,
+        loopId: loop.id,
+        title: loop.title,
+        count: loop.count,
+        value: loop.value,
+        at: now,
+        status: loop.count > 0 ? "ran-action-queue" : "ran-clear",
+      }));
+    setRunLog((prev) => [...entries, ...prev].slice(0, 30));
+  };
+
+  const copyPayload = async (loop) => {
+    const payload = {
+      id: loop.id,
+      title: loop.title,
+      cadence: loop.cadence,
+      enabled: !!enabled[loop.id],
+      approvalRequired: loop.approval,
+      approved: !!approvals[loop.id],
+      count: loop.count,
+      value: loop.value || 0,
+      action: loop.action,
+      outputs: loop.outputs,
+      module: loop.module,
+      generatedAt: new Date().toISOString(),
+    };
+    const text = JSON.stringify(payload, null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      alert("Auto-pilot payload copied.");
+    } catch {
+      window.prompt("Copy auto-pilot payload:", text);
+    }
+  };
+
+  const copyPlaybook = async () => {
+    const lines = [
+      "Have Us Clean Auto-Pilot Playbook",
+      "",
+      "Auto-pilot score: " + safeScore + "/100",
+      "Enabled loops: " + enabledLoops.length,
+      "Runnable loops: " + runnableLoops.length,
+      "Needs approval: " + needsApproval.length,
+      "Revenue at stake: " + cur + revenueAtStake,
+      "",
+      ...loops.map((loop, i) =>
+        (i + 1) + ". " + loop.icon + " " + loop.title + "\n" +
+        "   Cadence: " + loop.cadence + "\n" +
+        "   Enabled: " + (enabled[loop.id] ? "Yes" : "No") + "\n" +
+        "   Approval: " + (loop.approval ? (approvals[loop.id] ? "Approved" : "Required") : "Not required") + "\n" +
+        "   Items: " + loop.count + "\n" +
+        "   Value: " + cur + (loop.value || 0) + "\n" +
+        "   Action: " + loop.action
+      ),
+    ].join("\n\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Auto-pilot playbook copied.");
+    } catch {
+      window.prompt("Copy auto-pilot playbook:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const loopCard = (loop) => {
+    const isEnabled = !!enabled[loop.id];
+    const approved = !!approvals[loop.id];
+    const runnable = isEnabled && loop.count > 0 && (!loop.approval || approved);
+    const lastRun = runLog.find((r) => r.loopId === loop.id);
+
+    return (
+      <div key={loop.id} style={{ background: C.surface, border: `1px solid ${loop.color}55`, borderLeft: `4px solid ${loop.color}`, borderRadius: 14, padding: 14, marginBottom: 12 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 12, fontWeight: 900, color: loop.color }}>{loop.icon} {loop.cadence}</div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text, marginTop: 4 }}>{loop.title}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{loop.action}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ fontSize: 24, fontWeight: 900, color: loop.color }}>{loop.count}</div>
+            <div style={{ fontSize: 11, color: C.muted, fontWeight: 800 }}>items</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
+          {badge(isEnabled ? "Enabled" : "Paused", isEnabled ? C.accent : C.muted)}
+          {badge(runnable ? "Runnable" : loop.count > 0 ? "Waiting" : "Clear", runnable ? loop.color : loop.count > 0 ? C.gold : C.accent)}
+          {loop.approval && badge(approved ? "Approved" : "Approval needed", approved ? C.accent : C.gold)}
+          {badge("Value " + cur + (loop.value || 0), loop.value ? C.blue : C.muted)}
+          {lastRun && badge("Last run " + new Date(lastRun.at).toLocaleTimeString(), C.purple)}
+        </div>
+
+        <div style={{ background: C.card, borderRadius: 12, padding: 12, marginTop: 12 }}>
+          <div style={{ fontSize: 12, fontWeight: 900, color: C.text, marginBottom: 6 }}>Outputs</div>
+          <ul style={{ margin: 0, paddingLeft: 18, color: C.muted, fontSize: 12, lineHeight: 1.6 }}>
+            {loop.outputs.map((output, i) => <li key={i}>{output}</li>)}
+          </ul>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(105px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => toggleLoop(loop.id)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            {isEnabled ? "Pause" : "Enable"}
+          </button>
+          {loop.approval && (
+            <button type="button" onClick={() => approveLoop(loop.id)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+              Approve
+            </button>
+          )}
+          <button type="button" onClick={() => runLoop(loop)} style={{ minHeight: 42, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>
+            Run
+          </button>
+          <button type="button" onClick={() => setTab && setTab(loop.module)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            Open
+          </button>
+          <button type="button" onClick={() => copyPayload(loop)} style={{ minHeight: 42, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>
+            JSON
+          </button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>✈️ Auto-Pilot Engine</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Scheduled operating loops that prepare and run the business with owner approval gates.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={runEnabled} style={{ ...S.btn("primary"), minHeight: 40 }}>▶ Run Enabled</button>
+          <button type="button" onClick={copyPlaybook} style={{ ...S.btn("ghost"), minHeight: 40 }}>📋 Copy Playbook</button>
+        </div>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${scoreColor}55`, borderLeft: `5px solid ${scoreColor}`, borderRadius: 18, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".08em" }}>Auto-pilot readiness</div>
+        <div style={{ fontSize: 42, fontWeight: 900, color: scoreColor, marginTop: 4 }}>{safeScore}/100</div>
+        <div style={{ fontSize: 13, color: C.muted }}>Higher means more loops are enabled, clear, approved, and ready to run.</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,170px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Enabled", enabledLoops.length, "Active loops", C.accent)}
+        {stat("Runnable", runnableLoops.length, "Has work", runnableLoops.length ? C.gold : C.accent)}
+        {stat("Needs Approval", needsApproval.length, "Owner gate", needsApproval.length ? C.gold : C.accent)}
+        {stat("Value", cur + revenueAtStake, "At stake", C.blue)}
+        {stat("Runs", runLog.length, "Session log", C.purple)}
+      </div>
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Auto-Pilot Loops</div>
+        {loops.map(loopCard)}
+      </div>
+
+      {runLog.length > 0 && (
+        <div style={{ ...S.card, marginTop: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>Run Log</div>
+          {runLog.slice(0, 10).map((entry) => (
+            <div key={entry.id} style={{ background: C.surface, border: `1px solid ${C.border}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+              <div style={{ fontSize: 13, fontWeight: 900, color: entry.status === "ran-action-queue" ? C.gold : C.accent }}>{entry.title}</div>
+              <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{new Date(entry.at).toLocaleString()} · {entry.count} item(s) · {cur}{entry.value || 0}</div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -13072,6 +13499,7 @@ export default function App() {
       { id:"sales_execution_engine", label:"📞 Sales Engine", desc:"Sales execution engine" },
       { id:"growth_flywheel", label:"♻️ Growth", desc:"Growth flywheel" },
       { id:"integration_layer", label:"🔌 Integrations", desc:"Real integrations layer" },
+      { id:"auto_pilot_engine", label:"✈️ Auto-Pilot", desc:"Auto-pilot engine" },
       { id:"multi_region_expansion", label:"🌍 Expansion", desc:"Multi-region expansion engine" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
@@ -13299,6 +13727,7 @@ export default function App() {
         {tab==="sales_execution_engine" && <SalesExecutionEngine coldLeads={coldLeads} resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="growth_flywheel" && <GrowthFlywheel resLeads={resLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="integration_layer" && <IntegrationLayer region={activeRegion} />}
+        {tab==="auto_pilot_engine" && <AutoPilotEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="multi_region_expansion" && <MultiRegionExpansionEngine jobs={jobs} partners={partners} coldLeads={coldLeads} regions={REGIONS} activeRegion={activeRegion} setTab={setTab} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
