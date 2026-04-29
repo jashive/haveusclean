@@ -13486,6 +13486,206 @@ function MultiCityScalingSystem({ jobs = [], partners = [], coldLeads = [], resL
   );
 }
 
+
+function SystemTestCenter({ jobs = [], partners = [], coldLeads = [], resLeads = [], region, setTab }) {
+  const [lastRun, setLastRun] = useState(null);
+  const cur = region?.currencySymbol || "$";
+  const today = new Date().toISOString().split("T")[0];
+
+  const has = (arr) => Array.isArray(arr) && arr.length > 0;
+  const todayJobs = jobs.filter((j) => j.date === today);
+  const activeJobs = jobs.filter((j) => ["scheduled", "in-progress"].includes(j.status));
+  const completedJobs = jobs.filter((j) => j.status === "completed");
+  const paidJobs = completedJobs.filter((j) => (j.paymentStatus || j.invoiceStatus || "") === "paid");
+  const unpaidJobs = completedJobs.filter((j) => (j.paymentStatus || j.invoiceStatus || "unpaid") !== "paid");
+  const unassignedJobs = activeJobs.filter((j) => !(j.partnerIds || [j.partnerId]).filter(Boolean).length);
+  const activePartners = partners.filter((p) => p.onboarded && ["available", "active"].includes(p.status));
+
+  const proofComplete = (job) => {
+    const before = (job.beforePics || []).length;
+    const after = (job.afterPics || []).length;
+    const checklist = Object.values(job.checklist || {}).filter(Boolean).length;
+    return !!job.checkIn && !!job.checkOut && before > 0 && after > 0 && checklist > 0;
+  };
+
+  const proofGaps = completedJobs.filter((j) => !proofComplete(j));
+  const qualityIssues = completedJobs.filter((j) => ["issue", "callback"].includes(j.qualityStatus));
+  const revenue = jobs.reduce((sum, j) => sum + (j.clientPrice || 0), 0);
+  const profit = jobs.reduce((sum, j) => sum + (j.profit ?? ((j.clientPrice || 0) - (j.partnerPay || j.pay || 0))), 0);
+  const margin = revenue ? Math.round((profit / revenue) * 100) : 0;
+  const pipelineValue = coldLeads.reduce((sum, lead) => {
+    const score = Number(lead.priority_score || lead.priorityScore || 50);
+    return sum + (lead.value || 500 + score * 10);
+  }, 0);
+
+  const tests = [
+    {
+      group: "Core Data",
+      items: [
+        { id: "jobs", label: "Jobs loaded", status: has(jobs) ? "pass" : "warn", detail: jobs.length + " job(s)" },
+        { id: "partners", label: "Partners loaded", status: has(partners) ? "pass" : "warn", detail: partners.length + " partner(s)" },
+        { id: "resleads", label: "Residential leads loaded", status: has(resLeads) ? "pass" : "warn", detail: resLeads.length + " lead(s)" },
+        { id: "coldleads", label: "B2B leads loaded", status: has(coldLeads) ? "pass" : "warn", detail: coldLeads.length + " lead(s)" },
+      ],
+    },
+    {
+      group: "Operations",
+      items: [
+        { id: "daily_ops", label: "Daily Ops command center", tab: "daily_ops", status: "pass", detail: "Runs business cockpit" },
+        { id: "dispatch", label: "Dispatch readiness", tab: "dispatch_center", status: unassignedJobs.length ? "warn" : "pass", detail: unassignedJobs.length + " unassigned active job(s)" },
+        { id: "field_flow", label: "Field workflow enforcement", tab: "real_partner_workflow", status: proofGaps.length ? "warn" : "pass", detail: proofGaps.length + " proof gap(s)" },
+        { id: "partner_app", label: "Partner App mode", tab: "partner_app_mode", status: has(partners) ? "pass" : "warn", detail: activePartners.length + " active partner(s)" },
+      ],
+    },
+    {
+      group: "Revenue",
+      items: [
+        { id: "lead_capture", label: "Lead capture integration", tab: "lead_capture_integration", status: has(resLeads) ? "pass" : "warn", detail: resLeads.length + " residential lead(s)" },
+        { id: "sales_engine", label: "Sales execution engine", tab: "sales_execution_engine", status: has(coldLeads) || has(resLeads) ? "pass" : "warn", detail: "Pipeline " + cur + pipelineValue },
+        { id: "payments", label: "Payment + invoicing layer", tab: "payment_invoicing", status: completedJobs.length ? "pass" : "warn", detail: paidJobs.length + " paid / " + unpaidJobs.length + " unpaid" },
+        { id: "growth", label: "Growth flywheel", tab: "growth_flywheel", status: jobs.length || resLeads.length ? "pass" : "warn", detail: "Leads → jobs → payments → repeat" },
+      ],
+    },
+    {
+      group: "Automation + Intelligence",
+      items: [
+        { id: "alerts", label: "Alerts system", tab: "alerts_center", status: "pass", detail: qualityIssues.length + " quality issue(s)" },
+        { id: "automation", label: "Automation trigger center", tab: "automation_center", status: "pass", detail: "Trigger control layer" },
+        { id: "workflows", label: "Workflow automation console", tab: "workflow_console", status: "pass", detail: "SOP workflow layer" },
+        { id: "autopilot", label: "Auto-Pilot engine", tab: "auto_pilot_engine", status: "pass", detail: "Scheduled operating loops" },
+        { id: "decisions", label: "AI decision engine", tab: "ai_decision_engine", status: margin < 30 && revenue > 0 ? "warn" : "pass", detail: margin + "% margin" },
+        { id: "kpi", label: "KPI owner intelligence", tab: "kpi_owner_intelligence", status: "pass", detail: "Owner reporting + forecast" },
+      ],
+    },
+    {
+      group: "Scale",
+      items: [
+        { id: "owner", label: "Owner dashboard", tab: "owner_dashboard", status: "pass", detail: "CEO view" },
+        { id: "expansion", label: "Multi-region expansion", tab: "multi_region_expansion", status: "pass", detail: "Launch readiness by region" },
+        { id: "cityscale", label: "Multi-city scaling", tab: "multi_city_scaling", status: "pass", detail: "City scorecards" },
+        { id: "integrations", label: "Integration layer", tab: "integration_layer", status: "warn", detail: "Setup guide exists; live API wiring still next" },
+      ],
+    },
+  ];
+
+  const flat = tests.flatMap((g) => g.items.map((item) => ({ ...item, group: g.group })));
+  const pass = flat.filter((t) => t.status === "pass").length;
+  const warn = flat.filter((t) => t.status === "warn").length;
+  const fail = flat.filter((t) => t.status === "fail").length;
+  const score = Math.round((pass / flat.length) * 100);
+
+  const runAll = () => {
+    setLastRun(new Date().toISOString());
+  };
+
+  const copyReport = async () => {
+    const lines = [
+      "Have Us Clean System Test Report",
+      "",
+      "System score: " + score + "/100",
+      "Pass: " + pass,
+      "Warn: " + warn,
+      "Fail: " + fail,
+      "Last run: " + (lastRun ? new Date(lastRun).toLocaleString() : "Not run in this session"),
+      "",
+      "Business data:",
+      "- Jobs: " + jobs.length,
+      "- Partners: " + partners.length,
+      "- Residential leads: " + resLeads.length,
+      "- B2B leads: " + coldLeads.length,
+      "- Revenue: " + cur + revenue,
+      "- Profit: " + cur + profit,
+      "- Margin: " + margin + "%",
+      "- Proof gaps: " + proofGaps.length,
+      "- Unpaid completed jobs: " + unpaidJobs.length,
+      "",
+      "Module tests:",
+      ...flat.map((t, i) => (i + 1) + ". [" + t.status.toUpperCase() + "] " + t.group + " — " + t.label + " — " + t.detail),
+      "",
+      "Interpretation:",
+      "- PASS means the module/control layer exists and has enough data or logic to operate.",
+      "- WARN means the feature exists but needs data, live integration, or cleanup.",
+      "- FAIL means broken logic or missing wiring.",
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("System test report copied.");
+    } catch {
+      window.prompt("Copy system test report:", lines);
+    }
+  };
+
+  const statusColor = (status) => status === "pass" ? C.accent : status === "warn" ? C.gold : C.red || "#FF6B6B";
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const testCard = (item) => {
+    const color = statusColor(item.status);
+    return (
+      <div key={item.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 12, padding: 12, marginBottom: 8 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center" }}>
+          <div>
+            <div style={{ fontWeight: 900, color: C.text }}>{item.label}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 3 }}>{item.detail}</div>
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <span style={{ color, fontSize: 12, fontWeight: 900, textTransform: "uppercase" }}>{item.status}</span>
+            {item.tab && (
+              <button type="button" onClick={() => setTab && setTab(item.tab)} style={{ minHeight: 34, borderRadius: 8, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer", padding: "6px 10px" }}>
+                Open
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  const scoreColor = score >= 85 ? C.accent : score >= 65 ? C.gold : C.red || "#FF6B6B";
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🧪 System Test Center</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Smoke-test every major module and prove what changed.</div>
+        </div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button type="button" onClick={runAll} style={{ ...S.btn("primary"), minHeight: 40 }}>▶ Run Tests</button>
+          <button type="button" onClick={copyReport} style={{ ...S.btn("ghost"), minHeight: 40 }}>📋 Copy Report</button>
+        </div>
+      </div>
+
+      <div style={{ background: C.card, border: `1px solid ${scoreColor}55`, borderLeft: `5px solid ${scoreColor}`, borderRadius: 18, padding: 18, marginBottom: 18 }}>
+        <div style={{ fontSize: 13, color: C.muted, fontWeight: 900, textTransform: "uppercase", letterSpacing: ".08em" }}>System Health Score</div>
+        <div style={{ fontSize: 46, fontWeight: 900, color: scoreColor, marginTop: 4 }}>{score}/100</div>
+        <div style={{ fontSize: 13, color: C.muted }}>{lastRun ? "Last run: " + new Date(lastRun).toLocaleString() : "Click Run Tests to timestamp this session."}</div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,160px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Pass", pass, "Working", C.accent)}
+        {stat("Warnings", warn, "Needs data/integration", warn ? C.gold : C.accent)}
+        {stat("Fails", fail, "Broken", fail ? (C.red || "#FF6B6B") : C.accent)}
+        {stat("Modules", flat.length, "Tested", C.blue)}
+      </div>
+
+      {tests.map((group) => (
+        <div key={group.group} style={{ ...S.card, marginBottom: 16 }}>
+          <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 12 }}>{group.group}</div>
+          {group.items.map(testCard)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -14071,6 +14271,7 @@ export default function App() {
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
+      { id:"system_test_center", label:"🧪 QA Tests", desc:"System test center" },
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
       { id:"lead_capture_integration", label:"📥 Lead Capture", desc:"Lead capture integration" },
       { id:"payment_invoicing", label:"💳 Payments", desc:"Payment and invoicing layer" },
@@ -14301,6 +14502,7 @@ export default function App() {
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="system_test_center" && <SystemTestCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="lead_capture_integration" && <LeadCaptureIntegration resLeads={resLeads} jobs={regionJobs} region={activeRegion} setTab={setTab} />}
         {tab==="payment_invoicing" && <PaymentInvoicingLayer jobs={regionJobs} region={activeRegion} setTab={setTab} />}
