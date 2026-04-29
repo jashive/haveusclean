@@ -13970,6 +13970,262 @@ function ActionAuditCenter({ jobs = [], partners = [], coldLeads = [], resLeads 
 }
 
 
+
+function LeadDatabaseCleanup({ coldLeads = [], resLeads = [], region, setTab }) {
+  const [type, setType] = useState("cold");
+  const [filter, setFilter] = useState("active");
+  const [query, setQuery] = useState("");
+  const [deleted, setDeleted] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("huc_deleted_leads_v1") || "{}"); } catch { return {}; }
+  });
+  const [archived, setArchived] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("huc_archived_leads_v1") || "{}"); } catch { return {}; }
+  });
+  const [statusOverrides, setStatusOverrides] = useState(() => {
+    try { return JSON.parse(localStorage.getItem("huc_lead_status_overrides_v1") || "{}"); } catch { return {}; }
+  });
+
+  const cur = region?.currencySymbol || "$";
+
+  const persistDeleted = (next) => {
+    setDeleted(next);
+    localStorage.setItem("huc_deleted_leads_v1", JSON.stringify(next));
+  };
+  const persistArchived = (next) => {
+    setArchived(next);
+    localStorage.setItem("huc_archived_leads_v1", JSON.stringify(next));
+  };
+  const persistStatus = (next) => {
+    setStatusOverrides(next);
+    localStorage.setItem("huc_lead_status_overrides_v1", JSON.stringify(next));
+  };
+
+  const idFor = (lead, source, idx) => {
+    return source + "::" + String(lead.lead_id || lead.leadId || lead.id || lead.email || lead.phone || lead.company || lead.name || idx);
+  };
+
+  const normalize = (lead, source, idx) => {
+    const id = idFor(lead, source, idx);
+    const originalStatus = lead.status || lead.stage || "New";
+    const status = statusOverrides[id] || originalStatus;
+    const name = source === "cold"
+      ? (lead.company || lead.name || "Unknown Company")
+      : (lead.name || lead.client || lead.fullName || lead.customerName || "Unknown Lead");
+    const contact = lead.email || lead.phone || lead.customerEmail || lead.customerPhone || "";
+    const location = lead.city || lead.location || lead.address || lead.serviceAddress || "";
+    const score = Number(lead.priority_score || lead.priorityScore || 0);
+    const value = Number(lead.value || lead.estimatedPrice || lead.price || lead.quote || (source === "cold" ? 500 + (score || 50) * 10 : 180)) || 0;
+    const isDeleted = !!deleted[id];
+    const isArchived = !!archived[id] || ["Archived", "Bad Lead", "Lost", "Do Not Contact"].includes(status);
+    const weak = !name || name.includes("Unknown") || !contact;
+    const bad = String(status).toLowerCase().includes("bad") || String(status).toLowerCase().includes("invalid") || String(status).toLowerCase().includes("do not") || weak;
+
+    return { raw: lead, source, id, idx, name, contact, location, status, originalStatus, value, score, isDeleted, isArchived, weak, bad };
+  };
+
+  const cold = coldLeads.map((lead, idx) => normalize(lead, "cold", idx));
+  const res = resLeads.map((lead, idx) => normalize(lead, "res", idx));
+  const rows = type === "cold" ? cold : res;
+
+  const activeRows = rows.filter((r) => !r.isDeleted && !r.isArchived);
+  const archivedRows = rows.filter((r) => !r.isDeleted && r.isArchived);
+  const deletedRows = rows.filter((r) => r.isDeleted);
+  const badRows = rows.filter((r) => !r.isDeleted && r.bad);
+
+  const visible = rows.filter((r) => {
+    if (filter === "active" && (r.isDeleted || r.isArchived)) return false;
+    if (filter === "archived" && (r.isDeleted || !r.isArchived)) return false;
+    if (filter === "deleted" && !r.isDeleted) return false;
+    if (filter === "bad" && (r.isDeleted || !r.bad)) return false;
+    if (query.trim()) {
+      const hay = [r.name, r.contact, r.location, r.status].join(" ").toLowerCase();
+      if (!hay.includes(query.trim().toLowerCase())) return false;
+    }
+    return true;
+  }).slice(0, 250);
+
+  const archiveLead = (row, status = "Archived") => {
+    const nextArchived = { ...archived, [row.id]: true };
+    const nextStatus = { ...statusOverrides, [row.id]: status };
+    persistArchived(nextArchived);
+    persistStatus(nextStatus);
+  };
+
+  const deleteLead = (row) => {
+    if (!confirm("Permanently hide/delete this lead from active app queues? This is saved in localStorage.")) return;
+    const nextDeleted = { ...deleted, [row.id]: true };
+    const nextArchived = { ...archived };
+    delete nextArchived[row.id];
+    persistDeleted(nextDeleted);
+    persistArchived(nextArchived);
+  };
+
+  const restoreLead = (row) => {
+    const nextDeleted = { ...deleted };
+    const nextArchived = { ...archived };
+    const nextStatus = { ...statusOverrides };
+    delete nextDeleted[row.id];
+    delete nextArchived[row.id];
+    delete nextStatus[row.id];
+    persistDeleted(nextDeleted);
+    persistArchived(nextArchived);
+    persistStatus(nextStatus);
+  };
+
+  const bulkArchiveBad = () => {
+    if (!badRows.length) return alert("No bad leads detected in this view.");
+    if (!confirm("Archive all detected bad/weak leads in this view?")) return;
+    const nextArchived = { ...archived };
+    const nextStatus = { ...statusOverrides };
+    badRows.forEach((r) => {
+      nextArchived[r.id] = true;
+      nextStatus[r.id] = "Bad Lead";
+    });
+    persistArchived(nextArchived);
+    persistStatus(nextStatus);
+  };
+
+  const clearLocalCleanup = () => {
+    if (!confirm("Clear all local deleted/archived/status cleanup records?")) return;
+    localStorage.removeItem("huc_deleted_leads_v1");
+    localStorage.removeItem("huc_archived_leads_v1");
+    localStorage.removeItem("huc_lead_status_overrides_v1");
+    setDeleted({});
+    setArchived({});
+    setStatusOverrides({});
+  };
+
+  const copyReport = async () => {
+    const lines = [
+      "Have Us Clean Lead Cleanup Report",
+      "",
+      "View: " + (type === "cold" ? "Cold leads" : "Residential leads"),
+      "Total source records: " + rows.length,
+      "Active after cleanup: " + activeRows.length,
+      "Archived: " + archivedRows.length,
+      "Deleted/hidden: " + deletedRows.length,
+      "Bad/weak detected: " + badRows.length,
+      "Estimated active value: " + cur + activeRows.reduce((s, r) => s + r.value, 0),
+      "",
+      "Persistence:",
+      "- Deleted IDs saved to localStorage:huc_deleted_leads_v1",
+      "- Archived IDs saved to localStorage:huc_archived_leads_v1",
+      "- Status overrides saved to localStorage:huc_lead_status_overrides_v1",
+      "",
+      "Next production step:",
+      "Move these localStorage actions into a real backend/API so deletes/archives apply across devices and users."
+    ].join("\n");
+
+    try {
+      await navigator.clipboard.writeText(lines);
+      alert("Cleanup report copied.");
+    } catch {
+      window.prompt("Copy cleanup report:", lines);
+    }
+  };
+
+  const stat = (label, value, sub, color = C.accent) => (
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 16 }}>
+      <div style={{ fontSize: 12, color: C.muted, fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.06em" }}>{label}</div>
+      <div style={{ fontSize: 30, fontWeight: 900, color, marginTop: 6 }}>{value}</div>
+      {sub && <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{sub}</div>}
+    </div>
+  );
+
+  const badge = (text, color) => (
+    <span style={{ display: "inline-block", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800, background: `${color}22`, color }}>
+      {text}
+    </span>
+  );
+
+  const rowCard = (row) => {
+    const color = row.isDeleted ? C.red || "#FF6B6B" : row.isArchived ? C.muted : row.bad ? C.gold : C.accent;
+    return (
+      <div key={row.id} style={{ background: C.surface, border: `1px solid ${color}55`, borderLeft: `4px solid ${color}`, borderRadius: 14, padding: 14, marginBottom: 10 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start" }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, color: C.text }}>{row.name}</div>
+            <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>{row.contact || "No contact"} · {row.location || "No location"}</div>
+          </div>
+          <div style={{ textAlign: "right" }}>
+            <div style={{ color, fontSize: 12, fontWeight: 900 }}>{row.status}</div>
+            <div style={{ color: C.muted, fontSize: 11, marginTop: 4 }}>{cur}{row.value}</div>
+          </div>
+        </div>
+
+        <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 10 }}>
+          {row.isDeleted && badge("Deleted/hidden", C.red || "#FF6B6B")}
+          {row.isArchived && badge("Archived", C.muted)}
+          {row.bad && badge("Bad/weak", C.gold)}
+          {row.weak && badge("Missing contact/name", C.gold)}
+          {badge(row.source === "cold" ? "Cold lead" : "Residential", row.source === "cold" ? C.purple : C.blue)}
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(120px,1fr))", gap: 8, marginTop: 12 }}>
+          <button type="button" onClick={() => archiveLead(row, "Archived")} style={{ minHeight: 40, borderRadius: 10, border: "none", background: C.accent, color: "#0A0F1E", fontWeight: 900, cursor: "pointer" }}>Archive</button>
+          <button type="button" onClick={() => archiveLead(row, "Bad Lead")} style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>Bad Lead</button>
+          <button type="button" onClick={() => archiveLead(row, "Lost")} style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>Lost</button>
+          <button type="button" onClick={() => deleteLead(row)} style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.red || "#FF6B6B"}66`, background: C.card, color: C.red || "#FF6B6B", fontWeight: 900, cursor: "pointer" }}>Delete</button>
+          <button type="button" onClick={() => restoreLead(row)} style={{ minHeight: 40, borderRadius: 10, border: `1px solid ${C.border}`, background: C.card, color: C.text, fontWeight: 800, cursor: "pointer" }}>Restore</button>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 18, flexWrap: "wrap" }}>
+        <div>
+          <div style={S.h2}>🧹 Lead Database Cleanup</div>
+          <div style={{ fontSize: 13, color: C.muted, marginTop: -10 }}>Archive/delete bad leads and persist cleanup locally so active queues stay usable.</div>
+        </div>
+        <button type="button" onClick={copyReport} style={{ ...S.btn("primary"), minHeight: 40 }}>📋 Copy Cleanup Report</button>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(min(100%,150px),1fr))", gap: 12, marginBottom: 18 }}>
+        {stat("Source", rows.length, type === "cold" ? "Cold leads" : "Residential", C.blue)}
+        {stat("Active", activeRows.length, "After cleanup", C.accent)}
+        {stat("Archived", archivedRows.length, "Hidden from active", C.muted)}
+        {stat("Deleted", deletedRows.length, "Local hidden", C.red || "#FF6B6B")}
+        {stat("Bad/Weak", badRows.length, "Detected", badRows.length ? C.gold : C.accent)}
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <button type="button" onClick={() => setType("cold")} style={{ ...S.btn(type === "cold" ? "primary" : "ghost"), minHeight: 40 }}>Cold Leads ({cold.length})</button>
+        <button type="button" onClick={() => setType("res")} style={{ ...S.btn(type === "res" ? "primary" : "ghost"), minHeight: 40 }}>Residential ({res.length})</button>
+        <button type="button" onClick={bulkArchiveBad} style={{ ...S.btn("ghost"), minHeight: 40 }}>Archive Bad/Weak</button>
+        <button type="button" onClick={clearLocalCleanup} style={{ ...S.btn("ghost"), minHeight: 40 }}>Clear Cleanup</button>
+      </div>
+
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        {["active", "bad", "archived", "deleted", "all"].map((id) => (
+          <button key={id} type="button" onClick={() => setFilter(id)} style={{ ...S.btn(filter === id ? "primary" : "ghost"), minHeight: 40 }}>
+            {id.toUpperCase()}
+          </button>
+        ))}
+      </div>
+
+      <input
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        placeholder="Search name, company, email, phone, city, status..."
+        style={{ width: "100%", minHeight: 44, borderRadius: 12, border: `1px solid ${C.border}`, background: C.surface, color: C.text, padding: "10px 12px", marginBottom: 14 }}
+      />
+
+      <div style={S.card}>
+        <div style={{ fontSize: 15, fontWeight: 900, color: C.text, marginBottom: 8 }}>Cleanup Queue</div>
+        <div style={{ fontSize: 12, color: C.muted, marginBottom: 12 }}>Showing first {visible.length} records in this view. Archive/delete changes persist in this browser.</div>
+        {visible.length === 0 ? (
+          <div style={{ color: C.muted, fontSize: 13, padding: 20, textAlign: "center" }}>No records in this view.</div>
+        ) : (
+          visible.map(rowCard)
+        )}
+      </div>
+    </div>
+  );
+}
+
+
 export default function App() {
   const [tab, setTab] = useState("dashboard");
   const [jobs, setJobs] = useState(initJobs);
@@ -14555,6 +14811,7 @@ export default function App() {
       { id:"ai_decision_engine", label:"🧠 Decisions", desc:"AI decision engine" },
       { id:"communication_engine", label:"💬 Comms", desc:"Communication engine" },
       { id:"partner_app_mode", label:"📱 Partner App", desc:"Cleaner mobile app mode" },
+      { id:"lead_database_cleanup", label:"🧹 Lead Cleanup", desc:"Lead database cleanup" },
       { id:"action_audit_center", label:"🛠️ Action Audit", desc:"Functional action audit center" },
       { id:"system_test_center", label:"🧪 QA Tests", desc:"System test center" },
       { id:"daily_ops", label:"🚀 Daily Ops", desc:"Run business today" },
@@ -14787,6 +15044,7 @@ export default function App() {
         {tab==="ai_decision_engine" && <AIDecisionEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="communication_engine" && <CommunicationEngine jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
         {tab==="partner_app_mode" && <PartnerAppMode jobs={regionJobs} partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="lead_database_cleanup" && <LeadDatabaseCleanup coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="action_audit_center" && <ActionAuditCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="system_test_center" && <SystemTestCenter jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} resLeads={resLeads} region={activeRegion} setTab={setTab} />}
         {tab==="daily_ops" && <DailyOpsMode jobs={regionJobs} partners={regionPartners} coldLeads={coldLeads} region={activeRegion} setTab={setTab} />}
