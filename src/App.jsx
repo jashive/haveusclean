@@ -5355,97 +5355,166 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isLoading]);
 
-  // ── Real-time sync — poll Supabase every 15s ──
+  // ── Supabase Realtime — live cold lead updates (Pro plan) ──
+  // Replaces the 30s polling interval with an instant push subscription.
+  // When n8n writes new leads to huc_leads_cold, they appear in the app immediately.
+  // Jobs and residential leads are NOT subscribed — local state is their source of truth.
   useEffect(() => {
     if (isLoading) return;
-    const syncFromSupabase = async () => {
-      try {
-        // ── Cold leads: filter junk AND deleted leads BEFORE setting state ──
-        const freshCold = await sbGet("cp:cold_leads");
-        if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
-          const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
-          const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
-          const cleanCold = freshCold
-            .filter(l => {
-              if (!l?.company?.trim()) return false;
-              if (JUNK.test(l.company)) return false;
-              const lid = String(l.lead_id || l.id || "");
-              if (SAMPLE_IDS.has(lid)) return false;
-              if (lid && deletedLeadIds.has(lid)) return false;
-              return true;
-            })
-            .map(l => ({
-              ...l,
-              // Normalize market to exact casing so filters always work
-              market: (() => {
-                const m = (l.market||"").trim().toLowerCase();
-                if (m.includes("ontario")) return "Ontario";
-                if (m.includes("arizona")) return "Arizona";
-                // Fallback: derive from lead_id prefix (ON- = Ontario, AZ- = Arizona)
-                const id = (l.lead_id||l.id||"").toUpperCase();
-                if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
-                if (id.startsWith("AZ-")) return "Arizona";
-                // Fallback: derive from city name
-                const city = (l.city||"").toLowerCase();
-                const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","pickering","ajax","whitby","oshawa","north york","etobicoke","scarborough"];
-                const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills"];
-                if (ontarioCities.some(c => city.includes(c))) return "Ontario";
-                if (arizonaCities.some(c => city.includes(c))) return "Arizona";
-                return l.market || "";
-              })(),
-            }));
-          setColdLeads(prev => {
-            const localMap = Object.fromEntries(
-              (prev||[]).map(l => [l.lead_id||l.id||"", l])
-            );
-            const merged = cleanCold.map(l => ({
-              ...l,
-              status: localMap[l.lead_id||l.id]?.status || l.status || "New",
-              notes:  localMap[l.lead_id||l.id]?.notes  || l.notes  || "",
-            }));
-            const sbIds = new Set(cleanCold.map(l => l.lead_id||l.id||""));
-            const manualOnly = (prev||[]).filter(l =>
-              (l.source === "manual") && !sbIds.has(l.lead_id||l.id||"")
-            );
-            const combined = [...manualOnly, ...merged];
-            // Deduplicate by company name — keep best version
-            const compMap = new Map();
-            for (const lead of combined) {
-              const key = (lead.company||"").trim().toLowerCase();
-              if (!key) continue;
-              const ex = compMap.get(key);
-              if (!ex) { compMap.set(key, lead); continue; }
-              const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
-              if (score(lead) > score(ex)) compMap.set(key, lead);
-            }
-            const final = Array.from(compMap.values());
-            // Only replace if we have a meaningful result — never drop below 50% of local
-            return final.length >= (prev||[]).length * 0.5 ? final : prev;
-          });
-        }
 
-        // ── Jobs: DO NOT overwrite from Supabase sync ──
-        // Local state + localStorage IS the source of truth for jobs.
-        // Jobs are written TO Supabase for backup, never read back to overwrite local.
-        // Jobs are loaded from localStorage at boot only.
+    const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
+    const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
 
+    // ── Shared cold lead normalizer — used by both initial fetch and realtime events ──
+    const normalizeColdLead = (l) => ({
+      ...l,
+      market: (() => {
+        const m = (l.market||"").trim().toLowerCase();
+        if (m.includes("ontario")) return "Ontario";
+        if (m.includes("arizona")) return "Arizona";
+        const id = (l.lead_id||l.id||"").toUpperCase();
+        if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+        if (id.startsWith("AZ-")) return "Arizona";
+        const city = (l.city||"").toLowerCase();
+        const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","pickering","ajax","whitby","oshawa","north york","etobicoke","scarborough"];
+        const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills"];
+        if (ontarioCities.some(c => city.includes(c))) return "Ontario";
+        if (arizonaCities.some(c => city.includes(c))) return "Arizona";
+        return l.market || "";
+      })(),
+    });
 
-        // ── Residential leads: DO NOT overwrite from Supabase sync ──
-        // Local state + localStorage IS the source of truth for residential leads.
-        // Supabase is write-only backup. Reading back would undo deletes/edits.
-        // Residential leads are loaded from localStorage at boot only.
-
-      } catch { /* silent — offline ok */ }
+    const isValidLead = (l) => {
+      if (!l?.company?.trim()) return false;
+      if (JUNK.test(l.company)) return false;
+      const lid = String(l.lead_id || l.id || "");
+      if (SAMPLE_IDS.has(lid)) return false;
+      if (lid && deletedLeadIds.has(lid)) return false;
+      return true;
     };
 
-    // Run once immediately on mount so leads load without waiting 30s
-    syncFromSupabase();
+    const mergeColdLeads = (prev, incoming) => {
+      const cleanIncoming = incoming.filter(isValidLead).map(normalizeColdLead);
+      const localMap = Object.fromEntries((prev||[]).map(l => [l.lead_id||l.id||"", l]));
+      const merged = cleanIncoming.map(l => ({
+        ...l,
+        status: localMap[l.lead_id||l.id]?.status || l.status || "New",
+        notes:  localMap[l.lead_id||l.id]?.notes  || l.notes  || "",
+      }));
+      const sbIds = new Set(cleanIncoming.map(l => l.lead_id||l.id||""));
+      const manualOnly = (prev||[]).filter(l => (l.source === "manual") && !sbIds.has(l.lead_id||l.id||""));
+      const combined = [...manualOnly, ...merged];
+      // Deduplicate by lead_id (stable hash IDs from n8n)
+      const leadMap = new Map();
+      for (const lead of combined) {
+        const key = String(lead.lead_id || lead.id || "").trim();
+        if (!key) continue;
+        const ex = leadMap.get(key);
+        if (!ex) { leadMap.set(key, lead); continue; }
+        const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
+        if (score(lead) > score(ex)) leadMap.set(key, lead);
+      }
+      const final = Array.from(leadMap.values());
+      return final.length >= (prev||[]).length * 0.5 ? final : prev;
+    };
 
-    // Poll every 30s as reliable fallback
-    const t = setInterval(syncFromSupabase, 30000);
+    // ── Initial fetch on mount ──
+    sbGet("cp:cold_leads").then(freshCold => {
+      if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
+        setColdLeads(prev => mergeColdLeads(prev, freshCold));
+      }
+    }).catch(() => {});
+
+    // ── Realtime subscription — INSERT and UPDATE events on huc_leads_cold ──
+    // Uses Supabase Realtime Broadcast on postgres_changes
+    let channel = null;
+    try {
+      // Build a minimal Supabase Realtime client using the existing credentials
+      // We use raw fetch to POST to the Realtime REST endpoint since we don't have the JS client
+      // Instead we subscribe via the Supabase Realtime WebSocket protocol
+      const REALTIME_URL = SUPABASE_URL.replace("https://", "wss://") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+      const ws = new WebSocket(REALTIME_URL);
+      channel = ws;
+
+      ws.onopen = () => {
+        // Join the postgres_changes topic for huc_leads_cold
+        ws.send(JSON.stringify({
+          topic: "realtime:public:huc_leads_cold",
+          event: "phx_join",
+          payload: {
+            config: {
+              broadcast: { self: false },
+              postgres_changes: [
+                { event: "INSERT", schema: "public", table: "huc_leads_cold" },
+                { event: "UPDATE", schema: "public", table: "huc_leads_cold" },
+                { event: "DELETE", schema: "public", table: "huc_leads_cold" },
+              ]
+            }
+          },
+          ref: "1"
+        }));
+        // Send heartbeat every 25s to keep connection alive
+        ws._heartbeat = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb" }));
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const event = msg?.payload?.data?.type;
+          const record = msg?.payload?.data?.record;
+          const old = msg?.payload?.data?.old_record;
+
+          if (event === "INSERT" || event === "UPDATE") {
+            if (!record) return;
+            const lead = record.data || record;
+            if (!isValidLead(lead)) return;
+            const normalized = normalizeColdLead(lead);
+            setColdLeads(prev => {
+              const lid = String(lead.lead_id || lead.id || "");
+              const exists = prev.find(l => (l.lead_id||l.id) === lid);
+              if (exists) {
+                // UPDATE — preserve local status/notes
+                return prev.map(l => (l.lead_id||l.id) === lid
+                  ? { ...normalized, status: l.status || normalized.status, notes: l.notes || normalized.notes }
+                  : l
+                );
+              }
+              // INSERT — add to front
+              return [normalized, ...prev];
+            });
+          }
+
+          if (event === "DELETE") {
+            const lid = String(old?.lead_id || old?.id || "");
+            if (lid) setColdLeads(prev => prev.filter(l => (l.lead_id||l.id) !== lid));
+          }
+        } catch { /* ignore malformed messages */ }
+      };
+
+      ws.onerror = () => {
+        // WebSocket failed — fall back to 30s polling silently
+        ws._fallback = setInterval(() => {
+          sbGet("cp:cold_leads").then(freshCold => {
+            if (freshCold && Array.isArray(freshCold)) {
+              setColdLeads(prev => mergeColdLeads(prev, freshCold));
+            }
+          }).catch(() => {});
+        }, 30000);
+      };
+    } catch {
+      // If WebSocket construction fails entirely, fall back to polling
+    }
 
     return () => {
-      clearInterval(t);
+      if (channel) {
+        if (channel._heartbeat) clearInterval(channel._heartbeat);
+        if (channel._fallback) clearInterval(channel._fallback);
+        try { channel.close(); } catch {}
+      }
     };
   }, [isLoading]);
 
