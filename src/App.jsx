@@ -3,6 +3,10 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import ConfirmDrawer from "./components/ConfirmDrawer";
 import MobileBottomNav, { useMobileNav, MOBILE_NAV_HEIGHT } from "./components/MobileBottomNav";
 import MySchedule from "./pages/MySchedule";
+import StatusBadge from "./components/StatusBadge";
+import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartViews";
+import { filterLeads } from "./features/leads/leadUtils";
+import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -1812,7 +1816,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;          // phone number
       if (/\. [A-Z]/.test(name)) return true;                    // sentence pattern
       if (/,\s*(hi|hello|dear)/i.test(name)) return true;        // comma + greeting
-      if (/^(hi |hello |dear |i |i'm |i've |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|this is danae|danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(name.trim())) return true;
+      if (/^(hi |hello |dear |i |i'm |i've |i'd |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|this is danae|danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(name.trim())) return true;
       if (/just like yours/i.test(name)) return true;
       if (/clean(ing)? (dental|medical|office|your)/i.test(name)) return true;
       if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;
@@ -5363,6 +5367,7 @@ export default function App() {
     if (isLoading) return;
 
     const JUNK = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]|\[Property Manager\]|\[Buyer Name\]|\[Your_Name\]|\[building type\]|\[city\]|\[Recipient|\[Name\]/i;
+      const SENTENCE_COMPANY = /^(hi |hello |dear |i |i'm |i've |i'd |danae|have us clean|we specialize|just like yours|maintaining a clean|as the |as a )|(@|\|)|\b(patients?|tenants?|haveusclean\.ca)\b/i;
     const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
 
     // ── Shared cold lead normalizer — used by both initial fetch and realtime events ──
@@ -5387,6 +5392,7 @@ export default function App() {
     const isValidLead = (l) => {
       if (!l?.company?.trim()) return false;
       if (JUNK.test(l.company)) return false;
+      if (SENTENCE_COMPANY.test(l.company)) return false;
       const lid = String(l.lead_id || l.id || "");
       if (SAMPLE_IDS.has(lid)) return false;
       if (lid && deletedLeadIds.has(lid)) return false;
