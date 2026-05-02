@@ -7,7 +7,7 @@ import StatusBadge from "./components/StatusBadge";
 import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartViews";
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
-import LeadList from "./components/LeadList";
+import LeadList from "./features/leads/LeadList";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
