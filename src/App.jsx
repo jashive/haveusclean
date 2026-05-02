@@ -5323,10 +5323,34 @@ export default function App() {
     dbSet(DB_KEYS.partners, partners);
   }, [partners, isLoading]);
 
-  // ── Auto-save resLeads ──
+  // ── Auto-save resLeads — with write-time validator ──
+  // Filters junk before every write so dirty data never enters Supabase
   useEffect(() => {
     if (isLoading) return;
-    dbSet(DB_KEYS.leadsRes, resLeads);
+    const RES_JUNK_WRITE = [
+      /^(hi |hello |dear |i |i'm |i've |i'd )/i,
+      /^(this is |danae|have us clean|haveusclean)/i,
+      /^(we excel|we specialize|we provide|we offer|let's connect|let me know|just wanted|just reaching)/i,
+      /^(common area|do you have a moment|i see you manage|i noticed|i wanted to discuss)/i,
+      /^(ensuring,|maintaining a clean|as the |as a )/i,
+      /(common area.{0,30}clean|keeping.{0,20}pristine|spotless|hygien)/i,
+      /(enhance your|support your efforts|explore how we can|help keep them|discuss how our)/i,
+      /(I see .{3,40}manages)/i,
+      /\b(tenants?|patients?)\b/i,
+      /(\w+\s){3,}\w+[.!?,]$/,
+    ];
+    const isJunkWrite = (l) => {
+      const n = String(l.name || '').trim();
+      const a = String(l.address || '').trim();
+      if (!n && !a && !l.email) return true;
+      for (const rx of RES_JUNK_WRITE) {
+        if (rx.test(n)) return true;
+        if (rx.test(a)) return true;
+      }
+      return false;
+    };
+    const clean = resLeads.filter(l => !isJunkWrite(l));
+    dbSet(DB_KEYS.leadsRes, clean);
   }, [resLeads, isLoading]);
 
   // ── Auto-save coldLeads ──
