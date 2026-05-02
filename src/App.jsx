@@ -3400,6 +3400,9 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   ]);
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
+  const [editLead, setEditLead] = useState(null);
+  const [showEditForm, setShowEditForm] = useState(false);
+  const [confirmDrawerOpen, setConfirmDrawerOpen] = useState(false);
   const [showEmail, setShowEmail] = useState(null);
   const [form, setForm] = useState({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
 
