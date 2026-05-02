@@ -2838,12 +2838,42 @@ const SAMPLE_RES_LEADS = [
   { id:3, name:"Priya S.", email:"priya@email.com", phone:"(416) 555-4410", address:"44 Lakeshore Blvd, Toronto ON", dwellingType:"Semi / Townhouse", dwellingSize:"Large", beds:4, baths:3, sqft:2200, serviceType:"Move-In / Move-Out", addons:["cabinets","carpet"], frequency:"One-Time", preferredDate:"2026-04-12", preferredTime:"8:00 AM", notes:"Empty unit. Move-out clean.", status:"New", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:"2026-04-02T09:00:00Z" },
 ];
 
+function cleanResidentialLeadList(input = []) {
+  const seen = new Set();
+
+  return (Array.isArray(input) ? input : []).filter((lead) => {
+    if (!lead) return false;
+
+    const text = `${lead.name || ""} ${lead.email || ""} ${lead.phone || ""} ${lead.address || ""} ${lead.notes || ""} ${lead.jobNotes || ""}`.toLowerCase();
+
+    if (!lead.name && !lead.email && !lead.phone && !lead.address) return false;
+
+    if (text.includes("common area cleaning")) return false;
+    if (text.includes("tenants' experience")) return false;
+    if (text.includes("tenants experience")) return false;
+    if (text.includes("danae from have us clean")) return false;
+    if (text.includes("i see you manage properties")) return false;
+    if (text.includes("we excel in keeping common areas spotless")) return false;
+
+    const key = (lead.email || lead.phone || `${lead.name || ""}-${lead.address || ""}`).toLowerCase().trim();
+    if (!key) return false;
+    if (seen.has(key)) return false;
+
+    seen.add(key);
+    return true;
+  });
+}
+
 function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads, setTab = () => {} }) {
   // Use lifted state; seed with sample data if empty
   const leads = cleanResidentialLeadList(resLeads);
-  const setLeads = (updater) => {
-    setResLeads(typeof updater === "function" ? updater(leads) : updater);
-  };
+ const setLeads = (updater) => {
+  setResLeads(prev =>
+    cleanResidentialLeadList(
+      typeof updater === "function" ? updater(prev) : updater
+    )
+  );
+};
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
   const [editLead, setEditLead] = useState(null);
