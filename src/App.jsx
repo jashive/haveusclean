@@ -5394,7 +5394,31 @@ export default function App() {
         const data = await res.json();
         if (data.leads && data.leads.length > 0) {
           setResLeads(ls => {
-            // Dedup by email+name (stable identifiers)
+            // Get permanently deleted IDs so they never come back
+            let deletedIds = new Set();
+            try { deletedIds = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]")); } catch {}
+            // Junk filter
+            const RES_JUNK_INTAKE = [
+              /^(hi |hello |dear |i |i'm |i've |i'd )/i,
+              /^(this is |danae|have us clean|haveusclean)/i,
+              /^(we excel|we specialize|we provide|we offer|let's connect|just wanted|just reaching)/i,
+              /^(common area|do you have a moment|i see you manage|i noticed|i wanted to discuss)/i,
+              /(common area.{0,30}clean|keeping.{0,20}pristine|spotless)/i,
+              /(enhance your|support your efforts|explore how we can|help keep them|discuss how our)/i,
+              /\b(tenants?|patients?)\b/i,
+              /(\w+\s){3,}\w+[.!?,]$/,
+            ];
+            const isJunkIntake = (l) => {
+              const n = String(l.name || '').trim();
+              const a = String(l.address || '').trim();
+              if (!n && !a && !l.email) return true;
+              for (const rx of RES_JUNK_INTAKE) {
+                if (rx.test(n)) return true;
+                if (rx.test(a)) return true;
+              }
+              return false;
+            };
+            // Dedup by email+name
             const existingKeys = new Set(ls.map(l => {
               const email = (l.email||'').toLowerCase().trim();
               const name  = (l.name ||'').toLowerCase().trim();
@@ -5404,6 +5428,8 @@ export default function App() {
               const email = (l.email||'').toLowerCase().trim();
               const name  = (l.name ||'').toLowerCase().trim();
               if (!email || !name) return false;
+              if (l.id && deletedIds.has(String(l.id))) return false;
+              if (isJunkIntake(l)) return false;
               const key = `${email}|${name}`;
               if (existingKeys.has(key)) return false;
               existingKeys.add(key);
