@@ -5385,66 +5385,150 @@ export default function App() {
   }, [onboardingProgress, isLoading]);
 
   // ── Auto-pull new form leads every 5 minutes ──
+  // ── Supabase Realtime — live residential lead updates (Pro plan) ──
+  // Replaces the 5-minute Google Form polling with an instant WebSocket subscription.
+  // When n8n writes a new form submission to huc_leads_res, it appears immediately.
+  // Deleted leads are blocked by checking cp:leads_res_deleted at every entry point.
   useEffect(() => {
     if (isLoading) return;
-    const pullIntake = async () => {
+
+    // Junk filter — same rules used everywhere
+    const RES_JUNK_RT = [
+      /^(hi |hello |dear |i |i'm |i've |i'd )/i,
+      /^(this is |danae|have us clean|haveusclean)/i,
+      /^(we excel|we specialize|we provide|we offer|let's connect|just wanted|just reaching)/i,
+      /^(common area|do you have a moment|i see you manage|i noticed|i wanted to discuss)/i,
+      /^(ensuring,|maintaining a clean|as the |as a )/i,
+      /(common area.{0,30}clean|keeping.{0,20}pristine|spotless|hygien)/i,
+      /(enhance your|support your efforts|explore how we can|help keep them|discuss how our)/i,
+      /(I see .{3,40}manages)/i,
+      /\b(tenants?|patients?)\b/i,
+      /(\w+\s){3,}\w+[.!?,]$/,
+    ];
+
+    const isValidResLead = (l) => {
+      if (!l) return false;
+      const n = String(l.name || '').trim();
+      const a = String(l.address || '').trim();
+      if (!n && !a && !l.email) return false;
+      for (const rx of RES_JUNK_RT) {
+        if (rx.test(n)) return true && false; // junk — reject
+        if (rx.test(a)) return true && false;
+      }
+      // Check deleted IDs
       try {
-        const res = await fetch("/api/intake");
-        if (!res.ok) return;
-        const data = await res.json();
-        if (data.leads && data.leads.length > 0) {
-          setResLeads(ls => {
-            // Get permanently deleted IDs so they never come back
-            let deletedIds = new Set();
-            try { deletedIds = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]")); } catch {}
-            // Junk filter
-            const RES_JUNK_INTAKE = [
-              /^(hi |hello |dear |i |i'm |i've |i'd )/i,
-              /^(this is |danae|have us clean|haveusclean)/i,
-              /^(we excel|we specialize|we provide|we offer|let's connect|just wanted|just reaching)/i,
-              /^(common area|do you have a moment|i see you manage|i noticed|i wanted to discuss)/i,
-              /(common area.{0,30}clean|keeping.{0,20}pristine|spotless)/i,
-              /(enhance your|support your efforts|explore how we can|help keep them|discuss how our)/i,
-              /\b(tenants?|patients?)\b/i,
-              /(\w+\s){3,}\w+[.!?,]$/,
-            ];
-            const isJunkIntake = (l) => {
-              const n = String(l.name || '').trim();
-              const a = String(l.address || '').trim();
-              if (!n && !a && !l.email) return true;
-              for (const rx of RES_JUNK_INTAKE) {
-                if (rx.test(n)) return true;
-                if (rx.test(a)) return true;
-              }
-              return false;
-            };
-            // Dedup by email+name
-            const existingKeys = new Set(ls.map(l => {
-              const email = (l.email||'').toLowerCase().trim();
-              const name  = (l.name ||'').toLowerCase().trim();
-              return `${email}|${name}`;
-            }));
-            const newOnes = data.leads.filter(l => {
-              const email = (l.email||'').toLowerCase().trim();
-              const name  = (l.name ||'').toLowerCase().trim();
-              if (!email || !name) return false;
-              if (l.id && deletedIds.has(String(l.id))) return false;
-              if (isJunkIntake(l)) return false;
-              const key = `${email}|${name}`;
-              if (existingKeys.has(key)) return false;
-              existingKeys.add(key);
-              return true;
-            });
-            if (newOnes.length === 0) return ls;
-            console.log(`✅ Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
-            return [...newOnes, ...ls];
-          });
-        }
-      } catch { /* silent */ }
+        const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
+        if (l.id && deleted.has(String(l.id))) return false;
+      } catch {}
+      return true;
     };
-    pullIntake();
-    const timer = setInterval(pullIntake, 5 * 60 * 1000);
-    return () => clearInterval(timer);
+
+    // Corrected junk check — separate from validity check
+    const isJunkRes = (l) => {
+      const n = String(l.name || '').trim();
+      const a = String(l.address || '').trim();
+      for (const rx of RES_JUNK_RT) {
+        if (rx.test(n)) return true;
+        if (rx.test(a)) return true;
+      }
+      return false;
+    };
+
+    const isValidRes = (l) => {
+      if (!l) return false;
+      if (isJunkRes(l)) return false;
+      try {
+        const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
+        if (l.id && deleted.has(String(l.id))) return false;
+      } catch {}
+      return true;
+    };
+
+    // ── Realtime WebSocket for huc_leads_res ──
+    let wsRes = null;
+    try {
+      const REALTIME_URL = SUPABASE_URL.replace("https://", "wss://") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+      wsRes = new WebSocket(REALTIME_URL);
+
+      wsRes.onopen = () => {
+        wsRes.send(JSON.stringify({
+          topic: "realtime:public:huc_leads_res",
+          event: "phx_join",
+          payload: {
+            config: {
+              broadcast: { self: false },
+              postgres_changes: [
+                { event: "INSERT", schema: "public", table: "huc_leads_res" },
+                { event: "UPDATE", schema: "public", table: "huc_leads_res" },
+                { event: "DELETE", schema: "public", table: "huc_leads_res" },
+              ]
+            }
+          },
+          ref: "res1"
+        }));
+        wsRes._heartbeat = setInterval(() => {
+          if (wsRes.readyState === WebSocket.OPEN) {
+            wsRes.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb_res" }));
+          }
+        }, 25000);
+      };
+
+      wsRes.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const event = msg?.payload?.data?.type;
+          const record = msg?.payload?.data?.record;
+          const old = msg?.payload?.data?.old_record;
+
+          if (event === "INSERT") {
+            if (!record) return;
+            const lead = record.data || record;
+            if (!isValidRes(lead)) return;
+            setResLeads(prev => {
+              const lid = String(lead.id || "");
+              if (prev.find(l => String(l.id) === lid)) return prev; // already exists
+              return [lead, ...prev];
+            });
+          }
+
+          if (event === "UPDATE") {
+            if (!record) return;
+            const lead = record.data || record;
+            if (!isValidRes(lead)) return;
+            setResLeads(prev => {
+              const lid = String(lead.id || "");
+              if (prev.find(l => String(l.id) === lid)) {
+                return prev.map(l => String(l.id) === lid
+                  ? { ...lead, status: l.status || lead.status, notes: l.notes || lead.notes }
+                  : l
+                );
+              }
+              return [lead, ...prev];
+            });
+          }
+
+          if (event === "DELETE") {
+            const lid = String(old?.id || "");
+            if (lid) setResLeads(prev => prev.filter(l => String(l.id) !== lid));
+          }
+        } catch { /* ignore malformed */ }
+      };
+
+      wsRes.onerror = () => {
+        // WebSocket failed — no fallback polling (that's what caused the problem)
+        // App still works — leads load from Supabase at boot, local state persists
+        console.log("huc_leads_res Realtime unavailable — using boot load only");
+      };
+    } catch {
+      // WebSocket not supported — boot load handles initial data
+    }
+
+    return () => {
+      if (wsRes) {
+        if (wsRes._heartbeat) clearInterval(wsRes._heartbeat);
+        try { wsRes.close(); } catch {}
+      }
+    };
   }, [isLoading]);
 
   // ── Supabase Realtime — live cold lead updates (Pro plan) ──
