@@ -1825,6 +1825,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       // Sentence fragment: ends with period BUT not a business suffix like Inc. Corp. Ltd.
       if (name.trim().endsWith(".") && !/\b(inc|corp|ltd|co|llc|llp|plc|sa|pty|mgmt)\.$/.test(name.trim().toLowerCase())) return true;
       if (/\b(tailored for|tailored to|seamlessly|dependable services|high-quality cleaning|compliant cleaning|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(name)) return true;
+      if (/(common area.{0,30}clean|keeping.{0,20}pristine|help keep them|enhance your|support your efforts|explore how we can|committed to quality|keeping.*spotless|discuss how our|I see .{3,30}manages)/i.test(name)) return true;
       return false;
     };
     const seenCompanies = new Set();
@@ -5237,13 +5238,51 @@ export default function App() {
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
         if (savedResLeads) {
-          // Filter out permanently deleted lead IDs
           try {
+            // 1. Filter permanently deleted IDs
             const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
-            const filtered = deleted.size > 0
-              ? savedResLeads.filter(l => !deleted.has(String(l.id)))
-              : savedResLeads;
-            setResLeads(filtered);
+            // 2. Junk filter — remove outreach sentences masquerading as lead fields
+            const RES_JUNK = [
+              /^(hi |hello |dear |i |i'm |i've |i'd )/i,
+              /^(this is |danae|have us clean|haveusclean)/i,
+              /^(we excel|we specialize|we provide|we offer|let's connect|let me know|just wanted|just reaching)/i,
+              /^(common area|do you have a moment|i see you manage|i noticed|i wanted to discuss)/i,
+              /^(ensuring,|maintaining a clean|as the |as a )/i,
+              /(common area.{0,30}clean|keeping.{0,20}pristine|spotless|hygien)/i,
+              /(enhance your|support your efforts|explore how we can|help keep them)/i,
+              /\b(tenants?|patients?)\b/i,
+              /[|@]{1}.*[|@]{1}/,
+              /\d{3}[-.\s]\d{3}[-.\s]\d{4}/,
+            ];
+            const isJunkRes = (l) => {
+              const n = (l.name || '').trim();
+              const a = (l.address || '').trim();
+              if (!n && !a && !l.email) return true;
+              for (const rx of RES_JUNK) {
+                if (rx.test(n)) return true;
+                if (rx.test(a)) return true;
+              }
+              // Sentence-like name: 4+ words ending in punctuation
+              if (/(\w+\s){3,}\w+[.!?,]$/.test(n)) return true;
+              return false;
+            };
+            // 3. Dedup by email → phone → name+address
+            const seenEm = new Set(), seenPh = new Set(), seenNA = new Set();
+            const afterAll = savedResLeads.filter(l => {
+              if (deleted.has(String(l.id))) return false;
+              if (isJunkRes(l)) return false;
+              const em = (l.email || '').toLowerCase().trim();
+              const ph = (l.phone || '').replace(/\D/g, '');
+              const na = ((l.name || '') + '|' + (l.address || '')).toLowerCase().trim();
+              if (em && seenEm.has(em)) return false;
+              if (ph && ph.length >= 10 && seenPh.has(ph)) return false;
+              if (na.length > 3 && seenNA.has(na)) return false;
+              if (em) seenEm.add(em);
+              if (ph && ph.length >= 10) seenPh.add(ph);
+              if (na.length > 3) seenNA.add(na);
+              return true;
+            });
+            setResLeads(afterAll);
           } catch { setResLeads(savedResLeads); }
         }
         if (savedColdLeads && savedColdLeads.length > 0) {
