@@ -2855,22 +2855,20 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [searchQuery, setSearchQuery] = useState("");
 
   // Stable delete handler — lives outside the render loop so no stale closures
-  const handleDeleteRes = (id) => {
+  const handleDeleteRes = async (id) => {
     const deleteId = String(id);
     setConfirmDeleteRes(null);
-    setResLeads(prev => {
-      const next = prev.filter(l => String(l.id) !== deleteId);
-      // Persist deleted ID to localStorage so it survives refresh
-      try {
-        const existing = JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]");
-        if (!existing.includes(deleteId)) {
-          localStorage.setItem("cp:leads_res_deleted", JSON.stringify([...existing, deleteId]));
-        }
-      } catch {}
-      return next;
-    });
-    // Delete from Supabase in background
-    sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(deleteId)}`, { method: "DELETE" }).catch(() => {});
+    // 1. Remove from local state immediately
+    setResLeads(prev => prev.filter(l => String(l.id) !== deleteId));
+    // 2. Persist to localStorage so deleted ID survives refresh on this device
+    try {
+      const existing = JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]");
+      if (!existing.includes(deleteId)) {
+        localStorage.setItem("cp:leads_res_deleted", JSON.stringify([...existing, deleteId]));
+      }
+    } catch {}
+    // 3. Delete from Supabase — awaited, tries both id columns so row is truly gone
+    try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(deleteId)}`, { method: "DELETE" }); } catch {}
   };
   const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status:"New", assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
