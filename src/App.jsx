@@ -2840,7 +2840,7 @@ const SAMPLE_RES_LEADS = [
 
 function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads, setTab = () => {} }) {
   // Use lifted state; seed with sample data if empty
-  const leads = resLeads;
+  const leads = cleanResidentialLeadList(resLeads);
   const setLeads = (updater) => {
     setResLeads(typeof updater === "function" ? updater(leads) : updater);
   };
@@ -5189,8 +5189,8 @@ export default function App() {
             const filtered = deleted.size > 0
               ? savedResLeads.filter(l => !deleted.has(String(l.id)))
               : savedResLeads;
-            setResLeads(filtered);
-          } catch { setResLeads(savedResLeads); }
+           setResLeads(cleanResidentialLeadList(filtered));
+         } catch { setResLeads(cleanResidentialLeadList(savedResLeads)); }
         }
         if (savedColdLeads && savedColdLeads.length > 0) {
           // Strip out the hardcoded sample lead IDs that were stored in previous sessions
