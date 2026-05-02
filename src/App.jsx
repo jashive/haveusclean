@@ -1,4 +1,4 @@
-// ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
+// âââ HAVE US CLEAN v3.0 ââ Operating System ââââââââââââââââââââââââââââââââââ
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ConfirmDrawer from "./components/ConfirmDrawer";
 import MobileBottomNav, { useMobileNav, MOBILE_NAV_HEIGHT } from "./components/MobileBottomNav";
@@ -10,13 +10,13 @@ import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import LeadList from "./features/leads/LeadList";
 import { cleanResidentialLeads } from "./features/leads/residentialCleanup";
 
-// ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
+// âââ BRAND CONFIG âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const BRAND = {
   name: "Have Us Clean",
-  tagline: "Mid-Market Cleaning · Toronto & GTA",
+  tagline: "Mid-Market Cleaning Â· Toronto & GTA",
   version: "4.0.0",
   color: "#00D4AA",
-  logoMark: "🧹",
+  logoMark: "ð§¹",
   supportEmail: "haveusclean@gmail.com",
   website: "https://haveusclean.ca",
   businessName: "Have Us Clean",
@@ -25,20 +25,20 @@ const BRAND = {
 };
 
 
-// ─── WORK ORDER GENERATOR ─────────────────────────────────────────────────────
+// âââ WORK ORDER GENERATOR âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Auto-generates a structured work order when a lead is booked
 function generateWorkOrder(job, lead, partner) {
   const addonTasks = (lead?.addons || job.upsells || []).map(id => {
     const ao = RES_ADDONS.find(x => x.id === id);
     const label = ao?.label || id;
     const tasks = {
-      "Inside Fridge":          "Empty fridge contents → wipe all shelves and drawers with green rag → clean door seals → replace contents",
-      "Inside Oven":            "Remove oven racks → spray oven cleaner → let soak 10 min → scrub interior with green rag → wipe clean → replace racks",
-      "Inside Cabinets":        "Empty cabinet → wipe all interior surfaces with blue rag → clean door interiors → replace items neatly",
-      "Interior Windows":       "Blue damp rag on glass → buff dry immediately with dry blue rag → wipe sills and frames",
-      "Baseboards / Detail":    "Dry blue rag along all baseboards → damp follow-up on sticky buildup → check corners",
-      "Carpet Cleaning":        "Pre-treat stains → steam clean per carpet type → allow dry time before walking on",
-      "Pet Hair / Heavy Detail":"Use rubber gloves or lint roller on upholstery → vacuum twice with pet attachment → deodorise if needed",
+      "Inside Fridge":          "Empty fridge contents â wipe all shelves and drawers with green rag â clean door seals â replace contents",
+      "Inside Oven":            "Remove oven racks â spray oven cleaner â let soak 10 min â scrub interior with green rag â wipe clean â replace racks",
+      "Inside Cabinets":        "Empty cabinet â wipe all interior surfaces with blue rag â clean door interiors â replace items neatly",
+      "Interior Windows":       "Blue damp rag on glass â buff dry immediately with dry blue rag â wipe sills and frames",
+      "Baseboards / Detail":    "Dry blue rag along all baseboards â damp follow-up on sticky buildup â check corners",
+      "Carpet Cleaning":        "Pre-treat stains â steam clean per carpet type â allow dry time before walking on",
+      "Pet Hair / Heavy Detail":"Use rubber gloves or lint roller on upholstery â vacuum twice with pet attachment â deodorise if needed",
     };
     return { label, instruction: tasks[label] || `Complete ${label} as per standard procedure` };
   });
@@ -51,7 +51,7 @@ function generateWorkOrder(job, lead, partner) {
     "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
   };
 
-  const ragReminder = "🎨 RAG SYSTEM: 🔴 Red = Toilets ONLY · 🟡 Yellow = Sinks/Mirrors · 🟢 Green = Kitchen Surfaces · 🔵 Blue = General/Glass";
+  const ragReminder = "ð¨ RAG SYSTEM: ð´ Red = Toilets ONLY Â· ð¡ Yellow = Sinks/Mirrors Â· ð¢ Green = Kitchen Surfaces Â· ðµ Blue = General/Glass";
 
   return {
     id: `WO-${job.id}`,
@@ -75,7 +75,7 @@ function generateWorkOrder(job, lead, partner) {
   };
 }
 
-// ─── HAVE US CLEAN — SERVICE PACKAGES ────────────────────────────────────────
+// âââ HAVE US CLEAN â SERVICE PACKAGES ââââââââââââââââââââââââââââââââââââââââ
 // Sourced directly from HUC Operating System (ChatGPT export)
 const HUC_PACKAGES = {
   "Refresh Clean": {
@@ -83,39 +83,39 @@ const HUC_PACKAGES = {
     range: { min: 140, max: 300 },
     multiplier: 1.0,
     includes: ["Vacuum", "Mop", "Dusting", "Kitchen surfaces", "Bathroom wipe-down", "General reset"],
-    icon: "✨",
+    icon: "â¨",
   },
   "Full Home Clean": {
     best_for: "One-time or occasional whole-home clean",
     range: { min: 180, max: 400 },
     multiplier: 1.35,
     includes: ["Everything in Refresh Clean", "More detailed kitchens", "More detailed bathrooms", "Surface wipe-downs"],
-    icon: "🏠",
+    icon: "ð ",
   },
   "Deep Clean": {
     best_for: "First-time cleans / heavier buildup",
     range: { min: 250, max: 700 },
     multiplier: 1.8,
     includes: ["Everything in Full Home Clean", "Baseboards", "Detailed scrubbing", "Buildup removal", "Extra detail time"],
-    icon: "🔍",
+    icon: "ð",
   },
   "Move-In / Move-Out": {
     best_for: "Turnover / empty-unit cleaning",
     range: { min: 300, max: 600 },
     multiplier: 1.9,
     includes: ["Empty property clean", "Inside cabinets if empty", "Full kitchen and bathroom detail", "Floors and surfaces"],
-    icon: "📦",
+    icon: "ð¦",
   },
   "Kitchen & Bathroom Refresh": {
     best_for: "Fast, targeted clean / entry offer",
     range: { min: 120, max: 200 },
     multiplier: 0.75,
     includes: ["Kitchen counters", "Sink", "Cabinet exteriors", "Appliance wipe-down", "Bathroom full clean", "Floors cleaned"],
-    icon: "🚿",
+    icon: "ð¿",
   },
 };
 
-// ─── HUC PRICING GRID (real Toronto/GTA market prices from operating system) ──
+// âââ HUC PRICING GRID (real Toronto/GTA market prices from operating system) ââ
 const HUC_PRICING_GRID = {
   "Apartment / Condo": {
     "1 Bed": { "One-Time": [140,180], "Weekly": [120,150], "Bi-Weekly": [130,165], "Monthly": [140,180] },
@@ -137,30 +137,30 @@ const HUC_PRICING_GRID = {
   },
 };
 
-// ─── HUC ADDONS (real prices from operating system) ───────────────────────────
+// âââ HUC ADDONS (real prices from operating system) âââââââââââââââââââââââââââ
 const HUC_ADDONS = [
-  { id:"fridge",   label:"Inside Fridge",         priceRange:[40,60],  costToUs:25, icon:"🧊", col:"AI" },
-  { id:"oven",     label:"Inside Oven",            priceRange:[40,70],  costToUs:28, icon:"🔥", col:"AJ" },
-  { id:"cabinets", label:"Inside Cabinets",        priceRange:[40,80],  costToUs:28, icon:"🗄",  col:"AK" },
-  { id:"windows",  label:"Interior Windows",       priceRange:[5,10],   costToUs:4,  icon:"🪟", col:"AL", perUnit:true, unit:"per window" },
-  { id:"baseboards",label:"Baseboards / Detail",   priceRange:[40,80],  costToUs:28, icon:"📐", col:"AM" },
-  { id:"carpet",   label:"Carpet Cleaning",        priceRange:[60,120], costToUs:45, icon:"🛋", col:"AN" },
-  { id:"pethair",  label:"Pet Hair / Heavy Detail",priceRange:[40,80],  costToUs:28, icon:"🐾", col:"AO" },
+  { id:"fridge",   label:"Inside Fridge",         priceRange:[40,60],  costToUs:25, icon:"ð§", col:"AI" },
+  { id:"oven",     label:"Inside Oven",            priceRange:[40,70],  costToUs:28, icon:"ð¥", col:"AJ" },
+  { id:"cabinets", label:"Inside Cabinets",        priceRange:[40,80],  costToUs:28, icon:"ð",  col:"AK" },
+  { id:"windows",  label:"Interior Windows",       priceRange:[5,10],   costToUs:4,  icon:"ðª", col:"AL", perUnit:true, unit:"per window" },
+  { id:"baseboards",label:"Baseboards / Detail",   priceRange:[40,80],  costToUs:28, icon:"ð", col:"AM" },
+  { id:"carpet",   label:"Carpet Cleaning",        priceRange:[60,120], costToUs:45, icon:"ð", col:"AN" },
+  { id:"pethair",  label:"Pet Hair / Heavy Detail",priceRange:[40,80],  costToUs:28, icon:"ð¾", col:"AO" },
 ];
 
-// ─── HUC LEAD STATUSES (from operating system) ────────────────────────────────
+// âââ HUC LEAD STATUSES (from operating system) ââââââââââââââââââââââââââââââââ
 const HUC_STATUSES = ["New", "Quoted", "Follow Up", "Booked", "Completed", "Lost"];
-// Colors resolved after C is defined — see HUC_STATUS_COLOR below
+// Colors resolved after C is defined â see HUC_STATUS_COLOR below
 
-// ─── MULTI-REGION CONFIG ─────────────────────────────────────────────────────
+// âââ MULTI-REGION CONFIG âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Supports Canada (Ontario) and USA (Arizona) with correct tax, currency,
 // localized pricing benchmarks, labour laws, and compliance requirements.
 
 const REGIONS = {
   "ON": {
-    id: "ON", country: "CA", flag: "🇨🇦", label: "Ontario, Canada",
+    id: "ON", country: "CA", flag: "ð¨ð¦", label: "Ontario, Canada",
     currency: "CAD", currencySymbol: "CA$", locale: "en-CA",
-    // Tax: HST 13% (5% federal GST + 8% provincial) — cleaning services fully taxable
+    // Tax: HST 13% (5% federal GST + 8% provincial) â cleaning services fully taxable
     tax: { name: "HST", rate: 0.13, breakdown: { federal: 0.05, provincial: 0.08 },
       filingBody: "CRA (Canada Revenue Agency)",
       registrationThreshold: "$30,000 CAD annual taxable revenue",
@@ -169,7 +169,7 @@ const REGIONS = {
     },
     // Partner pay benchmarks (Ontario minimum wage $17.20/hr as of Oct 2024)
     partnerPayRange: { min: 25, mid: 30, max: 40 },
-    partnerCostPerHour: 30, // CAD — $30/hr per partner
+    partnerCostPerHour: 30, // CAD â $30/hr per partner
     // Market pricing benchmarks (research-verified, CAD)
     residential: {
       standardPerHour: { min: 35, max: 60 }, // GTA rates
@@ -197,7 +197,7 @@ const REGIONS = {
       "Date of service",
       "Description of services",
       "Pre-HST subtotal",
-      "HST amount (13% — do NOT show federal/provincial separately)",
+      "HST amount (13% â do NOT show federal/provincial separately)",
       "Total amount including HST",
       "Payment terms",
     ],
@@ -210,9 +210,9 @@ const REGIONS = {
   },
 
   "AZ": {
-    id: "AZ", country: "US", flag: "🇺🇸", label: "Arizona, USA",
+    id: "AZ", country: "US", flag: "ðºð¸", label: "Arizona, USA",
     currency: "USD", currencySymbol: "$", locale: "en-US",
-    // Tax: TPT (Transaction Privilege Tax) — state 5.6% + local
+    // Tax: TPT (Transaction Privilege Tax) â state 5.6% + local
     // Cleaning services: NOT taxable under TPT in Arizona (services generally exempt)
     // Exception: if selling cleaning products/supplies separately, those are taxable
     tax: {
@@ -227,7 +227,7 @@ const REGIONS = {
       notes: "Cleaning services are generally NOT subject to Arizona TPT. TPT applies if you sell tangible products. Register at AZTaxes.gov. $12/yr TPT license per location required.",
     },
     partnerPayRange: { min: 22, max: 32 },
-    partnerCostPerHour: 25, // USD — $25/hr per partner
+    partnerCostPerHour: 25, // USD â $25/hr per partner
     residential: {
       standardPerHour: { min: 25, max: 50 },
       flatRateSmall: { min: 100, max: 200 },
@@ -268,7 +268,7 @@ const REGIONS = {
   },
 };
 
-// Active region — consumers of this context use useRegion() hook pattern via App state
+// Active region â consumers of this context use useRegion() hook pattern via App state
 let ACTIVE_REGION = REGIONS["ON"]; // default, overridden by App state
 
 // Helper: format currency for active region
@@ -279,7 +279,7 @@ const fmt = (amount, region = ACTIVE_REGION) =>
 const fmtC = (amount, region = ACTIVE_REGION) =>
   new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:0, maximumFractionDigits:0 }).format(amount);
 
-// ─── COLOR SYSTEM ────────────────────────────────────────────────────────────
+// âââ COLOR SYSTEM ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const C = {
   bg: "#0A0F1E", surface: "#111827", card: "#1A2235", border: "#1E2D45",
   accent: "#00D4AA", accentDim: "#00D4AA22", gold: "#FFB800", goldDim: "#FFB80022",
@@ -298,7 +298,7 @@ const HUC_STATUS_COLOR = {
   "Lost":      C.dim,
 };
 
-// ─── PROFIT MARGIN CONFIG ────────────────────────────────────────────────────
+// âââ PROFIT MARGIN CONFIG ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Have Us Clean pay structure:
 //   Partner earns 65% of the client price (pre-tax)
 //   Company keeps 35% of the client price (gross profit)
@@ -310,17 +310,17 @@ const partnerPayFromPrice  = (clientPrice) => Math.round(clientPrice * PARTNER_S
 const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
 const markupFactor = (cost) => Math.ceil(cost / (1 - PROFIT_MARGIN));
 
-// ─── TEAM SIZE BY SQFT ───────────────────────────────────────────────────────
-// 1 partner  → up to 1,000 sqft
-// 2 partners → 1,001–3,000 sqft
-// 3 partners → 3,001+ sqft
+// âââ TEAM SIZE BY SQFT âââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// 1 partner  â up to 1,000 sqft
+// 2 partners â 1,001â3,000 sqft
+// 3 partners â 3,001+ sqft
 const getTeamSize = (sqft) => {
   if (!sqft || sqft <= 1000) return 1;
   if (sqft <= 3000) return 2;
   return 3;
 };
 
-// ─── HOURS BY SQFT (per team — team works together) ─────────────────────────
+// âââ HOURS BY SQFT (per team â team works together) âââââââââââââââââââââââââ
 // Production rate: 1,000 sqft/hr per team regardless of team size
 // Minimum 1.5h, rounded to nearest 0.5h
 const getJobHours = (sqft) => {
@@ -328,11 +328,11 @@ const getJobHours = (sqft) => {
   return Math.round(raw * 2) / 2; // round to nearest 0.5
 };
 
-// ─── PARTNER HOURLY RATE ─────────────────────────────────────────────────────
+// âââ PARTNER HOURLY RATE âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const PARTNER_HOURLY_ON = 30; // CAD per partner per hour (Ontario)
 const PARTNER_HOURLY_AZ = 25; // USD per partner per hour (Arizona)
 
-// ─── FLOOR PRICES BY DWELLING (market minimum — never go below these) ────────
+// âââ FLOOR PRICES BY DWELLING (market minimum â never go below these) ââââââââ
 const FLOOR_PRICES = {
   ON: {
     "Apartment / Condo": { "1 Bed":140, "2 Bed":165, "3 Bed":205 },
@@ -346,7 +346,7 @@ const FLOOR_PRICES = {
   },
 };
 
-// ─── PACKAGE MULTIPLIERS ─────────────────────────────────────────────────────
+// âââ PACKAGE MULTIPLIERS âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const RES_SERVICE_MULT = {
   "Refresh Clean":             1.00,
   "Full Home Clean":           1.25,
@@ -358,7 +358,7 @@ const RES_SERVICE_MULT = {
   "Office / Commercial":       1.20,
 };
 
-// ─── CONDITION MULTIPLIERS ───────────────────────────────────────────────────
+// âââ CONDITION MULTIPLIERS âââââââââââââââââââââââââââââââââââââââââââââââââââ
 const CONDITION_MULT = {
   "Light":   0.90,
   "Average": 1.00,
@@ -366,7 +366,7 @@ const CONDITION_MULT = {
   "":        1.00,
 };
 
-// ─── FREQUENCY DISCOUNTS ─────────────────────────────────────────────────────
+// âââ FREQUENCY DISCOUNTS âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const FREQ_DISCOUNTS = {
   "One-Time":  0,
   "Weekly":    0.15,
@@ -374,7 +374,7 @@ const FREQ_DISCOUNTS = {
   "Monthly":   0.05,
 };
 
-// ─── ADDON PRICES (fixed, market-tested) ────────────────────────────────────
+// âââ ADDON PRICES (fixed, market-tested) ââââââââââââââââââââââââââââââââââââ
 const RES_ADDONS = [
   { id:"fridge",    label:"Inside Fridge",         clientPrice:50,  costToUs:20 },
   { id:"oven",      label:"Inside Oven",            clientPrice:55,  costToUs:22 },
@@ -395,9 +395,9 @@ const getSqftHours = (sqft) => {
   for (let t of tiers) if (sqft <= t) return SQFT_HOURS[t];
   return SQFT_HOURS[5000] + (sqft - 5000) / 500;
 };
-const PARTNER_COST_PER_HOUR = 30; // updated — used in scheduling estimates
+const PARTNER_COST_PER_HOUR = 30; // updated â used in scheduling estimates
 
-// Commercial rates (cost per sqft → markup for 30% margin)
+// Commercial rates (cost per sqft â markup for 30% margin)
 const COM_SERVICE_COST_PER_SQFT = {
   "Office Clean": 0.07, "Janitorial (Daily)": 0.05, "Post-Construction": 0.14,
   "Medical/Lab Facility": 0.18, "Retail / Showroom": 0.065, "Warehouse / Industrial": 0.045,
@@ -423,7 +423,7 @@ const JOB_TYPES = ["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Mov
 const UPSELL_OPTIONS = ["Inside Fridge","Inside Oven","Inside Cabinets","Interior Windows","Baseboards / Detail","Carpet Cleaning","Pet Hair / Heavy Detail"];
 const avatarColors = ["linear-gradient(135deg,#00D4AA,#0088FF)","linear-gradient(135deg,#FF6B6B,#FF8E53)","linear-gradient(135deg,#A78BFA,#EC4899)","linear-gradient(135deg,#FFB800,#FF6B6B)"];
 
-// ─── SAMPLE DATA (Have Us Clean — Toronto & GTA) ─────────────────────────────
+// âââ SAMPLE DATA (Have Us Clean â Toronto & GTA) âââââââââââââââââââââââââââââ
 const initPartners = [
   { id:1, name:"Maria Santos",  phone:"(416) 555-0101", email:"maria@haveusclean.com",  status:"active",    rating:4.9, jobsDone:47, payRate:26, availability:["Mon","Tue","Wed","Thu","Fri"], onboarded:true,  avatar:"MS", region:"ON" },
   { id:2, name:"James Cole",    phone:"(480) 555-0102", email:"james@haveusclean.com",  status:"active",    rating:4.7, jobsDone:31, payRate:22, availability:["Mon","Wed","Fri","Sat"],       onboarded:true,  avatar:"JC", region:"AZ" },
@@ -437,14 +437,14 @@ const TOMORROW = new Date(Date.now()+86400000).toISOString().split("T")[0];
 const IN2DAYS = new Date(Date.now()+2*86400000).toISOString().split("T")[0];
 
 const initJobs = [
-  { id:1, client:"Sarah M. — 2BR Condo",        email:"sarah.m@email.com", address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, partnerIds:[1], status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
+  { id:1, client:"Sarah M. â 2BR Condo",        email:"sarah.m@email.com", address:"88 Maple Dr, North York ON",       type:"Full Home Clean",    date:TODAY_DATE,  time:"9:00 AM",  partnerId:1, partnerIds:[1], status:"scheduled",  hours:3, upsells:["Inside Oven","Inside Fridge"], beforePics:[], afterPics:[], summary:"", clientPrice:210, partnerPay:137, profit:73,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Bi-Weekly", nextDate:TOMORROW, region:"ON" },
   { id:2, client:"The Thompson House",           email:"thompson@email.com", address:"55 Birchwood Ave, Scottsdale AZ",  type:"Deep Clean",         date:TODAY_DATE,  time:"1:00 PM",  partnerId:3, partnerIds:[3], status:"in-progress", hours:4, upsells:["Baseboards / Detail"],         beforePics:[], afterPics:[], summary:"", clientPrice:320, partnerPay:208, profit:112, checkIn:"1:03 PM", checkOut:null, checkInCoords:{lat:33.4484,lng:-112.0740}, checkOutCoords:null, recurring:"One-Time", nextDate:null, region:"AZ" },
-  { id:3, client:"Priya S. — 3BR Detached",     email:"priya@email.com", address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, partnerIds:[2], status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
-  { id:4, client:"King St Lofts — Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, partnerIds:[1], status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
+  { id:3, client:"Priya S. â 3BR Detached",     email:"priya@email.com", address:"12 Oakridge Rd, Mississauga ON",   type:"Refresh Clean",      date:TOMORROW,    time:"10:00 AM", partnerId:2, partnerIds:[2], status:"scheduled",  hours:2, upsells:[],                              beforePics:[], afterPics:[], summary:"", clientPrice:180, partnerPay:117, profit:63,  checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:"Weekly", nextDate:IN2DAYS, region:"ON" },
+  { id:4, client:"King St Lofts â Unit 402",    address:"900 King St W, Toronto ON",        type:"Move-In / Move-Out", date:YESTERDAY,   time:"8:00 AM",  partnerId:1, partnerIds:[1], status:"completed",  hours:5, upsells:["Inside Cabinets","Carpet Cleaning"], beforePics:["before1.jpg"], afterPics:["after1.jpg"], summary:"Empty unit, full move-out. Client very happy. Carpets came out great.", clientPrice:450, partnerPay:293, profit:157, checkIn:"8:01 AM", checkOut:"1:12 PM", checkInCoords:{lat:43.6426,lng:-79.4022}, checkOutCoords:{lat:43.6426,lng:-79.4022}, recurring:"One-Time", nextDate:null, region:"ON" },
 ];
 
-// ─── SHARED STYLES ────────────────────────────────────────────────────────────
-// ─── RESPONSIVE HELPERS ──────────────────────────────────────────────────────
+// âââ SHARED STYLES ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// âââ RESPONSIVE HELPERS ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const S = {
   app: { minHeight:"100vh", background:C.bg, fontFamily:"'DM Sans','Segoe UI',system-ui,sans-serif", color:C.text, display:"flex", flexDirection:"column" },
   header: { background:C.surface, borderBottom:`1px solid ${C.border}`, padding:"0 16px", display:"flex", alignItems:"center", justifyContent:"space-between", height:56, position:"sticky", top:0, zIndex:200, backdropFilter:"blur(8px)" },
@@ -465,7 +465,7 @@ const S = {
   avatar: (color) => ({ width:36, height:36, borderRadius:"50%", background:color||`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:13, color:"#fff", flexShrink:0 }),
   divider: { height:1, background:C.border, margin:"16px 0" },
   statCard: (color) => ({ background:C.card, borderRadius:12, border:`1px solid ${C.border}`, padding:"15px 16px", borderLeft:`3px solid ${color}` }),
-  // Mobile-safe grids — stack on small screens
+  // Mobile-safe grids â stack on small screens
   grid2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,260px),1fr))", gap:14 },
   grid3: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,180px),1fr))", gap:12 },
   grid4: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,140px),1fr))", gap:10 },
@@ -474,7 +474,7 @@ const S = {
 };
 const styles = S;
 
-// ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
+// âââ SHARED COMPONENTS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function StatCard({ label, value, sub, color, icon }) {
   return (
     <div style={S.statCard(color)}>
@@ -494,7 +494,7 @@ function Modal({ title, children, onClose, wide }) {
         onClick={e => e.stopPropagation()}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
           <div style={{ fontSize:16, fontWeight:800, paddingRight:12 }}>{title}</div>
-          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, fontSize:24, cursor:"pointer", padding:"0 4px", lineHeight:1, flexShrink:0 }}>×</button>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, fontSize:24, cursor:"pointer", padding:"0 4px", lineHeight:1, flexShrink:0 }}>Ã</button>
         </div>
         {children}
       </div>
@@ -502,8 +502,8 @@ function Modal({ title, children, onClose, wide }) {
   );
 }
 
-// ─── PROFIT-AWARE + REGION-AWARE QUOTE ENGINE ────────────────────────────────
-// ─── HUC QUOTE ENGINE ────────────────────────────────────────────────────────
+// âââ PROFIT-AWARE + REGION-AWARE QUOTE ENGINE ââââââââââââââââââââââââââââââââ
+// âââ HUC QUOTE ENGINE ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Uses real HUC pricing grid as primary source, cross-referenced with labor hours.
 // For ON: +13% HST. For AZ: no service tax.
 function calcResQuote(f, region = ACTIVE_REGION) {
@@ -511,7 +511,7 @@ function calcResQuote(f, region = ACTIVE_REGION) {
   const hourlyRate = isAZ ? PARTNER_HOURLY_AZ : PARTNER_HOURLY_ON;
   const azUplift   = isAZ ? 1.12 : 1.0; // AZ market 12% higher than Ontario
 
-  // ── Step 1: Determine sqft (estimate from beds/baths if not provided) ──
+  // ââ Step 1: Determine sqft (estimate from beds/baths if not provided) ââ
   const estimatedSqft = f.sqft && f.sqft > 0
     ? f.sqft
     : Math.max(400,
@@ -520,34 +520,34 @@ function calcResQuote(f, region = ACTIVE_REGION) {
         + (f.baths || 1) * 80
       );
 
-  // ── Step 2: Team size and hours ──
+  // ââ Step 2: Team size and hours ââ
   const teamSize  = getTeamSize(estimatedSqft);
   const jobHours  = getJobHours(estimatedSqft);
 
-  // ── Step 3: Labor cost (team total) ──
+  // ââ Step 3: Labor cost (team total) ââ
   const laborCost = teamSize * hourlyRate * jobHours;
 
-  // ── Step 4: Base price from labor (35% margin) ──
+  // ââ Step 4: Base price from labor (35% margin) ââ
   const laborBasePrice = Math.ceil(laborCost / PARTNER_SHARE);
 
-  // ── Step 5: Apply package multiplier ──
+  // ââ Step 5: Apply package multiplier ââ
   const pkgMult = RES_SERVICE_MULT[f.serviceType] || 1.0;
   const formulaPrice = Math.round(laborBasePrice * pkgMult * azUplift);
 
-  // ── Step 6: Floor price (never go below market minimum) ──
+  // ââ Step 6: Floor price (never go below market minimum) ââ
   const regionKey = isAZ ? "AZ" : "ON";
   const floorGroup = FLOOR_PRICES[regionKey]?.[f.dwellingType];
   const floorBase  = floorGroup?.[f.dwellingSize] || 140;
   const floorPrice = Math.round(floorBase * pkgMult * azUplift);
 
-  // ── Step 7: Take the higher of formula or floor ──
+  // ââ Step 7: Take the higher of formula or floor ââ
   const baseClientPrice = Math.max(formulaPrice, floorPrice);
 
-  // ── Step 8: Condition adjustment ──
+  // ââ Step 8: Condition adjustment ââ
   const condMult = CONDITION_MULT[f.condition || ""] || 1.0;
   const conditionedPrice = Math.round(baseClientPrice * condMult);
 
-  // ── Step 9: Addons ──
+  // ââ Step 9: Addons ââ
   const addonClientTotal = (f.addons || []).reduce((a, id) => {
     const ao = RES_ADDONS.find(x => x.id === id);
     return a + (ao?.clientPrice || 0);
@@ -559,33 +559,33 @@ function calcResQuote(f, region = ACTIVE_REGION) {
 
   const clientSubtotal = conditionedPrice + addonClientTotal;
 
-  // ── Step 10: Frequency discount ──
+  // ââ Step 10: Frequency discount ââ
   const discPct    = FREQ_DISCOUNTS[f.frequency] || 0;
   const discountAmt = Math.round(clientSubtotal * discPct);
   const preTaxTotal = clientSubtotal - discountAmt;
 
-  // ── Step 11: Tax (ON = 13% HST, AZ = 0%) ──
+  // ââ Step 11: Tax (ON = 13% HST, AZ = 0%) ââ
   const taxRate   = region.id === "ON" ? region.tax.rate : 0;
   const taxAmount = Math.round(preTaxTotal * taxRate);
   const finalTotal = preTaxTotal + taxAmount;
 
-  // ── Step 12: Pay split ──
+  // ââ Step 12: Pay split ââ
   const partnerPayTotal = partnerPayFromPrice(preTaxTotal); // 65% of pre-tax
   const partnerPayEach  = teamSize > 1 ? Math.round(partnerPayTotal / teamSize) : partnerPayTotal;
   const profit          = companyProfitFromPrice(preTaxTotal); // 35%
   const margin          = preTaxTotal > 0 ? ((profit / preTaxTotal) * 100).toFixed(1) : "0";
 
-  // ── Frequency pricing variants (for quote display) ──
+  // ââ Frequency pricing variants (for quote display) ââ
   const freq_prices = {};
   Object.keys(FREQ_DISCOUNTS).forEach(freq => {
     const d = FREQ_DISCOUNTS[freq] || 0;
     freq_prices[freq] = Math.round(conditionedPrice * (1 - d));
   });
 
-  // ── Breakdown lines ──
+  // ââ Breakdown lines ââ
   const breakdown = [
     {
-      label: `Labor (${teamSize} partner${teamSize>1?"s":""} × ${jobHours}h × ${region.currencySymbol}${hourlyRate}/hr)`,
+      label: `Labor (${teamSize} partner${teamSize>1?"s":""} Ã ${jobHours}h Ã ${region.currencySymbol}${hourlyRate}/hr)`,
       cost: laborCost,
       price: conditionedPrice,
     },
@@ -652,7 +652,7 @@ function calcComQuote(f, region = ACTIVE_REGION) {
 
 function ProfitBadge({ margin }) {
   const color = margin >= 30 ? C.accent : margin >= 20 ? C.gold : C.red;
-  return <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${color}22`, color, border:`1px solid ${color}44` }}>📊 {margin}% margin</span>;
+  return <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${color}22`, color, border:`1px solid ${color}44` }}>ð {margin}% margin</span>;
 }
 
 function QuoteBox({ q, type = "res" }) {
@@ -661,7 +661,7 @@ function QuoteBox({ q, type = "res" }) {
   return (
     <div style={{ background:C.surface, borderRadius:13, border:`1px solid ${C.border}`, padding:16, marginTop:4 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:6 }}>
-        <div style={S.label}>Quote Breakdown ({R.currencySymbol} · {R.label})</div>
+        <div style={S.label}>Quote Breakdown ({R.currencySymbol} Â· {R.label})</div>
         <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
           <ProfitBadge margin={q.margin} />
           {q.taxRate > 0 && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.blueDim, color:C.blue }}>{q.taxName}: {(q.taxRate*100).toFixed(0)}%</span>}
@@ -671,14 +671,14 @@ function QuoteBox({ q, type = "res" }) {
       {/* Team and hours summary */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
         <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.blueDim, color:C.blue }}>
-          👥 {q.teamSize} partner{q.teamSize>1?"s":""}
+          ð¥ {q.teamSize} partner{q.teamSize>1?"s":""}
         </span>
         <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.surface, color:C.muted }}>
-          ⏱ {q.jobHours}h estimated
+          â± {q.jobHours}h estimated
         </span>
         {q.teamSize > 1 && (
           <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>
-            💰 {q.currency}{q.partnerPayEach} each
+            ð° {q.currency}{q.partnerPayEach} each
           </span>
         )}
       </div>
@@ -691,7 +691,7 @@ function QuoteBox({ q, type = "res" }) {
           </div>
         </div>
       ))}
-      {q.discountAmt > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"5px 0", color:C.accent, fontWeight:700 }}><span>🎁 Recurring Discount ({Math.round(q.discPct*100)}%)</span><span>−{f(q.discountAmt)}</span></div>}
+      {q.discountAmt > 0 && <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"5px 0", color:C.accent, fontWeight:700 }}><span>ð Recurring Discount ({Math.round(q.discPct*100)}%)</span><span>â{f(q.discountAmt)}</span></div>}
 
       {/* Pre-tax subtotal if tax applies */}
       {q.taxRate > 0 && (
@@ -721,21 +721,21 @@ function QuoteBox({ q, type = "res" }) {
       </div>
       {type==="res" && q.teamSize && (
         <div style={{ marginTop:10, fontSize:11, color:C.dim, background:C.bg, borderRadius:8, padding:"8px 12px" }}>
-          📐 {q.estimatedSqft?.toLocaleString()} sqft · 👥 {q.teamSize} partner{q.teamSize>1?"s":""} · ⏱ {q.jobHours}h · 💰 Floor check: {q.region?.currencySymbol}{q.floorPrice} → used: {q.region?.currencySymbol}{q.formulaPrice >= q.floorPrice ? q.formulaPrice : q.floorPrice}
+          ð {q.estimatedSqft?.toLocaleString()} sqft Â· ð¥ {q.teamSize} partner{q.teamSize>1?"s":""} Â· â± {q.jobHours}h Â· ð° Floor check: {q.region?.currencySymbol}{q.floorPrice} â used: {q.region?.currencySymbol}{q.formulaPrice >= q.floorPrice ? q.formulaPrice : q.floorPrice}
         </div>
       )}
       {q.taxRate === 0 && q.region?.id === "AZ" && (
         <div style={{ marginTop:8, fontSize:11, color:C.accent, background:C.accentDim, borderRadius:8, padding:"6px 10px" }}>
-          ℹ️ Cleaning services are generally NOT subject to Arizona TPT. No tax applied to service fees.
+          â¹ï¸ Cleaning services are generally NOT subject to Arizona TPT. No tax applied to service fees.
         </div>
       )}
     </div>
   );
 }
 
-// ─── STRIPE PAYMENTS ─────────────────────────────────────────────────────────
+// âââ STRIPE PAYMENTS âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const STRIPE_PUBLISHABLE_KEY = "pk_live_51S1ParF5AYxkV3asN5kDlMPmQgTsrdd0PpafHXRLcG6xnzci8j0BoKPXrLQJTjLG5QNVGFS3V4DmjJ3XKJcph4Fr00awk4cSFa"; // replaced after user provides key
-const STRIPE_FEE_RATE = 0.03; // 3% built into price — covers 2.9% + $0.30 Stripe fee
+const STRIPE_FEE_RATE = 0.03; // 3% built into price â covers 2.9% + $0.30 Stripe fee
 const ETRANSFER_EMAIL = "info@haveusclean.ca"; // Ontario e-transfer
 
 // Calculate price with 3% processing fee baked in
@@ -800,12 +800,12 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
 
   return (
     <div>
-      <div style={S.h2}>💳 Payments</div>
+      <div style={S.h2}>ð³ Payments</div>
 
       {/* Payment return banner */}
       {paymentResult === "success" && (
         <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, fontWeight:700, color:C.accent }}>
-          ✅ Payment received! Thank you — your booking is confirmed.
+          â Payment received! Thank you â your booking is confirmed.
         </div>
       )}
       {paymentResult === "cancelled" && (
@@ -816,15 +816,15 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
 
       {error && (
         <div style={{ background:"#FF475722", border:`1px solid #FF475744`, borderRadius:10, padding:"12px 16px", marginBottom:18, fontSize:13, color:"#FF4757" }}>
-          ⚠️ {error}
+          â ï¸ {error}
         </div>
       )}
 
       {/* Stats */}
       <div style={S.grid3}>
-        <StatCard label="Total Received"  value={`${cur}${totalReceived.toLocaleString()}`}  icon="✅" color={C.accent} sub="paid jobs" />
-        <StatCard label="Awaiting Payment" value={`${cur}${totalPending.toLocaleString()}`}   icon="⏳" color={C.gold}   sub="completed, unpaid" />
-        <StatCard label="Processing Fees" value={`${cur}${totalFees.toLocaleString()}`}       icon="💸" color={C.red}    sub="3% built into price" />
+        <StatCard label="Total Received"  value={`${cur}${totalReceived.toLocaleString()}`}  icon="â" color={C.accent} sub="paid jobs" />
+        <StatCard label="Awaiting Payment" value={`${cur}${totalPending.toLocaleString()}`}   icon="â³" color={C.gold}   sub="completed, unpaid" />
+        <StatCard label="Processing Fees" value={`${cur}${totalFees.toLocaleString()}`}       icon="ð¸" color={C.red}    sub="3% built into price" />
       </div>
 
       <div style={S.divider} />
@@ -832,18 +832,18 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
       {/* Payment method info */}
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:14, marginBottom:20 }}>
         <div style={{ ...S.card, borderLeft:`4px solid ${C.accent}` }}>
-          <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>💳 Card Payments (Stripe)</div>
+          <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>ð³ Card Payments (Stripe)</div>
           <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
-            Available for all clients · Ontario (CAD) + Arizona (USD)<br/>
-            3% fee built into price — no surprise charges<br/>
+            Available for all clients Â· Ontario (CAD) + Arizona (USD)<br/>
+            3% fee built into price â no surprise charges<br/>
             Client pays via secure Stripe checkout link
           </div>
         </div>
         {region?.id === "ON" && (
           <div style={{ ...S.card, borderLeft:`4px solid ${C.blue}` }}>
-            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>📱 Interac E-Transfer (ON only)</div>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>ð± Interac E-Transfer (ON only)</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
-              Free · No processing fee · Ontario clients only<br/>
+              Free Â· No processing fee Â· Ontario clients only<br/>
               Send to: <strong style={{ color:C.text }}>{ETRANSFER_EMAIL}</strong><br/>
               Use job ID or client name as the message
             </div>
@@ -851,7 +851,7 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
         )}
         {region?.id === "AZ" && (
           <div style={{ ...S.card, borderLeft:`4px solid ${C.gold}` }}>
-            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>🇺🇸 Arizona Payments (USD)</div>
+            <div style={{ fontWeight:800, fontSize:15, marginBottom:6 }}>ðºð¸ Arizona Payments (USD)</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
               Card payments only via Stripe<br/>
               No tax on cleaning services in AZ<br/>
@@ -864,7 +864,7 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
       {/* Pending payments */}
       {pendingJobs.length > 0 && (
         <>
-          <div style={S.h3}>⏳ Awaiting Payment ({pendingJobs.length})</div>
+          <div style={S.h3}>â³ Awaiting Payment ({pendingJobs.length})</div>
           <div style={{ display:"flex", flexDirection:"column", gap:10, marginBottom:20 }}>
             {pendingJobs.map(job => {
               const amountWithFee = priceWithFee(job.clientPrice || 0);
@@ -874,7 +874,7 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
                     <div>
                       <div style={{ fontWeight:700, fontSize:15 }}>{job.client}</div>
-                      <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type} · {job.address}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>{job.date} Â· {job.type} Â· {job.address}</div>
                       <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
                         Base: {cur}{job.clientPrice} + 3% fee = <strong style={{ color:C.text }}>{cur}{amountWithFee}</strong>
                       </div>
@@ -883,17 +883,17 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
                       {region?.id === "ON" && (
                         <button style={S.btn("ghost")}
                           onClick={() => {
-                            navigator.clipboard?.writeText(`Please send ${cur}${amountWithFee} via Interac e-transfer to ${ETRANSFER_EMAIL}. Use "${job.client} - ${job.type}" as the message. Thank you! — Have Us Clean`);
-                            alert("✅ E-transfer instructions copied to clipboard!");
+                            navigator.clipboard?.writeText(`Please send ${cur}${amountWithFee} via Interac e-transfer to ${ETRANSFER_EMAIL}. Use "${job.client} - ${job.type}" as the message. Thank you! â Have Us Clean`);
+                            alert("â E-transfer instructions copied to clipboard!");
                           }}>
-                          📱 E-Transfer Instructions
+                          ð± E-Transfer Instructions
                         </button>
                       )}
                       <button
                         style={{ ...S.btn("primary"), background: isProcessing ? C.dim : C.accent }}
                         onClick={() => handlePayNow(job)}
                         disabled={isProcessing}>
-                        {isProcessing ? "Opening Stripe..." : "💳 Send Pay Link"}
+                        {isProcessing ? "Opening Stripe..." : "ð³ Send Pay Link"}
                       </button>
                     </div>
                   </div>
@@ -907,17 +907,17 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
       {/* Paid jobs */}
       {paidJobs.length > 0 && (
         <>
-          <div style={S.h3}>✅ Paid ({paidJobs.length})</div>
+          <div style={S.h3}>â Paid ({paidJobs.length})</div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
             {paidJobs.map(job => (
               <div key={job.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
                 <div>
                   <div style={{ fontWeight:700, fontSize:14 }}>{job.client}</div>
-                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date} Â· {job.type}</div>
                 </div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontWeight:800, color:C.accent }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
-                  <span style={S.badge("green")}>Paid ✅</span>
+                  <span style={S.badge("green")}>Paid â</span>
                 </div>
               </div>
             ))}
@@ -927,7 +927,7 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
 
       {completedJobs.length === 0 && (
         <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>💳</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð³</div>
           <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No completed jobs yet</div>
           <div style={{ color:C.muted, fontSize:14 }}>Completed jobs will appear here ready for payment collection.</div>
         </div>
@@ -936,9 +936,9 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
       {/* Setup reminder */}
       {STRIPE_PUBLISHABLE_KEY.includes("REPLACE") && (
         <div style={{ ...S.card, marginTop:20, borderLeft:`4px solid ${C.gold}`, background:"#FFB80011" }}>
-          <div style={{ fontWeight:700, color:C.gold, marginBottom:6 }}>⚙️ Stripe Setup Required</div>
+          <div style={{ fontWeight:700, color:C.gold, marginBottom:6 }}>âï¸ Stripe Setup Required</div>
           <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-            1. Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>STRIPE_SECRET_KEY</code> to Vercel → Settings → Environment Variables<br/>
+            1. Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>STRIPE_SECRET_KEY</code> to Vercel â Settings â Environment Variables<br/>
             2. Share your Stripe publishable key (starts with <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>pk_live_</code>) so we can update the app code
           </div>
         </div>
@@ -947,22 +947,22 @@ function StripePayments({ jobs, partners, region = ACTIVE_REGION }) {
   );
 }
 
-// ─── SMS REMINDERS ────────────────────────────────────────────────────────────
+// âââ SMS REMINDERS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const SMS_TEMPLATES = [
-  { id:"confirm",   icon:"✅", label:"Booking Confirmation",  timing:"Immediately", template:(j)=>`Hi ${j.client}! Your ${j.type} with Have Us Clean is confirmed for ${j.date} at ${j.time} at ${j.address}. Questions? Reply or email haveusclean@gmail.com` },
-  { id:"remind24",  icon:"🔔", label:"24-Hour Reminder",      timing:"24h before",  template:(j)=>`Reminder: Your Have Us Clean service is TOMORROW ${j.date} at ${j.time}. Your cleaner will arrive at ${j.address}. See you soon!` },
-  { id:"remind2",   icon:"⏰", label:"2-Hour Reminder",       timing:"2h before",   template:(j)=>`Your Have Us Clean cleaner is on the way! Arriving at ${j.address} around ${j.time} today. Need to reach us? Reply here.` },
-  { id:"enroute",   icon:"🚗", label:"Cleaner En Route",      timing:"On check-in", template:(j)=>`Your Have Us Clean cleaner has arrived and is starting your ${j.type}. We'll let you know when done!` },
-  { id:"complete",  icon:"🎉", label:"Job Complete",          timing:"On checkout", template:(j)=>`Your ${j.type} is complete! We'd love your feedback — reply with a rating 1-5 ⭐. Thank you for choosing Have Us Clean!` },
-  { id:"followup",  icon:"💬", label:"Post-Clean Follow-Up",  timing:"2h after",    template:(j)=>`Hi ${j.client}! How did your Have Us Clean service go? We want to make sure everything was perfect. Reply anytime — we appreciate you!` },
+  { id:"confirm",   icon:"â", label:"Booking Confirmation",  timing:"Immediately", template:(j)=>`Hi ${j.client}! Your ${j.type} with Have Us Clean is confirmed for ${j.date} at ${j.time} at ${j.address}. Questions? Reply or email haveusclean@gmail.com` },
+  { id:"remind24",  icon:"ð", label:"24-Hour Reminder",      timing:"24h before",  template:(j)=>`Reminder: Your Have Us Clean service is TOMORROW ${j.date} at ${j.time}. Your cleaner will arrive at ${j.address}. See you soon!` },
+  { id:"remind2",   icon:"â°", label:"2-Hour Reminder",       timing:"2h before",   template:(j)=>`Your Have Us Clean cleaner is on the way! Arriving at ${j.address} around ${j.time} today. Need to reach us? Reply here.` },
+  { id:"enroute",   icon:"ð", label:"Cleaner En Route",      timing:"On check-in", template:(j)=>`Your Have Us Clean cleaner has arrived and is starting your ${j.type}. We'll let you know when done!` },
+  { id:"complete",  icon:"ð", label:"Job Complete",          timing:"On checkout", template:(j)=>`Your ${j.type} is complete! We'd love your feedback â reply with a rating 1-5 â­. Thank you for choosing Have Us Clean!` },
+  { id:"followup",  icon:"ð¬", label:"Post-Clean Follow-Up",  timing:"2h after",    template:(j)=>`Hi ${j.client}! How did your Have Us Clean service go? We want to make sure everything was perfect. Reply anytime â we appreciate you!` },
 ];
 
 function SMSReminders({ jobs }) {
   const [enabled, setEnabled] = useState({ confirm:true, remind24:true, remind2:false, enroute:true, complete:true, followup:false });
   const [logs, setLogs] = useState([
-    { time:"1:03 PM", msg:"✅ 'Cleaner En Route' sent to Sunrise Apartments #4B", type:"success" },
-    { time:"9:00 AM", msg:"✅ 'Booking Confirmation' sent to The Johnson Home", type:"success" },
-    { time:"8:00 AM", msg:"✅ '24-Hour Reminder' sent to Green Office Suite 3", type:"success" },
+    { time:"1:03 PM", msg:"â 'Cleaner En Route' sent to Sunrise Apartments #4B", type:"success" },
+    { time:"9:00 AM", msg:"â 'Booking Confirmation' sent to The Johnson Home", type:"success" },
+    { time:"8:00 AM", msg:"â '24-Hour Reminder' sent to Green Office Suite 3", type:"success" },
   ]);
   const [preview, setPreview] = useState(null);
 
@@ -970,19 +970,19 @@ function SMSReminders({ jobs }) {
 
   const sendNow = (tmpl, job) => {
     const msg = tmpl.template(job);
-    setLogs(l => [{ time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}), msg:`✅ '${tmpl.label}' sent to ${job.client}`, type:"success" }, ...l]);
-    alert(`📱 SMS Sent!\n\n"${msg}"`);
+    setLogs(l => [{ time:new Date().toLocaleTimeString([], {hour:"2-digit",minute:"2-digit"}), msg:`â '${tmpl.label}' sent to ${job.client}`, type:"success" }, ...l]);
+    alert(`ð± SMS Sent!\n\n"${msg}"`);
   };
 
   const sentToday = logs.filter(l=>l.type==="success").length;
 
   return (
     <div>
-      <div style={S.h2}>📱 SMS Reminders</div>
+      <div style={S.h2}>ð± SMS Reminders</div>
       <div style={S.grid3}>
-        <StatCard label="Active Automations" value={Object.values(enabled).filter(Boolean).length} icon="🤖" color={C.accent} />
-        <StatCard label="Sent Today" value={sentToday} icon="📤" color={C.blue} />
-        <StatCard label="Templates Ready" value={SMS_TEMPLATES.length} icon="📝" color={C.gold} />
+        <StatCard label="Active Automations" value={Object.values(enabled).filter(Boolean).length} icon="ð¤" color={C.accent} />
+        <StatCard label="Sent Today" value={sentToday} icon="ð¤" color={C.blue} />
+        <StatCard label="Templates Ready" value={SMS_TEMPLATES.length} icon="ð" color={C.gold} />
       </div>
       <div style={S.divider} />
 
@@ -1056,7 +1056,7 @@ function SMSReminders({ jobs }) {
   );
 }
 
-// ─── RECURRING JOBS ────────────────────────────────────────────────────────────
+// âââ RECURRING JOBS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function RecurringJobs({ jobs, setJobs, partners }) {
   const recurring = jobs.filter(j=>j.recurring && j.recurring!=="One-Time");
   const [showModal, setShowModal] = useState(false);
@@ -1072,7 +1072,7 @@ function RecurringJobs({ jobs, setJobs, partners }) {
     const laborCost = job.hours * (partner?.payRate||24);
     const newJob = { ...job, id:Date.now(), date:nextDate, status:"scheduled", checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, beforePics:[], afterPics:[], summary:"", clientPrice:markupFactor(laborCost), partnerPay:Math.round(laborCost), profit:markupFactor(laborCost)-Math.round(laborCost), nextDate:null };
     setJobs(js=>[...js, newJob]);
-    alert(`✅ Next ${job.recurring} job created for ${nextDate}!`);
+    alert(`â Next ${job.recurring} job created for ${nextDate}!`);
   };
 
   const createRecurring = () => {
@@ -1088,13 +1088,13 @@ function RecurringJobs({ jobs, setJobs, partners }) {
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
-        <div style={S.h2}>🔄 Recurring Jobs</div>
+        <div style={S.h2}>ð Recurring Jobs</div>
         <button style={S.btn("primary")} onClick={()=>setShowModal(true)}>+ New Recurring</button>
       </div>
       <div style={S.grid3}>
-        <StatCard label="Recurring Clients" value={recurring.length} icon="🔄" color={C.accent} />
-        <StatCard label="Est. Weekly Revenue" value={`$${Math.round(totalWeeklyRevenue)}`} icon="📈" color={C.blue} />
-        <StatCard label="Avg Freq" value={recurring.length?"Weekly":"—"} icon="📅" color={C.gold} />
+        <StatCard label="Recurring Clients" value={recurring.length} icon="ð" color={C.accent} />
+        <StatCard label="Est. Weekly Revenue" value={`$${Math.round(totalWeeklyRevenue)}`} icon="ð" color={C.blue} />
+        <StatCard label="Avg Freq" value={recurring.length?"Weekly":"â"} icon="ð" color={C.gold} />
       </div>
       <div style={S.divider} />
       <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
@@ -1106,10 +1106,10 @@ function RecurringJobs({ jobs, setJobs, partners }) {
               <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
                 <div>
                   <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>📍 {job.address}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>👷 {partner?.name} · {job.time} · {job.type}</div>
+                  <div style={{ fontSize:13, color:C.muted }}>ð {job.address}</div>
+                  <div style={{ fontSize:13, color:C.muted }}>ð· {partner?.name} Â· {job.time} Â· {job.type}</div>
                   <div style={{ marginTop:6, display:"flex", gap:8, flexWrap:"wrap" }}>
-                    <span style={S.badge("blue")}>🔄 {job.recurring}</span>
+                    <span style={S.badge("blue")}>ð {job.recurring}</span>
                     <span style={S.badge("green")}>Next: {job.date}</span>
                   </div>
                 </div>
@@ -1120,7 +1120,7 @@ function RecurringJobs({ jobs, setJobs, partners }) {
                 </div>
               </div>
               <div style={{ marginTop:12, display:"flex", gap:8 }}>
-                <button style={S.btn("sm")} onClick={()=>generateNext(job)}>➕ Generate Next Visit</button>
+                <button style={S.btn("sm")} onClick={()=>generateNext(job)}>â Generate Next Visit</button>
               </div>
             </div>
           );
@@ -1128,7 +1128,7 @@ function RecurringJobs({ jobs, setJobs, partners }) {
       </div>
 
       {showModal && (
-        <Modal title="🔄 New Recurring Job" onClose={()=>setShowModal(false)}>
+        <Modal title="ð New Recurring Job" onClose={()=>setShowModal(false)}>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div><div style={S.label}>Client</div><input style={S.input} value={form.client} onChange={e=>setForm({...form,client:e.target.value})} placeholder="Client Name" /></div>
             <div><div style={S.label}>Address</div><input style={S.input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 Main St" /></div>
@@ -1158,12 +1158,12 @@ function RecurringJobs({ jobs, setJobs, partners }) {
   );
 }
 
-// ─── GEOFENCING ───────────────────────────────────────────────────────────────
+// âââ GEOFENCING âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Geofencing({ jobs, partners }) {
   const [radius, setRadius] = useState(0.5);
   const [alerts, setAlerts] = useState([
-    { id:1, partner:"Maria Santos", job:"The Johnson Home", dist:0.02, time:"9:02 AM", status:"ok",      msg:"Checked in 0.02 mi from job site ✅" },
-    { id:2, partner:"Tanya Brooks", job:"Sunrise Apts #4B", dist:0.83, time:"1:05 PM", status:"alert",   msg:"⚠️ Checked in 0.83 mi from job site — outside geofence!" },
+    { id:1, partner:"Maria Santos", job:"The Johnson Home", dist:0.02, time:"9:02 AM", status:"ok",      msg:"Checked in 0.02 mi from job site â" },
+    { id:2, partner:"Tanya Brooks", job:"Sunrise Apts #4B", dist:0.83, time:"1:05 PM", status:"alert",   msg:"â ï¸ Checked in 0.83 mi from job site â outside geofence!" },
   ]);
   const [simulating, setSimulating] = useState(false);
 
@@ -1172,7 +1172,7 @@ function Geofencing({ jobs, partners }) {
     setTimeout(() => {
       const dist = +(Math.random()*1.2).toFixed(2);
       const status = dist<=radius?"ok":"alert";
-      setAlerts(a=>[{ id:Date.now(), partner:"James Cole", job:"The Martinez Family", dist, time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}), status, msg:status==="ok"?`Checked in ${dist} mi from job site ✅`:`⚠️ Checked in ${dist} mi from job site — outside geofence!` }, ...a]);
+      setAlerts(a=>[{ id:Date.now(), partner:"James Cole", job:"The Martinez Family", dist, time:new Date().toLocaleTimeString([],{hour:"2-digit",minute:"2-digit"}), status, msg:status==="ok"?`Checked in ${dist} mi from job site â`:`â ï¸ Checked in ${dist} mi from job site â outside geofence!` }, ...a]);
       setSimulating(false);
     }, 1400);
   };
@@ -1182,23 +1182,23 @@ function Geofencing({ jobs, partners }) {
 
   return (
     <div>
-      <div style={S.h2}>🛡️ Geofencing & Compliance</div>
+      <div style={S.h2}>ð¡ï¸ Geofencing & Compliance</div>
       <div style={S.grid3}>
-        <StatCard label="Compliant Check-Ins" value={ok_today} icon="✅" color={C.accent} />
-        <StatCard label="Outside Geofence" value={alerts_today} icon="⚠️" color={C.red} sub="require review" />
-        <StatCard label="Geofence Radius" value={`${radius} mi`} icon="📡" color={C.blue} />
+        <StatCard label="Compliant Check-Ins" value={ok_today} icon="â" color={C.accent} />
+        <StatCard label="Outside Geofence" value={alerts_today} icon="â ï¸" color={C.red} sub="require review" />
+        <StatCard label="Geofence Radius" value={`${radius} mi`} icon="ð¡" color={C.blue} />
       </div>
       <div style={S.divider} />
 
       <div style={{ ...S.card, marginBottom:20 }}>
-        <div style={S.h3}>⚙️ Geofence Settings</div>
+        <div style={S.h3}>âï¸ Geofence Settings</div>
         <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap" }}>
           <div style={{ flex:1 }}>
             <div style={S.label}>Alert Radius (miles)</div>
             <input type="range" min={0.1} max={2} step={0.1} value={radius} onChange={e=>setRadius(+e.target.value)} style={{ width:"100%", accentColor:C.accent }} />
             <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.muted }}><span>0.1 mi (tight)</span><span style={{ color:C.accent, fontWeight:700 }}>{radius} mi selected</span><span>2 mi (loose)</span></div>
           </div>
-          <button style={S.btn("primary")} onClick={simulateCheckIn} disabled={simulating}>{simulating?"📡 Detecting...":"📍 Simulate Check-In"}</button>
+          <button style={S.btn("primary")} onClick={simulateCheckIn} disabled={simulating}>{simulating?"ð¡ Detecting...":"ð Simulate Check-In"}</button>
         </div>
         <div style={{ marginTop:14, fontSize:13, color:C.muted }}>
           Partners must check in within <strong style={{ color:C.accent }}>{radius} miles</strong> of the job address. Violations generate automatic alerts.
@@ -1211,11 +1211,11 @@ function Geofencing({ jobs, partners }) {
           <div key={a.id} style={{ ...S.cardSm, borderLeft:`4px solid ${a.status==="ok"?C.accent:C.red}` }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
               <div>
-                <div style={{ fontWeight:700, fontSize:14 }}>{a.partner} → {a.job}</div>
-                <div style={{ fontSize:12, color:C.muted }}>{a.time} · {a.dist} mi from site</div>
+                <div style={{ fontWeight:700, fontSize:14 }}>{a.partner} â {a.job}</div>
+                <div style={{ fontSize:12, color:C.muted }}>{a.time} Â· {a.dist} mi from site</div>
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                <span style={S.badge(a.status==="ok"?"green":"red")}>{a.status==="ok"?"✅ In Range":"⚠️ Outside Range"}</span>
+                <span style={S.badge(a.status==="ok"?"green":"red")}>{a.status==="ok"?"â In Range":"â ï¸ Outside Range"}</span>
                 {a.status==="alert" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>alert(`Alert reviewed for ${a.partner}`)}>Review</button>}
               </div>
             </div>
@@ -1226,7 +1226,7 @@ function Geofencing({ jobs, partners }) {
   );
 }
 
-// ─── AI SCHEDULING ────────────────────────────────────────────────────────────
+// âââ AI SCHEDULING ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function AIScheduling({ jobs, setJobs, partners }) {
   const [loading, setLoading] = useState(false);
   const [suggestions, setSuggestions] = useState([]);
@@ -1258,9 +1258,9 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
       setSuggestions(parsed);
     } catch(e) {
       setSuggestions([
-        { jobId:1, jobClient:"The Johnson Home",   currentPartner:"Maria Santos", suggestedPartner:"Maria Santos", suggestedTime:"9:00 AM", reason:"Maria has highest rating (4.9) and is available Mon-Fri — optimal for this recurring deep clean.", efficiencyGain:"High" },
+        { jobId:1, jobClient:"The Johnson Home",   currentPartner:"Maria Santos", suggestedPartner:"Maria Santos", suggestedTime:"9:00 AM", reason:"Maria has highest rating (4.9) and is available Mon-Fri â optimal for this recurring deep clean.", efficiencyGain:"High" },
         { jobId:3, jobClient:"The Martinez Family", currentPartner:"James Cole",  suggestedPartner:"Tanya Brooks", suggestedTime:"10:00 AM", reason:"Tanya is available Thu and lives closer to Elm Ave, reducing drive time by ~20 min.", efficiencyGain:"Medium" },
-        { jobId:2, jobClient:"Sunrise Apartments",  currentPartner:"Tanya Brooks", suggestedPartner:"Tanya Brooks", suggestedTime:"1:00 PM", reason:"Tanya's current assignment is optimal — move-out clean aligns with her Tue/Thu availability.", efficiencyGain:"Optimal" },
+        { jobId:2, jobClient:"Sunrise Apartments",  currentPartner:"Tanya Brooks", suggestedPartner:"Tanya Brooks", suggestedTime:"1:00 PM", reason:"Tanya's current assignment is optimal â move-out clean aligns with her Tue/Thu availability.", efficiencyGain:"Optimal" },
       ]);
     }
     setLoading(false);
@@ -1275,23 +1275,23 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 
   return (
     <div>
-      <div style={S.h2}>🤖 AI Scheduling Assistant</div>
+      <div style={S.h2}>ð¤ AI Scheduling Assistant</div>
       <div style={{ ...S.card, marginBottom:22, background:`linear-gradient(135deg,#0D1B2A,#112240)`, border:`1px solid ${C.accent}33` }}>
         <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
-          <div style={{ fontSize:40 }}>🤖</div>
+          <div style={{ fontSize:40 }}>ð¤</div>
           <div style={{ flex:1 }}>
             <div style={{ fontWeight:800, fontSize:18, color:C.accent }}>Powered by Claude AI</div>
-            <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Analyzes your jobs, partner availability, ratings, and locations to suggest the most efficient schedule — saving you hours of manual planning.</div>
+            <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Analyzes your jobs, partner availability, ratings, and locations to suggest the most efficient schedule â saving you hours of manual planning.</div>
           </div>
           <button style={{ ...S.btn("primary"), fontSize:15, padding:"12px 24px" }} onClick={runAI} disabled={loading}>
-            {loading?"🤔 Analyzing...":"✨ Generate Schedule"}
+            {loading?"ð¤ Analyzing...":"â¨ Generate Schedule"}
           </button>
         </div>
       </div>
 
       {loading && (
         <div style={{ textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🤔</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð¤</div>
           <div style={{ color:C.muted, fontSize:14 }}>Claude is analyzing your schedule...</div>
           <div style={{ width:200, height:4, background:C.surface, borderRadius:2, margin:"12px auto" }}>
             <div style={{ height:4, background:`linear-gradient(90deg,${C.accent},#0088FF)`, borderRadius:2, animation:"progress 1.5s ease-in-out infinite", width:"60%" }} />
@@ -1302,7 +1302,7 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 
       {suggestions.length > 0 && (
         <div>
-          <div style={S.h3}>💡 AI Recommendations</div>
+          <div style={S.h3}>ð¡ AI Recommendations</div>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             {suggestions.map((s,i)=>(
               <div key={i} style={{ ...S.card, borderLeft:`4px solid ${applied.includes(s.jobId)?C.accent:C.blue}` }}>
@@ -1310,17 +1310,17 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
                   <div style={{ flex:1 }}>
                     <div style={{ fontWeight:800, fontSize:15 }}>{s.jobClient}</div>
                     <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>
-                      {s.currentPartner===s.suggestedPartner ? `✅ Keep ${s.currentPartner}` : `🔄 Switch: ${s.currentPartner} → ${s.suggestedPartner}`}
-                      {" · "}⏰ {s.suggestedTime}
+                      {s.currentPartner===s.suggestedPartner ? `â Keep ${s.currentPartner}` : `ð Switch: ${s.currentPartner} â ${s.suggestedPartner}`}
+                      {" Â· "}â° {s.suggestedTime}
                     </div>
-                    <div style={{ fontSize:13, color:C.text, marginTop:6, lineHeight:1.5 }}>💡 {s.reason}</div>
+                    <div style={{ fontSize:13, color:C.text, marginTop:6, lineHeight:1.5 }}>ð¡ {s.reason}</div>
                   </div>
                   <div style={{ display:"flex", flexDirection:"column", alignItems:"flex-end", gap:8 }}>
                     <span style={S.badge(s.efficiencyGain==="High"||s.efficiencyGain==="Optimal"?"green":"gold")}>{s.efficiencyGain}</span>
                     {!applied.includes(s.jobId) ? (
-                      <button style={S.btn("sm")} onClick={()=>applySuggestion(s)}>Apply →</button>
+                      <button style={S.btn("sm")} onClick={()=>applySuggestion(s)}>Apply â</button>
                     ) : (
-                      <span style={{ fontSize:12, color:C.accent, fontWeight:700 }}>✅ Applied</span>
+                      <span style={{ fontSize:12, color:C.accent, fontWeight:700 }}>â Applied</span>
                     )}
                   </div>
                 </div>
@@ -1332,7 +1332,7 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 
       {suggestions.length===0 && !loading && (
         <div style={{ textAlign:"center", padding:40, color:C.muted }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>📅</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð</div>
           <div style={{ fontSize:14 }}>Click "Generate Schedule" to get AI-powered optimization suggestions for your jobs and partners.</div>
         </div>
       )}
@@ -1340,7 +1340,7 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
   );
 }
 
-// ─── WHITE LABEL / LICENSE SETTINGS ──────────────────────────────────────────
+// âââ WHITE LABEL / LICENSE SETTINGS ââââââââââââââââââââââââââââââââââââââââââ
 function WhiteLabel() {
   const [config, setConfig] = useState({ ...BRAND, primaryColor:"#00D4AA", plan:"growth", licenseKey:"CP-XXXX-XXXX-XXXX-XXXX", seats:10 });
   const [saved, setSaved] = useState(false);
@@ -1350,22 +1350,22 @@ function WhiteLabel() {
 
   const APP_STORE_CHECKLIST = [
     { done:true,  item:"Progressive Web App (PWA) manifest ready",                 note:"installable on iOS & Android home screen" },
-    { done:true,  item:"Responsive design — mobile-first layouts",                  note:"tested at 375px, 768px, 1200px" },
-    { done:true,  item:"Touch-friendly tap targets (≥44px)",                        note:"all buttons & nav items optimized" },
+    { done:true,  item:"Responsive design â mobile-first layouts",                  note:"tested at 375px, 768px, 1200px" },
+    { done:true,  item:"Touch-friendly tap targets (â¥44px)",                        note:"all buttons & nav items optimized" },
     { done:true,  item:"Offline-capable UI structure",                              note:"state managed in React, no server dependency" },
     { done:true,  item:"White-label brand config (name, color, logo)",              note:"BRAND object controls all identity" },
     { done:false, item:"Push notification integration (FCM)",                       note:"required for iOS App Store notifications" },
     { done:false, item:"App Store metadata (screenshots, description, keywords)",   note:"needed before submission" },
     { done:false, item:"Apple Developer Account ($99/yr)",                          note:"required for iOS App Store" },
     { done:false, item:"Google Play Console Account ($25 one-time)",                note:"required for Android Play Store" },
-    { done:false, item:"Capacitor / React Native wrapper",                          note:"converts web app → native binary" },
+    { done:false, item:"Capacitor / React Native wrapper",                          note:"converts web app â native binary" },
     { done:false, item:"Privacy Policy & Terms of Service pages",                   note:"required by both app stores" },
     { done:false, item:"In-app purchase / subscription billing",                    note:"Apple takes 15-30% of subscription revenue" },
   ];
 
   return (
     <div>
-      <div style={S.h2}>🏷️ White-Label & App Store Readiness</div>
+      <div style={S.h2}>ð·ï¸ White-Label & App Store Readiness</div>
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(280px,1fr))", gap:20, marginBottom:24 }}>
         {/* Brand Config */}
@@ -1381,7 +1381,7 @@ function WhiteLabel() {
                 <input style={{ ...S.input, fontFamily:"monospace" }} value={config.primaryColor} onChange={e=>setConfig({...config,primaryColor:e.target.value})} />
               </div>
             </div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={save}>{saved?"✅ Saved!":"💾 Save Brand Settings"}</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={save}>{saved?"â Saved!":"ð¾ Save Brand Settings"}</button>
           </div>
         </div>
 
@@ -1390,14 +1390,14 @@ function WhiteLabel() {
           <div style={S.h3}>License & Subscription</div>
           <div style={{ background:C.accentDim, borderRadius:10, padding:14, marginBottom:14 }}>
             <div style={{ fontSize:12, color:C.muted, fontWeight:700, textTransform:"uppercase", marginBottom:4 }}>Current Plan</div>
-            <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>Growth Plan · $59/mo</div>
-            <div style={{ fontSize:13, color:C.muted }}>Up to {config.seats} partners · All core features</div>
+            <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>Growth Plan Â· $59/mo</div>
+            <div style={{ fontSize:13, color:C.muted }}>Up to {config.seats} partners Â· All core features</div>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
             <div><div style={S.label}>License Key</div>
               <div style={{ display:"flex", gap:8 }}>
-                <input style={{ ...S.input, fontFamily:"monospace", fontSize:13 }} value={showLicense?config.licenseKey:"CP-••••-••••-••••-••••"} readOnly />
-                <button style={S.btn("ghost")} onClick={()=>setShowLicense(!showLicense)}>{showLicense?"🙈":"👁"}</button>
+                <input style={{ ...S.input, fontFamily:"monospace", fontSize:13 }} value={showLicense?config.licenseKey:"CP-â¢â¢â¢â¢-â¢â¢â¢â¢-â¢â¢â¢â¢-â¢â¢â¢â¢"} readOnly />
+                <button style={S.btn("ghost")} onClick={()=>setShowLicense(!showLicense)}>{showLicense?"ð":"ð"}</button>
               </div>
             </div>
             <div><div style={S.label}>Active Seats</div>
@@ -1407,8 +1407,8 @@ function WhiteLabel() {
               </div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8 }}>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... 🚀")}>⬆ Upgrade to Pro</button>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>💳 Manage Billing</button>
+              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... ð")}>â¬ Upgrade to Pro</button>
+              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>ð³ Manage Billing</button>
             </div>
           </div>
         </div>
@@ -1417,7 +1417,7 @@ function WhiteLabel() {
       {/* App Store Readiness */}
       <div style={S.card}>
         <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16, flexWrap:"wrap", gap:10 }}>
-          <div style={S.h3}>📱 App Store Readiness Checklist</div>
+          <div style={S.h3}>ð± App Store Readiness Checklist</div>
           <div style={S.badge("green")}>{APP_STORE_CHECKLIST.filter(i=>i.done).length}/{APP_STORE_CHECKLIST.length} Complete</div>
         </div>
         <div style={{ background:C.surface, borderRadius:10, height:8, marginBottom:18 }}>
@@ -1426,7 +1426,7 @@ function WhiteLabel() {
         <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
           {APP_STORE_CHECKLIST.map((item,i)=>(
             <div key={i} style={{ display:"flex", alignItems:"flex-start", gap:12, padding:"8px 0", borderBottom:`1px solid ${C.border}` }}>
-              <span style={{ fontSize:16, flexShrink:0, marginTop:1 }}>{item.done?"✅":"⬜"}</span>
+              <span style={{ fontSize:16, flexShrink:0, marginTop:1 }}>{item.done?"â":"â¬"}</span>
               <div style={{ flex:1 }}>
                 <div style={{ fontSize:13, fontWeight:600, color:item.done?C.text:C.muted }}>{item.item}</div>
                 <div style={{ fontSize:11, color:C.dim }}>{item.note}</div>
@@ -1436,22 +1436,22 @@ function WhiteLabel() {
         </div>
 
         <div style={{ marginTop:20, background:C.goldDim, border:`1px solid ${C.gold}44`, borderRadius:10, padding:14 }}>
-          <div style={{ fontWeight:700, color:C.gold, marginBottom:6 }}>📋 To List on App Stores</div>
+          <div style={{ fontWeight:700, color:C.gold, marginBottom:6 }}>ð To List on App Stores</div>
           <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-            This app runs as a <strong style={{ color:C.text }}>Progressive Web App (PWA)</strong> — it works on any device right now via browser. To publish on the Apple App Store or Google Play, wrap it with <strong style={{ color:C.text }}>Capacitor.js</strong> (free) to create native iOS/Android binaries. Budget: <strong style={{ color:C.accent }}>~$124/year</strong> (Apple $99 + Google $25 one-time). Apple takes 15–30% of subscription revenue collected through their in-app purchase system, so consider directing users to subscribe via your website instead.
+            This app runs as a <strong style={{ color:C.text }}>Progressive Web App (PWA)</strong> â it works on any device right now via browser. To publish on the Apple App Store or Google Play, wrap it with <strong style={{ color:C.text }}>Capacitor.js</strong> (free) to create native iOS/Android binaries. Budget: <strong style={{ color:C.accent }}>~$124/year</strong> (Apple $99 + Google $25 one-time). Apple takes 15â30% of subscription revenue collected through their in-app purchase system, so consider directing users to subscribe via your website instead.
           </div>
         </div>
       </div>
 
       {/* Cloud Sync */}
       <div style={{ ...S.card, marginTop:20 }}>
-        <div style={S.h3}>☁️ Cloud Sync Status</div>
+        <div style={S.h3}>âï¸ Cloud Sync Status</div>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
           {[
-            { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
-            { icon:"☁️", label:"Cloud Database", status:"Coming Soon", color:C.muted, note:"Firebase / Supabase" },
-            { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
-            { icon:"🔄", label:"Real-Time Sync", status:"Coming Soon", color:C.muted, note:"Live updates across devices" },
+            { icon:"ð¾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
+            { icon:"âï¸", label:"Cloud Database", status:"Coming Soon", color:C.muted, note:"Firebase / Supabase" },
+            { icon:"ð±", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
+            { icon:"ð", label:"Real-Time Sync", status:"Coming Soon", color:C.muted, note:"Live updates across devices" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>
               <div style={{ fontSize:28, marginBottom:6 }}>{item.icon}</div>
@@ -1466,7 +1466,7 @@ function WhiteLabel() {
   );
 }
 
-// ─── COLD OUTREACH ────────────────────────────────────────────────────────────
+// âââ COLD OUTREACH ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Reads from n8n Google Sheets pipeline. Leads have: lead_id, company, city,
 // market, segment, buyer_title, pain_point, first_offer, priority_score,
 // cold_email, follow_up_email, linkedin_note, call_opener, status, notes
@@ -1482,11 +1482,11 @@ const COLD_STATUS_COLOR = {
 };
 
 const SEGMENT_META = {
-  "Office":            { icon:"🏢", color:"#3B82F6", tone:"professional office management" },
-  "Medical":           { icon:"🏥", color:"#EF4444", tone:"medical / clinical environment" },
-  "Industrial-Office": { icon:"🏭", color:"#F59E0B", tone:"industrial facility operations" },
-  "Property Manager":  { icon:"🏘️", color:"#8B5CF6", tone:"property management / tenant services" },
-  "Dental":            { icon:"🦷", color:"#06B6D4", tone:"dental practice / patient environment" },
+  "Office":            { icon:"ð¢", color:"#3B82F6", tone:"professional office management" },
+  "Medical":           { icon:"ð¥", color:"#EF4444", tone:"medical / clinical environment" },
+  "Industrial-Office": { icon:"ð­", color:"#F59E0B", tone:"industrial facility operations" },
+  "Property Manager":  { icon:"ðï¸", color:"#8B5CF6", tone:"property management / tenant services" },
+  "Dental":            { icon:"ð¦·", color:"#06B6D4", tone:"dental practice / patient environment" },
 };
 
 // Industry-aware email upgrade prompts
@@ -1503,7 +1503,7 @@ const SEGMENT_EMAIL_CONTEXT = {
   },
   "Industrial-Office": {
     angle: "Minimal disruption to operations, after-hours flexibility",
-    hook: "We work around your schedule — nights, weekends, or between shifts.",
+    hook: "We work around your schedule â nights, weekends, or between shifts.",
     cta: "a short call to understand your facility schedule",
   },
   "Property Manager": {
@@ -1574,11 +1574,11 @@ function parseOutreachSections(text) {
   };
 }
 
-// Sample leads matching your n8n schema — replace with live sheet data
+// Sample leads matching your n8n schema â replace with live sheet data
 const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0101", company:"Brampton Medical Plaza", city:"Brampton", market:"Ontario", segment:"Medical", buyer_title:"Clinic Manager", pain_point:"High-traffic waiting areas need daily disinfection", first_offer:"medical office cleaning", priority_score:5, next_action:"Call clinic manager", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"New", owner:"Jason", notes:"" },
   { lead_id:"ON-0201", company:"Mississauga Office Tower", city:"Mississauga", market:"Ontario", segment:"Office", buyer_title:"Property Manager", pain_point:"Common areas showing wear between current cleaning cycles", first_offer:"janitorial cleaning", priority_score:4, next_action:"Email property manager", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"New", owner:"Jason", notes:"" },
-  { lead_id:"AZ-0101", company:"Scottsdale Dental Group", city:"Scottsdale", market:"Arizona", segment:"Dental", buyer_title:"Practice Manager", pain_point:"Patient perception of cleanliness affects reviews", first_offer:"dental office cleaning", priority_score:5, next_action:"Send cold email", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Contacted", owner:"Jason", notes:"Called — left voicemail" },
+  { lead_id:"AZ-0101", company:"Scottsdale Dental Group", city:"Scottsdale", market:"Arizona", segment:"Dental", buyer_title:"Practice Manager", pain_point:"Patient perception of cleanliness affects reviews", first_offer:"dental office cleaning", priority_score:5, next_action:"Send cold email", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Contacted", owner:"Jason", notes:"Called â left voicemail" },
   { lead_id:"AZ-0201", company:"Phoenix Airpark Industrial", city:"Phoenix", market:"Arizona", segment:"Industrial-Office", buyer_title:"Facilities Director", pain_point:"After-hours cleaning needed without disrupting day shift", first_offer:"janitorial cleaning", priority_score:3, next_action:"LinkedIn outreach", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Follow Up", owner:"Jason", notes:"" },
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
@@ -1589,7 +1589,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [viewLead, setViewLead]         = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [filterSeg, setFilterSeg]       = useState("All");
-  // filterMkt comes directly from App state (filterMktProp) — no local copy needed
+  // filterMkt comes directly from App state (filterMktProp) â no local copy needed
   const filterMkt = filterMktProp;
   const handleSetFilterMkt = (v) => { setFilterMktProp(v); setPage(0); };
   const [upgrading, setUpgrading]       = useState(false);
@@ -1615,7 +1615,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const res = await fetch("/api/sheet");
       const data = await res.json();
       if (data.error) {
-        setSyncError(data.error + (data.help ? " — " + data.help : ""));
+        setSyncError(data.error + (data.help ? " â " + data.help : ""));
         setLoadingSheet(false);
         return;
       }
@@ -1625,7 +1625,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         return;
       }
 
-      // ── Step 1: Clean and normalize leads ──
+      // ââ Step 1: Clean and normalize leads ââ
       const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
       const validLeads = data.leads
         .filter(l => {
@@ -1660,7 +1660,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         return;
       }
 
-      // ── Step 2: Merge with existing state ──
+      // ââ Step 2: Merge with existing state ââ
       const prevLeads = coldLeads || [];
       const prevMap = Object.fromEntries(prevLeads.map(l => [l.lead_id, l]));
       const merged = validLeads.map(sheetLead => ({
@@ -1676,7 +1676,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const manualLeads = prevLeads.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
       const combined = [...manualLeads, ...merged];
 
-      // ── Step 3: Deduplicate by lead_id — n8n guarantees unique stable IDs per business ──
+      // ââ Step 3: Deduplicate by lead_id â n8n guarantees unique stable IDs per business ââ
       const leadMap = new Map();
       for (const lead of combined) {
         const key = String(lead.lead_id || lead.id || "").trim();
@@ -1692,17 +1692,17 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       }
       const final = Array.from(leadMap.values());
 
-      // ── Step 4: Update React state (pure — no side effects) ──
+      // ââ Step 4: Update React state (pure â no side effects) ââ
       setColdLeads(final);
-      setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
+      setLastSynced(`v5.30 Â· ${new Date().toLocaleTimeString()} Â· fetched ${data.leads.length} Â· validated ${validLeads.length} Â· final ${final.length}`);
 
-      // ── Step 5: Write to Supabase — larger batches to stay under rate limit ──
+      // ââ Step 5: Write to Supabase â larger batches to stay under rate limit ââ
       const BATCH = 100;      // 100 leads per request reduces total request count
       const PARALLEL = 2;     // only 2 parallel to avoid rate limit
       let written = 0;
       let lastError = "";
 
-      // Dedupe by lead_id — Postgres rejects batches with duplicate primary keys
+      // Dedupe by lead_id â Postgres rejects batches with duplicate primary keys
       // Also: skip any lead without a real lead_id (don't invent random ones that pollute Supabase)
       const leadIdMap = new Map();
       let skipped = 0;
@@ -1722,7 +1722,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       for (let i = 0; i < batches.length; i += PARALLEL) {
         const chunk = batches.slice(i, i + PARALLEL);
-        setLastSynced(`v5.36 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
+        setLastSynced(`v5.36 Â· writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} Â· ${written} saved`);
         const promises = chunk.map(batch => {
           const rows = batch.map(({ lead, lid }) => ({
             lead_id: lid,
@@ -1750,10 +1750,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         }
       }
       const finalMsg = written === uniqueFinal.length
-        ? `v5.37 · ${new Date().toLocaleTimeString()} · ${written}/${uniqueFinal.length} saved · ${skipped} skipped (no ID) ✅`
+        ? `v5.37 Â· ${new Date().toLocaleTimeString()} Â· ${written}/${uniqueFinal.length} saved Â· ${skipped} skipped (no ID) â`
         : written > 0
-        ? `v5.37 · partial: ${written}/${uniqueFinal.length} saved · ${lastError}`
-        : `v5.37 · FAILED · 0/${uniqueFinal.length} · ${lastError || "no response"}`;
+        ? `v5.37 Â· partial: ${written}/${uniqueFinal.length} saved Â· ${lastError}`
+        : `v5.37 Â· FAILED Â· 0/${uniqueFinal.length} Â· ${lastError || "no response"}`;
       setLastSynced(finalMsg);
 
     } catch (err) {
@@ -1768,13 +1768,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     // 1. Remove from local state immediately
     setLeads(ls => ls.filter(l => l.lead_id !== lid && l.id !== lid));
     if (viewLead?.lead_id === lid || viewLead?.id === lid) setViewLead(null);
-    // 2. Permanently track — persisted to localStorage so survives refresh
+    // 2. Permanently track â persisted to localStorage so survives refresh
     setDeletedLeadIds(prev => {
       const next = new Set([...prev, lid]);
       try { localStorage.setItem("cp:deletedLeadIds", JSON.stringify([...next])); } catch {}
       return next;
     });
-    // 3. Delete from Supabase — await so we know it succeeded
+    // 3. Delete from Supabase â await so we know it succeeded
     try {
       await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" });
     } catch {}
@@ -1783,9 +1783,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     } catch {}
   };
 
-  // Auto-delete incomplete leads — only runs when leads array changes
+  // Auto-delete incomplete leads â only runs when leads array changes
   // A lead is junk if it has NO company AND NO city AND NO buyer_title AND NO lead_id
-  // Auto-delete junk leads — runs whenever leads array changes
+  // Auto-delete junk leads â runs whenever leads array changes
   const prevLeadsRef = React.useRef(null);
   useEffect(() => {
     if (!leads || leads.length === 0) return;
@@ -1795,7 +1795,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     prevLeadsRef.current = key;
     const cleaned = leads.filter(l => {
       if (!l) return false;
-      // Delete any lead without a company name — these are junk n8n rows
+      // Delete any lead without a company name â these are junk n8n rows
       return !!(l.company?.trim());
     });
     if (cleaned.length !== leads.length) {
@@ -1804,7 +1804,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     }
   });
 
-  // Filter leads — hide truly empty rows but keep leads with lead_id
+  // Filter leads â hide truly empty rows but keep leads with lead_id
   const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
   const filtered = (() => {
     const JUNK_CHECK = /\[Your Name\]|\[City\]|\[Name\]/i;
@@ -1834,9 +1834,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     const normalizeCompany = (name) => {
       let n = (name || "").trim();
       // Extract real company name from enrichment opener pattern
-      // e.g. "As the Facility Manager at 360 Medical Centre → making a lasting impression"
-      // Strip everything from "→" onwards first
-      n = n.replace(/→.*/g, "").trim();
+      // e.g. "As the Facility Manager at 360 Medical Centre â making a lasting impression"
+      // Strip everything from "â" onwards first
+      n = n.replace(/â.*/g, "").trim();
       // Now extract "at COMPANY_NAME" pattern
       const atMatch = n.match(/\bat\s+(.+)$/i);
       if (atMatch) n = atMatch[1].trim();
@@ -1848,14 +1848,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "")
         .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "") // run twice to catch "ABC Inc Ltd"
         // Strip all punctuation
-        .replace(/[.,''"`''""\-–—&()/\\|:;!?*#]/g, " ")
+        .replace(/[.,''"`''""\-ââ&()/\\|:;!?*#]/g, " ")
         // Collapse whitespace
         .replace(/\s+/g, " ")
         .trim();
     };
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
-      // Normalize market — handle any casing or whitespace from n8n
+      // Normalize market â handle any casing or whitespace from n8n
       const normalizedMarket = (() => {
         const m = (l.market||"").trim().toLowerCase();
         if (m.includes("ontario")) return "Ontario";
@@ -1876,7 +1876,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       // Apply status and segment filters
       if (filterStatus !== "All" && l.status !== filterStatus) return false;
       if (filterSeg    !== "All" && l.segment !== filterSeg)    return false;
-      // Dedup by NORMALIZED company name — catches "ABC" = "ABC Inc." = "ABC Ltd"
+      // Dedup by NORMALIZED company name â catches "ABC" = "ABC Inc." = "ABC Ltd"
       // Also include city so "Acme Phoenix" and "Acme Scottsdale" stay separate
       const normCompany = normalizeCompany(l.company);
       const normCity    = (l.city || "").trim().toLowerCase();
@@ -1896,7 +1896,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Reset to page 0 when filters change
   useEffect(() => { setPage(0); }, [filterStatus, filterSeg]);
 
-  // ── Auto-sync on mount — pulls fresh leads from Google Sheet automatically ──
+  // ââ Auto-sync on mount â pulls fresh leads from Google Sheet automatically ââ
   // Runs on every mount (tab switch won't remount, but page refresh will)
   useEffect(() => {
     syncSheet();
@@ -1974,11 +1974,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Priority badge
   const PriorityBadge = ({ score }) => {
     const color = score >= 5 ? C.red : score >= 4 ? C.gold : score >= 3 ? C.blue : C.dim;
-    const label = score >= 5 ? "🔥 Hot" : score >= 4 ? "⚡ High" : score >= 3 ? "📋 Med" : "❄️ Low";
+    const label = score >= 5 ? "ð¥ Hot" : score >= 4 ? "â¡ High" : score >= 3 ? "ð Med" : "âï¸ Low";
     return <span style={{ padding:"2px 9px", borderRadius:20, fontSize:11, fontWeight:800, background:`${color}22`, color }}>{label} {score}/5</span>;
   };
 
-  // ── LEAD DETAIL VIEW ──
+  // ââ LEAD DETAIL VIEW ââ
   if (viewLead) {
     const seg = SEGMENT_META[viewLead.segment] || SEGMENT_META["Office"];
     const hasOutreach = viewLead.cold_email || upgradedContent;
@@ -1988,7 +1988,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     return (
       <div>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); setConfirmDelete(null); }}>← All Leads</button>
+          <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setViewLead(null); setUpgradedContent(null); setConfirmDelete(null); }}>â All Leads</button>
           {confirmDelete === "detail" ? (
             <div style={{ display:"flex", gap:8 }}>
               <button style={{ ...S.btn("danger"), fontSize:12, padding:"7px 14px" }}
@@ -2003,7 +2003,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           ) : (
             <button style={{ ...S.btn("ghost"), fontSize:12, color:C.red, borderColor:`${C.red}55` }}
               onClick={() => setConfirmDelete("detail")}>
-              🗑 Delete Lead
+              ð Delete Lead
             </button>
           )}
         </div>
@@ -2015,8 +2015,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
               <div style={{ width:52, height:52, borderRadius:14, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, border:`1px solid ${seg.color}44`, flexShrink:0 }}>{seg.icon}</div>
               <div>
                 <div style={{ fontWeight:800, fontSize:22 }}>{viewLead.company}</div>
-                <div style={{ fontSize:14, color:C.muted }}>📍 {viewLead.city}, {viewLead.market} · {viewLead.segment}</div>
-                <div style={{ fontSize:13, color:C.muted }}>👤 {viewLead.buyer_title}</div>
+                <div style={{ fontSize:14, color:C.muted }}>ð {viewLead.city}, {viewLead.market} Â· {viewLead.segment}</div>
+                <div style={{ fontSize:13, color:C.muted }}>ð¤ {viewLead.buyer_title}</div>
                 <div style={{ fontSize:13, color:C.muted, marginTop:4, fontStyle:"italic" }}>"{viewLead.pain_point}"</div>
               </div>
             </div>
@@ -2031,14 +2031,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
             <a href={linkedinSearch(viewLead)} target="_blank" rel="noopener noreferrer"
               style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, display:"flex", alignItems:"center", gap:6, padding:"8px 14px" }}>
-              🔗 Find on LinkedIn
+              ð Find on LinkedIn
             </a>
             {viewLead.phone && (
-              <a href={`tel:${viewLead.phone}`} style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, padding:"8px 14px" }}>📞 Call</a>
+              <a href={`tel:${viewLead.phone}`} style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, padding:"8px 14px" }}>ð Call</a>
             )}
             <button style={{ ...S.btn("primary"), fontSize:12, padding:"8px 14px", background: upgrading ? C.dim : "#7C3AED" }}
               onClick={() => upgradeOutreach(viewLead)} disabled={upgrading}>
-              {upgrading ? "✨ Upgrading..." : "✨ Upgrade Outreach with AI"}
+              {upgrading ? "â¨ Upgrading..." : "â¨ Upgrade Outreach with AI"}
             </button>
           </div>
         </div>
@@ -2056,7 +2056,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                     background: active ? `${col}33` : C.surface,
                     color: active ? col : C.muted,
                     border: `1px solid ${active ? col : C.border}` }}>
-                  {active ? "● " : ""}{s}
+                  {active ? "â " : ""}{s}
                 </button>
               );
             })}
@@ -2086,7 +2086,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         {/* Inline edit for incomplete leads */}
         {(!viewLead.company || !viewLead.city || !viewLead.buyer_title || !viewLead.pain_point) && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.red}`, background:"#FF475711" }}>
-            <div style={{ fontWeight:700, color:C.red, marginBottom:12, fontSize:14 }}>⚠️ Fill in missing details to use this lead</div>
+            <div style={{ fontWeight:700, color:C.red, marginBottom:12, fontSize:14 }}>â ï¸ Fill in missing details to use this lead</div>
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               {[
                 { field:"company",     label:"Company Name",         placeholder:"e.g. Apex Medical Centre" },
@@ -2117,7 +2117,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                   </div>
                 </div>
               ))}
-              <div style={{ fontSize:11, color:C.muted }}>Type a value and click out of the field to save. The ⚠️ panel disappears once all fields are filled.</div>
+              <div style={{ fontSize:11, color:C.muted }}>Type a value and click out of the field to save. The â ï¸ panel disappears once all fields are filled.</div>
             </div>
           </div>
         )}
@@ -2125,25 +2125,25 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         {viewLead.needs_upgrade && !upgradedContent && (
           <div style={{ background:"#A78BFA22", border:`1px solid #A78BFA44`, borderRadius:10, padding:"12px 16px", marginBottom:14, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
             <div>
-              <div style={{ fontWeight:700, color:"#A78BFA", fontSize:14 }}>✨ Outreach has generic placeholders</div>
+              <div style={{ fontWeight:700, color:"#A78BFA", fontSize:14 }}>â¨ Outreach has generic placeholders</div>
               <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>Your n8n used template text. Hit Upgrade to generate real personalized outreach for {viewLead.segment}.</div>
             </div>
             <button style={{ ...S.btn("primary"), background:"#7C3AED", fontSize:13 }} onClick={() => upgradeOutreach(viewLead)} disabled={upgrading}>
-              {upgrading ? "Upgrading..." : "✨ Upgrade Now"}
+              {upgrading ? "Upgrading..." : "â¨ Upgrade Now"}
             </button>
           </div>
         )}
         {upgradedContent && (
           <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"10px 14px", marginBottom:14, fontSize:13, color:C.accent, fontWeight:700 }}>
-            ✨ Outreach upgraded with AI — industry-aware messaging for {viewLead.segment}
+            â¨ Outreach upgraded with AI â industry-aware messaging for {viewLead.segment}
           </div>
         )}
 
         {[
-          { key:"cold_email",      label:"📧 Cold Email",       icon:"📋" },
-          { key:"follow_up_email", label:"📧 Follow-Up Email",   icon:"📋" },
-          { key:"linkedin_note",   label:"💼 LinkedIn Note",     icon:"📋" },
-          { key:"call_opener",     label:"📞 Call Opener Script", icon:"📋" },
+          { key:"cold_email",      label:"ð§ Cold Email",       icon:"ð" },
+          { key:"follow_up_email", label:"ð§ Follow-Up Email",   icon:"ð" },
+          { key:"linkedin_note",   label:"ð¼ LinkedIn Note",     icon:"ð" },
+          { key:"call_opener",     label:"ð Call Opener Script", icon:"ð" },
         ].map(({ key, label, icon }) => {
           const val = outreach[key] || viewLead[key];
           if (!val) return null;
@@ -2154,13 +2154,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                 <div style={{ fontWeight:700, fontSize:14 }}>{label}</div>
                 <div style={{ display:"flex", gap:8 }}>
                   {isEmail && (
-                    <a href={`https://mail.google.com/mail/?view=cm&su=${encodeURIComponent(`Commercial Cleaning — ${viewLead.company}`)}&body=${encodeURIComponent(val)}`}
+                    <a href={`https://mail.google.com/mail/?view=cm&su=${encodeURIComponent(`Commercial Cleaning â ${viewLead.company}`)}&body=${encodeURIComponent(val)}`}
                       target="_blank" rel="noopener noreferrer"
-                      style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>📨 Gmail</a>
+                      style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>ð¨ Gmail</a>
                   )}
                   <button style={{ ...S.btn("sm"), background: copied===key ? C.accentDim : C.surface, color: copied===key ? C.accent : C.muted, fontSize:11 }}
                     onClick={() => copy(val, key)}>
-                    {copied === key ? "✅ Copied!" : `${icon} Copy`}
+                    {copied === key ? "â Copied!" : `${icon} Copy`}
                   </button>
                 </div>
               </div>
@@ -2174,19 +2174,19 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     );
   }
 
-  // ── LIST VIEW ──
+  // ââ LIST VIEW ââ
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>🎯 Cold Outreach Pipeline</div>
+          <div style={S.h2}>ð¯ Cold Outreach Pipeline</div>
           <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
-            Leads generated daily by your n8n AI agent · Ontario & Arizona
+            Leads generated daily by your n8n AI agent Â· Ontario & Arizona
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
           <button style={S.btn("ghost")} onClick={syncSheet} disabled={loadingSheet} title="Pull latest leads from Google Sheet">
-            {loadingSheet ? "🔄 Syncing..." : `🔄 Sync Sheet${lastSynced ? ` · ${lastSynced}` : ""}`}
+            {loadingSheet ? "ð Syncing..." : `ð Sync Sheet${lastSynced ? ` Â· ${lastSynced}` : ""}`}
           </button>
           <button style={S.btn("primary")} onClick={() => setShowManual(true)}>+ Add Lead</button>
         </div>
@@ -2194,10 +2194,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       {/* Stats */}
       <div style={S.grid4}>
-        <StatCard label="Total Pipeline"   value={total}     icon="🎯" color={C.blue}   />
-        <StatCard label="Hot Leads (4-5)"  value={hot}       icon="🔥" color={C.red}    />
-        <StatCard label="Meetings Booked"  value={booked}    icon="📅" color={C.accent} />
-        <StatCard label="Won"              value={won}       icon="🏆" color={C.gold}   sub={`${convRate}% conv.`} />
+        <StatCard label="Total Pipeline"   value={total}     icon="ð¯" color={C.blue}   />
+        <StatCard label="Hot Leads (4-5)"  value={hot}       icon="ð¥" color={C.red}    />
+        <StatCard label="Meetings Booked"  value={booked}    icon="ð" color={C.accent} />
+        <StatCard label="Won"              value={won}       icon="ð" color={C.gold}   sub={`${convRate}% conv.`} />
       </div>
 
       <div style={S.divider} />
@@ -2205,18 +2205,18 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       {/* Sync error */}
       {syncError && (
         <div style={{ background:"#FF4757" + "22", border:`1px solid #FF475744`, borderRadius:10, padding:"10px 16px", marginBottom:14, fontSize:13, color:"#FF4757" }}>
-          ⚠️ {syncError}
+          â ï¸ {syncError}
         </div>
       )}
 
       {/* Sync info banner */}
       <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.blue}`, padding:"12px 16px" }}>
         <div style={{ fontWeight:700, color:C.blue, fontSize:14, marginBottom:4 }}>
-          🔄 Live Google Sheet Connection{lastSynced ? ` · Last synced ${lastSynced}` : " · Not yet synced"}
+          ð Live Google Sheet Connection{lastSynced ? ` Â· Last synced ${lastSynced}` : " Â· Not yet synced"}
         </div>
         <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
           Your n8n agent appends leads daily to your Google Sheet. Hit <strong style={{ color:C.text }}>Sync Sheet</strong> to pull them live.<br/>
-          <strong style={{ color:C.gold }}>First time?</strong> Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_SHEETS_API_KEY</code> to Vercel → Settings → Environment Variables. Also make sure your Google Sheet is shared as <strong style={{ color:C.text }}>Anyone with the link can view</strong>.
+          <strong style={{ color:C.gold }}>First time?</strong> Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_SHEETS_API_KEY</code> to Vercel â Settings â Environment Variables. Also make sure your Google Sheet is shared as <strong style={{ color:C.text }}>Anyone with the link can view</strong>.
         </div>
       </div>
 
@@ -2253,7 +2253,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                 background: filterMkt===m ? C.accentDim : C.surface,
                 color: filterMkt===m ? C.accent : C.muted,
                 border: `1px solid ${filterMkt===m ? C.accent : C.border}` }}>
-              {m === "Ontario" ? "🇨🇦 Ontario" : m === "Arizona" ? "🇺🇸 Arizona" : "All Markets"} ({count})
+              {m === "Ontario" ? "ð¨ð¦ Ontario" : m === "Arizona" ? "ðºð¸ Arizona" : "All Markets"} ({count})
             </button>
           );
         })}
@@ -2265,7 +2265,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                 background: filterSeg===seg ? C.accentDim : C.surface,
                 color: filterSeg===seg ? C.accent : C.muted,
                 border: `1px solid ${filterSeg===seg ? C.accent : C.border}` }}>
-              {SEGMENT_META[seg]?.icon || "📋"} {seg} ({count})
+              {SEGMENT_META[seg]?.icon || "ð"} {seg} ({count})
             </button>
           );
         })}
@@ -2274,23 +2274,23 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       {/* Lead cards */}
       {filtered.length === 0 && (
         <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🎯</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð¯</div>
           <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No leads in this view</div>
           <div style={{ color:C.muted, fontSize:14 }}>Your n8n agent adds new leads daily. Hit Sync Sheet or add one manually.</div>
         </div>
       )}
 
-      {/* Pagination info — ABOVE list as count indicator only */}
+      {/* Pagination info â ABOVE list as count indicator only */}
       {filtered.length > PAGE_SIZE && (
         <div style={{ fontSize:12, color:C.muted, marginBottom:8, textAlign:"right" }}>
-          Page {safePage+1} of {totalPages} · {filtered.length} leads
+          Page {safePage+1} of {totalPages} Â· {filtered.length} leads
         </div>
       )}
 
       <div id="cold-leads-list" style={{ display:"flex", flexDirection:"column", gap:10 }}>
         {filtered.length === 0 ? (
           <div style={{ ...S.card, textAlign:"center", padding:32, color:C.muted }}>
-            <div style={{ fontSize:32, marginBottom:12 }}>🎯</div>
+            <div style={{ fontSize:32, marginBottom:12 }}>ð¯</div>
             <div style={{ fontWeight:700, marginBottom:6 }}>No leads found</div>
             <div style={{ fontSize:13 }}>
               {leads.length > 0
@@ -2300,7 +2300,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           </div>
         ) : paginated.length === 0 ? (
           <div style={{ ...S.card, textAlign:"center", padding:24, color:C.muted, fontSize:13 }}>
-            No leads on this page — going back to page 1
+            No leads on this page â going back to page 1
           </div>
         ) : paginated.map(lead => {
           const lid = lead.lead_id || lead.id || `${lead.company||""}-${lead.city||""}-${lead.segment||""}`;
@@ -2311,7 +2311,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           return (
             <div key={lid} style={{ ...S.card, padding:0, overflow:"hidden", borderLeft:`3px solid ${seg.color}`, display:"flex", alignItems:"stretch" }}>
 
-              {/* LEFT — tap to open detail */}
+              {/* LEFT â tap to open detail */}
               <div
                 style={{ flex:1, padding:"13px 14px", cursor:"pointer", minWidth:0 }}
                 onClick={() => { if(!isDeleting){ setViewLead(lead); setUpgradedContent(null); setConfirmDelete(null); } }}
@@ -2320,21 +2320,21 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                   <div style={{ width:34, height:34, borderRadius:8, background:`${seg.color}22`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:17, flexShrink:0 }}>{seg.icon}</div>
                   <div style={{ minWidth:0 }}>
                     <div style={{ fontWeight:700, fontSize:14, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", color:lead.company?C.text:C.red }}>
-                      {lead.company || "⚠️ No company name"}
+                      {lead.company || "â ï¸ No company name"}
                     </div>
                     <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
-                      {lead.city || "—"} · {lead.segment || "—"}
+                      {lead.city || "â"} Â· {lead.segment || "â"}
                     </div>
                     <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
                       <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status||"New"}</span>
-                      {hasOutreach && <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.accentDim, color:C.accent }}>✉️</span>}
-                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.surface, color:C.muted }}>{lead.market==="Ontario"?"🇨🇦":"🇺🇸"}</span>
+                      {hasOutreach && <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.accentDim, color:C.accent }}>âï¸</span>}
+                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.surface, color:C.muted }}>{lead.market==="Ontario"?"ð¨ð¦":"ðºð¸"}</span>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* RIGHT — delete only, completely isolated */}
+              {/* RIGHT â delete only, completely isolated */}
               <div style={{ width:56, borderLeft:`1px solid ${C.border}`, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", gap:4, padding:"8px 0", background: isDeleting ? `${C.red}11` : "transparent", flexShrink:0 }}>
                 {isDeleting ? (
                   <>
@@ -2351,7 +2351,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                   <button
                     style={{ background:"none", border:"none", fontSize:20, cursor:"pointer", color:C.dim, padding:"8px 0", lineHeight:1 }}
                     onClick={() => setConfirmDelete(lid)}
-                  >🗑</button>
+                  >ð</button>
                 )}
               </div>
 
@@ -2360,7 +2360,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         })}
       </div>
 
-      {/* Pagination controls — scrolls to top of list on page change */}
+      {/* Pagination controls â scrolls to top of list on page change */}
       {filtered.length > PAGE_SIZE && (
         <div style={{ display:"flex", justifyContent:"center", alignItems:"center", gap:8, marginTop:16, flexWrap:"wrap" }}>
           <button style={{ ...S.btn("ghost"), fontSize:13, padding:"8px 16px" }}
@@ -2368,14 +2368,14 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
             onClick={() => {
               setPage(Math.max(0, safePage - 1));
               setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
-            }}>← Prev</button>
+            }}>â Prev</button>
           <span style={{ fontSize:13, color:C.muted }}>Page {safePage+1} of {totalPages}</span>
           <button style={{ ...S.btn(page<totalPages-1?"primary":"ghost"), fontSize:13, padding:"8px 16px" }}
             disabled={safePage>=totalPages-1}
             onClick={() => {
               setPage(safePage + 1);
               setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
-            }}>Next →</button>
+            }}>Next â</button>
         </div>
       )}
 
@@ -2411,7 +2411,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
             <div><div style={S.label}>Pain Point</div><input style={S.input} value={manualForm.pain_point} onChange={e=>setManualForm({...manualForm,pain_point:e.target.value})} placeholder="Current cleaning inconsistent" /></div>
             <div><div style={S.label}>First Offer</div><input style={S.input} value={manualForm.first_offer} onChange={e=>setManualForm({...manualForm,first_offer:e.target.value})} placeholder="office cleaning" /></div>
             <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={manualForm.notes} onChange={e=>setManualForm({...manualForm,notes:e.target.value})} placeholder="How you found them, any context..." /></div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManualLead} disabled={!manualForm.company.trim()}>💾 Add to Pipeline</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManualLead} disabled={!manualForm.company.trim()}>ð¾ Add to Pipeline</button>
           </div>
         </Modal>
       )}
@@ -2419,12 +2419,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   );
 }
 
-// ─── FORM INTAKE ──────────────────────────────────────────────────────────────
-// Google Form → New Leads auto-flow
+// âââ FORM INTAKE ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// Google Form â New Leads auto-flow
 // Your Google Form submissions come in via n8n webhook and land here as new leads
 
 const GOOGLE_FORM_URL = "https://docs.google.com/forms/d/e/1FAIpQLScyKKqwyg2hVLFqJFnrrP_j8uG97pBER_Uby_Y-eJeZY6ntgg/viewform";
-// Google Form URL — haveusclean.ca intake form
+// Google Form URL â haveusclean.ca intake form
 
 function FormIntake({ resLeads, setResLeads, region, setTab }) {
   const [formUrl, setFormUrl] = useState("https://docs.google.com/forms/d/e/1FAIpQLScyKKqwyg2hVLFqJFnrrP_j8uG97pBER_Uby_Y-eJeZY6ntgg/viewform");
@@ -2447,7 +2447,7 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
       const data = await res.json();
       if (data.leads && data.leads.length > 0) {
         setResLeads(ls => {
-          // Dedup by email + name — most stable identifiers
+          // Dedup by email + name â most stable identifiers
           // Timestamps vary between pulls for same submission, so can't be used
           const existingKeys = new Set(ls.map(l => {
             const email = (l.email||'').toLowerCase().trim();
@@ -2464,10 +2464,10 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
             return true;
           });
           if (newOnes.length > 0) {
-            setPullResult(`✅ ${newOnes.length} new lead${newOnes.length > 1 ? 's' : ''} pulled from Google Form!`);
+            setPullResult(`â ${newOnes.length} new lead${newOnes.length > 1 ? 's' : ''} pulled from Google Form!`);
             return [...newOnes, ...ls];
           } else {
-            setPullResult(`ℹ️ ${data.leads.length} total submissions found — all already in app.`);
+            setPullResult(`â¹ï¸ ${data.leads.length} total submissions found â all already in app.`);
             return ls;
           }
         });
@@ -2501,41 +2501,41 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>📋 Form Intake & Lead Flow</div>
+          <div style={S.h2}>ð Form Intake & Lead Flow</div>
           <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
-            Google Form → n8n → App · Auto-creates New leads
+            Google Form â n8n â App Â· Auto-creates New leads
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
           <button style={S.btn("ghost")} onClick={pullFormLeads} disabled={pulling}>
-            {pulling ? "🔄 Pulling..." : "🔄 Pull New Form Leads"}
+            {pulling ? "ð Pulling..." : "ð Pull New Form Leads"}
           </button>
           <button style={S.btn("primary")} onClick={() => setShowManual(true)}>+ Add Manually</button>
         </div>
       </div>
 
       {pullResult && (
-        <div style={{ background: pullResult.startsWith("✅") ? C.accentDim : C.surface, border:`1px solid ${pullResult.startsWith("✅") ? C.accent : C.border}44`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:13, color: pullResult.startsWith("✅") ? C.accent : C.muted, fontWeight:700 }}>
+        <div style={{ background: pullResult.startsWith("â") ? C.accentDim : C.surface, border:`1px solid ${pullResult.startsWith("â") ? C.accent : C.border}44`, borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:13, color: pullResult.startsWith("â") ? C.accent : C.muted, fontWeight:700 }}>
           {pullResult}
         </div>
       )}
 
       {/* Flow diagram */}
       <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
-        <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>🔄 How the Flow Works</div>
+        <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>ð How the Flow Works</div>
         <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap", fontSize:13 }}>
           {[
-            { icon:"🌐", label:"haveusclean.ca", sub:"Google Form embed" },
-            { icon:"→", label:"", sub:"" },
-            { icon:"📋", label:"Google Form", sub:"Client fills out" },
-            { icon:"→", label:"", sub:"" },
-            { icon:"⚡", label:"n8n Webhook", sub:"Triggers on submit" },
-            { icon:"→", label:"", sub:"" },
-            { icon:"📱", label:"Have Us Clean App", sub:"New Lead appears" },
-            { icon:"→", label:"", sub:"" },
-            { icon:"💬", label:"Quote & Book", sub:"You respond" },
-          ].map((step, i) => step.icon === "→"
-            ? <span key={i} style={{ color:C.accent, fontSize:20, fontWeight:700 }}>→</span>
+            { icon:"ð", label:"haveusclean.ca", sub:"Google Form embed" },
+            { icon:"â", label:"", sub:"" },
+            { icon:"ð", label:"Google Form", sub:"Client fills out" },
+            { icon:"â", label:"", sub:"" },
+            { icon:"â¡", label:"n8n Webhook", sub:"Triggers on submit" },
+            { icon:"â", label:"", sub:"" },
+            { icon:"ð±", label:"Have Us Clean App", sub:"New Lead appears" },
+            { icon:"â", label:"", sub:"" },
+            { icon:"ð¬", label:"Quote & Book", sub:"You respond" },
+          ].map((step, i) => step.icon === "â"
+            ? <span key={i} style={{ color:C.accent, fontSize:20, fontWeight:700 }}>â</span>
             : (
               <div key={i} style={{ background:C.surface, borderRadius:10, padding:"8px 12px", textAlign:"center", minWidth:90 }}>
                 <div style={{ fontSize:22 }}>{step.icon}</div>
@@ -2549,12 +2549,12 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
 
       {/* Setup guide */}
       <div style={{ ...S.card, marginBottom:20, borderLeft:`4px solid ${C.gold}` }}>
-        <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:12 }}>⚙️ Setup — 10 Minutes</div>
+        <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:12 }}>âï¸ Setup â 10 Minutes</div>
         {[
-          { step:"1", title:"Create your Google Form", detail:'Go to forms.google.com → Create new form. Add fields: Name, Email, Phone, Address, Property Type, Bedrooms, Bathrooms, Service Needed, Frequency, Special Notes. Set it as "Collect email addresses".' },
-          { step:"2", title:"Embed on your website", detail:'In Google Form → Send → Embed (< >) → Copy the iframe code → Paste it on your haveusclean.ca "Get a Free Quote" page. This is the form clients fill out to request a quote.' },
-          { step:"3", title:"Connect to n8n", detail:'In n8n: Add a new workflow → Webhook trigger → copy the webhook URL → In Google Form → Responses → Connect to Sheets → Also add an n8n webhook via Apps Script (we can build this together).' },
-          { step:"4", title:"n8n sends to this app", detail:'Your n8n workflow receives the form data and calls your Vercel API to create a new lead. The lead appears instantly in 🏠 Residential Leads as status: New.' },
+          { step:"1", title:"Create your Google Form", detail:'Go to forms.google.com â Create new form. Add fields: Name, Email, Phone, Address, Property Type, Bedrooms, Bathrooms, Service Needed, Frequency, Special Notes. Set it as "Collect email addresses".' },
+          { step:"2", title:"Embed on your website", detail:'In Google Form â Send â Embed (< >) â Copy the iframe code â Paste it on your haveusclean.ca "Get a Free Quote" page. This is the form clients fill out to request a quote.' },
+          { step:"3", title:"Connect to n8n", detail:'In n8n: Add a new workflow â Webhook trigger â copy the webhook URL â In Google Form â Responses â Connect to Sheets â Also add an n8n webhook via Apps Script (we can build this together).' },
+          { step:"4", title:"n8n sends to this app", detail:'Your n8n workflow receives the form data and calls your Vercel API to create a new lead. The lead appears instantly in ð  Residential Leads as status: New.' },
         ].map(s => (
           <div key={s.step} style={{ display:"flex", gap:12, marginBottom:14, paddingBottom:14, borderBottom:`1px solid ${C.border}` }}>
             <div style={{ width:28, height:28, borderRadius:"50%", background:C.gold, display:"flex", alignItems:"center", justifyContent:"center", fontWeight:800, fontSize:13, color:"#0A0F1E", flexShrink:0 }}>{s.step}</div>
@@ -2570,7 +2570,7 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
           <input style={{ ...S.input, marginTop:6 }} value={formUrl} onChange={e => setFormUrl(e.target.value)} placeholder="https://docs.google.com/forms/d/e/..." />
           {formUrl && !formUrl.length < 20 && (
             <a href={formUrl} target="_blank" rel="noopener noreferrer" style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block", marginTop:8, fontSize:13 }}>
-              🔗 Open Form
+              ð Open Form
             </a>
           )}
         </div>
@@ -2595,12 +2595,12 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
             <div key={lead.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:8 }}>
               <div>
                 <div style={{ fontWeight:700, fontSize:14 }}>{lead.name}</div>
-                <div style={{ fontSize:12, color:C.muted }}>{lead.email} · {lead.dwellingType} · {lead.serviceType}</div>
-                <div style={{ fontSize:11, color:C.dim }}>{lead.createdAt ? new Date(lead.createdAt).toLocaleString() : ""} {lead.source ? `· ${lead.source}` : ""}</div>
+                <div style={{ fontSize:12, color:C.muted }}>{lead.email} Â· {lead.dwellingType} Â· {lead.serviceType}</div>
+                <div style={{ fontSize:11, color:C.dim }}>{lead.createdAt ? new Date(lead.createdAt).toLocaleString() : ""} {lead.source ? `Â· ${lead.source}` : ""}</div>
               </div>
               <div style={{ display:"flex", gap:8, alignItems:"center" }}>
                 <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status}</span>
-                <button style={{ ...S.btn("sm") }} onClick={() => setTab("res")}>View →</button>
+                <button style={{ ...S.btn("sm") }} onClick={() => setTab("res")}>View â</button>
               </div>
             </div>
           );
@@ -2637,7 +2637,7 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
               </div>
             </div>
             <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={manualForm.notes} onChange={e=>setManualForm({...manualForm,notes:e.target.value})} placeholder="Special instructions, how they found us..." /></div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManual} disabled={!manualForm.name||!manualForm.email}>💾 Add Lead → Goes to Residential Leads</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={addManual} disabled={!manualForm.name||!manualForm.email}>ð¾ Add Lead â Goes to Residential Leads</button>
           </div>
         </Modal>
       )}
@@ -2645,7 +2645,7 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
   );
 }
 
-// ─── FOLLOW-UP REMINDERS ──────────────────────────────────────────────────────
+// âââ FOLLOW-UP REMINDERS ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
   const today = new Date().toISOString().split("T")[0];
   const todayDate = new Date(today);
@@ -2691,7 +2691,7 @@ function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
 Company: Have Us Clean
 Client: ${lead.name}
 Service quoted: ${lead.serviceType}
-Property: ${lead.dwellingType}${lead.dwellingSize ? ` — ${lead.dwellingSize}` : ""}
+Property: ${lead.dwellingType}${lead.dwellingSize ? ` â ${lead.dwellingSize}` : ""}
 Quote total: ${cur}${Math.round(q.total)}
 Days since quoted: ${lead.quotedDate ? Math.floor((todayDate - new Date(lead.quotedDate)) / 86400000) : "unknown"}
 Notes: ${lead.notes || "none"}
@@ -2701,7 +2701,7 @@ Rules:
 - Warm, not pushy
 - Reference the specific service and price
 - Include a simple next step
-- Sign as: Have Us Clean · haveusclean@gmail.com
+- Sign as: Have Us Clean Â· haveusclean@gmail.com
 - Do not use placeholders`;
 
     try {
@@ -2738,7 +2738,7 @@ Rules:
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:10, marginBottom:10 }}>
           <div>
             <div style={{ fontWeight:800, fontSize:15 }}>{lead.name}</div>
-            <div style={{ fontSize:12, color:C.muted }}>{lead.email} · {lead.serviceType} · {lead.dwellingType}</div>
+            <div style={{ fontSize:12, color:C.muted }}>{lead.email} Â· {lead.serviceType} Â· {lead.dwellingType}</div>
             {lead.notes && <div style={{ fontSize:11, color:C.dim, marginTop:2 }}>"{lead.notes}"</div>}
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:4, alignItems:"flex-end" }}>
@@ -2750,26 +2750,26 @@ Rules:
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
           <button style={{ ...S.btn("sm"), background:"#7C3AED", color:"#fff" }}
             onClick={() => generateFollowUp(lead, setLoading, setEmailDraft)} disabled={loading}>
-            {loading ? "Writing..." : "✨ Generate Follow-Up Email"}
+            {loading ? "Writing..." : "â¨ Generate Follow-Up Email"}
           </button>
-          <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up — ${lead.serviceType} quote`)}`}
+          <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up â ${lead.serviceType} quote`)}`}
             target="_blank" rel="noopener noreferrer"
             style={{ ...S.btn("ghost"), textDecoration:"none", fontSize:12, padding:"7px 14px" }}>
-            📨 Open Gmail
+            ð¨ Open Gmail
           </a>
-          <button style={S.btn("sm")} onClick={markFollowedUp}>✅ Mark Followed Up</button>
+          <button style={S.btn("sm")} onClick={markFollowedUp}>â Mark Followed Up</button>
         </div>
 
         {emailDraft && (
           <div style={{ marginTop:12, background:C.surface, borderRadius:10, padding:14, border:`1px solid ${C.border}` }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:8 }}>
-              <div style={{ fontSize:12, fontWeight:700, color:"#A78BFA" }}>✨ AI-Generated Follow-Up</div>
+              <div style={{ fontSize:12, fontWeight:700, color:"#A78BFA" }}>â¨ AI-Generated Follow-Up</div>
               <div style={{ display:"flex", gap:8 }}>
-                <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up — ${lead.serviceType} quote`)}&body=${encodeURIComponent(emailDraft)}`}
+                <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(lead.email)}&su=${encodeURIComponent(`Following up â ${lead.serviceType} quote`)}&body=${encodeURIComponent(emailDraft)}`}
                   target="_blank" rel="noopener noreferrer"
-                  style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>📨 Gmail</a>
+                  style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11 }}>ð¨ Gmail</a>
                 <button style={{ ...S.btn("sm"), background: copied ? C.accentDim : C.surface, color: copied ? C.accent : C.muted, fontSize:11 }}
-                  onClick={() => copy(emailDraft)}>{copied ? "✅ Copied!" : "📋 Copy"}</button>
+                  onClick={() => copy(emailDraft)}>{copied ? "â Copied!" : "ð Copy"}</button>
               </div>
             </div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.7, whiteSpace:"pre-wrap" }}>{emailDraft}</div>
@@ -2783,25 +2783,25 @@ Rules:
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>🔔 Follow-Up Reminders</div>
+          <div style={S.h2}>ð Follow-Up Reminders</div>
           <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>
-            Auto-detected from your leads pipeline · Updates live as you change statuses
+            Auto-detected from your leads pipeline Â· Updates live as you change statuses
           </div>
         </div>
       </div>
 
       {/* Stats */}
       <div style={S.grid3}>
-        <StatCard label="Urgent" value={urgent.length} icon="🚨" color={C.red} sub="overdue follow-ups" />
-        <StatCard label="Action Needed" value={action.length} icon="⚡" color={C.blue} sub="quotes to send" />
-        <StatCard label="Due Soon" value={reminder.length} icon="🔔" color={C.gold} sub="follow up this week" />
+        <StatCard label="Urgent" value={urgent.length} icon="ð¨" color={C.red} sub="overdue follow-ups" />
+        <StatCard label="Action Needed" value={action.length} icon="â¡" color={C.blue} sub="quotes to send" />
+        <StatCard label="Due Soon" value={reminder.length} icon="ð" color={C.gold} sub="follow up this week" />
       </div>
 
       <div style={S.divider} />
 
       {followUps.length === 0 && (
         <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>🎉</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð</div>
           <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>All caught up!</div>
           <div style={{ color:C.muted, fontSize:14 }}>No follow-ups needed right now. Check back after you send more quotes.</div>
         </div>
@@ -2809,21 +2809,21 @@ Rules:
 
       {urgent.length > 0 && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontWeight:800, fontSize:15, color:C.red, marginBottom:10 }}>🚨 Urgent — Act Today</div>
+          <div style={{ fontWeight:800, fontSize:15, color:C.red, marginBottom:10 }}>ð¨ Urgent â Act Today</div>
           {urgent.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
         </div>
       )}
 
       {action.length > 0 && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontWeight:800, fontSize:15, color:C.blue, marginBottom:10 }}>⚡ Send Quote</div>
+          <div style={{ fontWeight:800, fontSize:15, color:C.blue, marginBottom:10 }}>â¡ Send Quote</div>
           {action.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
         </div>
       )}
 
       {reminder.length > 0 && (
         <div style={{ marginBottom:20 }}>
-          <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:10 }}>🔔 This Week</div>
+          <div style={{ fontWeight:800, fontSize:15, color:C.gold, marginBottom:10 }}>ð This Week</div>
           {reminder.map(({lead, fu}) => <FollowUpCard key={lead.id} lead={lead} fu={fu} />)}
         </div>
       )}
@@ -2831,7 +2831,7 @@ Rules:
   );
 }
 
-// ─── RESIDENTIAL LEADS — Have Us Clean ───────────────────────────────────────
+// âââ RESIDENTIAL LEADS â Have Us Clean âââââââââââââââââââââââââââââââââââââââ
 const SAMPLE_RES_LEADS = [
   { id:1, name:"Sarah M.", email:"sarah.m@email.com", phone:"(416) 555-2201", address:"88 Maple Dr, North York ON", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:850, serviceType:"Full Home Clean", addons:["oven","fridge"], frequency:"Bi-Weekly", preferredDate:"2026-04-10", preferredTime:"9:00 AM", notes:"Has a cat. Please use unscented products.", status:"Quoted", assignedTo:"", followUpDate:"", jobNotes:"", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T10:00:00Z" },
   { id:2, name:"David K.", email:"davidk@email.com", phone:"(416) 555-3310", address:"12 Oakridge Rd, Mississauga ON", dwellingType:"Detached House", dwellingSize:"Medium", beds:3, baths:2, sqft:1800, serviceType:"Deep Clean", addons:[], frequency:"One-Time", preferredDate:"2026-04-14", preferredTime:"10:00 AM", notes:"First-time client.", status:"Follow Up", assignedTo:"", followUpDate:"2026-04-10", jobNotes:"Emailed quote Apr 3. Following up.", workOrder:null, paymentConfirmed:false, quotedDate:"2026-04-03", bookedDate:"", createdAt:"2026-04-01T11:00:00Z" },
@@ -2854,7 +2854,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
 
-  // Stable delete handler — lives outside the render loop so no stale closures
+  // Stable delete handler â lives outside the render loop so no stale closures
   const handleDeleteRes = (id) => {
     const deleteId = String(id);
     setConfirmDeleteRes(null);
@@ -2886,18 +2886,18 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     const cur = region.id === "ON" ? "CA$" : "$";
     const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
 
-    const subject = `Your Cleaning Quote — ${BRAND.businessName}`;
+    const subject = `Your Cleaning Quote â ${BRAND.businessName}`;
 
     const body = [
       `Hi ${lead.name || "there"},`,
       ``,
       `Thank you for reaching out to Have Us Clean! Based on the details you provided, here is your custom quote:`,
       ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `SERVICE DETAILS`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `Service:    ${lead.serviceType}`,
-      `Property:   ${lead.dwellingType}${lead.dwellingSize ? ` — ${lead.dwellingSize}` : ""}`,
+      `Property:   ${lead.dwellingType}${lead.dwellingSize ? ` â ${lead.dwellingSize}` : ""}`,
       `Address:    ${lead.address}`,
       `Frequency:  ${lead.frequency}`,
       lead.beds ? `Bedrooms:   ${lead.beds}  |  Bathrooms: ${lead.baths}` : "",
@@ -2906,9 +2906,9 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       addonList.length > 0 ? `ADD-ONS SELECTED:` : "",
       ...addonPrices,
       addonList.length > 0 ? `` : "",
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `PRICING`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `${lead.frequency} Price:  ${f(q.preTaxTotal)}${q.taxRate > 0 ? ` + ${(q.taxRate*100).toFixed(0)}% HST = ${f(q.total)}` : ""}`,
       ``,
       q.freq_prices ? `RECURRING OPTIONS (save with regular service):` : "",
@@ -2916,10 +2916,10 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       q.freq_prices ? `  Bi-Weekly:  ${f(q.freq_prices["Bi-Weekly"])}/visit` : "",
       q.freq_prices ? `  Monthly:    ${f(q.freq_prices["Monthly"])}/visit` : "",
       q.freq_prices ? `` : "",
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `WHAT'S INCLUDED`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      ...(pkg ? pkg.includes.map(i => `✓ ${i}`) : []),
+      `ââââââââââââââââââââââââââââ`,
+      ...(pkg ? pkg.includes.map(i => `â ${i}`) : []),
       ``,
       `If everything looks good, simply reply to this email and we will get your service scheduled right away.`,
       ``,
@@ -2929,8 +2929,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       ``,
       `Best regards,`,
       `Have Us Clean`,
-      `📧 ${BRAND.supportEmail}`,
-      `🌐 haveusclean.ca`,
+      `ð§ ${BRAND.supportEmail}`,
+      `ð haveusclean.ca`,
     ].filter(l => l !== null && l !== undefined).join("\n");
 
     return { subject, body };
@@ -2979,7 +2979,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
     if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
     if (typeof setTab === "function") setTab("jobs");
-    alert(`✅ Job booked!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total\n\nOpening Jobs tab now.`);
+    alert(`â Job booked!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total\n\nOpening Jobs tab now.`);
   };
 
   const confirmPayment = (lead) => {
@@ -3036,8 +3036,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>🏠 Residential Leads</div>
-          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Have Us Clean — Toronto & GTA</div>
+          <div style={S.h2}>ð  Residential Leads</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Have Us Clean â Toronto & GTA</div>
         </div>
         <button style={S.btn("primary")} onClick={()=>setShowForm(true)}>+ New Lead</button>
       </div>
@@ -3045,7 +3045,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       {/* Search */}
       <input
         style={{ ...S.input, marginBottom:12 }}
-        placeholder="🔍 Search by name, email, address or phone..."
+        placeholder="ð Search by name, email, address or phone..."
         value={searchQuery}
         onChange={e => setSearchQuery(e.target.value)}
       />
@@ -3088,7 +3088,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
       {/* New Lead Form */}
       {showForm && (
-        <Modal title="🏠 New Residential Lead — Have Us Clean" onClose={()=>setShowForm(false)} wide>
+        <Modal title="ð  New Residential Lead â Have Us Clean" onClose={()=>setShowForm(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Full Name</div><input style={S.input} value={form.name} onChange={e=>setForm({...form,name:e.target.value})} placeholder="Jane Smith" /></div>
@@ -3097,7 +3097,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             <div><div style={S.label}>Email</div><input style={S.input} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} placeholder="jane@email.com" /></div>
             <div><div style={S.label}>Address (Toronto / GTA / AZ)</div><input style={S.input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} placeholder="123 King St W, Toronto ON" /></div>
 
-            {/* Dwelling Type + Size — HUC pricing grid */}
+            {/* Dwelling Type + Size â HUC pricing grid */}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Dwelling Type</div>
                 <select style={S.select} value={form.dwellingType} onChange={e=>setForm({...form,dwellingType:e.target.value,dwellingSize:Object.keys(HUC_PRICING_GRID[e.target.value]||{})[0]||""})}>
@@ -3134,8 +3134,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             {/* Package description */}
             {form.serviceType && HUC_PACKAGES[form.serviceType] && (
               <div style={{ background:C.accentDim, borderRadius:10, padding:"10px 14px", fontSize:12, color:C.muted }}>
-                <strong style={{ color:C.accent }}>{HUC_PACKAGES[form.serviceType].icon} {form.serviceType}</strong> — {HUC_PACKAGES[form.serviceType].best_for}<br/>
-                <span style={{ color:C.dim }}>Includes: {HUC_PACKAGES[form.serviceType].includes.join(" · ")}</span>
+                <strong style={{ color:C.accent }}>{HUC_PACKAGES[form.serviceType].icon} {form.serviceType}</strong> â {HUC_PACKAGES[form.serviceType].best_for}<br/>
+                <span style={{ color:C.dim }}>Includes: {HUC_PACKAGES[form.serviceType].includes.join(" Â· ")}</span>
               </div>
             )}
 
@@ -3156,7 +3156,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
             </div>
             <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} placeholder="Special instructions, pets, access info..." /></div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={submitForm} disabled={!form.name||!form.email}>💾 Save Lead</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={submitForm} disabled={!form.name||!form.email}>ð¾ Save Lead</button>
           </div>
         </Modal>
       )}
@@ -3165,7 +3165,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       {showEditForm && editLead && (
         <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
           <div style={{ padding:16 }}>
-            <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
+            <h3 style={{ color:C.accent, marginBottom:16 }}>âï¸ Edit Lead</h3>
             {["name","email","phone","address","notes"].map(field => (
               <div key={field} style={{ marginBottom:10 }}>
                 <div style={S.label}>{field.charAt(0).toUpperCase()+field.slice(1)}</div>
@@ -3186,17 +3186,17 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
                 setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
-              }}>💾 Save Changes</button>
+              }}>ð¾ Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
             <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
               setConfirmDrawerOpen(true);
-            }}>🗑 Delete Lead</button>
+            }}>ð Delete Lead</button>
           </div>
         </Modal>
       )}
 
-      {/* ── ConfirmDrawer — replaces window.confirm for edit modal lead delete ── */}
+      {/* ââ ConfirmDrawer â replaces window.confirm for edit modal lead delete ââ */}
       <ConfirmDrawer
         open={confirmDrawerOpen}
         title="Delete this lead?"
@@ -3219,26 +3219,26 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
         onCancel={() => setConfirmDrawerOpen(false)}
       />
       {viewLead && (
-        <Modal title={`📄 Quote — ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
+        <Modal title={`ð Quote â ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
           <div>
             <div style={{ marginBottom:14 }}>
-              <div style={{ fontSize:14, color:C.muted }}>📍 {viewLead.address}</div>
-              <div style={{ fontSize:14, color:C.muted }}>{viewLead.dwellingType} — {viewLead.dwellingSize} · 🛏 {viewLead.beds}bd / 🚿 {viewLead.baths}ba · 📐 {viewLead.sqft} sqft</div>
-              <div style={{ fontSize:14, color:C.muted }}>{HUC_PACKAGES[viewLead.serviceType]?.icon} {viewLead.serviceType} · {viewLead.frequency}</div>
-              {viewLead.notes && <div style={{ fontSize:13, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px", marginTop:8 }}>💬 {viewLead.notes}</div>}
+              <div style={{ fontSize:14, color:C.muted }}>ð {viewLead.address}</div>
+              <div style={{ fontSize:14, color:C.muted }}>{viewLead.dwellingType} â {viewLead.dwellingSize} Â· ð {viewLead.beds}bd / ð¿ {viewLead.baths}ba Â· ð {viewLead.sqft} sqft</div>
+              <div style={{ fontSize:14, color:C.muted }}>{HUC_PACKAGES[viewLead.serviceType]?.icon} {viewLead.serviceType} Â· {viewLead.frequency}</div>
+              {viewLead.notes && <div style={{ fontSize:13, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px", marginTop:8 }}>ð¬ {viewLead.notes}</div>}
             </div>
-            {(() => { try { return <QuoteBox q={calcResQuote({...viewLead, dwellingType:viewLead.dwellingType||"Apartment / Condo", dwellingSize:viewLead.dwellingSize||"2 Bed", serviceType:viewLead.serviceType||"Refresh Clean", frequency:viewLead.frequency||"One-Time", beds:viewLead.beds||2, baths:viewLead.baths||1, sqft:viewLead.sqft||900, addons:viewLead.addons||[]},region)} type="res" />; } catch(e) { return <div style={{color:C.muted,fontSize:13,padding:12}}>Quote preview unavailable — fill in property details</div>; } })()}
+            {(() => { try { return <QuoteBox q={calcResQuote({...viewLead, dwellingType:viewLead.dwellingType||"Apartment / Condo", dwellingSize:viewLead.dwellingSize||"2 Bed", serviceType:viewLead.serviceType||"Refresh Clean", frequency:viewLead.frequency||"One-Time", beds:viewLead.beds||2, baths:viewLead.baths||1, sqft:viewLead.sqft||900, addons:viewLead.addons||[]},region)} type="res" />; } catch(e) { return <div style={{color:C.muted,fontSize:13,padding:12}}>Quote preview unavailable â fill in property details</div>; } })()}
             {/* Editable job notes + follow-up */}
             <div style={{ marginTop:14, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10 }}>
               <div><div style={S.label}>Job Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={viewLead.jobNotes||""} onChange={e=>updateLeadField(viewLead.id,"jobNotes",e.target.value)} placeholder="Notes for VA / team..." /></div>
               <div><div style={S.label}>Follow-Up Date</div><input style={S.input} type="date" value={viewLead.followUpDate||""} onChange={e=>updateLeadField(viewLead.id,"followUpDate",e.target.value)} /></div>
             </div>
             <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
-              {viewLead.status==="New" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>📤 Send Quote to {viewLead.email}</button>}
-              {viewLead.status==="Quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>✅ Book + Create Work Order</button>}
-              {viewLead.status==="Follow Up" && <button style={{ ...S.btn("primary"), width:"100%", background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(viewLead)}>📤 Re-Send Quote</button>}
-              {viewLead.status==="Booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>💳 Confirm Payment</button>}
-              {viewLead.status==="Completed" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>🎉 Job complete and paid!</div>}
+              {viewLead.status==="New" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>ð¤ Send Quote to {viewLead.email}</button>}
+              {viewLead.status==="Quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>â Book + Create Work Order</button>}
+              {viewLead.status==="Follow Up" && <button style={{ ...S.btn("primary"), width:"100%", background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(viewLead)}>ð¤ Re-Send Quote</button>}
+              {viewLead.status==="Booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>ð³ Confirm Payment</button>}
+              {viewLead.status==="Completed" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>ð Job complete and paid!</div>}
             </div>
           </div>
         </Modal>
@@ -3246,11 +3246,11 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
       {/* Email Send Modal */}
       {showEmail && (
-        <Modal title="📧 Send Quote Email" onClose={()=>setShowEmail(null)} wide>
+        <Modal title="ð§ Send Quote Email" onClose={()=>setShowEmail(null)} wide>
           <div>
             {/* Status banner */}
             <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:20 }}>✅</span>
+              <span style={{ fontSize:20 }}>â</span>
               <div>
                 <div style={{ fontWeight:700, color:C.accent, fontSize:14 }}>Lead marked as Quoted</div>
                 <div style={{ fontSize:12, color:C.muted }}>Now send the email using one of the options below</div>
@@ -3262,7 +3262,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div>
                 <div style={S.label}>To</div>
                 <div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700, color:C.text }}>
-                  {showEmail.lead.email || <span style={{ color:C.red }}>⚠️ No email on file</span>}
+                  {showEmail.lead.email || <span style={{ color:C.red }}>â ï¸ No email on file</span>}
                 </div>
               </div>
               <div>
@@ -3283,41 +3283,41 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             <div style={S.label}>Send Options</div>
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
 
-              {/* Option 1 — Open Gmail */}
+              {/* Option 1 â Open Gmail */}
               <a
                 href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(showEmail.lead.email || "")}&su=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
                 target="_blank"
                 rel="noopener noreferrer"
                 style={{ ...S.btn("primary"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
               >
-                <span style={{ fontSize:20 }}>📨</span>
+                <span style={{ fontSize:20 }}>ð¨</span>
                 <div style={{ textAlign:"left" }}>
                   <div style={{ fontWeight:800 }}>Open in Gmail</div>
-                  <div style={{ fontSize:11, opacity:0.8 }}>Opens Gmail with quote pre-filled — just hit Send</div>
+                  <div style={{ fontSize:11, opacity:0.8 }}>Opens Gmail with quote pre-filled â just hit Send</div>
                 </div>
               </a>
 
-              {/* Option 2 — mailto (default email app) */}
+              {/* Option 2 â mailto (default email app) */}
               <a
                 href={`mailto:${showEmail.lead.email || ""}?subject=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
                 style={{ ...S.btn("ghost"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
               >
-                <span style={{ fontSize:20 }}>📱</span>
+                <span style={{ fontSize:20 }}>ð±</span>
                 <div style={{ textAlign:"left" }}>
                   <div style={{ fontWeight:800 }}>Open in Mail App</div>
                   <div style={{ fontSize:11, color:C.dim }}>Opens your default email app (iPhone Mail, Outlook, etc.)</div>
                 </div>
               </a>
 
-              {/* Option 3 — Copy body */}
+              {/* Option 3 â Copy body */}
               <button
                 style={{ ...S.btn("ghost"), display:"flex", alignItems:"center", justifyContent:"center", gap:10, fontSize:14, padding:"14px 20px" }}
                 onClick={() => {
                   navigator.clipboard?.writeText(showEmail.body);
-                  alert("✅ Email body copied! Paste it into any email app.");
+                  alert("â Email body copied! Paste it into any email app.");
                 }}
               >
-                <span style={{ fontSize:20 }}>📋</span>
+                <span style={{ fontSize:20 }}>ð</span>
                 <div style={{ textAlign:"left" }}>
                   <div style={{ fontWeight:800 }}>Copy Email Body</div>
                   <div style={{ fontSize:11, color:C.dim }}>Copy and paste into any email manually</div>
@@ -3356,25 +3356,25 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
     const addonList = lead.addons?.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
     const cur = region.id === "ON" ? "CA$" : "$";
     const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
-    const subject = `Commercial Cleaning Proposal — ${BRAND.businessName}`;
+    const subject = `Commercial Cleaning Proposal â ${BRAND.businessName}`;
     const body = [
       `Hi ${lead.contactName || "there"},`,
       ``,
       `Thank you for considering Have Us Clean for your commercial cleaning needs. Here is your custom proposal:`,
       ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `PROPOSAL DETAILS`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `Business:   ${lead.bizName}`,
       `Service:    ${pkg}`,
       `Address:    ${lead.address}`,
-      `Size:       ${lead.sqft?.toLocaleString()} sqft · ${lead.floors} floor(s)`,
+      `Size:       ${lead.sqft?.toLocaleString()} sqft Â· ${lead.floors} floor(s)`,
       `Frequency:  ${lead.frequency}`,
       addonList.length > 0 ? `Add-Ons:    ${addonList.join(", ")}` : "",
       ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `PRICING`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
+      `ââââââââââââââââââââââââââââ`,
       `Per Visit:      ${f(q.total)}${q.taxRate > 0 ? ` (incl. ${(q.taxRate*100).toFixed(0)}% HST)` : ""}`,
       `Monthly Est.:   ${f(q.monthly)}`,
       lead.contractMonths > 1 ? `Contract Value: ${f(q.contract)} (${lead.contractMonths} months)` : "",
@@ -3383,7 +3383,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       ``,
       `Best regards,`,
       `Have Us Clean`,
-      `📧 ${BRAND.supportEmail}`,
+      `ð§ ${BRAND.supportEmail}`,
     ].filter(l => l !== null && l !== undefined).join("\n");
 
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"quoted" } : l));
@@ -3396,7 +3396,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
     setJobs(js=>[...js,newJob]);
     setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"booked",workOrder:newJob.id}:l));
     if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"booked"});
-    alert("✅ Commercial contract created! Work order added to Jobs.");
+    alert("â Commercial contract created! Work order added to Jobs.");
   };
   const confirmPayment = (lead) => {
     setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"paid",paymentConfirmed:true}:l));
@@ -3412,13 +3412,13 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
-        <div style={S.h2}>🏢 Commercial Leads</div>
+        <div style={S.h2}>ð¢ Commercial Leads</div>
         <button style={S.btn("primary")} onClick={()=>setShowForm(true)}>+ New Lead</button>
       </div>
       <div style={S.grid3}>
-        <StatCard label="Commercial Leads" value={leads.length} icon="🏢" color={C.blue} />
-        <StatCard label="Monthly Value" value={`$${leads.filter(l=>l.status!=="new").reduce((a,b)=>a+calcComQuote(b, region).monthly,0).toFixed(0)}`} icon="📈" color={C.gold} />
-        <StatCard label="Active Contracts" value={leads.filter(l=>["booked","paid"].includes(l.status)).length} icon="📑" color={C.accent} />
+        <StatCard label="Commercial Leads" value={leads.length} icon="ð¢" color={C.blue} />
+        <StatCard label="Monthly Value" value={`$${leads.filter(l=>l.status!=="new").reduce((a,b)=>a+calcComQuote(b, region).monthly,0).toFixed(0)}`} icon="ð" color={C.gold} />
+        <StatCard label="Active Contracts" value={leads.filter(l=>["booked","paid"].includes(l.status)).length} icon="ð" color={C.accent} />
       </div>
       <div style={S.divider} />
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
@@ -3429,24 +3429,24 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
                 <div>
                   <div style={{ fontWeight:800, fontSize:17 }}>{lead.bizName}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>👤 {lead.contactName} · 📧 {lead.email}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>📐 {lead.sqft.toLocaleString()} sqft · {lead.floors} fl · {lead.serviceType} · {lead.frequency}</div>
+                  <div style={{ fontSize:13, color:C.muted }}>ð¤ {lead.contactName} Â· ð§ {lead.email}</div>
+                  <div style={{ fontSize:13, color:C.muted }}>ð {lead.sqft.toLocaleString()} sqft Â· {lead.floors} fl Â· {lead.serviceType} Â· {lead.frequency}</div>
                 </div>
                 <div style={{ textAlign:"right" }}>
                   <span style={S.badge(lead.status==="paid"?"green":lead.status==="booked"?"green":lead.status==="quoted"?"gold":"blue")}>{lead.status}</span>
                   <div style={{ fontWeight:800, fontSize:20, color:C.accent, marginTop:6 }}>${q.total.toFixed(2)}<span style={{ fontSize:12,color:C.muted }}>/visit</span></div>
-                  <div style={{ fontSize:12, color:C.gold }}>Profit: ${q.profit}/visit · {q.margin}% margin</div>
-                  <div style={{ fontSize:12, color:C.muted }}>${q.monthly.toFixed(0)}/mo · ${q.contract.toFixed(0)} contract</div>
+                  <div style={{ fontSize:12, color:C.gold }}>Profit: ${q.profit}/visit Â· {q.margin}% margin</div>
+                  <div style={{ fontSize:12, color:C.muted }}>${q.monthly.toFixed(0)}/mo Â· ${q.contract.toFixed(0)} contract</div>
                 </div>
               </div>
               {(lead.addons||[]).length>0 && <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>{lead.addons?.map(id=>{ const ao=COM_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("blue")}>{ao.label}</span>:null; })}</div>}
-              {lead.notes && <div style={{ marginTop:10, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px" }}>💬 {lead.notes}</div>}
+              {lead.notes && <div style={{ marginTop:10, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px" }}>ð¬ {lead.notes}</div>}
               <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
-                <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View Proposal</button>
-                {lead.status==="new" && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Send Proposal</button>}
-                {lead.status==="quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Sign Contract</button>}
-                {lead.status==="booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Confirm Deposit</button>}
-                {lead.status==="paid" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Contract Active!</span>}
+                <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>ð View Proposal</button>
+                {lead.status==="new" && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>ð¤ Send Proposal</button>}
+                {lead.status==="quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>â Sign Contract</button>}
+                {lead.status==="booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>ð³ Confirm Deposit</button>}
+                {lead.status==="paid" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>ð Contract Active!</span>}
               </div>
             </div>
           );
@@ -3454,7 +3454,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       </div>
 
       {showForm && (
-        <Modal title="🏢 New Commercial Lead" onClose={()=>setShowForm(false)} wide>
+        <Modal title="ð¢ New Commercial Lead" onClose={()=>setShowForm(false)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Business Name</div><input style={S.input} value={form.bizName} onChange={e=>setForm({...form,bizName:e.target.value})} placeholder="Acme Corp" /></div>
@@ -3479,7 +3479,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
             </div>
             <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} /></div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={submitForm} disabled={!form.bizName||!form.email}>💾 Save Lead & Generate Proposal</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={submitForm} disabled={!form.bizName||!form.email}>ð¾ Save Lead & Generate Proposal</button>
           </div>
         </Modal>
       )}
@@ -3487,7 +3487,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       {showEditForm && editLead && (
         <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
           <div style={{ padding:16 }}>
-            <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
+            <h3 style={{ color:C.accent, marginBottom:16 }}>âï¸ Edit Lead</h3>
             {["name","email","phone","address","notes"].map(field => (
               <div key={field} style={{ marginBottom:10 }}>
                 <div style={S.label}>{field.charAt(0).toUpperCase()+field.slice(1)}</div>
@@ -3508,17 +3508,17 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
               <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
                 setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
                 setShowEditForm(false);setEditLead(null);
-              }}>💾 Save Changes</button>
+              }}>ð¾ Save Changes</button>
               <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
             </div>
             <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
               setConfirmDrawerOpen(true);
-            }}>🗑 Delete Lead</button>
+            }}>ð Delete Lead</button>
           </div>
         </Modal>
       )}
 
-      {/* ── ConfirmDrawer — commercial edit modal lead delete ── */}
+      {/* ââ ConfirmDrawer â commercial edit modal lead delete ââ */}
       <ConfirmDrawer
         open={confirmDrawerOpen}
         title="Delete this lead?"
@@ -3541,12 +3541,12 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
         onCancel={() => setConfirmDrawerOpen(false)}
       />
       {viewLead && (
-        <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
+        <Modal title={`ð Proposal â ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
           {(() => { const q=calcComQuote(viewLead, region); return (
             <div>
               <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:14, color:C.muted }}>👤 {viewLead.contactName} · {viewLead.email}</div>
-                <div style={{ fontSize:13, color:C.muted }}>📐 {viewLead.sqft.toLocaleString()} sqft · {viewLead.floors} floor(s) · {viewLead.serviceType} · {viewLead.frequency}</div>
+                <div style={{ fontSize:14, color:C.muted }}>ð¤ {viewLead.contactName} Â· {viewLead.email}</div>
+                <div style={{ fontSize:13, color:C.muted }}>ð {viewLead.sqft.toLocaleString()} sqft Â· {viewLead.floors} floor(s) Â· {viewLead.serviceType} Â· {viewLead.frequency}</div>
               </div>
               <QuoteBox q={q} type="com" />
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}>
@@ -3554,10 +3554,10 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
                 <div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{viewLead.contractMonths}-MO CONTRACT</div><div style={{ fontSize:20,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div>
               </div>
               <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
-                {viewLead.status==="new" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>📤 Send Proposal</button>}
-                {viewLead.status==="quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>✅ Sign Contract + Work Order</button>}
-                {viewLead.status==="booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>💳 Confirm Deposit</button>}
-                {viewLead.status==="paid" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>🎉 Contract Active!</div>}
+                {viewLead.status==="new" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>ð¤ Send Proposal</button>}
+                {viewLead.status==="quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>â Sign Contract + Work Order</button>}
+                {viewLead.status==="booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>ð³ Confirm Deposit</button>}
+                {viewLead.status==="paid" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>ð Contract Active!</div>}
               </div>
             </div>
           ); })()}
@@ -3565,10 +3565,10 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       )}
       {/* Commercial Email Modal */}
       {showEmail && (
-        <Modal title="📧 Send Commercial Proposal" onClose={()=>setShowEmail(null)} wide>
+        <Modal title="ð§ Send Commercial Proposal" onClose={()=>setShowEmail(null)} wide>
           <div>
             <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:20 }}>✅</span>
+              <span style={{ fontSize:20 }}>â</span>
               <div>
                 <div style={{ fontWeight:700, color:C.accent, fontSize:14 }}>Lead marked as Quoted</div>
                 <div style={{ fontSize:12, color:C.muted }}>Send the proposal using one of the options below</div>
@@ -3585,17 +3585,17 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
             <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
               <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(showEmail.lead.email||"")}&su=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`} target="_blank" rel="noopener noreferrer"
                 style={{ ...S.btn("primary"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
-                <span style={{ fontSize:20 }}>📨</span>
+                <span style={{ fontSize:20 }}>ð¨</span>
                 <div><div style={{ fontWeight:800 }}>Open in Gmail</div><div style={{ fontSize:11, opacity:0.8 }}>Pre-filled and ready to send</div></div>
               </a>
               <a href={`mailto:${showEmail.lead.email||""}?subject=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
                 style={{ ...S.btn("ghost"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
-                <span style={{ fontSize:20 }}>📱</span>
+                <span style={{ fontSize:20 }}>ð±</span>
                 <div><div style={{ fontWeight:800 }}>Open in Mail App</div><div style={{ fontSize:11, color:C.dim }}>Opens your default email app</div></div>
               </a>
               <button style={{ ...S.btn("ghost"), display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}
-                onClick={() => { navigator.clipboard?.writeText(showEmail.body); alert("✅ Proposal copied to clipboard!"); }}>
-                <span style={{ fontSize:20 }}>📋</span>
+                onClick={() => { navigator.clipboard?.writeText(showEmail.body); alert("â Proposal copied to clipboard!"); }}>
+                <span style={{ fontSize:20 }}>ð</span>
                 <div><div style={{ fontWeight:800 }}>Copy Proposal Body</div><div style={{ fontSize:11, color:C.dim }}>Paste into any email manually</div></div>
               </button>
             </div>
@@ -3623,17 +3623,17 @@ function RegionSwitcher({ activeRegion, setActiveRegion }) {
   );
 }
 
-// ─── TAX & COMPLIANCE ─────────────────────────────────────────────────────────
+// âââ TAX & COMPLIANCE âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function TaxCompliance({ region }) {
   const R = region;
   const [activeTab, setActiveTab] = useState("overview");
 
   const tabs = [
-    { id:"overview",    label:"📋 Overview" },
-    { id:"tax",         label:`💰 ${R.tax.name} Tax` },
-    { id:"compliance",  label:"✅ Compliance" },
-    { id:"invoicing",   label:"🧾 Invoicing" },
-    { id:"rates",       label:"📊 Market Rates" },
+    { id:"overview",    label:"ð Overview" },
+    { id:"tax",         label:`ð° ${R.tax.name} Tax` },
+    { id:"compliance",  label:"â Compliance" },
+    { id:"invoicing",   label:"ð§¾ Invoicing" },
+    { id:"rates",       label:"ð Market Rates" },
   ];
 
   return (
@@ -3641,7 +3641,7 @@ function TaxCompliance({ region }) {
       <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:20, flexWrap:"wrap" }}>
         <div style={{ fontSize:40 }}>{R.flag}</div>
         <div>
-          <div style={S.h2}>{R.label} — Tax & Compliance</div>
+          <div style={S.h2}>{R.label} â Tax & Compliance</div>
           <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>All regulatory requirements for operating CleanPro in {R.label}</div>
         </div>
       </div>
@@ -3654,8 +3654,8 @@ function TaxCompliance({ region }) {
         <div>
           <div style={S.grid3}>
             <StatCard label="Tax System" value={R.tax.name} icon={R.flag} color={R.country==="CA"?"#FF6B6B":C.blue} sub={R.country==="CA"?"Canada Revenue Agency":"Arizona ADOR"} />
-            <StatCard label="Tax Rate on Services" value={R.id==="ON"?"13%":"0%"} icon="📊" color={R.id==="ON"?C.gold:C.accent} sub={R.id==="ON"?"HST on cleaning services":"Cleaning services exempt"} />
-            <StatCard label="Currency" value={R.currencySymbol} icon="💱" color={C.blue} sub={R.currency} />
+            <StatCard label="Tax Rate on Services" value={R.id==="ON"?"13%":"0%"} icon="ð" color={R.id==="ON"?C.gold:C.accent} sub={R.id==="ON"?"HST on cleaning services":"Cleaning services exempt"} />
+            <StatCard label="Currency" value={R.currencySymbol} icon="ð±" color={C.blue} sub={R.currency} />
           </div>
           <div style={S.divider} />
 
@@ -3666,24 +3666,24 @@ function TaxCompliance({ region }) {
             </div>
             {R.id === "ON" && (
               <div style={{ display:"flex", flexDirection:"column", gap:8, fontSize:13, color:C.muted, lineHeight:1.7 }}>
-                <div>✅ <strong style={{ color:C.text }}>HST 13%</strong> applies to all cleaning services (5% federal GST + 8% Ontario PST, collected as one)</div>
-                <div>✅ Must <strong style={{ color:C.text }}>register with CRA</strong> for a Business Number + HST account once revenue exceeds $30,000 CAD</div>
-                <div>✅ Must <strong style={{ color:C.text }}>show HST registration number</strong> on every invoice — do NOT show federal/provincial separately</div>
-                <div>✅ <strong style={{ color:C.text }}>WSIB coverage</strong> required if you have workers (not just contractors)</div>
-                <div>✅ Commercial clients can claim <strong style={{ color:C.text }}>Input Tax Credits (ITCs)</strong> for HST paid — mention this in sales pitches</div>
-                <div>✅ Partner pay rate benchmark: <strong style={{ color:C.text }}>$20–$38 CAD/hr</strong> (GTA: $26–$38; minimum wage: $17.20)</div>
-                <div>📐 Measurement: sqft for real estate, but metric (m², km) for distances</div>
+                <div>â <strong style={{ color:C.text }}>HST 13%</strong> applies to all cleaning services (5% federal GST + 8% Ontario PST, collected as one)</div>
+                <div>â Must <strong style={{ color:C.text }}>register with CRA</strong> for a Business Number + HST account once revenue exceeds $30,000 CAD</div>
+                <div>â Must <strong style={{ color:C.text }}>show HST registration number</strong> on every invoice â do NOT show federal/provincial separately</div>
+                <div>â <strong style={{ color:C.text }}>WSIB coverage</strong> required if you have workers (not just contractors)</div>
+                <div>â Commercial clients can claim <strong style={{ color:C.text }}>Input Tax Credits (ITCs)</strong> for HST paid â mention this in sales pitches</div>
+                <div>â Partner pay rate benchmark: <strong style={{ color:C.text }}>$20â$38 CAD/hr</strong> (GTA: $26â$38; minimum wage: $17.20)</div>
+                <div>ð Measurement: sqft for real estate, but metric (mÂ², km) for distances</div>
               </div>
             )}
             {R.id === "AZ" && (
               <div style={{ display:"flex", flexDirection:"column", gap:8, fontSize:13, color:C.muted, lineHeight:1.7 }}>
-                <div>✅ <strong style={{ color:C.text }}>Cleaning services are NOT subject to Arizona TPT</strong> — do NOT charge customers tax on service fees</div>
-                <div>✅ <strong style={{ color:C.text }}>TPT DOES apply</strong> if you sell cleaning products/supplies separately (taxable at Phoenix: 8.6%)</div>
-                <div>✅ Must obtain a <strong style={{ color:C.text }}>TPT License from ADOR</strong> — $12/year at AZTaxes.gov (even if services are exempt)</div>
-                <div>✅ <strong style={{ color:C.text }}>Workers' Compensation insurance</strong> required for any employees (even part-time)</div>
-                <div>✅ Arizona minimum wage <strong style={{ color:C.text }}>$14.70/hr (2025)</strong>; Phoenix living wage ~$17–20/hr</div>
-                <div>✅ Phoenix combined TPT rate: <strong style={{ color:C.text }}>8.6%</strong> (state 5.6% + local 3.0%); varies by city</div>
-                <div>📐 Measurement: imperial (sqft, miles, Fahrenheit)</div>
+                <div>â <strong style={{ color:C.text }}>Cleaning services are NOT subject to Arizona TPT</strong> â do NOT charge customers tax on service fees</div>
+                <div>â <strong style={{ color:C.text }}>TPT DOES apply</strong> if you sell cleaning products/supplies separately (taxable at Phoenix: 8.6%)</div>
+                <div>â Must obtain a <strong style={{ color:C.text }}>TPT License from ADOR</strong> â $12/year at AZTaxes.gov (even if services are exempt)</div>
+                <div>â <strong style={{ color:C.text }}>Workers' Compensation insurance</strong> required for any employees (even part-time)</div>
+                <div>â Arizona minimum wage <strong style={{ color:C.text }}>$14.70/hr (2025)</strong>; Phoenix living wage ~$17â20/hr</div>
+                <div>â Phoenix combined TPT rate: <strong style={{ color:C.text }}>8.6%</strong> (state 5.6% + local 3.0%); varies by city</div>
+                <div>ð Measurement: imperial (sqft, miles, Fahrenheit)</div>
               </div>
             )}
           </div>
@@ -3696,19 +3696,19 @@ function TaxCompliance({ region }) {
             {R.id === "ON" && (
               <>
                 <div style={S.statCard(C.gold)}>
-                  <div style={{ fontSize:22 }}>🇨🇦</div>
+                  <div style={{ fontSize:22 }}>ð¨ð¦</div>
                   <div style={{ fontWeight:800, fontSize:22, color:C.gold }}>13% HST</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>Ontario Cleaning Services</div>
                   <div style={{ fontSize:12, color:C.muted }}>5% federal + 8% provincial</div>
                 </div>
                 <div style={S.statCard(C.blue)}>
-                  <div style={{ fontSize:22 }}>📋</div>
+                  <div style={{ fontSize:22 }}>ð</div>
                   <div style={{ fontWeight:800, fontSize:20, color:C.blue }}>$30,000 CAD</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>Registration Threshold</div>
                   <div style={{ fontSize:12, color:C.muted }}>Must register with CRA</div>
                 </div>
                 <div style={S.statCard(C.accent)}>
-                  <div style={{ fontSize:22 }}>💰</div>
+                  <div style={{ fontSize:22 }}>ð°</div>
                   <div style={{ fontWeight:800, fontSize:20, color:C.accent }}>ITCs Available</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>Commercial Clients</div>
                   <div style={{ fontSize:12, color:C.muted }}>Can reclaim HST paid</div>
@@ -3718,19 +3718,19 @@ function TaxCompliance({ region }) {
             {R.id === "AZ" && (
               <>
                 <div style={S.statCard(C.accent)}>
-                  <div style={{ fontSize:22 }}>🇺🇸</div>
+                  <div style={{ fontSize:22 }}>ðºð¸</div>
                   <div style={{ fontWeight:800, fontSize:22, color:C.accent }}>0% TPT</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>On Cleaning Services</div>
                   <div style={{ fontSize:12, color:C.muted }}>Services generally exempt</div>
                 </div>
                 <div style={S.statCard(C.gold)}>
-                  <div style={{ fontSize:22 }}>🏪</div>
+                  <div style={{ fontSize:22 }}>ðª</div>
                   <div style={{ fontWeight:800, fontSize:20, color:C.gold }}>5.6% + local</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>If Selling Products</div>
                   <div style={{ fontSize:12, color:C.muted }}>Phoenix total: 8.6%</div>
                 </div>
                 <div style={S.statCard(C.blue)}>
-                  <div style={{ fontSize:22 }}>📋</div>
+                  <div style={{ fontSize:22 }}>ð</div>
                   <div style={{ fontWeight:800, fontSize:20, color:C.blue }}>$12/yr</div>
                   <div style={{ fontSize:13, fontWeight:600 }}>TPT License Fee</div>
                   <div style={{ fontSize:12, color:C.muted }}>Per location at AZTaxes.gov</div>
@@ -3740,7 +3740,7 @@ function TaxCompliance({ region }) {
           </div>
 
           <div style={S.card}>
-            <div style={S.h3}>City Tax Rates {R.id==="AZ"?"(Arizona — select cities)":"(Ontario — HST is uniform)"}</div>
+            <div style={S.h3}>City Tax Rates {R.id==="AZ"?"(Arizona â select cities)":"(Ontario â HST is uniform)"}</div>
             {R.id === "AZ" ? (
               <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
                 <thead>
@@ -3767,7 +3767,7 @@ function TaxCompliance({ region }) {
               </table>
             ) : (
               <div style={{ fontSize:14, color:C.muted, lineHeight:1.8 }}>
-                <p style={{ marginBottom:8 }}>Ontario uses a single uniform <strong style={{ color:C.text }}>13% HST</strong> rate province-wide. There are no city-level variations — unlike the US, every invoice in Ontario charges exactly 13%.</p>
+                <p style={{ marginBottom:8 }}>Ontario uses a single uniform <strong style={{ color:C.text }}>13% HST</strong> rate province-wide. There are no city-level variations â unlike the US, every invoice in Ontario charges exactly 13%.</p>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginTop:12 }}>
                   <div style={{ background:C.bg, borderRadius:10, padding:14 }}>
                     <div style={{ fontWeight:700, color:C.gold, marginBottom:4 }}>Filing Frequency</div>
@@ -3784,16 +3784,16 @@ function TaxCompliance({ region }) {
 
           {/* Invoice tax example */}
           <div style={{ ...S.card, marginTop:16 }}>
-            <div style={S.h3}>📄 Sample Invoice Tax Calculation</div>
+            <div style={S.h3}>ð Sample Invoice Tax Calculation</div>
             {R.id === "ON" ? (() => {
               const ex = 250;
               const hst = ex * 0.13;
               return (
                 <div style={{ display:"flex", flexDirection:"column", gap:8, fontSize:14 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}><span>Cleaning Service (Deep Clean)</span><span style={{ fontWeight:700 }}>CA$250.00</span></div>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}`, color:C.blue }}><span>HST (13%) — Registration #RT0001234</span><span style={{ fontWeight:700 }}>CA${hst.toFixed(2)}</span></div>
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}`, color:C.blue }}><span>HST (13%) â Registration #RT0001234</span><span style={{ fontWeight:700 }}>CA${hst.toFixed(2)}</span></div>
                   <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", fontWeight:800, fontSize:16 }}><span>Total Due</span><span style={{ color:C.accent }}>CA${(ex+hst).toFixed(2)}</span></div>
-                  <div style={{ fontSize:12, color:C.dim, marginTop:4 }}>✅ CRA requires: HST registration number, combined 13% rate (not split into GST/PST separately)</div>
+                  <div style={{ fontSize:12, color:C.dim, marginTop:4 }}>â CRA requires: HST registration number, combined 13% rate (not split into GST/PST separately)</div>
                 </div>
               );
             })() : (() => {
@@ -3801,9 +3801,9 @@ function TaxCompliance({ region }) {
               return (
                 <div style={{ display:"flex", flexDirection:"column", gap:8, fontSize:14 }}>
                   <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}` }}><span>Cleaning Service (Standard Clean)</span><span style={{ fontWeight:700 }}>${ex.toFixed(2)}</span></div>
-                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}`, color:C.accent }}><span>TPT — Cleaning services not subject to AZ TPT</span><span style={{ fontWeight:700 }}>$0.00</span></div>
+                  <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}`, color:C.accent }}><span>TPT â Cleaning services not subject to AZ TPT</span><span style={{ fontWeight:700 }}>$0.00</span></div>
                   <div style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", fontWeight:800, fontSize:16 }}><span>Total Due</span><span style={{ color:C.accent }}>${ex.toFixed(2)}</span></div>
-                  <div style={{ fontSize:12, color:C.dim, marginTop:4 }}>✅ ADOR guidance: Cleaning/maid services are NOT subject to TPT. Note on invoice: "Services exempt from AZ TPT"</div>
+                  <div style={{ fontSize:12, color:C.dim, marginTop:4 }}>â ADOR guidance: Cleaning/maid services are NOT subject to TPT. Note on invoice: "Services exempt from AZ TPT"</div>
                 </div>
               );
             })()}
@@ -3821,7 +3821,7 @@ function TaxCompliance({ region }) {
                     <div style={{ fontWeight:700, fontSize:15 }}>{item.item}</div>
                     <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Required: {item.required}</div>
                     <div style={{ marginTop:6 }}>
-                      <a href={`https://${item.link}`} target="_blank" rel="noopener noreferrer" style={{ fontSize:12, color:C.blue, textDecoration:"none" }}>🔗 {item.link}</a>
+                      <a href={`https://${item.link}`} target="_blank" rel="noopener noreferrer" style={{ fontSize:12, color:C.blue, textDecoration:"none" }}>ð {item.link}</a>
                     </div>
                   </div>
                   <span style={S.badge(item.status==="required"?"red":"gold")}>{item.status==="required"?"Required":"Conditional"}</span>
@@ -3835,18 +3835,18 @@ function TaxCompliance({ region }) {
       {activeTab === "invoicing" && (
         <div>
           <div style={S.card}>
-            <div style={S.h3}>🧾 Invoice Requirements — {R.label}</div>
+            <div style={S.h3}>ð§¾ Invoice Requirements â {R.label}</div>
             <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
               {R.invoiceRequirements.map((req, i) => (
                 <div key={i} style={{ display:"flex", gap:10, padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
-                  <span style={{ color:C.accent, flexShrink:0 }}>✅</span>
+                  <span style={{ color:C.accent, flexShrink:0 }}>â</span>
                   <span>{req}</span>
                 </div>
               ))}
             </div>
           </div>
           <div style={{ ...S.card, marginTop:16 }}>
-            <div style={S.h3}>📞 Phone & Address Format</div>
+            <div style={S.h3}>ð Phone & Address Format</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div style={{ background:C.surface, borderRadius:10, padding:14 }}>
                 <div style={{ fontSize:12, color:C.muted, fontWeight:700 }}>PHONE FORMAT</div>
@@ -3873,10 +3873,10 @@ function TaxCompliance({ region }) {
         <div>
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
-              Market rates for <strong style={{ color:C.text }}>{R.label}</strong> — use these to validate your CleanPro quotes are competitive. All amounts in <strong style={{ color:C.accent }}>{R.currency}</strong>.
+              Market rates for <strong style={{ color:C.text }}>{R.label}</strong> â use these to validate your CleanPro quotes are competitive. All amounts in <strong style={{ color:C.accent }}>{R.currency}</strong>.
             </div>
           </div>
-          <div style={S.h3}>🏠 Residential Market Rates ({R.currencySymbol})</div>
+          <div style={S.h3}>ð  Residential Market Rates ({R.currencySymbol})</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:12, marginBottom:22 }}>
             {[
               { label:"Hourly Rate", lo:R.residential.standardPerHour.min, hi:R.residential.standardPerHour.max, note:"Per cleaner" },
@@ -3886,12 +3886,12 @@ function TaxCompliance({ region }) {
             ].map((item, i) => (
               <div key={i} style={S.statCard(C.accent)}>
                 <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>{item.label}</div>
-                <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>{R.currencySymbol}{item.lo}–{R.currencySymbol}{item.hi}</div>
+                <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>{R.currencySymbol}{item.lo}â{R.currencySymbol}{item.hi}</div>
                 <div style={{ fontSize:12, color:C.muted }}>{item.note}</div>
               </div>
             ))}
           </div>
-          <div style={S.h3}>🏢 Commercial Market Rates ({R.currencySymbol})</div>
+          <div style={S.h3}>ð¢ Commercial Market Rates ({R.currencySymbol})</div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(200px,1fr))", gap:12 }}>
             {[
               { label:"Hourly Rate", lo:R.commercial.perHour.min, hi:R.commercial.perHour.max, note:"Per cleaner" },
@@ -3899,18 +3899,18 @@ function TaxCompliance({ region }) {
             ].map((item, i) => (
               <div key={i} style={S.statCard(C.blue)}>
                 <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>{item.label}</div>
-                <div style={{ fontSize:20, fontWeight:800, color:C.blue }}>{R.currencySymbol}{item.lo}–{R.currencySymbol}{item.hi}</div>
+                <div style={{ fontSize:20, fontWeight:800, color:C.blue }}>{R.currencySymbol}{item.lo}â{R.currencySymbol}{item.hi}</div>
                 <div style={{ fontSize:12, color:C.muted }}>{item.note}</div>
               </div>
             ))}
             <div style={S.statCard(C.gold)}>
               <div style={{ fontSize:14, fontWeight:700, marginBottom:4 }}>Partner Pay Range</div>
-              <div style={{ fontSize:20, fontWeight:800, color:C.gold }}>{R.currencySymbol}{R.partnerPayRange.min}–{R.currencySymbol}{R.partnerPayRange.max}/hr</div>
+              <div style={{ fontSize:20, fontWeight:800, color:C.gold }}>{R.currencySymbol}{R.partnerPayRange.min}â{R.currencySymbol}{R.partnerPayRange.max}/hr</div>
               <div style={{ fontSize:12, color:C.muted }}>Market benchmark</div>
             </div>
           </div>
           <div style={{ ...S.card, marginTop:18 }}>
-            <div style={S.h3}>💱 Currency Note</div>
+            <div style={S.h3}>ð± Currency Note</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.7 }}>
               All Ontario jobs are quoted and billed in <strong style={{ color:C.text }}>Canadian Dollars (CAD)</strong> with HST added. All Arizona jobs are quoted and billed in <strong style={{ color:C.text }}>US Dollars (USD)</strong> with no service tax. The Have Us Clean app automatically handles formatting and tax rules per region. Exchange rate management (for cross-border reporting) should be handled through your accounting software.
             </div>
@@ -3921,16 +3921,16 @@ function TaxCompliance({ region }) {
   );
 }
 
-// ─── DATABASE LAYER ───────────────────────────────────────────────────────────
+// âââ DATABASE LAYER âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Uses window.storage (artifact persistent key-value store).
 // Keys: cp:jobs, cp:partners, cp:leads_res, cp:leads_com, cp:region, cp:settings
 // All reads/writes are async; UI shows sync status in the header.
 
-// ─── STORAGE LAYER ───────────────────────────────────────────────────────────
+// âââ STORAGE LAYER âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 // Works in 3 environments:
-//   1. Claude artifact player   → window.storage (persistent across reloads)
-//   2. Browser (standalone)     → localStorage fallback
-//   3. No storage at all        → in-memory only (still fully functional)
+//   1. Claude artifact player   â window.storage (persistent across reloads)
+//   2. Browser (standalone)     â localStorage fallback
+//   3. No storage at all        â in-memory only (still fully functional)
 
 const DB_KEYS = {
   jobs:               "cp:jobs",
@@ -3944,7 +3944,7 @@ const DB_KEYS = {
   onboardingProgress: "cp:onboarding_progress",
 };
 
-// ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
+// âââ SUPABASE CLIENT ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const SUPABASE_URL  = "https://opazwghrohmfykzxxsjk.supabase.co";
 const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
 
@@ -3954,7 +3954,7 @@ const sbH = {
   "Content-Type":  "application/json",
 };
 
-// Safe string ID — converts any ID to a stable string
+// Safe string ID â converts any ID to a stable string
 const toStrId = (v) => v !== undefined && v !== null ? String(v) : String(Date.now());
 
 // Supabase table config
@@ -3971,7 +3971,7 @@ async function sbFetch(path, opts = {}) {
   try {
     const method = (opts.method || "GET").toUpperCase();
     const isWrite = method === "POST" || method === "PUT" || method === "PATCH" || method === "DELETE";
-    // CRITICAL: spread opts FIRST, then override headers — otherwise opts.headers wins and wipes out auth
+    // CRITICAL: spread opts FIRST, then override headers â otherwise opts.headers wins and wipes out auth
     const { headers: optsHeaders, ...restOpts } = opts;
     const r = await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
       ...restOpts,
@@ -4002,7 +4002,7 @@ async function sbGet(key) {
         allRows.push(...rows);
         if (rows.length < BATCH) break; // last batch
         from += BATCH;
-        if (from > 20000) break; // safety cap — never fetch more than 20k rows
+        if (from > 20000) break; // safety cap â never fetch more than 20k rows
       }
       if (allRows.length === 0) return null;
       const result = allRows.map(r => r.data).filter(Boolean);
@@ -4060,7 +4060,7 @@ async function sbSet(key, value) {
     const rows = value
       .filter(item => item) // skip nulls
       .map(item => {
-        // Get primary key value — ensure it's a string
+        // Get primary key value â ensure it's a string
         let pkVal;
         if (key === "cp:cold_leads") {
           pkVal = toStrId(item.lead_id || item.id);
@@ -4093,7 +4093,7 @@ async function sbDelete(key) {
   } catch { return false; }
 }
 
-// ─── DB LAYER — Supabase first, localStorage fallback ─────────────────────────
+// âââ DB LAYER â Supabase first, localStorage fallback âââââââââââââââââââââââââ
 const hasLocalStorage = (() => {
   try { localStorage.setItem("_t","1"); localStorage.removeItem("_t"); return true; }
   catch { return false; }
@@ -4143,7 +4143,7 @@ async function logActivity(action, detail) {
   } catch {}
 }
 
-// ─── DATA MANAGEMENT PANEL ────────────────────────────────────────────────────
+// âââ DATA MANAGEMENT PANEL ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
   const [showLog, setShowLog] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -4154,30 +4154,30 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
 
   return (
     <div>
-      <div style={S.h2}>🗄️ Database & Data Management</div>
+      <div style={S.h2}>ðï¸ Database & Data Management</div>
 
       <div style={{ ...S.card, marginBottom: 20, borderLeft: `4px solid ${dbStatus === "synced" ? C.accent : dbStatus === "saving" ? C.gold : dbStatus === "local" ? C.blue : C.red}` }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <div style={{ fontSize: 36 }}>
-              {dbStatus === "synced" ? "✅" : dbStatus === "saving" ? "🔄" : dbStatus === "local" ? "💾" : "⚠️"}
+              {dbStatus === "synced" ? "â" : dbStatus === "saving" ? "ð" : dbStatus === "local" ? "ð¾" : "â ï¸"}
             </div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 17 }}>
                 {hasArtifactStorage ? "Artifact Persistent Storage" : "Supabase + localStorage"}
               </div>
               <div style={{ fontSize: 13, fontWeight: 700, color: dbStatus === "synced" ? C.accent : dbStatus === "local" ? C.blue : C.gold }}>
-                {hasArtifactStorage ? "✅ Data persists across reloads in the artifact player"
-                  : hasLocalStorage  ? "💾 Data saved to this browser — persists on this device"
-                  :                    "⚠️ No storage available — data lives in memory this session only"}
+                {hasArtifactStorage ? "â Data persists across reloads in the artifact player"
+                  : hasLocalStorage  ? "ð¾ Data saved to this browser â persists on this device"
+                  :                    "â ï¸ No storage available â data lives in memory this session only"}
               </div>
               {lastSaved && <div style={{ fontSize: 12, color: C.muted }}>Last saved: {lastSaved}</div>}
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button style={S.btn("primary")} onClick={onExport}>⬇ Export JSON Backup</button>
+            <button style={S.btn("primary")} onClick={onExport}>â¬ Export JSON Backup</button>
             <button style={{ ...S.btn("ghost") }} onClick={() => setShowLog(!showLog)}>
-              {showLog ? "Hide Log" : "📋 Activity Log"}
+              {showLog ? "Hide Log" : "ð Activity Log"}
             </button>
           </div>
         </div>
@@ -4185,37 +4185,37 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
 
       {/* Storage mode info */}
       <div style={{ ...S.card, marginBottom: 20, background: "linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
-        <div style={S.h3}>📡 Storage Environment</div>
+        <div style={S.h3}>ð¡ Storage Environment</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 10 }}>
           {[
-            { label: "Artifact Player (claude.ai)", icon: "✨", active: hasArtifactStorage, note: "Full persistence across reloads" },
-            { label: "Browser localStorage",        icon: "🌐", active: !hasArtifactStorage && hasLocalStorage, note: "Persists on this browser/device" },
-            { label: "In-Memory Only",               icon: "💡", active: !hasArtifactStorage && !hasLocalStorage, note: "Resets on page reload" },
+            { label: "Artifact Player (claude.ai)", icon: "â¨", active: hasArtifactStorage, note: "Full persistence across reloads" },
+            { label: "Browser localStorage",        icon: "ð", active: !hasArtifactStorage && hasLocalStorage, note: "Persists on this browser/device" },
+            { label: "In-Memory Only",               icon: "ð¡", active: !hasArtifactStorage && !hasLocalStorage, note: "Resets on page reload" },
           ].map(env => (
             <div key={env.label} style={{ background: env.active ? C.accentDim : C.surface, borderRadius: 10, padding: 14, border: `1px solid ${env.active ? C.accent+"44" : C.border}` }}>
               <div style={{ fontSize: 22, marginBottom: 6 }}>{env.icon}</div>
               <div style={{ fontWeight: 700, fontSize: 13, color: env.active ? C.accent : C.muted }}>{env.label}</div>
               <div style={{ fontSize: 11, color: C.dim, marginTop: 4 }}>{env.note}</div>
-              {env.active && <div style={{ fontSize: 11, fontWeight: 700, color: C.accent, marginTop: 4 }}>● Active</div>}
+              {env.active && <div style={{ fontSize: 11, fontWeight: 700, color: C.accent, marginTop: 4 }}>â Active</div>}
             </div>
           ))}
         </div>
         <div style={{ marginTop: 14, fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
-          💡 <strong style={{ color: C.text }}>To use the app outside Claude:</strong> Open the .jsx file in a React project (Vite, Create React App, or CodeSandbox). localStorage will automatically be used for persistence. For full cloud sync, connect Supabase — we can build that next.
+          ð¡ <strong style={{ color: C.text }}>To use the app outside Claude:</strong> Open the .jsx file in a React project (Vite, Create React App, or CodeSandbox). localStorage will automatically be used for persistence. For full cloud sync, connect Supabase â we can build that next.
         </div>
       </div>
 
       {/* What's stored */}
       <div style={{ ...S.card, marginBottom: 20 }}>
-        <div style={S.h3}>📦 Stored Data Collections</div>
+        <div style={S.h3}>ð¦ Stored Data Collections</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           {[
-            { key: DB_KEYS.jobs,      label: "Jobs",               icon: "📋", desc: "All job records, status, GPS, photos, summaries" },
-            { key: DB_KEYS.partners,  label: "Partners",           icon: "👥", desc: "Partner profiles, availability, pay rates, onboarding" },
-            { key: DB_KEYS.leadsRes,  label: "Residential Leads",  icon: "🏠", desc: "Lead intake forms, quotes, booking status" },
-            { key: DB_KEYS.leadsCom,  label: "Commercial Leads",   icon: "🏢", desc: "Commercial proposals, contracts, deposits" },
-            { key: DB_KEYS.region,    label: "Region Setting",     icon: "🌍", desc: "Active region (ON/AZ) persists on reload" },
-            { key: DB_KEYS.activity,  label: "Activity Log",       icon: "📊", desc: "Last 100 create/update/delete events" },
+            { key: DB_KEYS.jobs,      label: "Jobs",               icon: "ð", desc: "All job records, status, GPS, photos, summaries" },
+            { key: DB_KEYS.partners,  label: "Partners",           icon: "ð¥", desc: "Partner profiles, availability, pay rates, onboarding" },
+            { key: DB_KEYS.leadsRes,  label: "Residential Leads",  icon: "ð ", desc: "Lead intake forms, quotes, booking status" },
+            { key: DB_KEYS.leadsCom,  label: "Commercial Leads",   icon: "ð¢", desc: "Commercial proposals, contracts, deposits" },
+            { key: DB_KEYS.region,    label: "Region Setting",     icon: "ð", desc: "Active region (ON/AZ) persists on reload" },
+            { key: DB_KEYS.activity,  label: "Activity Log",       icon: "ð", desc: "Last 100 create/update/delete events" },
           ].map(item => (
             <div key={item.key} style={{ display: "flex", alignItems: "center", gap: 12, padding: "10px 0", borderBottom: `1px solid ${C.border}` }}>
               <div style={{ fontSize: 22, flexShrink: 0 }}>{item.icon}</div>
@@ -4233,7 +4233,7 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
       {/* Activity Log */}
       {showLog && (
         <div style={{ ...S.card, marginBottom: 20 }}>
-          <div style={S.h3}>📋 Activity Log (Last 100 Events)</div>
+          <div style={S.h3}>ð Activity Log (Last 100 Events)</div>
           {activityLog.length === 0 && <div style={{ color: C.muted, fontSize: 13 }}>No activity yet.</div>}
           <div style={{ maxHeight: 300, overflowY: "auto" }}>
             {activityLog.map(e => (
@@ -4249,14 +4249,14 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
 
       {/* Danger Zone */}
       <div style={{ ...S.card, borderLeft: `4px solid ${C.red}` }}>
-        <div style={{ fontWeight: 800, fontSize: 16, color: C.red, marginBottom: 12 }}>⚠️ Danger Zone</div>
+        <div style={{ fontWeight: 800, fontSize: 16, color: C.red, marginBottom: 12 }}>â ï¸ Danger Zone</div>
         {!confirmReset ? (
           <div>
             <div style={{ fontSize: 13, color: C.muted, marginBottom: 12 }}>
               Reset all data back to the demo sample data. This cannot be undone.
             </div>
             <button style={{ ...S.btn("danger") }} onClick={() => setConfirmReset(true)}>
-              🗑 Reset to Demo Data
+              ð Reset to Demo Data
             </button>
           </div>
         ) : (
@@ -4277,8 +4277,8 @@ function DataManager({ onReset, onExport, activityLog, dbStatus, lastSaved }) {
   );
 }
 
-// ─── CLIENT VIEW ──────────────────────────────────────────────────────────────
-// What clients see — their upcoming job, quote history, and how to contact HUC
+// âââ CLIENT VIEW ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// What clients see â their upcoming job, quote history, and how to contact HUC
 function ClientView({ jobs, resLeads, region, setTab }) {
   const [emailInput, setEmailInput] = useState("");
   const [authedClient, setAuthedClient] = useState(null);
@@ -4306,7 +4306,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     }
   };
 
-  // Get data for the logged-in client — match by email OR name
+  // Get data for the logged-in client â match by email OR name
   const getClientData = (authed) => {
     const email = authed.email?.toLowerCase();
     const name  = authed.name;
@@ -4322,14 +4322,14 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     return { clientJobs, clientLeads, lead };
   };
 
-  // Not logged in — show email login
+  // Not logged in â show email login
   if (!authedClient) {
     return (
       <div style={{ maxWidth:400, margin:"40px auto" }}>
         <div style={{ textAlign:"center", marginBottom:28 }}>
-          <div style={{ fontSize:52, marginBottom:12 }}>🧹</div>
+          <div style={{ fontSize:52, marginBottom:12 }}>ð§¹</div>
           <div style={{ fontWeight:800, fontSize:24 }}>Have Us Clean</div>
-          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Client Portal — Sign in to see your upcoming service</div>
+          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Client Portal â Sign in to see your upcoming service</div>
         </div>
         <div style={S.card}>
           <div style={S.label}>Your Email Address</div>
@@ -4345,7 +4345,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
           />
           {loginError && <div style={{ color:C.red, fontSize:13, marginBottom:10 }}>{loginError}</div>}
           <button style={{ ...S.btn("primary"), width:"100%", fontSize:16, padding:"14px" }} onClick={handleLogin} disabled={!emailInput.trim()}>
-            Continue →
+            Continue â
           </button>
           <div style={{ marginTop:16, fontSize:12, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
             Use the email address you gave us when booking.<br/>
@@ -4356,7 +4356,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     );
   }
 
-  // Logged in — show client's own data only
+  // Logged in â show client's own data only
   const { clientJobs, clientLeads, lead } = getClientData(authedClient);
   const upcomingJobs = clientJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
   const completedJobs = clientJobs.filter(j => j.status === "completed");
@@ -4369,18 +4369,18 @@ function ClientView({ jobs, resLeads, region, setTab }) {
     return (
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <div style={{ fontSize:14, color:C.muted }}>👋 Hi, <strong style={{ color:C.text }}>{authedClient.name}</strong></div>
-          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setAuthedClient(null); setEmailInput(""); }}>🔒 Sign Out</button>
+          <div style={{ fontSize:14, color:C.muted }}>ð Hi, <strong style={{ color:C.text }}>{authedClient.name}</strong></div>
+          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setAuthedClient(null); setEmailInput(""); }}>ð Sign Out</button>
         </div>
 
         {/* Client header */}
         <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.accent}` }}>
           <div style={{ display:"flex", alignItems:"center", gap:14, flexWrap:"wrap" }}>
-            <div style={{ width:52, height:52, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24 }}>🏠</div>
+            <div style={{ width:52, height:52, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:24 }}>ð </div>
             <div style={{ flex:1 }}>
               <div style={{ fontWeight:800, fontSize:22 }}>{selectedClient}</div>
-              {lead?.email && <div style={{ fontSize:13, color:C.muted }}>📧 {lead.email}</div>}
-              {lead?.address && <div style={{ fontSize:13, color:C.muted }}>📍 {lead.address}</div>}
+              {lead?.email && <div style={{ fontSize:13, color:C.muted }}>ð§ {lead.email}</div>}
+              {lead?.address && <div style={{ fontSize:13, color:C.muted }}>ð {lead.address}</div>}
             </div>
           </div>
         </div>
@@ -4388,12 +4388,12 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         {/* Empty state */}
         {upcomingJobs.length === 0 && completedJobs.length === 0 && !activeQuote && (
           <div style={{ ...S.card, textAlign:"center", padding:32, marginBottom:18 }}>
-            <div style={{ fontSize:40, marginBottom:12 }}>📋</div>
+            <div style={{ fontSize:40, marginBottom:12 }}>ð</div>
             <div style={{ fontWeight:700, fontSize:16, marginBottom:8 }}>No scheduled services yet</div>
             <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Ready to book? We'd love to help.</div>
             <a href={`mailto:${BRAND.supportEmail}?subject=New Booking Request`}
               style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block" }}>
-              📅 Book a Service
+              ð Book a Service
             </a>
           </div>
         )}
@@ -4401,7 +4401,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         {/* Upcoming jobs */}
         {upcomingJobs.length > 0 && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.accent}` }}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>📅 Upcoming Service</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.accent }}>ð Upcoming Service</div>
             {upcomingJobs.map(job => {
               const includes = {
                 "Refresh Clean":["Vacuum all floors","Mop hard floors","Kitchen surfaces + sink","Bathroom clean","Dusting accessible surfaces"],
@@ -4416,12 +4416,12 @@ function ClientView({ jobs, resLeads, region, setTab }) {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
                     <div>
                       <div style={{ fontWeight:700, fontSize:16 }}>{job.type}</div>
-                      <div style={{ fontSize:14, color:C.muted, marginTop:4 }}>📅 {job.date} at {job.time}</div>
-                      <div style={{ fontSize:14, color:C.muted }}>📍 {job.address}</div>
+                      <div style={{ fontSize:14, color:C.muted, marginTop:4 }}>ð {job.date} at {job.time}</div>
+                      <div style={{ fontSize:14, color:C.muted }}>ð {job.address}</div>
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <span style={{ padding:"4px 14px", borderRadius:20, fontSize:12, fontWeight:700, background:C.accentDim, color:C.accent }}>
-                        {job.status === "in-progress" ? "🔄 In Progress" : "✅ Confirmed"}
+                        {job.status === "in-progress" ? "ð In Progress" : "â Confirmed"}
                       </span>
                       <div style={{ fontSize:18, fontWeight:800, color:C.accent, marginTop:6 }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
                     </div>
@@ -4429,18 +4429,18 @@ function ClientView({ jobs, resLeads, region, setTab }) {
 
                   {/* What's included */}
                   <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", marginBottom:10 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:8 }}>✅ WHAT'S INCLUDED</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:8 }}>â WHAT'S INCLUDED</div>
                     {includes.map((item, i) => (
                       <div key={i} style={{ fontSize:13, color:C.text, padding:"3px 0", display:"flex", gap:8 }}>
-                        <span style={{ color:C.accent }}>✓</span><span>{item}</span>
+                        <span style={{ color:C.accent }}>â</span><span>{item}</span>
                       </div>
                     ))}
                     {job.upsells?.length > 0 && (
                       <div style={{ marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
-                        <div style={{ fontSize:12, fontWeight:700, color:C.gold, marginBottom:4 }}>⭐ YOUR ADD-ONS</div>
+                        <div style={{ fontSize:12, fontWeight:700, color:C.gold, marginBottom:4 }}>â­ YOUR ADD-ONS</div>
                         {(job.upsells||[]).map((addon, i) => (
                           <div key={i} style={{ fontSize:13, color:C.gold, display:"flex", gap:8 }}>
-                            <span>★</span><span>{addon}</span>
+                            <span>â</span><span>{addon}</span>
                           </div>
                         ))}
                       </div>
@@ -4450,7 +4450,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
                   {/* After photos if done */}
                   {job.afterPics?.filter(p=>p?.startsWith("data:")).length > 0 && (
                     <div style={{ marginBottom:10 }}>
-                      <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>📷 COMPLETED PHOTOS</div>
+                      <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>ð· COMPLETED PHOTOS</div>
                       <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
                         {(job.afterPics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
                           <img key={i} src={p} alt="after" style={{ width:70, height:70, borderRadius:8, objectFit:"cover" }} />
@@ -4467,9 +4467,9 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         {/* Active quote */}
         {activeQuote && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.gold }}>📄 Your Quote</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14, color:C.gold }}>ð Your Quote</div>
             <div style={{ fontSize:14, color:C.muted }}>Service: <strong style={{ color:C.text }}>{activeQuote.serviceType}</strong></div>
-            <div style={{ fontSize:14, color:C.muted }}>Property: <strong style={{ color:C.text }}>{activeQuote.dwellingType} — {activeQuote.dwellingSize}</strong></div>
+            <div style={{ fontSize:14, color:C.muted }}>Property: <strong style={{ color:C.text }}>{activeQuote.dwellingType} â {activeQuote.dwellingSize}</strong></div>
             <div style={{ fontSize:14, color:C.muted }}>Frequency: <strong style={{ color:C.text }}>{activeQuote.frequency}</strong></div>
             {activeQuote.addons?.length > 0 && (
               <div style={{ fontSize:14, color:C.muted }}>Add-ons: <strong style={{ color:C.text }}>{(activeQuote.addons||[]).map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</strong></div>
@@ -4477,17 +4477,17 @@ function ClientView({ jobs, resLeads, region, setTab }) {
             <div style={{ marginTop:14, padding:"12px 16px", background:C.surface, borderRadius:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:13, color:C.muted }}>Quote Total</span>
               <span style={{ fontSize:22, fontWeight:800, color:C.gold }}>
-                {cur}{(() => { try { return Math.round(calcResQuote({...activeQuote, dwellingType:activeQuote.dwellingType||"Apartment / Condo", dwellingSize:activeQuote.dwellingSize||"2 Bed", serviceType:activeQuote.serviceType||"Refresh Clean", frequency:activeQuote.frequency||"One-Time", beds:activeQuote.beds||2, baths:activeQuote.baths||1, sqft:activeQuote.sqft||900, addons:activeQuote.addons||[]}, region||ACTIVE_REGION).total).toLocaleString(); } catch(e) { return "—"; } })()}
+                {cur}{(() => { try { return Math.round(calcResQuote({...activeQuote, dwellingType:activeQuote.dwellingType||"Apartment / Condo", dwellingSize:activeQuote.dwellingSize||"2 Bed", serviceType:activeQuote.serviceType||"Refresh Clean", frequency:activeQuote.frequency||"One-Time", beds:activeQuote.beds||2, baths:activeQuote.baths||1, sqft:activeQuote.sqft||900, addons:activeQuote.addons||[]}, region||ACTIVE_REGION).total).toLocaleString(); } catch(e) { return "â"; } })()}
               </span>
             </div>
             <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
-              <a href={`mailto:${BRAND.supportEmail}?subject=Booking Confirmation — ${activeQuote.serviceType}&body=Hi Have Us Clean,%0A%0AI'd like to confirm my booking for ${activeQuote.serviceType}.%0A%0AThanks!`}
+              <a href={`mailto:${BRAND.supportEmail}?subject=Booking Confirmation â ${activeQuote.serviceType}&body=Hi Have Us Clean,%0A%0AI'd like to confirm my booking for ${activeQuote.serviceType}.%0A%0AThanks!`}
                 style={{ ...S.btn("primary"), textDecoration:"none", flex:1, textAlign:"center" }}>
-                ✅ Accept & Book
+                â Accept & Book
               </a>
               <a href={`mailto:${BRAND.supportEmail}?subject=Question about my quote`}
                 style={{ ...S.btn("ghost"), textDecoration:"none", flex:1, textAlign:"center" }}>
-                💬 Ask a Question
+                ð¬ Ask a Question
               </a>
             </div>
           </div>
@@ -4496,7 +4496,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         {/* Job history */}
         {completedJobs.length > 0 && (
           <div style={S.card}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>🧹 Service History</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>ð§¹ Service History</div>
             {completedJobs.slice().reverse().map(job => (
               <div key={job.id} style={{ display:"flex", justifyContent:"space-between", padding:"10px 0", borderBottom:`1px solid ${C.border}` }}>
                 <div>
@@ -4504,7 +4504,7 @@ function ClientView({ jobs, resLeads, region, setTab }) {
                   <div style={{ fontSize:12, color:C.muted }}>{job.date}</div>
                 </div>
                 <div style={{ textAlign:"right" }}>
-                  <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>Completed ✅</span>
+                  <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>Completed â</span>
                   <div style={{ fontSize:13, fontWeight:700, color:C.accent, marginTop:2 }}>{cur}{(job.clientPrice||0).toLocaleString()}</div>
                 </div>
               </div>
@@ -4516,15 +4516,15 @@ function ClientView({ jobs, resLeads, region, setTab }) {
         <div style={{ ...S.card, marginTop:18, textAlign:"center" }}>
           <div style={{ fontWeight:700, fontSize:15, marginBottom:10 }}>Need anything?</div>
           <div style={{ fontSize:13, color:C.muted, marginBottom:14 }}>Reach us anytime at <strong style={{ color:C.accent }}>{BRAND.supportEmail}</strong></div>
-          <a href={`mailto:${BRAND.supportEmail}`} style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block" }}>✉️ Email Have Us Clean</a>
+          <a href={`mailto:${BRAND.supportEmail}`} style={{ ...S.btn("primary"), textDecoration:"none", display:"inline-block" }}>âï¸ Email Have Us Clean</a>
         </div>
       </div>
     );
   }
 }
 
-// ─── PARTNER VIEW ─────────────────────────────────────────────────────────────
-// What partners see — their schedule, jobs to complete, check-in actions
+// âââ PARTNER VIEW âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// What partners see â their schedule, jobs to complete, check-in actions
 function PartnerView({ jobs, partners, region }) {
   const [pinInput, setPinInput] = useState("");
   const [authedPartner, setAuthedPartner] = useState(null); // logged-in partner
@@ -4534,7 +4534,7 @@ function PartnerView({ jobs, partners, region }) {
   const today = new Date().toISOString().split("T")[0];
   const cur = region?.currencySymbol || "$";
 
-  // Admin PIN — hardcoded for now, change to your own 6-digit code
+  // Admin PIN â hardcoded for now, change to your own 6-digit code
   const ADMIN_PIN = "000000";
 
   const handlePinSubmit = () => {
@@ -4559,14 +4559,14 @@ function PartnerView({ jobs, partners, region }) {
     }
   };
 
-  // Not logged in — show PIN screen
+  // Not logged in â show PIN screen
   if (!authedPartner && !isAdminMode) {
     return (
       <div style={{ maxWidth:380, margin:"40px auto" }}>
         <div style={{ textAlign:"center", marginBottom:28 }}>
-          <div style={{ fontSize:52, marginBottom:12 }}>🧹</div>
+          <div style={{ fontSize:52, marginBottom:12 }}>ð§¹</div>
           <div style={{ fontWeight:800, fontSize:24 }}>Have Us Clean</div>
-          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Partner Portal — Enter your PIN to continue</div>
+          <div style={{ fontSize:14, color:C.muted, marginTop:6 }}>Partner Portal â Enter your PIN to continue</div>
         </div>
         <div style={S.card}>
           <div style={S.label}>Your PIN</div>
@@ -4578,12 +4578,12 @@ function PartnerView({ jobs, partners, region }) {
             value={pinInput}
             onChange={e => setPinInput(e.target.value.replace(/\D/g,""))}
             onKeyDown={e => e.key === "Enter" && handlePinSubmit()}
-            placeholder="••••"
+            placeholder="â¢â¢â¢â¢"
             autoFocus
           />
           {pinError && <div style={{ color:C.red, fontSize:13, marginBottom:10, textAlign:"center" }}>{pinError}</div>}
           <button style={{ ...S.btn("primary"), width:"100%", fontSize:16, padding:"14px" }} onClick={handlePinSubmit} disabled={pinInput.length < 4}>
-            Sign In →
+            Sign In â
           </button>
           <div style={{ marginTop:14, fontSize:12, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
             Default PIN: last 4 digits of your phone number<br/>
@@ -4594,13 +4594,13 @@ function PartnerView({ jobs, partners, region }) {
     );
   }
 
-  // ── ADMIN MODE: show all partners ──
+  // ââ ADMIN MODE: show all partners ââ
   if (isAdminMode && !selectedPartner) {
     return (
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
-          <div style={S.h2}>📋 Partner View <span style={{ fontSize:13, color:C.gold, fontWeight:600 }}>— Admin Mode</span></div>
-          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setPinInput(""); }}>🔒 Sign Out</button>
+          <div style={S.h2}>ð Partner View <span style={{ fontSize:13, color:C.gold, fontWeight:600 }}>â Admin Mode</span></div>
+          <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setPinInput(""); }}>ð Sign Out</button>
         </div>
         <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
           {partners.map(partner => {
@@ -4614,15 +4614,15 @@ function PartnerView({ jobs, partners, region }) {
                     <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
                     <div>
                       <div style={{ fontWeight:700, fontSize:15 }}>{partner.name}</div>
-                      <div style={{ fontSize:12, color:C.muted }}>PIN: {partner.pin || partner.phone?.replace(/\D/g,"").slice(-4) || "0000"} · {partner.region}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>PIN: {partner.pin || partner.phone?.replace(/\D/g,"").slice(-4) || "0000"} Â· {partner.region}</div>
                       <div style={{ display:"flex", gap:6, marginTop:4 }}>
-                        {todayCount > 0 && <span style={S.badge("gold")}>📅 {todayCount} today</span>}
+                        {todayCount > 0 && <span style={S.badge("gold")}>ð {todayCount} today</span>}
                         {pendingPay > 0 && <span style={S.badge("green")}>{cur}{pendingPay} pending</span>}
-                        {!partner.onboarded && <span style={S.badge("red")}>⚠️ Not onboarded</span>}
+                        {!partner.onboarded && <span style={S.badge("red")}>â ï¸ Not onboarded</span>}
                       </div>
                     </div>
                   </div>
-                  <span style={{ color:C.muted, fontSize:20 }}>›</span>
+                  <span style={{ color:C.muted, fontSize:20 }}>âº</span>
                 </div>
               </div>
             );
@@ -4632,7 +4632,7 @@ function PartnerView({ jobs, partners, region }) {
     );
   }
 
-  // ── PARTNER or ADMIN viewing a specific partner ──
+  // ââ PARTNER or ADMIN viewing a specific partner ââ
   const viewingId = isAdminMode ? selectedPartner : authedPartner?.id;
   const partner = partners.find(p => p.id === viewingId);
   if (!partner) return null;
@@ -4648,10 +4648,10 @@ function PartnerView({ jobs, partners, region }) {
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
           {isAdminMode
-            ? <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => setSelectedPartner(null)}>← All Partners</button>
-            : <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setAuthedPartner(null); setPinInput(""); }}>🔒 Sign Out</button>
+            ? <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => setSelectedPartner(null)}>â All Partners</button>
+            : <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setAuthedPartner(null); setPinInput(""); }}>ð Sign Out</button>
           }
-          {isAdminMode && <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setSelectedPartner(null); setPinInput(""); }}>🔒 Exit Admin</button>}
+          {isAdminMode && <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setSelectedPartner(null); setPinInput(""); }}>ð Exit Admin</button>}
         </div>
 
         {/* Partner header */}
@@ -4660,7 +4660,7 @@ function PartnerView({ jobs, partners, region }) {
             <div style={S.avatar(avatarColors[partner.id % 4])}>{partner.avatar}</div>
             <div style={{ flex:1 }}>
               <div style={{ fontWeight:800, fontSize:22 }}>{partner.name}</div>
-              <div style={{ fontSize:13, color:C.muted }}>{partner.email} · {partner.phone}</div>
+              <div style={{ fontSize:13, color:C.muted }}>{partner.email} Â· {partner.phone}</div>
               <span style={S.badge(partner.status==="active"?"green":"gold")}>{partner.status}</span>
             </div>
           </div>
@@ -4688,7 +4688,7 @@ function PartnerView({ jobs, partners, region }) {
         {/* Today's jobs */}
         {todayJobs.length > 0 && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
-            <div style={{ fontWeight:800, fontSize:16, color:C.gold, marginBottom:14 }}>📅 Today's Jobs</div>
+            <div style={{ fontWeight:800, fontSize:16, color:C.gold, marginBottom:14 }}>ð Today's Jobs</div>
             {todayJobs.map(job => {
               const statusColor = job.status==="in-progress" ? C.gold : job.status==="completed" ? C.accent : C.blue;
               const checklist = {
@@ -4706,10 +4706,10 @@ function PartnerView({ jobs, partners, region }) {
                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
                     <div>
                       <div style={{ fontWeight:800, fontSize:17 }}>{job.client}</div>
-                      <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h estimated</div>
-                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
-                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
+                      <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>ð {job.address}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>â° {job.time} Â· {job.type} Â· {job.hours}h estimated</div>
+                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>â Add-ons: {job.upsells.join(", ")}</div>}
+                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>â ï¸ {job.notes}</div>}
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
@@ -4720,20 +4720,20 @@ function PartnerView({ jobs, partners, region }) {
 
                   {/* RAG reminder */}
                   <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
-                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
+                    ð¨ RAG: <span style={{ color:"#FF4757" }}>ð´ Toilets ONLY</span> Â· <span style={{ color:"#FFA502" }}>ð¡ Sinks/Mirrors</span> Â· <span style={{ color:"#2ED573" }}>ð¢ Kitchen</span> Â· <span style={{ color:"#1E90FF" }}>ðµ General/Glass</span>
                   </div>
 
                   {/* Checklist */}
                   <div style={{ marginBottom:12 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>â CHECKLIST</div>
                     {checklist.map((task, i) => (
                       <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center" }}>
-                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
+                        <span style={{ color:C.muted }}>â</span><span>{task}</span>
                       </div>
                     ))}
                     {job.upsells?.length > 0 && (job.upsells||[]).map((addon, i) => (
                       <div key={`addon-${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center", border:`1px solid #FFB80033` }}>
-                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
+                        <span style={{ color:C.gold }}>â</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
                       </div>
                     ))}
                   </div>
@@ -4743,10 +4743,10 @@ function PartnerView({ jobs, partners, region }) {
                     <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
                       target="_blank" rel="noopener noreferrer"
                       style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none" }}>
-                      🗺 Directions
+                      ðº Directions
                     </a>
                     <label style={{ ...S.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
-                      📷 Before Photo
+                      ð· Before Photo
                       <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                         onChange={e => {
                           const file = e.target.files[0]; if (!file) return;
@@ -4757,7 +4757,7 @@ function PartnerView({ jobs, partners, region }) {
                         }} />
                     </label>
                     <label style={{ ...S.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
-                      ✨ After Photo
+                      â¨ After Photo
                       <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                         onChange={e => {
                           const file = e.target.files[0]; if (!file) return;
@@ -4809,7 +4809,7 @@ function PartnerView({ jobs, partners, region }) {
         )}
         {todayJobs.length === 0 && (
           <div style={{ ...S.card, marginBottom:18, textAlign:"center", padding:30 }}>
-            <div style={{ fontSize:32, marginBottom:8 }}>🎉</div>
+            <div style={{ fontSize:32, marginBottom:8 }}>ð</div>
             <div style={{ fontWeight:700, fontSize:16 }}>No jobs today</div>
             <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Enjoy your day off!</div>
           </div>
@@ -4818,7 +4818,7 @@ function PartnerView({ jobs, partners, region }) {
         {/* Upcoming jobs */}
         {upcomingJobs.filter(j => j.date !== today).length > 0 && (
           <div style={S.card}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>📆 Upcoming Jobs</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>ð Upcoming Jobs</div>
             {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => {
               const checklist = {
                 "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
@@ -4834,11 +4834,11 @@ function PartnerView({ jobs, partners, region }) {
                   <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:12 }}>
                     <div>
                       <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>📅 {job.date} at {job.time}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>🧹 {job.type} · {job.hours}h</div>
-                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
-                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
+                      <div style={{ fontSize:13, color:C.muted }}>ð {job.date} at {job.time}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>ð {job.address}</div>
+                      <div style={{ fontSize:13, color:C.muted }}>ð§¹ {job.type} Â· {job.hours}h</div>
+                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>â Add-ons: {job.upsells.join(", ")}</div>}
+                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>â ï¸ {job.notes}</div>}
                     </div>
                     <div style={{ textAlign:"right" }}>
                       <div style={{ fontWeight:800, fontSize:20, color:C.blue }}>{cur}{job.partnerPay||0}</div>
@@ -4848,20 +4848,20 @@ function PartnerView({ jobs, partners, region }) {
 
                   {/* RAG */}
                   <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
-                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
+                    ð¨ RAG: <span style={{ color:"#FF4757" }}>ð´ Toilets ONLY</span> Â· <span style={{ color:"#FFA502" }}>ð¡ Sinks/Mirrors</span> Â· <span style={{ color:"#2ED573" }}>ð¢ Kitchen</span> Â· <span style={{ color:"#1E90FF" }}>ðµ General/Glass</span>
                   </div>
 
                   {/* Checklist */}
                   <div style={{ marginBottom:12 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
+                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>â CHECKLIST</div>
                     {checklist.map((task, i) => (
                       <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8 }}>
-                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
+                        <span style={{ color:C.muted }}>â</span><span>{task}</span>
                       </div>
                     ))}
                     {job.upsells?.map((addon,i) => (
                       <div key={`u${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, border:`1px solid #FFB80033` }}>
-                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
+                        <span style={{ color:C.gold }}>â</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
                       </div>
                     ))}
                   </div>
@@ -4870,7 +4870,7 @@ function PartnerView({ jobs, partners, region }) {
                   <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
                     target="_blank" rel="noopener noreferrer"
                     style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none", display:"inline-block" }}>
-                    🗺 Get Directions
+                    ðº Get Directions
                   </a>
                 </div>
               );
@@ -4881,8 +4881,8 @@ function PartnerView({ jobs, partners, region }) {
     );
 }
 
-// ─── MAIN APP ─────────────────────────────────────────────────────────────────
-// ─── System Diagnostic Component ─────────────────────────────────────────────
+// âââ MAIN APP âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// âââ System Diagnostic Component âââââââââââââââââââââââââââââââââââââââââââââ
 function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   const [results, setResults] = useState([]);
   const [running, setRunning] = useState(false);
@@ -4908,7 +4908,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
       setResults([...res]);
     };
 
-    // ── INFRASTRUCTURE ──────────────────────────────────────────────────────
+    // ââ INFRASTRUCTURE ââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     try {
       const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id&limit=1`, { headers: SB_H });
       add("Infrastructure", "Supabase Connection", r.ok ? "ok" : "err", `HTTP ${r.status}`);
@@ -4928,7 +4928,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
       });
       if (r.ok) {
         await fetch(`${SB_URL}/rest/v1/huc_leads_cold?lead_id=eq.${tid}`, { method: "DELETE", headers: SB_H });
-        add("Infrastructure", "Supabase Write/Delete", "ok", "Write + cleanup ✅");
+        add("Infrastructure", "Supabase Write/Delete", "ok", "Write + cleanup â");
       } else { add("Infrastructure", "Supabase Write/Delete", "err", `HTTP ${r.status}`, "Check RLS policies allow INSERT/DELETE for anon"); }
     } catch(e) { add("Infrastructure", "Supabase Write/Delete", "err", e.message); }
 
@@ -4938,7 +4938,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
       else {
         const total = (d.leads || []).length;
         add("Infrastructure", "Google Sheet API", total > 0 ? "ok" : "warn", `${total} leads returned`);
-        if (total === 0) sugg.push({ icon: "📋", text: "Google Sheet has no leads — run your n8n workflow to populate it" });
+        if (total === 0) sugg.push({ icon: "ð", text: "Google Sheet has no leads â run your n8n workflow to populate it" });
       }
     } catch(e) { add("Infrastructure", "Google Sheet API", "err", e.message, "Vercel /api/sheet function may be failing"); }
 
@@ -4946,16 +4946,16 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
       const r = await fetch("/api/intake"); const d = await r.json();
       const count = (d.leads || []).length;
       add("Infrastructure", "Form Intake API", "ok", `${count} form submissions`);
-      if (count === 0) sugg.push({ icon: "📝", text: "No form submissions yet — share your Google Form with clients to start collecting leads" });
+      if (count === 0) sugg.push({ icon: "ð", text: "No form submissions yet â share your Google Form with clients to start collecting leads" });
     } catch(e) { add("Infrastructure", "Form Intake API", "err", e.message); }
 
     if ("geolocation" in navigator) {
-      add("Infrastructure", "GPS/Geolocation", "ok", "Browser geolocation available ✅");
+      add("Infrastructure", "GPS/Geolocation", "ok", "Browser geolocation available â");
     } else {
       add("Infrastructure", "GPS/Geolocation", "err", "Not available", "GPS check-in won't work on this device");
     }
 
-    // ── COLD OUTREACH ────────────────────────────────────────────────────────
+    // ââ COLD OUTREACH ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     add("Cold Outreach", "Leads loaded", coldLeads.length > 0 ? "ok" : "warn",
       `${coldLeads.length} leads in memory`,
       coldLeads.length === 0 ? "Open Cold Outreach tab to trigger auto-sync" : "");
@@ -4968,73 +4968,73 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
     const contacted = coldLeads.filter(l => l.status !== "New").length;
     add("Cold Outreach", "Leads with activity", contacted > 0 ? "ok" : "warn",
       `${contacted}/${coldLeads.length} leads have been contacted or updated`);
-    if (contacted === 0 && coldLeads.length > 0) sugg.push({ icon: "🎯", text: "Start contacting cold leads — open a lead, send the cold email, update status to Contacted" });
+    if (contacted === 0 && coldLeads.length > 0) sugg.push({ icon: "ð¯", text: "Start contacting cold leads â open a lead, send the cold email, update status to Contacted" });
 
-    // ── RESIDENTIAL LEADS ────────────────────────────────────────────────────
+    // ââ RESIDENTIAL LEADS ââââââââââââââââââââââââââââââââââââââââââââââââââââ
     add("Residential", "Leads in app", resLeads.length >= 0 ? "ok" : "warn", `${resLeads.length} residential leads`);
-    if (resLeads.length === 0) sugg.push({ icon: "🏠", text: "No residential leads yet — add your first lead from the Residential tab" });
+    if (resLeads.length === 0) sugg.push({ icon: "ð ", text: "No residential leads yet â add your first lead from the Residential tab" });
 
     const quoted = resLeads.filter(l => l.status === "Quoted").length;
     const booked = resLeads.filter(l => l.status === "Booked").length;
     const completed = resLeads.filter(l => l.status === "Completed").length;
     add("Residential", "Lead pipeline", "ok",
-      `New: ${resLeads.filter(l=>l.status==="New").length} · Quoted: ${quoted} · Booked: ${booked} · Completed: ${completed}`);
+      `New: ${resLeads.filter(l=>l.status==="New").length} Â· Quoted: ${quoted} Â· Booked: ${booked} Â· Completed: ${completed}`);
 
-    if (quoted > 0 && booked === 0) sugg.push({ icon: "📋", text: `${quoted} quoted leads not yet booked — follow up or click Book Job to schedule them` });
+    if (quoted > 0 && booked === 0) sugg.push({ icon: "ð", text: `${quoted} quoted leads not yet booked â follow up or click Book Job to schedule them` });
 
-    // ── JOBS ─────────────────────────────────────────────────────────────────
+    // ââ JOBS âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     add("Jobs", "Total jobs", "ok", `${jobs.length} jobs in system`);
-    if (jobs.length === 0) sugg.push({ icon: "📋", text: "No jobs yet — book a residential lead to create the first job" });
+    if (jobs.length === 0) sugg.push({ icon: "ð", text: "No jobs yet â book a residential lead to create the first job" });
 
     const scheduled = jobs.filter(j => j.status === "scheduled").length;
     const inProgress = jobs.filter(j => j.status === "in_progress").length;
     const completedJobs = jobs.filter(j => j.status === "completed").length;
     add("Jobs", "Job status breakdown", "ok",
-      `Scheduled: ${scheduled} · In Progress: ${inProgress} · Completed: ${completedJobs}`);
+      `Scheduled: ${scheduled} Â· In Progress: ${inProgress} Â· Completed: ${completedJobs}`);
 
     const unassigned = jobs.filter(j => !j.partnerId && !(j.partnerIds||[]).length).length;
     if (unassigned > 0) {
       add("Jobs", "Unassigned jobs", "warn", `${unassigned} jobs have no partner assigned`, "Go to Jobs tab and assign partners");
-      sugg.push({ icon: "👥", text: `${unassigned} jobs have no partner assigned — assign partners so they show up in Partner View` });
-    } else { add("Jobs", "Unassigned jobs", "ok", "All jobs have partners assigned ✅"); }
+      sugg.push({ icon: "ð¥", text: `${unassigned} jobs have no partner assigned â assign partners so they show up in Partner View` });
+    } else { add("Jobs", "Unassigned jobs", "ok", "All jobs have partners assigned â"); }
 
-    // ── PARTNERS ─────────────────────────────────────────────────────────────
+    // ââ PARTNERS âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     add("Partners", "Partners registered", partners.length > 0 ? "ok" : "warn",
       `${partners.length} partners in system`, partners.length === 0 ? "Add partners in the Partners tab" : "");
-    if (partners.length === 0) sugg.push({ icon: "👥", text: "No partners added yet — go to Partners tab and add your team members" });
+    if (partners.length === 0) sugg.push({ icon: "ð¥", text: "No partners added yet â go to Partners tab and add your team members" });
 
     const onboarded = partners.filter(p => p.onboarded).length;
     if (partners.length > 0) {
       add("Partners", "Onboarding status", onboarded === partners.length ? "ok" : "warn",
         `${onboarded}/${partners.length} partners fully onboarded`);
-      if (onboarded < partners.length) sugg.push({ icon: "🎓", text: `${partners.length - onboarded} partners not fully onboarded — complete training in the Onboarding tab` });
+      if (onboarded < partners.length) sugg.push({ icon: "ð", text: `${partners.length - onboarded} partners not fully onboarded â complete training in the Onboarding tab` });
     }
 
-    // ── PAYMENTS ─────────────────────────────────────────────────────────────
+    // ââ PAYMENTS âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     const paid = jobs.filter(j => j.paymentConfirmed).length;
     const unpaid = completedJobs - paid;
     add("Payments", "Payment status", unpaid > 0 ? "warn" : "ok",
-      `${paid} jobs paid · ${unpaid} completed but unpaid`);
-    if (unpaid > 0) sugg.push({ icon: "💳", text: `${unpaid} completed jobs awaiting payment — confirm payment in the Jobs tab` });
+      `${paid} jobs paid Â· ${unpaid} completed but unpaid`);
+    if (unpaid > 0) sugg.push({ icon: "ð³", text: `${unpaid} completed jobs awaiting payment â confirm payment in the Jobs tab` });
 
-    // ── REGION ───────────────────────────────────────────────────────────────
+    // ââ REGION âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
     add("Config", "Active region", "ok",
-      `${region?.name || "Unknown"} (${region?.id || "?"}) — ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
+      `${region?.name || "Unknown"} (${region?.id || "?"}) â ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
 
     try {
       localStorage.setItem("diag-test", "1"); localStorage.removeItem("diag-test");
-      add("Config", "localStorage", "ok", "Working ✅");
+      add("Config", "localStorage", "ok", "Working â");
     } catch(e) { add("Config", "localStorage", "err", e.message); }
 
     const deletedIds = (() => { try { return JSON.parse(localStorage.getItem("cp:deletedLeadIds") || "[]"); } catch { return []; } })();
     add("Config", "Deleted leads tracking", "ok", `${deletedIds.length} leads permanently deleted and tracked`);
 
-    // ── FEATURE SUGGESTIONS ───────────────────────────────────────────────────
-    if (!jobs.some(j => j.recurring)) sugg.push({ icon: "🔄", text: "No recurring jobs set up — add recurring schedules in the Recurring tab to automate weekly/bi-weekly bookings" });
-    if (partners.length > 0 && !partners.some(p => p.phone)) sugg.push({ icon: "📱", text: "Partner phone numbers missing — add them in Partners tab to enable SMS reminders" });
-    if (completedJobs > 0 && unpaid === 0) sugg.push({ icon: "💰", text: "All completed jobs are paid — great job! Consider setting up Stripe for automatic online payment collection" });
-    if (coldLeads.length > 0 && azLeads.length === 0) sugg.push({ icon: "🇺🇸", text: "No Arizona leads loaded — run your n8n workflow with Arizona search jobs to populate AZ pipeline" });
-    if (coldLeads.length > 500) sugg.push({ icon: "🎯", text: `You have ${coldLeads.length} cold leads — consider assigning a sales team member to work through them systematically` });
+    // ââ FEATURE SUGGESTIONS âââââââââââââââââââââââââââââââââââââââââââââââââââ
+    if (!jobs.some(j => j.recurring)) sugg.push({ icon: "ð", text: "No recurring jobs set up â add recurring schedules in the Recurring tab to automate weekly/bi-weekly bookings" });
+    if (partners.length > 0 && !partners.some(p => p.phone)) sugg.push({ icon: "ð±", text: "Partner phone numbers missing â add them in Partners tab to enable SMS reminders" });
+    if (completedJobs > 0 && unpaid === 0) sugg.push({ icon: "ð°", text: "All completed jobs are paid â great job! Consider setting up Stripe for automatic online payment collection" });
+    if (coldLeads.length > 0 && azLeads.length === 0) sugg.push({ icon: "ðºð¸", text: "No Arizona leads loaded â run your n8n workflow with Arizona search jobs to populate AZ pipeline" });
+    if (coldLeads.length > 500) sugg.push({ icon: "ð¯", text: `You have ${coldLeads.length} cold leads â consider assigning a sales team member to work through them systematically` });
 
     setSuggestions(sugg);
     setSummary({ passed, failed, warned });
@@ -5060,12 +5060,12 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   return (
     <div style={{ padding: 20, maxWidth: 700, margin: "0 auto" }}>
       <div style={{ marginBottom: 20 }}>
-        <h2 style={{ color: C.accent, fontSize: 22, marginBottom: 4 }}>🔬 System Diagnostic</h2>
-        <p style={{ color: C.muted, fontSize: 13 }}>Full health check of every feature — runs live against your real data</p>
+        <h2 style={{ color: C.accent, fontSize: 22, marginBottom: 4 }}>ð¬ System Diagnostic</h2>
+        <p style={{ color: C.muted, fontSize: 13 }}>Full health check of every feature â runs live against your real data</p>
       </div>
 
       <button onClick={runAll} disabled={running} style={{ ...S.btn("primary"), marginBottom: 16, opacity: running ? 0.6 : 1 }}>
-        {running ? "⏳ Running all checks..." : "▶ Run Full Diagnostic"}
+        {running ? "â³ Running all checks..." : "â¶ Run Full Diagnostic"}
       </button>
 
       {summary && (
@@ -5074,7 +5074,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
           border: `1px solid ${summary.failed > 0 ? "#FF475744" : summary.warned > 0 ? "#f59e0b44" : "#00D4AA44"}`,
           color: summary.failed > 0 ? "#FF4757" : summary.warned > 0 ? "#f59e0b" : "#00D4AA",
           fontWeight: 700, fontSize: 15, textAlign: "center" }}>
-          ✅ {summary.passed} passed · ❌ {summary.failed} failed · ⚠️ {summary.warned} warnings
+          â {summary.passed} passed Â· â {summary.failed} failed Â· â ï¸ {summary.warned} warnings
         </div>
       )}
 
@@ -5085,11 +5085,11 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
           </div>
           {items.map((r, i) => (
             <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${C.border}20` : "none" }}>
-              <div style={{ fontSize: 16, minWidth: 20 }}>{r.status === "ok" ? "✅" : r.status === "err" ? "❌" : "⚠️"}</div>
+              <div style={{ fontSize: 16, minWidth: 20 }}>{r.status === "ok" ? "â" : r.status === "err" ? "â" : "â ï¸"}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{r.name}</div>
                 <div style={{ fontSize: 12, color: r.status === "ok" ? "#00D4AA" : r.status === "err" ? "#FF4757" : "#f59e0b", marginTop: 2 }}>{r.message}</div>
-                {r.fix && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontStyle: "italic" }}>→ {r.fix}</div>}
+                {r.fix && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontStyle: "italic" }}>â {r.fix}</div>}
               </div>
               <div style={{ fontSize: 10, color: C.muted, whiteSpace: "nowrap" }}>{r.time}</div>
             </div>
@@ -5100,7 +5100,7 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
       {suggestions.length > 0 && (
         <div style={{ background: C.card, border: `1px solid #3B82F644`, borderRadius: 10, overflow: "hidden" }}>
           <div style={{ padding: "10px 14px", background: "#3B82F622", borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#60A5FA" }}>💡 Suggestions & Next Steps</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#60A5FA" }}>ð¡ Suggestions & Next Steps</span>
           </div>
           {suggestions.map((s, i) => (
             <div key={i} style={{ display: "flex", gap: 10, padding: "10px 14px", borderBottom: i < suggestions.length - 1 ? `1px solid ${C.border}20` : "none" }}>
@@ -5146,18 +5146,18 @@ export default function App() {
   }, [deletedLeadIds]);
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
-  // ── DB state ──
+  // ââ DB state ââ
   const [dbStatus, setDbStatus] = useState("loading");
   const [lastSaved, setLastSaved] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
   const [activityLog, setActivityLog] = useState([]);
   const saveTimer = useRef(null);
 
-  // ── Boot: load saved data, with 2s timeout so it never hangs ──
+  // ââ Boot: load saved data, with 2s timeout so it never hangs ââ
   useEffect(() => {
     let cancelled = false;
 
-    // Hard timeout — if storage takes > 2s (or isn't available), just use demo data
+    // Hard timeout â if storage takes > 2s (or isn't available), just use demo data
     const timeout = setTimeout(() => {
       if (!cancelled) {
         setIsLoading(false);
@@ -5183,13 +5183,58 @@ export default function App() {
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
         if (savedResLeads) {
-          // Filter out permanently deleted lead IDs
+          // Filter out permanently deleted lead IDs + junk/outreach rows + duplicates
           try {
             const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
-            const filtered = deleted.size > 0
+
+            // Helper: detect outreach sentences masquerading as lead name/address fields
+            const RES_JUNK = [
+              /^(hi |hello |dear |i |i'm |i've |i'd )/i,
+              /^(this is danae|danae from|have us clean|haveusclean)/i,
+              /^(we excel|we specialize|we provide|we offer|let's connect|let me know)/i,
+              /^(common area|do you have a moment|i see you manage|i noticed)/i,
+              /^(ensuring,|maintaining a clean|as the |as a |at )/i,
+              /^(just wanted|just reaching|just checking)/i,
+              /\b(tenants?|patients?|spotless|hygien|keeping your|your (?:clinic|office|building|property) clean)\b/i,
+              /(common areas? (?:can|will)|enhance your|support your efforts)/i,
+              /explore how we can/i,
+            ];
+            const isJunkRes = (l) => {
+              const name = (l.name || '').trim();
+              const addr = (l.address || '').trim();
+              if (!name && !addr && !l.email) return true;
+              for (const rx of RES_JUNK) {
+                if (rx.test(name)) return true;
+                if (rx.test(addr)) return true;
+              }
+              if (/[a-z]{3,}\s[a-z]{3,}\s[a-z]{3,}.*[.!?,]$/i.test(name)) return true;
+              return false;
+            };
+
+            // Dedup by email → phone → name+address (keep first occurrence)
+            const seenEm  = new Set();
+            const seenPh  = new Set();
+            const seenNA  = new Set();
+            const dedupRes = (arr) => arr.filter(l => {
+              const em = (l.email || '').toLowerCase().trim();
+              const ph = (l.phone || '').replace(/\D/g, '');
+              const na = ((l.name || '') + '|' + (l.address || '')).toLowerCase().trim();
+              if (em && seenEm.has(em))                    return false;
+              if (ph && ph.length >= 10 && seenPh.has(ph)) return false;
+              if (na.length > 3 && seenNA.has(na))         return false;
+              if (em) seenEm.add(em);
+              if (ph && ph.length >= 10) seenPh.add(ph);
+              if (na.length > 3) seenNA.add(na);
+              return true;
+            });
+
+            const afterDeleted = deleted.size > 0
               ? savedResLeads.filter(l => !deleted.has(String(l.id)))
               : savedResLeads;
-            setResLeads(filtered);
+            const afterJunk  = afterDeleted.filter(l => !isJunkRes(l));
+            const afterDedup = dedupRes(afterJunk);
+
+            setResLeads(afterDedup);
           } catch { setResLeads(savedResLeads); }
         }
         if (savedColdLeads && savedColdLeads.length > 0) {
@@ -5212,7 +5257,7 @@ export default function App() {
     return () => { cancelled = true; clearTimeout(timeout); };
   }, []);
 
-  // ── Auto-save jobs whenever they change (debounced 600ms) ──
+  // ââ Auto-save jobs whenever they change (debounced 600ms) ââ
   useEffect(() => {
     if (isLoading) return;
     setDbStatus("saving");
@@ -5224,19 +5269,19 @@ export default function App() {
     }, 600);
   }, [jobs, isLoading]);
 
-  // ── Auto-save partners ──
+  // ââ Auto-save partners ââ
   useEffect(() => {
     if (isLoading) return;
     dbSet(DB_KEYS.partners, partners);
   }, [partners, isLoading]);
 
-  // ── Auto-save resLeads ──
+  // ââ Auto-save resLeads ââ
   useEffect(() => {
     if (isLoading) return;
     dbSet(DB_KEYS.leadsRes, resLeads);
   }, [resLeads, isLoading]);
 
-  // ── Auto-save coldLeads ──
+  // ââ Auto-save coldLeads ââ
   useEffect(() => {
     if (isLoading) return;
     // Write cold leads directly to Supabase sequentially
@@ -5263,13 +5308,13 @@ export default function App() {
     dbSet(DB_KEYS.coldLeads, coldLeads); // also save to localStorage as backup
   }, [coldLeads, isLoading]);
 
-  // ── Auto-save onboarding progress ──
+  // ââ Auto-save onboarding progress ââ
   useEffect(() => {
     if (isLoading) return;
     dbSet(DB_KEYS.onboardingProgress, onboardingProgress);
   }, [onboardingProgress, isLoading]);
 
-  // ── Auto-pull new form leads every 5 minutes ──
+  // ââ Auto-pull new form leads every 5 minutes ââ
   useEffect(() => {
     if (isLoading) return;
     const pullIntake = async () => {
@@ -5295,7 +5340,7 @@ export default function App() {
               return true;
             });
             if (newOnes.length === 0) return ls;
-            console.log(`✅ Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
+            console.log(`â Auto-pulled ${newOnes.length} new lead(s) from Google Form`);
             return [...newOnes, ...ls];
           });
         }
@@ -5306,10 +5351,10 @@ export default function App() {
     return () => clearInterval(timer);
   }, [isLoading]);
 
-  // ── Supabase Realtime — live cold lead updates (Pro plan) ──
+  // ââ Supabase Realtime â live cold lead updates (Pro plan) ââ
   // Replaces the 30s polling interval with an instant push subscription.
   // When n8n writes new leads to huc_leads_cold, they appear in the app immediately.
-  // Jobs and residential leads are NOT subscribed — local state is their source of truth.
+  // Jobs and residential leads are NOT subscribed â local state is their source of truth.
   useEffect(() => {
     if (isLoading) return;
 
@@ -5317,7 +5362,7 @@ export default function App() {
       const SENTENCE_COMPANY = /^(hi |hello |dear |i |i'm |i've |i'd |danae|have us clean|we specialize|just like yours|maintaining a clean|as the |as a )|(@|\|)|\b(patients?|tenants?|haveusclean\.ca)\b/i;
     const SAMPLE_IDS = new Set(["ON-0101","ON-0201","AZ-0101","AZ-0201","ON-0301"]);
 
-    // ── Shared cold lead normalizer — used by both initial fetch and realtime events ──
+    // ââ Shared cold lead normalizer â used by both initial fetch and realtime events ââ
     const normalizeColdLead = (l) => ({
       ...l,
       market: (() => {
@@ -5371,14 +5416,14 @@ export default function App() {
       return final.length >= (prev||[]).length * 0.5 ? final : prev;
     };
 
-    // ── Initial fetch on mount ──
+    // ââ Initial fetch on mount ââ
     sbGet("cp:cold_leads").then(freshCold => {
       if (freshCold && Array.isArray(freshCold) && freshCold.length > 0) {
         setColdLeads(prev => mergeColdLeads(prev, freshCold));
       }
     }).catch(() => {});
 
-    // ── Realtime subscription — INSERT and UPDATE events on huc_leads_cold ──
+    // ââ Realtime subscription â INSERT and UPDATE events on huc_leads_cold ââ
     // Uses Supabase Realtime Broadcast on postgres_changes
     let channel = null;
     try {
@@ -5430,13 +5475,13 @@ export default function App() {
               const lid = String(lead.lead_id || lead.id || "");
               const exists = prev.find(l => (l.lead_id||l.id) === lid);
               if (exists) {
-                // UPDATE — preserve local status/notes
+                // UPDATE â preserve local status/notes
                 return prev.map(l => (l.lead_id||l.id) === lid
                   ? { ...normalized, status: l.status || normalized.status, notes: l.notes || normalized.notes }
                   : l
                 );
               }
-              // INSERT — add to front
+              // INSERT â add to front
               return [normalized, ...prev];
             });
           }
@@ -5449,7 +5494,7 @@ export default function App() {
       };
 
       ws.onerror = () => {
-        // WebSocket failed — fall back to 30s polling silently
+        // WebSocket failed â fall back to 30s polling silently
         ws._fallback = setInterval(() => {
           sbGet("cp:cold_leads").then(freshCold => {
             if (freshCold && Array.isArray(freshCold)) {
@@ -5471,13 +5516,13 @@ export default function App() {
     };
   }, [isLoading]);
 
-  // ── Save region preference ──
+  // ââ Save region preference ââ
   useEffect(() => {
     if (isLoading) return;
     dbSet(DB_KEYS.region, activeRegion.id);
   }, [activeRegion, isLoading]);
 
-  // ── Wrapped setters that also log activity ──
+  // ââ Wrapped setters that also log activity ââ
   const setJobsDB = useCallback((updater) => {
     setJobs(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
@@ -5489,7 +5534,7 @@ export default function App() {
       });
       if (added.length)   logActivity("JOB_ADDED",   added.map(j => j.client).join(", "));
       if (removed.length) logActivity("JOB_DELETED",  removed.map(j => j.client).join(", "));
-      if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} → ${j.status}`).join(", "));
+      if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} â ${j.status}`).join(", "));
       // Write to Supabase immediately so changes persist across refreshes
       dbSet(DB_KEYS.jobs, next).catch(() => {});
       return next;
@@ -5511,7 +5556,7 @@ export default function App() {
     if (log) setActivityLog(log);
   }, []);
 
-  // ── Reset to demo data ──
+  // ââ Reset to demo data ââ
   const handleReset = async () => {
     await Promise.all([
       dbSet(DB_KEYS.jobs,     initJobs),
@@ -5533,7 +5578,7 @@ export default function App() {
     setDbStatus("synced");
   };
 
-  // ── Export all data as JSON download ──
+  // ââ Export all data as JSON download ââ
   const handleExport = () => {
     const payload = {
       exportedAt: new Date().toISOString(),
@@ -5561,67 +5606,67 @@ export default function App() {
   const regionPartners = partners.filter(p => !p.region || p.region === activeRegion.id);
 
   const NAV_GROUPS = [
-    { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
-      { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
-      { id:"ops_mgr",    label:"🧠 Ops Manager",  desc:"AI daily operations overview" },
-      { id:"jobs",       label:"📋 Jobs",          desc:"All jobs & work orders" },
-      { id:"recurring",  label:"🔄 Recurring",     desc:"Recurring job schedules" },
-      { id:"gps",        label:"📍 GPS",           desc:"Check-in / check-out" },
-      { id:"geo",        label:"🛡️ Geofence",     desc:"Location compliance" },
+    { id:"ops",      label:"âï¸ Operations", color: C.accent, tabs:[
+      { id:"dashboard",  label:"ð Dashboard",    desc:"Overview & today's jobs" },
+      { id:"ops_mgr",    label:"ð§  Ops Manager",  desc:"AI daily operations overview" },
+      { id:"jobs",       label:"ð Jobs",          desc:"All jobs & work orders" },
+      { id:"recurring",  label:"ð Recurring",     desc:"Recurring job schedules" },
+      { id:"gps",        label:"ð GPS",           desc:"Check-in / check-out" },
+      { id:"geo",        label:"ð¡ï¸ Geofence",     desc:"Location compliance" },
     ]},
-    { id:"quotes",   label:"💬 Quotes", color: C.gold, tabs:[
-      { id:"res",        label:"🏠 Residential",   desc:"Leads, quotes & booking" },
-      { id:"com",        label:"🏢 Commercial",    desc:"Commercial proposals" },
-      { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
-      { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
+    { id:"quotes",   label:"ð¬ Quotes", color: C.gold, tabs:[
+      { id:"res",        label:"ð  Residential",   desc:"Leads, quotes & booking" },
+      { id:"com",        label:"ð¢ Commercial",    desc:"Commercial proposals" },
+      { id:"cold",       label:"ð¯ Cold Outreach",  desc:"AI-generated cold leads pipeline" },
+      { id:"intake",     label:"ð Form Intake",    desc:"Google Form â New leads auto-flow" },
     ]},
-    { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
-      { id:"agent_quote",    label:"💬 VA Quote",      desc:"Generate quotes with AI" },
-      { id:"agent_bidspec",  label:"📄 Bid Spec",      desc:"Customer-facing summaries" },
-      { id:"agent_workorder",label:"🔧 Work Order",    desc:"Cleaner-facing checklists" },
-      { id:"agent_social",   label:"📱 Social Content",desc:"Lead-gen content generator" },
-      { id:"agent_dm",       label:"💌 DM Conversion", desc:"Inbox lead qualification" },
-      { id:"agent_ops",      label:"📊 Ops Manager",   desc:"Daily pipeline briefing" },
+    { id:"agents",   label:"ð¤ AI Agents", color: "#A78BFA", tabs:[
+      { id:"agent_quote",    label:"ð¬ VA Quote",      desc:"Generate quotes with AI" },
+      { id:"agent_bidspec",  label:"ð Bid Spec",      desc:"Customer-facing summaries" },
+      { id:"agent_workorder",label:"ð§ Work Order",    desc:"Cleaner-facing checklists" },
+      { id:"agent_social",   label:"ð± Social Content",desc:"Lead-gen content generator" },
+      { id:"agent_dm",       label:"ð DM Conversion", desc:"Inbox lead qualification" },
+      { id:"agent_ops",      label:"ð Ops Manager",   desc:"Daily pipeline briefing" },
     ]},
-    { id:"finance",  label:"💰 Finance", color: "#FF6B6B", tabs:[
-      { id:"pay",        label:"💰 Partner Pay",   desc:"Pay tracking & history" },
-      { id:"stripe",     label:"💳 Payments",      desc:"Client payments (Stripe)" },
-      { id:"qb",         label:"💚 QuickBooks",    desc:"Accounting sync" },
+    { id:"finance",  label:"ð° Finance", color: "#FF6B6B", tabs:[
+      { id:"pay",        label:"ð° Partner Pay",   desc:"Pay tracking & history" },
+      { id:"stripe",     label:"ð³ Payments",      desc:"Client payments (Stripe)" },
+      { id:"qb",         label:"ð QuickBooks",    desc:"Accounting sync" },
     ]},
-    { id:"clients",  label:"🌐 Clients", color: C.blue, tabs:[
-      { id:"portal",      label:"🌐 Client Portal",  desc:"Quotes, invoices & reviews" },
-      { id:"clientview",  label:"📲 Client View",    desc:"What your clients see" },
-      { id:"followup",    label:"🔔 Follow-Ups",     desc:"Automated reminder system" },
-      { id:"sms",         label:"📱 SMS Reminders",  desc:"Automated messaging" },
-      { id:"marketing",   label:"📣 Marketing",      desc:"30-day content system" },
+    { id:"clients",  label:"ð Clients", color: C.blue, tabs:[
+      { id:"portal",      label:"ð Client Portal",  desc:"Quotes, invoices & reviews" },
+      { id:"clientview",  label:"ð² Client View",    desc:"What your clients see" },
+      { id:"followup",    label:"ð Follow-Ups",     desc:"Automated reminder system" },
+      { id:"sms",         label:"ð± SMS Reminders",  desc:"Automated messaging" },
+      { id:"marketing",   label:"ð£ Marketing",      desc:"30-day content system" },
     ]},
-    { id:"team",     label:"👥 Team", color: C.gold, tabs:[
-      { id:"partners",    label:"👥 Partners",       desc:"Partner profiles & availability" },
-      { id:"partnerview", label:"📋 Partner View",   desc:"What your partners see" },
-      { id:"onboarding",  label:"🎓 Onboarding",     desc:"Training & certification" },
-      { id:"ai",          label:"🗓️ AI Scheduling",  desc:"AI-powered schedule optimizer" },
+    { id:"team",     label:"ð¥ Team", color: C.gold, tabs:[
+      { id:"partners",    label:"ð¥ Partners",       desc:"Partner profiles & availability" },
+      { id:"partnerview", label:"ð Partner View",   desc:"What your partners see" },
+      { id:"onboarding",  label:"ð Onboarding",     desc:"Training & certification" },
+      { id:"ai",          label:"ðï¸ AI Scheduling",  desc:"AI-powered schedule optimizer" },
     ]},
-    { id:"biz",      label:"📊 Business", color: C.muted, tabs:[
-      { id:"tax",        label: activeRegion.id==="ON" ? "🇨🇦 HST / Tax" : "🇺🇸 TPT / Tax", desc:"Tax rules & compliance" },
-      { id:"db",         label:"🗄️ Database",     desc:"Data management & backup" },
-      { id:"whitelabel", label:"🏷️ App Store",    desc:"Licensing & white-label" },
-      { id:"pricing",    label:"💰 Pricing",       desc:"Subscription tiers" },
-      { id:"swot",       label:"📊 SWOT",          desc:"Competitive analysis" },
-      { id:"diagnostic", label:"🔬 Diagnostic",     desc:"System health check" },
-      { id:"schedule",   label:"📅 My Schedule",    desc:"Today's jobs for field team" },
+    { id:"biz",      label:"ð Business", color: C.muted, tabs:[
+      { id:"tax",        label: activeRegion.id==="ON" ? "ð¨ð¦ HST / Tax" : "ðºð¸ TPT / Tax", desc:"Tax rules & compliance" },
+      { id:"db",         label:"ðï¸ Database",     desc:"Data management & backup" },
+      { id:"whitelabel", label:"ð·ï¸ App Store",    desc:"Licensing & white-label" },
+      { id:"pricing",    label:"ð° Pricing",       desc:"Subscription tiers" },
+      { id:"swot",       label:"ð SWOT",          desc:"Competitive analysis" },
+      { id:"diagnostic", label:"ð¬ Diagnostic",     desc:"System health check" },
+      { id:"schedule",   label:"ð My Schedule",    desc:"Today's jobs for field team" },
     ]},
   ];
 
   const activeGroup = NAV_GROUPS.find(g => g.tabs.some(t => t.id === tab)) || NAV_GROUPS[0];
   const allTabs = NAV_GROUPS.flatMap(g => g.tabs);
 
-  // ── Loading screen ──
+  // ââ Loading screen ââ
   if (isLoading) {
     return (
       <div style={{ ...S.app, alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
 <div style={{ textAlign:"center" }}>
-          <div style={{ fontSize:52, marginBottom:16 }}>✨</div>
-          <div style={{ fontWeight:800, fontSize:24, color:C.accent, marginBottom:8 }}>Have Us Clean 🧹</div>
+          <div style={{ fontSize:52, marginBottom:16 }}>â¨</div>
+          <div style={{ fontWeight:800, fontSize:24, color:C.accent, marginBottom:8 }}>Have Us Clean ð§¹</div>
           <div style={{ color:C.muted, fontSize:14, marginBottom:28 }}>Loading your data...</div>
           <div style={{ width:200, height:4, background:C.surface, borderRadius:2, margin:"0 auto" }}>
             <div style={{ height:4, background:`linear-gradient(90deg,${C.accent},#0088FF)`, borderRadius:2, animation:"load 1.2s ease-in-out infinite", width:"60%" }} />
@@ -5634,7 +5679,7 @@ export default function App() {
 
   return (
     <div style={S.app}>
-{/* ── TOP HEADER: Logo + Region + DB status ── */}
+{/* ââ TOP HEADER: Logo + Region + DB status ââ */}
       <header style={{ ...S.header, flexShrink: 0 }}>
         <div style={S.logo}>
           <div style={S.logoMark}>{BRAND.logoMark}</div>
@@ -5648,27 +5693,27 @@ export default function App() {
         <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, justifyContent:"center", flexWrap:"wrap" }}>
           <span style={{ fontSize:14 }}>{activeRegion.flag}</span>
           <span style={{ color: activeRegion.id==="ON" ? "#FF6B6B" : C.blue, fontWeight:700, fontSize:13 }}>{activeRegion.label}</span>
-          <span style={{ color:C.dim, fontSize:12 }}>·</span>
-          <span style={{ color:C.muted, fontSize:12 }}>{activeRegion.id==="ON" ? "CAD · 13% HST" : "USD · Services Tax-Exempt"}</span>
+          <span style={{ color:C.dim, fontSize:12 }}>Â·</span>
+          <span style={{ color:C.muted, fontSize:12 }}>{activeRegion.id==="ON" ? "CAD Â· 13% HST" : "USD Â· Services Tax-Exempt"}</span>
         </div>
 
         <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
           {/* DB sync pill */}
           <div
-            title={lastSaved ? `Last saved: ${lastSaved}` : dbStatus === "local" ? "Running in local mode — data in memory only" : "Click to manage data"}
+            title={lastSaved ? `Last saved: ${lastSaved}` : dbStatus === "local" ? "Running in local mode â data in memory only" : "Click to manage data"}
             onClick={() => setTab("db")}
             style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, background: dbStatus==="synced"?C.accentDim:dbStatus==="saving"?C.goldDim:dbStatus==="local"?C.blueDim:C.redDim, cursor:"pointer", border:`1px solid ${dbStatus==="synced"?C.accent+"44":dbStatus==="saving"?C.gold+"44":dbStatus==="local"?C.blue+"44":C.red+"44"}` }}
           >
             <div style={{ width:6, height:6, borderRadius:"50%", background: dbStatus==="synced"?C.accent:dbStatus==="saving"?C.gold:dbStatus==="local"?C.blue:C.red, animation: dbStatus==="saving"?"dbpulse 1s infinite":"none" }} />
             <span style={{ fontSize:11, fontWeight:700, color: dbStatus==="synced"?C.accent:dbStatus==="saving"?C.gold:dbStatus==="local"?C.blue:C.red }}>
-              {dbStatus==="synced" ? "Saved" : dbStatus==="saving" ? "Saving…" : dbStatus==="local" ? "Local" : "Memory"}
+              {dbStatus==="synced" ? "Saved" : dbStatus==="saving" ? "Savingâ¦" : dbStatus==="local" ? "Local" : "Memory"}
             </span>
           </div>
         </div>
       </header>
 
-      {/* ── NAV ROW 1: Category pills ── */}
+      {/* ââ NAV ROW 1: Category pills ââ */}
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0 }}>
         {NAV_GROUPS.map(g => {
           const isActive = g.id === activeGroup.id;
@@ -5696,7 +5741,7 @@ export default function App() {
         })}
       </div>
 
-      {/* ── NAV ROW 2: Active group's tabs ── */}
+      {/* ââ NAV ROW 2: Active group's tabs ââ */}
       <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "6px 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0, alignItems:"center" }}>
         {activeGroup.tabs.map(t => {
           const isActive = tab === t.id;
@@ -5725,7 +5770,7 @@ export default function App() {
         })}
         {/* Breadcrumb hint */}
         <div style={{ marginLeft:"auto", fontSize:11, color:C.dim, whiteSpace:"nowrap", paddingLeft:8 }}>
-          {activeGroup.label} › {activeGroup.tabs.find(t=>t.id===tab)?.label || ""}
+          {activeGroup.label} âº {activeGroup.tabs.find(t=>t.id===tab)?.label || ""}
         </div>
       </div>
 
@@ -5773,82 +5818,82 @@ export default function App() {
   );
 }
 
-// ─── HUC AGENT SYSTEM PROMPTS ────────────────────────────────────────────────
+// âââ HUC AGENT SYSTEM PROMPTS ââââââââââââââââââââââââââââââââââââââââââââââââ
 const HUC_AGENTS = {
   VA_Quote_Agent: {
-    icon: "💬", color: C.accent,
+    icon: "ð¬", color: C.accent,
     title: "VA Quote Agent",
     purpose: "Generate fast, consistent quotes using the exact HUC formula.",
     system: `You are the Have Us Clean VA Quote Agent. Use this exact formula every time.
 
 TEAM SIZE BY SQFT:
-- 1 partner → up to 1,000 sqft
-- 2 partners → 1,001–3,000 sqft
-- 3 partners → 3,001+ sqft
+- 1 partner â up to 1,000 sqft
+- 2 partners â 1,001â3,000 sqft
+- 3 partners â 3,001+ sqft
 
-HOURS: sqft ÷ 1,000 (minimum 1.5h, round to nearest 0.5h)
-PARTNER RATE: $30/hr CAD (Ontario) · $25/hr USD (Arizona)
+HOURS: sqft Ã· 1,000 (minimum 1.5h, round to nearest 0.5h)
+PARTNER RATE: $30/hr CAD (Ontario) Â· $25/hr USD (Arizona)
 
 STEP-BY-STEP FORMULA:
-1. Hours = MAX(1.5, sqft ÷ 1000), round to nearest 0.5
-2. Labor cost = team size × $30 × hours
-3. Labor price = labor cost ÷ 0.65
-4. Formula price = labor price × package multiplier
+1. Hours = MAX(1.5, sqft Ã· 1000), round to nearest 0.5
+2. Labor cost = team size Ã $30 Ã hours
+3. Labor price = labor cost Ã· 0.65
+4. Formula price = labor price Ã package multiplier
 5. Floor base = floor price for that dwelling type (see below)
-6. Floor price with package = floor base × package multiplier  ← CRITICAL: multiply floor by package too
+6. Floor price with package = floor base Ã package multiplier  â CRITICAL: multiply floor by package too
 7. Final base = MAX(formula price, floor price with package)
-8. Condition adjust = final base × condition multiplier
+8. Condition adjust = final base Ã condition multiplier
 9. Add addons at fixed prices
 10. Apply frequency discount
 11. Ontario: add 13% HST. Arizona: no tax.
 
 PACKAGE MULTIPLIERS:
-Refresh Clean ×1.0 · Full Home Clean ×1.25 · Deep Clean ×1.65
-Move-In/Out ×1.80 · Kitchen & Bath Refresh ×0.65 · Pre-Sale ×1.50
+Refresh Clean Ã1.0 Â· Full Home Clean Ã1.25 Â· Deep Clean Ã1.65
+Move-In/Out Ã1.80 Â· Kitchen & Bath Refresh Ã0.65 Â· Pre-Sale Ã1.50
 
-FLOOR BASE PRICES — Ontario CAD (multiply by package multiplier per step 6):
-Apartment/Condo: 1BR $140 · 2BR $165 · 3BR $205
-Semi/Townhouse: Small $165 · Medium $205 · Large $245
-Detached House: Small $185 · Medium $230 · Large $310
+FLOOR BASE PRICES â Ontario CAD (multiply by package multiplier per step 6):
+Apartment/Condo: 1BR $140 Â· 2BR $165 Â· 3BR $205
+Semi/Townhouse: Small $165 Â· Medium $205 Â· Large $245
+Detached House: Small $185 Â· Medium $230 Â· Large $310
 Arizona: multiply Ontario floor by 1.12
 
-ADDONS: Fridge $50 · Oven $55 · Cabinets $65 · Windows $60 · Baseboards $55 · Carpet $95 · Pet Hair $65
-FREQUENCY DISCOUNTS: Weekly −15% · Bi-Weekly −10% · Monthly −5%
-TAX: Ontario +13% HST · Arizona 0%
+ADDONS: Fridge $50 Â· Oven $55 Â· Cabinets $65 Â· Windows $60 Â· Baseboards $55 Â· Carpet $95 Â· Pet Hair $65
+FREQUENCY DISCOUNTS: Weekly â15% Â· Bi-Weekly â10% Â· Monthly â5%
+TAX: Ontario +13% HST Â· Arizona 0%
 
-WORKED EXAMPLE — 2BR Condo, 900 sqft, Full Home Clean, average condition, one-time, Ontario:
-1. Hours = MAX(1.5, 900÷1000=0.9) → 1.5h
-2. Labor cost = 1 × $30 × 1.5 = $45
-3. Labor price = $45 ÷ 0.65 = $69
-4. Formula price = $69 × 1.25 = $86
+WORKED EXAMPLE â 2BR Condo, 900 sqft, Full Home Clean, average condition, one-time, Ontario:
+1. Hours = MAX(1.5, 900Ã·1000=0.9) â 1.5h
+2. Labor cost = 1 Ã $30 Ã 1.5 = $45
+3. Labor price = $45 Ã· 0.65 = $69
+4. Formula price = $69 Ã 1.25 = $86
 5. Floor base (2BR Condo Ontario) = $165
-6. Floor with package = $165 × 1.25 = $206  ← floor gets multiplied too
-7. Final base = MAX($86, $206) = $206  ← floor wins
-8. Condition average ×1.0 → $206
+6. Floor with package = $165 Ã 1.25 = $206  â floor gets multiplied too
+7. Final base = MAX($86, $206) = $206  â floor wins
+8. Condition average Ã1.0 â $206
 9. No addons
 10. No discount (one-time)
-11. Pre-tax = $206 · HST = $27 · TOTAL = $233
+11. Pre-tax = $206 Â· HST = $27 Â· TOTAL = $233
 
-Partner pay = $206 × 0.65 = $134 · Company keeps = $206 × 0.35 = $72
+Partner pay = $206 Ã 0.65 = $134 Â· Company keeps = $206 Ã 0.35 = $72
 
-PAY SPLIT: Partner total = pre-tax × 65% · Company = pre-tax × 35%
-2 partners → each gets half · 3 partners → each gets a third
+PAY SPLIT: Partner total = pre-tax Ã 65% Â· Company = pre-tax Ã 35%
+2 partners â each gets half Â· 3 partners â each gets a third
 
 Always show full breakdown: team, hours, formula price, floor check, final base, condition, addons, discount, pre-tax, HST, total, partner pay each, company margin.
 
 IMPORTANT: Never ask for more information. If details are missing, use these smart defaults:
-- Sqft missing → estimate from beds/baths or use 900 sqft for 2BR
-- Condition missing → assume Average
-- Frequency missing → assume One-Time
-- Region missing → assume Ontario
-- Package missing → assume Refresh Clean
+- Sqft missing â estimate from beds/baths or use 900 sqft for 2BR
+- Condition missing â assume Average
+- Frequency missing â assume One-Time
+- Region missing â assume Ontario
+- Package missing â assume Refresh Clean
 Always produce a complete quote. State your assumptions clearly at the top.`,
-    inputLabel: "Describe the job — be as brief or detailed as you want. I'll make smart assumptions for anything missing.",
-    inputPlaceholder: "e.g. 2BR condo North York, Full Home Clean\n— or —\n3BR detached Mississauga, Deep Clean, heavy condition, bi-weekly, add inside oven\n— or —\nSmall office Scottsdale AZ, weekly janitorial",
+    inputLabel: "Describe the job â be as brief or detailed as you want. I'll make smart assumptions for anything missing.",
+    inputPlaceholder: "e.g. 2BR condo North York, Full Home Clean\nâ or â\n3BR detached Mississauga, Deep Clean, heavy condition, bi-weekly, add inside oven\nâ or â\nSmall office Scottsdale AZ, weekly janitorial",
     outputSections: ["Quote Breakdown", "Partner Pay", "Customer-Facing Message", "Warning Flag (if any)"],
   },
   BidSpec_Agent: {
-    icon: "📄", color: C.gold,
+    icon: "ð", color: C.gold,
     title: "Bid Spec Agent",
     purpose: "Generate clean, customer-safe bid summaries from quote details.",
     system: `You are the Have Us Clean Bid Spec Agent. Produce clean, customer-safe quote summaries.
@@ -5858,12 +5903,12 @@ RULES: Do NOT expose internal notes, margin warnings, or crew-only details. Summ
 FORMAT your output as:
 1. Email-safe summary (for pasting into email)
 2. PDF-safe scope paragraph (for formal documents)`,
-    inputLabel: "Paste or describe the quote details — service, frequency, property, addons, and total price.",
+    inputLabel: "Paste or describe the quote details â service, frequency, property, addons, and total price.",
     inputPlaceholder: "e.g. Full Home Clean, bi-weekly, 2BR condo North York, addons: inside fridge ($50), total CA$213 + HST. Generate a bid spec.",
     outputSections: ["Email-Safe Summary", "PDF-Safe Scope Paragraph", "Call to Action"],
   },
   WorkOrder_Agent: {
-    icon: "🔧", color: "#FF6B6B",
+    icon: "ð§", color: "#FF6B6B",
     title: "Work Order Agent",
     purpose: "Generate cleaner-facing operational work orders.",
     system: `You are the Have Us Clean Work Order Agent. Produce operational, task-focused work orders for cleaning partners.
@@ -5871,23 +5916,23 @@ FORMAT your output as:
 INCLUDE: Customer name, address, date, arrival window, quoted hours, room counts, service package, selected add-ons, access notes, parking notes, and special instructions (pets, allergies, fragile items).
 
 COLOUR RAG SYSTEM REMINDER (always include):
-- 🔴 Red = Toilets/urinals only
-- 🟡 Yellow = Other bathroom surfaces (sinks, mirrors)
-- 🟢 Green = Kitchen/food prep surfaces
-- 🔵 Blue = General/glass/living areas
+- ð´ Red = Toilets/urinals only
+- ð¡ Yellow = Other bathroom surfaces (sinks, mirrors)
+- ð¢ Green = Kitchen/food prep surfaces
+- ðµ Blue = General/glass/living areas
 
 FORMAT: Checklist-style. No marketing language. Clear task order (top to bottom, back to front). Flag any unusual requirements.`,
-    inputLabel: "Paste the job details — client name, address, date, time, package, addons, hours, and any access or special notes.",
+    inputLabel: "Paste the job details â client name, address, date, time, package, addons, hours, and any access or special notes.",
     inputPlaceholder: "e.g. Sarah M., 88 Maple Dr North York, April 14 at 9am, Full Home Clean 2BR condo, addon: inside fridge, ~3hrs, dog on premises (keep doors closed), access code #4521",
     outputSections: ["Work Order Header", "Room-by-Room Checklist", "Add-On Tasks", "Special Instructions"],
   },
   Social_Content_Agent: {
-    icon: "📱", color: C.blue,
+    icon: "ð±", color: C.blue,
     title: "Social Content Agent",
     purpose: "Turn pricing and service offers into lead-generating content.",
     system: `You are the Have Us Clean Social Content Agent. Create modern-startup style content for Instagram, Facebook, X, and LinkedIn.
 
-BRAND: Have Us Clean · Mid-market · Toronto & GTA · haveusclean@gmail.com
+BRAND: Have Us Clean Â· Mid-market Â· Toronto & GTA Â· haveusclean@gmail.com
 
 CONTENT PILLARS:
 1. Transparent pricing (show real prices, build trust)
@@ -5896,7 +5941,7 @@ CONTENT PILLARS:
 4. Offers and direct CTAs (Kitchen & Bathroom Refresh is the entry offer)
 5. Testimonials and social proof
 
-ENTRY OFFER: Kitchen & Bathroom Refresh ($120–$200) — easiest yes for new clients.
+ENTRY OFFER: Kitchen & Bathroom Refresh ($120â$200) â easiest yes for new clients.
 
 30-DAY WEEKLY PATTERN:
 - Monday: Pricing/trust post
@@ -5908,12 +5953,12 @@ ENTRY OFFER: Kitchen & Bathroom Refresh ($120–$200) — easiest yes for new cl
 - Sunday: Story/repost
 
 Always include a clear CTA. Keep copy modern-startup, not corporate. Use emoji sparingly but effectively.`,
-    inputLabel: "Describe what you need — platform (Instagram/Facebook/X/LinkedIn), goal (awareness/offer/educational/proof), and any specific service or offer to highlight.",
-    inputPlaceholder: "e.g. Instagram post for Wednesday, highlight the Kitchen & Bathroom Refresh entry offer at $120–$200, goal is to get DMs from people in Toronto. Modern and clean tone.",
+    inputLabel: "Describe what you need â platform (Instagram/Facebook/X/LinkedIn), goal (awareness/offer/educational/proof), and any specific service or offer to highlight.",
+    inputPlaceholder: "e.g. Instagram post for Wednesday, highlight the Kitchen & Bathroom Refresh entry offer at $120â$200, goal is to get DMs from people in Toronto. Modern and clean tone.",
     outputSections: ["Post Copy", "Carousel Slide Breakdown (if applicable)", "Hashtags", "CTA"],
   },
   DM_Conversion_Agent: {
-    icon: "💌", color: "#FF6B6B",
+    icon: "ð", color: "#FF6B6B",
     title: "DM Conversion Agent",
     purpose: "Handle inbound DMs and move people into the quote funnel.",
     system: `You are the Have Us Clean DM Conversion Agent. Your job is to respond to inbound DMs, qualify the lead, and move them toward a quote or booking.
@@ -5925,17 +5970,17 @@ QUALIFICATION QUESTIONS (use as needed, not all at once):
 - When are you hoping to get started?
 - Any specific areas of focus or add-ons?
 
-FLOW: Warm greeting → acknowledge their interest → 1–2 qualifying questions → offer a quote or direct to form → follow-up if no reply in 24h.
+FLOW: Warm greeting â acknowledge their interest â 1â2 qualifying questions â offer a quote or direct to form â follow-up if no reply in 24h.
 
 TONE: Warm, efficient, easy to reply to. Never salesy. Always move the conversation forward. Close with a clear next step (quote, date, or link).
 
 ENTRY OFFER: If they seem hesitant on price, mention Kitchen & Bathroom Refresh starting at $120 as a low-commitment way to try the service.`,
     inputLabel: "Paste the incoming DM message. Include any context you have (platform, what they saw, their property type if known).",
-    inputPlaceholder: `e.g. "Hey! I saw your post about cleaning prices, how much would it cost to clean my apartment?" — 2BR condo, found us on Instagram, first contact.`,
+    inputPlaceholder: `e.g. "Hey! I saw your post about cleaning prices, how much would it cost to clean my apartment?" â 2BR condo, found us on Instagram, first contact.`,
     outputSections: ["Reply Message", "Qualification Questions to Ask", "Follow-Up Script (if no reply)", "Booking Nudge"],
   },
   Operations_Manager_Agent: {
-    icon: "📊", color: C.accent,
+    icon: "ð", color: C.accent,
     title: "Operations Manager Agent",
     purpose: "Maintain pipeline hygiene and surface daily priority actions.",
     system: `You are the Have Us Clean Operations Manager Agent. Track quote status, follow-up dates, booked dates, assigned crew, and outstanding actions. Keep cold Leads separate from active Quotes. Your daily focus is the Quotes pipeline: new quote requests, quoted jobs needing follow-up, booked jobs needing work orders, and completed jobs needing closeout. Surface only what matters for the day.
@@ -5947,13 +5992,13 @@ FLAGS & EXCEPTIONS (anything that needs immediate attention)
 RECOMMENDED NEXT STEP
 
 Be direct and action-oriented. No fluff. Max 300 words.`,
-    inputLabel: "Paste your current pipeline data — lead statuses, follow-up dates, job counts, partner availability, or any specific situation you need prioritized.",
+    inputLabel: "Paste your current pipeline data â lead statuses, follow-up dates, job counts, partner availability, or any specific situation you need prioritized.",
     inputPlaceholder: `e.g. I have 3 New leads, 2 Quoted from last week with no follow-up, 1 Booked job tomorrow with no work order yet, and 4 active partners. What should I focus on today?`,
     outputSections: ["Today's Priority Actions", "Pipeline Status", "Flags & Exceptions", "Recommended Next Step"],
   },
 };
 
-// ─── AGENT PANEL COMPONENT ────────────────────────────────────────────────────
+// âââ AGENT PANEL COMPONENT ââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function AgentPanel({ agent, setResLeads, region }) {
   const cfg = HUC_AGENTS[agent];
   const [input, setInput] = useState("");
@@ -5985,7 +6030,7 @@ function AgentPanel({ agent, setResLeads, region }) {
       setOutput(text);
       setHistory(h => [{ input: userMsg, output: text, ts: new Date().toLocaleTimeString() }, ...h].slice(0, 10));
     } catch (e) {
-      setOutput("⚠️ Error connecting to AI. Please try again.");
+      setOutput("â ï¸ Error connecting to AI. Please try again.");
     } finally {
       setLoading(false);
     }
@@ -6096,7 +6141,7 @@ function AgentPanel({ agent, setResLeads, region }) {
       {/* Output sections */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:20 }}>
         {cfg.outputSections.map(s => (
-          <span key={s} style={{ padding:"4px 12px", borderRadius:20, background:C.surface, color:C.muted, fontSize:11, fontWeight:600, border:`1px solid ${C.border}` }}>📤 {s}</span>
+          <span key={s} style={{ padding:"4px 12px", borderRadius:20, background:C.surface, color:C.muted, fontSize:11, fontWeight:600, border:`1px solid ${C.border}` }}>ð¤ {s}</span>
         ))}
       </div>
 
@@ -6115,7 +6160,7 @@ function AgentPanel({ agent, setResLeads, region }) {
             onClick={run}
             disabled={loading || !input.trim()}
           >
-            {loading ? "⏳ Running..." : `${cfg.icon} Run ${cfg.title}`}
+            {loading ? "â³ Running..." : `${cfg.icon} Run ${cfg.title}`}
           </button>
           {input && <button style={S.btn("ghost")} onClick={() => setInput("")}>Clear</button>}
         </div>
@@ -6129,17 +6174,17 @@ function AgentPanel({ agent, setResLeads, region }) {
             <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
               {output && (
                 <button style={S.btn("ghost")} onClick={copy}>
-                  {copied ? "✅ Copied!" : "📋 Copy"}
+                  {copied ? "â Copied!" : "ð Copy"}
                 </button>
               )}
-              {/* VA Quote Agent only — Save as Lead button */}
+              {/* VA Quote Agent only â Save as Lead button */}
               {output && agent === "VA_Quote_Agent" && setResLeads && (
                 <button
                   style={{ ...S.btn(savedLead ? "ghost" : "primary"), fontSize:13 }}
                   onClick={saveAsLead}
                   disabled={savedLead}
                 >
-                  {savedLead ? "✅ Saved to Leads!" : "➕ Save as Lead"}
+                  {savedLead ? "â Saved to Leads!" : "â Save as Lead"}
                 </button>
               )}
             </div>
@@ -6155,7 +6200,7 @@ function AgentPanel({ agent, setResLeads, region }) {
           )}
           {savedLead && (
             <div style={{ marginTop:12, padding:"10px 14px", background:C.accentDim, borderRadius:9, fontSize:13, color:C.accent, fontWeight:600 }}>
-              ✅ Lead saved to 🏠 Residential Leads with "Quoted" status. Go there to add client name, email, and book the job.
+              â Lead saved to ð  Residential Leads with "Quoted" status. Go there to add client name, email, and book the job.
             </div>
           )}
         </div>
@@ -6164,7 +6209,7 @@ function AgentPanel({ agent, setResLeads, region }) {
       {/* History */}
       {history.length > 0 && (
         <div style={S.card}>
-          <div style={{ fontWeight:700, fontSize:13, marginBottom:10, color:C.muted }}>📋 Recent Runs (this session)</div>
+          <div style={{ fontWeight:700, fontSize:13, marginBottom:10, color:C.muted }}>ð Recent Runs (this session)</div>
           {history.map((h, i) => (
             <div key={i} style={{ borderBottom:`1px solid ${C.border}`, padding:"10px 0", cursor:"pointer" }} onClick={() => { setInput(h.input); setOutput(h.output); setSavedLead(false); }}>
               <div style={{ fontSize:11, color:C.dim, marginBottom:4 }}>{h.ts}</div>
@@ -6177,7 +6222,7 @@ function AgentPanel({ agent, setResLeads, region }) {
   );
 }
 
-// ─── OPERATIONS MANAGER DASHBOARD ────────────────────────────────────────────
+// âââ OPERATIONS MANAGER DASHBOARD ââââââââââââââââââââââââââââââââââââââââââââ
 function OperationsManager({ jobs, partners, region, setTab }) {
   const [aiSummary, setAiSummary] = useState("");
   const [loadingAI, setLoadingAI] = useState(false);
@@ -6220,7 +6265,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
       const data = await res.json();
       setAiSummary(data.content?.map(b => b.text || "").join("\n") || "No response.");
     } catch {
-      setAiSummary("⚠️ Could not connect to AI. Check your connection.");
+      setAiSummary("â ï¸ Could not connect to AI. Check your connection.");
     } finally {
       setLoadingAI(false);
     }
@@ -6237,20 +6282,20 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:20, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>🧠 Operations Manager</div>
-          <div style={{ fontSize:13, color:C.muted, marginTop:-12 }}>Have Us Clean — Daily briefing powered by AI</div>
+          <div style={S.h2}>ð§  Operations Manager</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-12 }}>Have Us Clean â Daily briefing powered by AI</div>
         </div>
         <button style={{ ...S.btn("primary"), background: loadingAI ? C.surface : C.accent, color:"#0A0F1E" }} onClick={runOpsMgr} disabled={loadingAI}>
-          {loadingAI ? "⏳ Generating..." : "🧠 Get AI Daily Briefing"}
+          {loadingAI ? "â³ Generating..." : "ð§  Get AI Daily Briefing"}
         </button>
       </div>
 
       {/* Live stats */}
       <div style={S.grid4}>
-        <StatCard label="Today's Jobs"   value={todayJobs.length}         icon="📋" color={C.accent} />
-        <StatCard label="In Progress"    value={inProgressJobs.length}    icon="🔄" color={C.gold}   />
-        <StatCard label="Overdue"        value={overdueJobs.length}       icon="⚠️" color={overdueJobs.length>0?C.red:C.dim} />
-        <StatCard label="Unassigned"     value={unassigned.length}        icon="👤" color={unassigned.length>0?C.gold:C.dim} />
+        <StatCard label="Today's Jobs"   value={todayJobs.length}         icon="ð" color={C.accent} />
+        <StatCard label="In Progress"    value={inProgressJobs.length}    icon="ð" color={C.gold}   />
+        <StatCard label="Overdue"        value={overdueJobs.length}       icon="â ï¸" color={overdueJobs.length>0?C.red:C.dim} />
+        <StatCard label="Unassigned"     value={unassigned.length}        icon="ð¤" color={unassigned.length>0?C.gold:C.dim} />
       </div>
 
       <div style={S.divider} />
@@ -6258,7 +6303,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:16, marginBottom:20 }}>
         {/* Pipeline snapshot */}
         <div style={S.card}>
-          <div style={S.h3}>📊 Pipeline Snapshot</div>
+          <div style={S.h3}>ð Pipeline Snapshot</div>
           <StatusRow label="Scheduled (upcoming)" count={scheduledJobs.length} color={C.blue} />
           <StatusRow label="In Progress now"      count={inProgressJobs.length} color={C.gold} />
           <StatusRow label="Completed today"      count={completedToday.length} color={C.accent} />
@@ -6268,7 +6313,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
 
         {/* Team snapshot */}
         <div style={S.card}>
-          <div style={S.h3}>👥 Team Snapshot</div>
+          <div style={S.h3}>ð¥ Team Snapshot</div>
           {availablePartners.map(p => {
             const todayP = jobs.filter(j => j.partnerId === p.id && j.date === today);
             const statusColor = p.status === "active" ? C.accent : p.status === "available" ? C.blue : C.muted;
@@ -6292,10 +6337,10 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
       {/* Overdue jobs */}
       {overdueJobs.length > 0 && (
         <div style={{ ...S.card, marginBottom:16, borderLeft:`4px solid ${C.red}` }}>
-          <div style={{ fontWeight:800, fontSize:15, color:C.red, marginBottom:10 }}>⚠️ Overdue Jobs — Needs Action</div>
+          <div style={{ fontWeight:800, fontSize:15, color:C.red, marginBottom:10 }}>â ï¸ Overdue Jobs â Needs Action</div>
           {overdueJobs.map(j => (
             <div key={j.id} style={{ display:"flex", justifyContent:"space-between", padding:"8px 0", borderBottom:`1px solid ${C.border}`, fontSize:13 }}>
-              <div><strong>{j.client}</strong> · {j.type} · {j.address}</div>
+              <div><strong>{j.client}</strong> Â· {j.type} Â· {j.address}</div>
               <div style={{ color:C.red }}>Was: {j.date}</div>
             </div>
           ))}
@@ -6305,7 +6350,7 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
       {/* AI Briefing */}
       {(loadingAI || aiSummary) && (
         <div style={{ ...S.card, borderLeft:`4px solid ${C.accent}` }}>
-          <div style={{ fontWeight:700, fontSize:15, color:C.accent, marginBottom:12 }}>🧠 AI Operations Briefing</div>
+          <div style={{ fontWeight:700, fontSize:15, color:C.accent, marginBottom:12 }}>ð§  AI Operations Briefing</div>
           {loadingAI ? (
             <div style={{ color:C.muted, fontSize:13, display:"flex", gap:8, alignItems:"center" }}>
               <div style={{ width:8, height:8, borderRadius:"50%", background:C.accent, animation:"pulse2 1s infinite" }} />
@@ -6319,38 +6364,38 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
 
       {/* Quick actions */}
       <div style={{ ...S.card, marginTop:16 }}>
-        <div style={S.h3}>⚡ Quick Actions</div>
+        <div style={S.h3}>â¡ Quick Actions</div>
         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
-          <button style={S.btn("primary")} onClick={() => setTab("res")}>🏠 Open Leads</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("jobs")}>📋 Open Jobs</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("agent_quote")}>💬 Run VA Quote Agent</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("agent_workorder")}>🔧 Generate Work Order</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("partners")}>👥 Manage Partners</button>
+          <button style={S.btn("primary")} onClick={() => setTab("res")}>ð  Open Leads</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("jobs")}>ð Open Jobs</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("agent_quote")}>ð¬ Run VA Quote Agent</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("agent_workorder")}>ð§ Generate Work Order</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("partners")}>ð¥ Manage Partners</button>
         </div>
       </div>
     </div>
   );
 }
 
-// ─── MARKETING HUB ────────────────────────────────────────────────────────────
+// âââ MARKETING HUB ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const CONTENT_CALENDAR = [
-  { day:"Monday",    theme:"💰 Pricing / Trust",      desc:"Show real prices. Build trust with transparent pricing.",     cta:"Get a free quote today →",    hashtags:["#TorontoCleaning","#HouseCleaningToronto","#TransparentPricing"] },
-  { day:"Tuesday",   theme:"📸 Before / After",        desc:"Real results. Show a transformation from a real job.",         cta:"Book your clean today →",     hashtags:["#BeforeAndAfter","#CleanHome","#TorontoCleaning"] },
-  { day:"Wednesday", theme:"🚿 Offer — K&B Refresh",  desc:"Highlight the Kitchen & Bathroom Refresh entry offer ($120–$200).", cta:"Message us to book →",   hashtags:["#KitchenCleaning","#BathroomCleaning","#HaveUsClean"] },
-  { day:"Thursday",  theme:"🎓 Educational",           desc:"Cleaning tips, the RAG system, microfiber technique, etc.",    cta:"Follow for more tips →",      hashtags:["#CleaningTips","#ProfessionalCleaner","#CleaningHacks"] },
-  { day:"Friday",    theme:"⭐ Social Proof",           desc:"Client testimonial or review. Real words, real trust.",        cta:"See what our clients say →",  hashtags:["#CustomerReview","#5Stars","#TorontoSmallBusiness"] },
-  { day:"Saturday",  theme:"🔔 Soft Sell / Reminder",  desc:"Weekend reminder. Light urgency, easy yes.",                   cta:"Spots available this week →", hashtags:["#WeekendCleaning","#TorontoCleaning","#HouseCleaners"] },
-  { day:"Sunday",    theme:"💬 Story / Repost",        desc:"Optional story, behind-the-scenes, or repost from the week.",  cta:"DM us anytime →",            hashtags:["#BehindTheScenes","#CleaningBusiness","#Toronto"] },
+  { day:"Monday",    theme:"ð° Pricing / Trust",      desc:"Show real prices. Build trust with transparent pricing.",     cta:"Get a free quote today â",    hashtags:["#TorontoCleaning","#HouseCleaningToronto","#TransparentPricing"] },
+  { day:"Tuesday",   theme:"ð¸ Before / After",        desc:"Real results. Show a transformation from a real job.",         cta:"Book your clean today â",     hashtags:["#BeforeAndAfter","#CleanHome","#TorontoCleaning"] },
+  { day:"Wednesday", theme:"ð¿ Offer â K&B Refresh",  desc:"Highlight the Kitchen & Bathroom Refresh entry offer ($120â$200).", cta:"Message us to book â",   hashtags:["#KitchenCleaning","#BathroomCleaning","#HaveUsClean"] },
+  { day:"Thursday",  theme:"ð Educational",           desc:"Cleaning tips, the RAG system, microfiber technique, etc.",    cta:"Follow for more tips â",      hashtags:["#CleaningTips","#ProfessionalCleaner","#CleaningHacks"] },
+  { day:"Friday",    theme:"â­ Social Proof",           desc:"Client testimonial or review. Real words, real trust.",        cta:"See what our clients say â",  hashtags:["#CustomerReview","#5Stars","#TorontoSmallBusiness"] },
+  { day:"Saturday",  theme:"ð Soft Sell / Reminder",  desc:"Weekend reminder. Light urgency, easy yes.",                   cta:"Spots available this week â", hashtags:["#WeekendCleaning","#TorontoCleaning","#HouseCleaners"] },
+  { day:"Sunday",    theme:"ð¬ Story / Repost",        desc:"Optional story, behind-the-scenes, or repost from the week.",  cta:"DM us anytime â",            hashtags:["#BehindTheScenes","#CleaningBusiness","#Toronto"] },
 ];
 
 const INSTAGRAM_CAROUSEL = [
-  { slide:1, title:"Cleaning Prices in Toronto 🧹", desc:"We believe in transparent pricing. Here's exactly what we charge." },
-  { slide:2, title:"Apartment / Condo Pricing",   desc:"1 Bed: $140–$180 · 2 Bed: $160–$220 · 3 Bed: $200–$260 (one-time)" },
-  { slide:3, title:"House Pricing",                desc:"Small: $180–$240 · Medium: $220–$320 · Large: $300–$400 (one-time)" },
-  { slide:4, title:"Deep Clean Pricing",           desc:"First-time or heavy buildup? Starting from $250–$700+" },
-  { slide:5, title:"Kitchen & Bathroom Refresh ✨",desc:"Our entry offer. Targeted clean starting at $120–$200. Easy yes." },
-  { slide:6, title:"Add-Ons",                     desc:"Fridge $40–60 · Oven $40–70 · Carpet $60–120 · Pet hair $40–80" },
-  { slide:7, title:"Get Your Quote Today",         desc:"DM us or visit haveusclean.com · haveusclean@gmail.com" },
+  { slide:1, title:"Cleaning Prices in Toronto ð§¹", desc:"We believe in transparent pricing. Here's exactly what we charge." },
+  { slide:2, title:"Apartment / Condo Pricing",   desc:"1 Bed: $140â$180 Â· 2 Bed: $160â$220 Â· 3 Bed: $200â$260 (one-time)" },
+  { slide:3, title:"House Pricing",                desc:"Small: $180â$240 Â· Medium: $220â$320 Â· Large: $300â$400 (one-time)" },
+  { slide:4, title:"Deep Clean Pricing",           desc:"First-time or heavy buildup? Starting from $250â$700+" },
+  { slide:5, title:"Kitchen & Bathroom Refresh â¨",desc:"Our entry offer. Targeted clean starting at $120â$200. Easy yes." },
+  { slide:6, title:"Add-Ons",                     desc:"Fridge $40â60 Â· Oven $40â70 Â· Carpet $60â120 Â· Pet hair $40â80" },
+  { slide:7, title:"Get Your Quote Today",         desc:"DM us or visit haveusclean.com Â· haveusclean@gmail.com" },
 ];
 
 function MarketingHub({ region }) {
@@ -6378,7 +6423,7 @@ function MarketingHub({ region }) {
       const data = await res.json();
       setAiOutput(data.content?.map(b => b.text || "").join("\n") || "No response.");
     } catch {
-      setAiOutput("⚠️ Could not connect to AI.");
+      setAiOutput("â ï¸ Could not connect to AI.");
     } finally {
       setLoadingAI(false);
     }
@@ -6387,16 +6432,16 @@ function MarketingHub({ region }) {
   const copy = () => { navigator.clipboard?.writeText(aiOutput); setCopied(true); setTimeout(()=>setCopied(false),2000); };
 
   const tabs = [
-    { id:"calendar", label:"📅 30-Day Calendar" },
-    { id:"carousel", label:"🎠 Pricing Carousel" },
-    { id:"generator",label:"✍️ Content Generator" },
-    { id:"dm",       label:"💌 DM Scripts" },
+    { id:"calendar", label:"ð 30-Day Calendar" },
+    { id:"carousel", label:"ð  Pricing Carousel" },
+    { id:"generator",label:"âï¸ Content Generator" },
+    { id:"dm",       label:"ð DM Scripts" },
   ];
 
   return (
     <div>
-      <div style={S.h2}>📣 Marketing Hub</div>
-      <div style={{ fontSize:13, color:C.muted, marginBottom:18, marginTop:-12 }}>Have Us Clean — Social Strategy · Toronto & GTA</div>
+      <div style={S.h2}>ð£ Marketing Hub</div>
+      <div style={{ fontSize:13, color:C.muted, marginBottom:18, marginTop:-12 }}>Have Us Clean â Social Strategy Â· Toronto & GTA</div>
 
       {/* Tabs */}
       <div style={{ display:"flex", gap:6, marginBottom:20, flexWrap:"wrap" }}>
@@ -6407,9 +6452,9 @@ function MarketingHub({ region }) {
       {activeTab === "calendar" && (
         <div>
           <div style={{ ...S.card, marginBottom:18, background:"linear-gradient(135deg,#0A0F1E,#1A2235)", borderLeft:`4px solid ${C.blue}` }}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:6 }}>📅 Your 30-Day Content System</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:6 }}>ð Your 30-Day Content System</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.6 }}>
-              A repeating weekly pattern across Instagram, Facebook, X, and LinkedIn. Each pillar builds a different part of your audience — trust, desire, proof, and action. The Kitchen & Bathroom Refresh appears every Wednesday as your easiest "yes" offer.
+              A repeating weekly pattern across Instagram, Facebook, X, and LinkedIn. Each pillar builds a different part of your audience â trust, desire, proof, and action. The Kitchen & Bathroom Refresh appears every Wednesday as your easiest "yes" offer.
             </div>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
@@ -6421,7 +6466,7 @@ function MarketingHub({ region }) {
                     <div style={{ fontWeight:700, fontSize:14 }}>{day.theme}</div>
                     <div style={{ fontSize:12, color:C.muted }}>{day.desc}</div>
                   </div>
-                  <button style={S.btn("sm")} onClick={e=>{ e.stopPropagation(); setActiveTab("generator"); setAiInput(`Write a ${day.day} post. Theme: ${day.theme}. ${day.desc} CTA: ${day.cta} Platform: Instagram. Have Us Clean, Toronto & GTA.`); }}>✍️ Generate</button>
+                  <button style={S.btn("sm")} onClick={e=>{ e.stopPropagation(); setActiveTab("generator"); setAiInput(`Write a ${day.day} post. Theme: ${day.theme}. ${day.desc} CTA: ${day.cta} Platform: Instagram. Have Us Clean, Toronto & GTA.`); }}>âï¸ Generate</button>
                 </div>
                 {selectedDay?.day===day.day && (
                   <div style={{ marginTop:12, paddingTop:12, borderTop:`1px solid ${C.border}` }}>
@@ -6441,8 +6486,8 @@ function MarketingHub({ region }) {
       {activeTab === "carousel" && (
         <div>
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>🎠 Pricing Carousel — Instagram</div>
-            <div style={{ fontSize:13, color:C.muted }}>7-slide carousel structure for Instagram. Copy this layout into Canva. Modern startup style — clean, bold, transparent.</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>ð  Pricing Carousel â Instagram</div>
+            <div style={{ fontSize:13, color:C.muted }}>7-slide carousel structure for Instagram. Copy this layout into Canva. Modern startup style â clean, bold, transparent.</div>
           </div>
           <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(240px,1fr))", gap:12 }}>
             {INSTAGRAM_CAROUSEL.map(s => (
@@ -6454,14 +6499,14 @@ function MarketingHub({ region }) {
             ))}
           </div>
           <div style={{ ...S.card, marginTop:16, background:C.surface }}>
-            <div style={S.h3}>📐 Design Notes for Canva</div>
+            <div style={S.h3}>ð Design Notes for Canva</div>
             <div style={{ fontSize:13, color:C.muted, lineHeight:1.8 }}>
-              • Style: Modern startup — dark background (#0A0F1E), teal accent (#00D4AA), white text<br/>
-              • Font: DM Sans Bold for headlines, regular for body<br/>
-              • Slide 1: Big hook headline + brand name<br/>
-              • Slides 2–6: One price point or offer per slide — big numbers, short copy<br/>
-              • Slide 7: CTA with email + booking prompt<br/>
-              • Always include your logo or brand name on every slide
+              â¢ Style: Modern startup â dark background (#0A0F1E), teal accent (#00D4AA), white text<br/>
+              â¢ Font: DM Sans Bold for headlines, regular for body<br/>
+              â¢ Slide 1: Big hook headline + brand name<br/>
+              â¢ Slides 2â6: One price point or offer per slide â big numbers, short copy<br/>
+              â¢ Slide 7: CTA with email + booking prompt<br/>
+              â¢ Always include your logo or brand name on every slide
             </div>
           </div>
         </div>
@@ -6471,17 +6516,17 @@ function MarketingHub({ region }) {
       {activeTab === "generator" && (
         <div>
           <div style={{ ...S.card, marginBottom:16 }}>
-            <div style={S.h3}>✍️ AI Social Content Generator</div>
+            <div style={S.h3}>âï¸ AI Social Content Generator</div>
             <div style={{ fontSize:13, color:C.muted, marginBottom:12 }}>Powered by the Social Content Agent. Describe what you need and get ready-to-post copy.</div>
             <textarea
               style={{ ...S.input, minHeight:90, resize:"vertical", fontSize:13 }}
               value={aiInput}
               onChange={e=>setAiInput(e.target.value)}
-              placeholder="e.g. Instagram post for Wednesday, Kitchen & Bathroom Refresh offer, $120–$200 entry price, Toronto audience, modern tone, drive DMs"
+              placeholder="e.g. Instagram post for Wednesday, Kitchen & Bathroom Refresh offer, $120â$200 entry price, Toronto audience, modern tone, drive DMs"
             />
             <div style={{ display:"flex", gap:10, marginTop:10 }}>
               <button style={{ ...S.btn("primary"), flex:1 }} onClick={()=>runSocial(aiInput)} disabled={loadingAI||!aiInput.trim()}>
-                {loadingAI ? "⏳ Generating..." : "📱 Generate Content"}
+                {loadingAI ? "â³ Generating..." : "ð± Generate Content"}
               </button>
               {aiInput && <button style={S.btn("ghost")} onClick={()=>setAiInput("")}>Clear</button>}
             </div>
@@ -6489,7 +6534,7 @@ function MarketingHub({ region }) {
 
           {/* Shortcut buttons for common posts */}
           <div style={{ ...S.card, marginBottom:16 }}>
-            <div style={S.h3}>⚡ Quick Generate</div>
+            <div style={S.h3}>â¡ Quick Generate</div>
             <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
               {CONTENT_CALENDAR.map(d => (
                 <button key={d.day} style={S.btn("sm")} onClick={()=>{ setActiveTab("generator"); setAiInput(`Write a ${d.day} post. Theme: ${d.theme}. ${d.desc} CTA: ${d.cta} Platform: Instagram. Have Us Clean, Toronto & GTA.`); }}>
@@ -6502,11 +6547,11 @@ function MarketingHub({ region }) {
           {(loadingAI || aiOutput) && (
             <div style={{ ...S.card, borderLeft:`4px solid ${C.blue}` }}>
               <div style={{ display:"flex", justifyContent:"space-between", marginBottom:10 }}>
-                <div style={{ fontWeight:700, color:C.blue }}>📱 Generated Content</div>
-                {aiOutput && <button style={S.btn("ghost")} onClick={copy}>{copied?"✅ Copied!":"📋 Copy"}</button>}
+                <div style={{ fontWeight:700, color:C.blue }}>ð± Generated Content</div>
+                {aiOutput && <button style={S.btn("ghost")} onClick={copy}>{copied?"â Copied!":"ð Copy"}</button>}
               </div>
               {loadingAI ? (
-                <div style={{ color:C.muted, fontSize:13 }}>✍️ Writing your content...</div>
+                <div style={{ color:C.muted, fontSize:13 }}>âï¸ Writing your content...</div>
               ) : (
                 <div style={{ fontSize:13, color:C.text, lineHeight:1.8, whiteSpace:"pre-wrap" }}>{aiOutput}</div>
               )}
@@ -6519,20 +6564,20 @@ function MarketingHub({ region }) {
       {activeTab === "dm" && (
         <div>
           <div style={{ ...S.card, marginBottom:16, borderLeft:`4px solid ${C.accent}` }}>
-            <div style={S.h3}>💌 DM Conversion Scripts</div>
-            <div style={{ fontSize:13, color:C.muted }}>Use these as starting points. The AI DM Conversion Agent (in 🤖 AI Agents tab) can generate custom replies from real incoming messages.</div>
+            <div style={S.h3}>ð DM Conversion Scripts</div>
+            <div style={{ fontSize:13, color:C.muted }}>Use these as starting points. The AI DM Conversion Agent (in ð¤ AI Agents tab) can generate custom replies from real incoming messages.</div>
           </div>
           {[
-            { title:"Initial Inquiry Response", trigger:"Someone asks 'how much does it cost?'", script:`Hi [Name]! Thanks for reaching out 😊\n\nWe serve Toronto & GTA with transparent, flat-rate pricing. A few quick questions so I can give you an accurate number:\n\n1. What type of place? (condo, house, townhouse)\n2. How many bedrooms and bathrooms?\n3. Looking for a one-time clean or recurring?\n\nOnce I know, I can get you a price within minutes! 🧹` },
-            { title:"Soft Objection — Price Too High", trigger:"'That's a bit more than I expected'", script:`Totally get it — we're mid-market, not the cheapest, because we use trained, vetted partners and a professional colour-coded cleaning system.\n\nIf you want to try us without committing to a full clean, our Kitchen & Bathroom Refresh starts at $120–$200 — it's the most popular first clean. Most clients book recurring after that 😊\n\nWant me to quote that for you?` },
-            { title:"24hr Follow-Up (No Reply)", trigger:"Sent quote 24hrs ago, no response", script:`Hey [Name]! Just following up on the quote I sent yesterday for your [property type] in [area].\n\nWe have availability this week — happy to answer any questions or adjust the quote if needed 🙂\n\nLet me know!` },
-            { title:"Booking Confirmation", trigger:"Client says yes", script:`Amazing! Let's get that locked in 🎉\n\nI'll confirm:\n✅ Service: [package]\n✅ Date: [date] at [time]\n✅ Address: [address]\n\nYou'll receive a reminder the day before. Please ensure access is available at the scheduled time.\n\nLooking forward to it! — Have Us Clean 🧹` },
+            { title:"Initial Inquiry Response", trigger:"Someone asks 'how much does it cost?'", script:`Hi [Name]! Thanks for reaching out ð\n\nWe serve Toronto & GTA with transparent, flat-rate pricing. A few quick questions so I can give you an accurate number:\n\n1. What type of place? (condo, house, townhouse)\n2. How many bedrooms and bathrooms?\n3. Looking for a one-time clean or recurring?\n\nOnce I know, I can get you a price within minutes! ð§¹` },
+            { title:"Soft Objection â Price Too High", trigger:"'That's a bit more than I expected'", script:`Totally get it â we're mid-market, not the cheapest, because we use trained, vetted partners and a professional colour-coded cleaning system.\n\nIf you want to try us without committing to a full clean, our Kitchen & Bathroom Refresh starts at $120â$200 â it's the most popular first clean. Most clients book recurring after that ð\n\nWant me to quote that for you?` },
+            { title:"24hr Follow-Up (No Reply)", trigger:"Sent quote 24hrs ago, no response", script:`Hey [Name]! Just following up on the quote I sent yesterday for your [property type] in [area].\n\nWe have availability this week â happy to answer any questions or adjust the quote if needed ð\n\nLet me know!` },
+            { title:"Booking Confirmation", trigger:"Client says yes", script:`Amazing! Let's get that locked in ð\n\nI'll confirm:\nâ Service: [package]\nâ Date: [date] at [time]\nâ Address: [address]\n\nYou'll receive a reminder the day before. Please ensure access is available at the scheduled time.\n\nLooking forward to it! â Have Us Clean ð§¹` },
           ].map(script => (
             <div key={script.title} style={{ ...S.card, marginBottom:12 }}>
               <div style={{ fontWeight:800, fontSize:14, marginBottom:4 }}>{script.title}</div>
-              <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>📌 When: {script.trigger}</div>
+              <div style={{ fontSize:12, color:C.muted, marginBottom:10 }}>ð When: {script.trigger}</div>
               <div style={{ background:C.bg, borderRadius:8, padding:"10px 14px", fontSize:13, color:C.text, lineHeight:1.7, whiteSpace:"pre-wrap" }}>{script.script}</div>
-              <button style={{ ...S.btn("sm"), marginTop:8 }} onClick={()=>{ navigator.clipboard?.writeText(script.script); alert("Copied! ✅"); }}>📋 Copy Script</button>
+              <button style={{ ...S.btn("sm"), marginTop:8 }} onClick={()=>{ navigator.clipboard?.writeText(script.script); alert("Copied! â"); }}>ð Copy Script</button>
             </div>
           ))}
         </div>
@@ -6541,7 +6586,7 @@ function MarketingHub({ region }) {
   );
 }
 
-// ─── UPDATED DASHBOARD ────────────────────────────────────────────────────────
+// âââ UPDATED DASHBOARD ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }) {
   const today = new Date().toISOString().split("T")[0];
   const todayJobs = jobs.filter(j=>j.date===today);
@@ -6554,14 +6599,14 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
   return (
     <div>
       <div style={{ marginBottom:22 }}>
-        <div style={{ fontSize:24, fontWeight:800, letterSpacing:"-0.5px" }}>Good morning! 👋</div>
-        <div style={{ color:C.muted, marginTop:4, fontSize:14 }}>Here's your business overview — {BRAND.name} v{BRAND.version}</div>
+        <div style={{ fontSize:24, fontWeight:800, letterSpacing:"-0.5px" }}>Good morning! ð</div>
+        <div style={{ color:C.muted, marginTop:4, fontSize:14 }}>Here's your business overview â {BRAND.name} v{BRAND.version}</div>
       </div>
       <div style={S.grid4}>
-        <StatCard label="Jobs Today"       value={todayJobs.length}                  icon="📅" color={C.accent}  sub={`${todayJobs.filter(j=>j.status==="in-progress").length} in progress`} />
-        <StatCard label="Active Partners"  value={partners.filter(p=>p.onboarded).length} icon="👥" color={C.blue}   sub={`${partners.filter(p=>!p.onboarded).length} onboarding`} />
-        <StatCard label={`Revenue (${region.currency})`} value={f(totalRevenue)}     icon="💵" color={C.gold}   sub="completed jobs" />
-        <StatCard label="Gross Profit"     value={f(totalProfit)}                     icon="📈" color={C.purple} sub={`${avgMargin}% avg margin`} />
+        <StatCard label="Jobs Today"       value={todayJobs.length}                  icon="ð" color={C.accent}  sub={`${todayJobs.filter(j=>j.status==="in-progress").length} in progress`} />
+        <StatCard label="Active Partners"  value={partners.filter(p=>p.onboarded).length} icon="ð¥" color={C.blue}   sub={`${partners.filter(p=>!p.onboarded).length} onboarding`} />
+        <StatCard label={`Revenue (${region.currency})`} value={f(totalRevenue)}     icon="ðµ" color={C.gold}   sub="completed jobs" />
+        <StatCard label="Gross Profit"     value={f(totalProfit)}                     icon="ð" color={C.purple} sub={`${avgMargin}% avg margin`} />
       </div>
       <div style={S.divider} />
       <div style={S.grid2}>
@@ -6573,10 +6618,10 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
               const partner = partners.find(p=>p.id===job.partnerId);
               return (
                 <div key={job.id} style={{ ...S.cardSm, display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                  <div style={{ fontSize:20 }}>{job.status==="completed"?"✅":job.status==="in-progress"?"🔄":"📋"}</div>
+                  <div style={{ fontSize:20 }}>{job.status==="completed"?"â":job.status==="in-progress"?"ð":"ð"}</div>
                   <div style={{ flex:1 }}>
                     <div style={{ fontWeight:700, fontSize:14 }}>{job.client}</div>
-                    <div style={{ fontSize:12, color:C.muted }}>{job.time} · {job.type}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>{job.time} Â· {job.type}</div>
                   </div>
                   {partner && <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={S.avatar(avatarColors[partner.id%4])}>{partner.avatar}</div><span style={{ fontSize:12, color:C.muted }}>{partner.name.split(" ")[0]}</span></div>}
                   <div style={{ textAlign:"right" }}>
@@ -6609,7 +6654,7 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
 }
 
 
-// ─── JOBS ────────────────────────────────────────────────────────────────────
+// âââ JOBS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Jobs({ jobs, setJobs, partners }) {
   const [filter, setFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
@@ -6679,14 +6724,14 @@ function Jobs({ jobs, setJobs, partners }) {
               <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
                 <div>
                   <div style={{ fontWeight: 800, fontSize: 17 }}>{job.client}</div>
-                  <div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>📍 {job.address}</div>
-                  <div style={{ color: C.muted, fontSize: 13 }}>📅 {job.date} at {job.time} · {job.type}</div>
-                  {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{jobPartners.map(p=>p.name).join(" + ")}</strong></div>}
+                  <div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>ð {job.address}</div>
+                  <div style={{ color: C.muted, fontSize: 13 }}>ð {job.date} at {job.time} Â· {job.type}</div>
+                  {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>ð· <strong>{jobPartners.map(p=>p.name).join(" + ")}</strong></div>}
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
                   <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
                   <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.pay}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {(job.upsells||[]).length} upsells</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h Â· {(job.upsells||[]).length} upsells</div>
                 </div>
               </div>
 
@@ -6707,28 +6752,28 @@ function Jobs({ jobs, setJobs, partners }) {
               )}
 
               <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>▶ Start Job</button>}
+                {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>â¶ Start Job</button>}
                 {job.status === "in-progress" && (
                   <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", minHeight: 44 }} onClick={() => {
                     setPendingCompleteId(job.id);
                     setSummaryText("");
                     setSummaryDrawerOpen(true);
-                  }}>✅ Complete Job</button>
+                  }}>â Complete Job</button>
                 )}
-                <button style={styles.btn("ghost")} onClick={() => setSelectedJob(job)}>📸 Photos & Details</button>
+                <button style={styles.btn("ghost")} onClick={() => setSelectedJob(job)}>ð¸ Photos & Details</button>
               </div>
             </div>
           );
         })}
       </div>
 
-      {/* ── Summary drawer — replaces window.prompt for job completion ── */}
+      {/* ââ Summary drawer â replaces window.prompt for job completion ââ */}
       {summaryDrawerOpen && (
         <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:600, display:"flex", alignItems:"flex-end", justifyContent:"center" }}
           onClick={e => { if(e.target===e.currentTarget) setSummaryDrawerOpen(false); }}>
           <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:"16px 16px 0 0", padding:"24px 20px", width:"100%", maxWidth:480, boxSizing:"border-box", paddingBottom:"max(20px,env(safe-area-inset-bottom,20px))" }}>
             <div style={{ width:36, height:4, borderRadius:2, background:C.border, margin:"0 auto 20px" }} />
-            <div style={{ fontSize:18, fontWeight:800, color:C.text, marginBottom:8 }}>✅ Complete Job</div>
+            <div style={{ fontSize:18, fontWeight:800, color:C.text, marginBottom:8 }}>â Complete Job</div>
             <div style={{ fontSize:14, color:C.muted, marginBottom:16 }}>Add an end-of-job summary (optional)</div>
             <textarea
               value={summaryText}
@@ -6778,7 +6823,7 @@ function Jobs({ jobs, setJobs, partners }) {
               <div style={styles.label}>
                 Assign Team
                 {newJob.sqft && <span style={{ marginLeft:8, fontSize:11, color:C.accent, fontWeight:700 }}>
-                  👥 {getTeamSize(newJob.sqft)} partner{getTeamSize(newJob.sqft)>1?"s":""} recommended for {newJob.sqft} sqft
+                  ð¥ {getTeamSize(newJob.sqft)} partner{getTeamSize(newJob.sqft)>1?"s":""} recommended for {newJob.sqft} sqft
                 </span>}
               </div>
               {[0,1,2].slice(0, Math.max(1, getTeamSize(newJob.sqft||0))).map((slot, i) => (
@@ -6790,7 +6835,7 @@ function Jobs({ jobs, setJobs, partners }) {
                     const clean = ids.filter(Boolean);
                     setNewJob({ ...newJob, partnerIds: clean, partnerId: clean[0] || "" });
                   }}>
-                  <option value="">— Partner {i+1} {i===0?"(required)":"(optional)"} —</option>
+                  <option value="">â Partner {i+1} {i===0?"(required)":"(optional)"} â</option>
                   {partners.filter(p => p.onboarded).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
                 </select>
               ))}
@@ -6821,9 +6866,9 @@ function Jobs({ jobs, setJobs, partners }) {
                     <div>
                       <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>${clientPrice} client price</div>
                       <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>
-                        Partner total: ${partnerTotal} · Each: ${each} · Company: ${Math.round(clientPrice * COMPANY_SHARE)}
+                        Partner total: ${partnerTotal} Â· Each: ${each} Â· Company: ${Math.round(clientPrice * COMPANY_SHARE)}
                       </div>
-                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × ${each} each</div>}
+                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>ð¥ {teamSize} partners Ã ${each} each</div>}
                     </div>
                   );
                 })()}
@@ -6835,12 +6880,12 @@ function Jobs({ jobs, setJobs, partners }) {
       )}
 
       {selectedJob && (
-        <Modal title={`📋 ${selectedJob.client}`} onClose={() => setSelectedJob(null)} wide>
+        <Modal title={`ð ${selectedJob.client}`} onClose={() => setSelectedJob(null)} wide>
           <div style={{ display:"flex", flexDirection:"column", gap:16 }}>
 
             {/* Work Order Header */}
             <div style={{ background:`linear-gradient(135deg,${C.accentDim},${C.surface})`, borderRadius:12, padding:16, border:`1px solid ${C.accent}44` }}>
-              <div style={{ fontWeight:800, fontSize:16, color:C.accent, marginBottom:10 }}>📋 Work Order {selectedJob.workOrder?.id || `WO-${selectedJob.id}`}</div>
+              <div style={{ fontWeight:800, fontSize:16, color:C.accent, marginBottom:10 }}>ð Work Order {selectedJob.workOrder?.id || `WO-${selectedJob.id}`}</div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8, fontSize:13 }}>
                 <div><span style={{ color:C.muted }}>Client: </span><strong>{selectedJob.client}</strong></div>
                 <div><span style={{ color:C.muted }}>Date: </span><strong>{selectedJob.date}</strong></div>
@@ -6848,18 +6893,18 @@ function Jobs({ jobs, setJobs, partners }) {
                 <div><span style={{ color:C.muted }}>Hours: </span><strong>{selectedJob.hours}h estimated</strong></div>
                 <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Address: </span><strong>{selectedJob.address}</strong></div>
                 <div><span style={{ color:C.muted }}>Service: </span><strong>{selectedJob.type}</strong></div>
-                <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Team: </span><strong>{(selectedJob.partnerIds||[selectedJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" · ") || "Unassigned"}</strong></div>
+                <div style={{ gridColumn:"1/-1" }}><span style={{ color:C.muted }}>Team: </span><strong>{(selectedJob.partnerIds||[selectedJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" Â· ") || "Unassigned"}</strong></div>
               </div>
             </div>
 
             {/* RAG Reminder */}
             <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", fontSize:13, fontWeight:700 }}>
-              🎨 RAG SYSTEM: <span style={{ color:"#FF4757" }}>🔴 Red = Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Yellow = Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Green = Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 Blue = General/Glass</span>
+              ð¨ RAG SYSTEM: <span style={{ color:"#FF4757" }}>ð´ Red = Toilets ONLY</span> Â· <span style={{ color:"#FFA502" }}>ð¡ Yellow = Sinks/Mirrors</span> Â· <span style={{ color:"#2ED573" }}>ð¢ Green = Kitchen</span> Â· <span style={{ color:"#1E90FF" }}>ðµ Blue = General/Glass</span>
             </div>
 
             {/* Checklist */}
             <div>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>✅ Room-by-Room Checklist</div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>â Room-by-Room Checklist</div>
               <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
                 {(selectedJob.workOrder?.checklist || (() => {
                   const lists = {
@@ -6872,7 +6917,7 @@ function Jobs({ jobs, setJobs, partners }) {
                   return lists[selectedJob.type] || lists["Full Home Clean"];
                 })()).map((task, i) => (
                   <div key={i} style={{ display:"flex", alignItems:"center", gap:10, background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:13 }}>
-                    <span style={{ fontSize:16 }}>☐</span>
+                    <span style={{ fontSize:16 }}>â</span>
                     <span>{task}</span>
                   </div>
                 ))}
@@ -6882,7 +6927,7 @@ function Jobs({ jobs, setJobs, partners }) {
             {/* Addons */}
             {selectedJob.upsells?.length > 0 && (
               <div>
-                <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>⭐ Add-On Tasks</div>
+                <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>â­ Add-On Tasks</div>
                 {selectedJob.upsells.map((addon, i) => (
                   <div key={i} style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:13, marginBottom:6 }}>
                     <strong>{addon}</strong>
@@ -6894,13 +6939,13 @@ function Jobs({ jobs, setJobs, partners }) {
             {/* Client Notes */}
             {selectedJob.notes && (
               <div style={{ background:"#FFA50222", borderRadius:10, padding:"10px 14px", fontSize:13, borderLeft:`3px solid #FFA502` }}>
-                <strong>⚠️ Client Notes:</strong> {selectedJob.notes}
+                <strong>â ï¸ Client Notes:</strong> {selectedJob.notes}
               </div>
             )}
 
             {/* Before Photos */}
             <div>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>📷 Before Photos</div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>ð· Before Photos</div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
                 {selectedJob.beforePics?.filter(p => p && !p.includes("_new")).map((p, i) => (
                   <img key={i} src={p} alt={`before-${i}`} style={{ width:80, height:80, borderRadius:10, objectFit:"cover", border:`2px solid ${C.border}` }} />
@@ -6909,7 +6954,7 @@ function Jobs({ jobs, setJobs, partners }) {
                   <div style={{ color:C.muted, fontSize:13 }}>No before photos yet</div>
                 )}
                 <label style={{ ...styles.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:6 }}>
-                  📷 Add Before Photo
+                  ð· Add Before Photo
                   <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                     onChange={e => {
                       const file = e.target.files[0];
@@ -6928,7 +6973,7 @@ function Jobs({ jobs, setJobs, partners }) {
 
             {/* After Photos */}
             <div>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>✨ After Photos</div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>â¨ After Photos</div>
               <div style={{ display:"flex", gap:8, flexWrap:"wrap", alignItems:"center" }}>
                 {selectedJob.afterPics?.filter(p => p && !p.includes("_new")).map((p, i) => (
                   <img key={i} src={p} alt={`after-${i}`} style={{ width:80, height:80, borderRadius:10, objectFit:"cover", border:`2px solid ${C.accent}44` }} />
@@ -6937,7 +6982,7 @@ function Jobs({ jobs, setJobs, partners }) {
                   <div style={{ color:C.muted, fontSize:13 }}>No after photos yet</div>
                 )}
                 <label style={{ ...styles.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:6 }}>
-                  📷 Add After Photo
+                  ð· Add After Photo
                   <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
                     onChange={e => {
                       const file = e.target.files[0];
@@ -6956,7 +7001,7 @@ function Jobs({ jobs, setJobs, partners }) {
 
             {/* Job Summary */}
             <div>
-              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>📝 End-of-Job Summary</div>
+              <div style={{ fontWeight:800, fontSize:14, marginBottom:8 }}>ð End-of-Job Summary</div>
               <textarea style={{ ...styles.input, minHeight:80, resize:"vertical" }}
                 value={selectedJob.summary || ""}
                 onChange={e => {
@@ -6971,11 +7016,11 @@ function Jobs({ jobs, setJobs, partners }) {
             <div style={{ background:C.surface, borderRadius:10, padding:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Partner Pay (65%)</div>
-                <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>${selectedJob.pay?.toFixed(2) || "—"}</div>
+                <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>${selectedJob.pay?.toFixed(2) || "â"}</div>
               </div>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Client Price</div>
-                <div style={{ fontSize:22, fontWeight:800 }}>${selectedJob.clientPrice?.toFixed(2) || "—"}</div>
+                <div style={{ fontSize:22, fontWeight:800 }}>${selectedJob.clientPrice?.toFixed(2) || "â"}</div>
               </div>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Hours</div>
@@ -6992,7 +7037,7 @@ function Jobs({ jobs, setJobs, partners }) {
 
 
 
-// ─── PARTNERS ────────────────────────────────────────────────────────────────
+// âââ PARTNERS ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Partners({ partners, setPartners, jobs }) {
   const [showModal, setShowModal] = useState(false);
   const [newP, setNewP] = useState({ name: "", phone: "", email: "", payRate: 22, availability: [] });
@@ -7024,10 +7069,10 @@ function Partners({ partners, setPartners, jobs }) {
               <div style={styles.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
               <div style={{ flex: 1 }}>
                 <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>{p.phone} · {p.email}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>{p.phone} Â· {p.email}</div>
                 <div style={{ marginTop: 6 }}>
                   <span style={styles.badge(p.status === "active" ? "green" : p.status === "available" ? "blue" : "gold")}>{p.status}</span>
-                  {p.rating > 0 && <span style={{ marginLeft: 8, fontSize: 13, color: C.gold }}>⭐ {p.rating}</span>}
+                  {p.rating > 0 && <span style={{ marginLeft: 8, fontSize: 13, color: C.gold }}>â­ {p.rating}</span>}
                 </div>
               </div>
             </div>
@@ -7096,7 +7141,7 @@ function Partners({ partners, setPartners, jobs }) {
 
 
 
-// ─── PAY ─────────────────────────────────────────────────────────────────────
+// âââ PAY âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Pay({ partners, jobs }) {
   const completedJobs = jobs.filter(j => j.status === "completed");
   const pendingJobs   = jobs.filter(j => j.status !== "completed" && j.status !== "scheduled" ? false : j.status === "scheduled");
@@ -7115,16 +7160,16 @@ function Pay({ partners, jobs }) {
 
   return (
     <div>
-      <div style={S.h2}>💰 Partner Pay</div>
+      <div style={S.h2}>ð° Partner Pay</div>
       <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:18 }}>
-        Pay structure: <strong style={{ color:C.blue }}>Partner 65%</strong> · <strong style={{ color:C.gold }}>Company 35%</strong> of each job's client price
+        Pay structure: <strong style={{ color:C.blue }}>Partner 65%</strong> Â· <strong style={{ color:C.gold }}>Company 35%</strong> of each job's client price
       </div>
 
       <div style={S.grid4}>
-        <StatCard label="Total Revenue"      value={`$${totalRevenue.toLocaleString()}`}  icon="💵" color={C.accent} />
-        <StatCard label="Partner Pay (Total)" value={`$${totalEarned.toLocaleString()}`}   icon="👥" color={C.blue}   sub="completed jobs" />
-        <StatCard label="Pending Pay"         value={`$${totalPending.toLocaleString()}`}  icon="⏳" color={C.gold}   sub="scheduled jobs" />
-        <StatCard label="Company Kept"        value={`$${companyTotal.toLocaleString()}`}  icon="🏢" color={C.accent} sub="35% of all jobs" />
+        <StatCard label="Total Revenue"      value={`$${totalRevenue.toLocaleString()}`}  icon="ðµ" color={C.accent} />
+        <StatCard label="Partner Pay (Total)" value={`$${totalEarned.toLocaleString()}`}   icon="ð¥" color={C.blue}   sub="completed jobs" />
+        <StatCard label="Pending Pay"         value={`$${totalPending.toLocaleString()}`}  icon="â³" color={C.gold}   sub="scheduled jobs" />
+        <StatCard label="Company Kept"        value={`$${companyTotal.toLocaleString()}`}  icon="ð¢" color={C.accent} sub="35% of all jobs" />
       </div>
 
       <div style={S.divider} />
@@ -7145,7 +7190,7 @@ function Pay({ partners, jobs }) {
                 <div style={S.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
                 <div style={{ flex:1 }}>
                   <div style={{ fontWeight:800, fontSize:16 }}>{p.name}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>{pJobs.length} jobs · ${totalRev.toLocaleString()} total client revenue</div>
+                  <div style={{ fontSize:13, color:C.muted }}>{pJobs.length} jobs Â· ${totalRev.toLocaleString()} total client revenue</div>
                 </div>
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontWeight:800, fontSize:22, color:C.gold }}>${pending.toLocaleString()} <span style={{ fontSize:12, fontWeight:600, color:C.muted }}>DUE</span></div>
@@ -7165,7 +7210,7 @@ function Pay({ partners, jobs }) {
                       <div key={job.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"9px 0", borderBottom:`1px solid ${C.border}` }}>
                         <div>
                           <div style={{ fontSize:14, fontWeight:600 }}>{job.client}</div>
-                          <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.type}</div>
+                          <div style={{ fontSize:12, color:C.muted }}>{job.date} Â· {job.type}</div>
                         </div>
                         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                           <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
@@ -7190,133 +7235,133 @@ function Pay({ partners, jobs }) {
 
 
 
-// ─── ONBOARDING ──────────────────────────────────────────────────────────────
-// ─── TRAINING MODULES (Research-backed, with video + RAG system) ──────────────
+// âââ ONBOARDING ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
+// âââ TRAINING MODULES (Research-backed, with video + RAG system) ââââââââââââââ
 // Color RAG system based on industry standard (ISSA / BSC / Janitorial Manager):
-// 🔴 Red    = High-risk (toilets, urinals, bodily fluids)
-// 🟡 Yellow = Moderate-risk restroom (sinks, counters, mirrors, soap dispensers)
-// 🟢 Green  = Food-prep / kitchen surfaces (countertops, appliances, stovetop)
-// 🔵 Blue   = Low-risk general / glass / electronics (windows, desks, lobbies)
+// ð´ Red    = High-risk (toilets, urinals, bodily fluids)
+// ð¡ Yellow = Moderate-risk restroom (sinks, counters, mirrors, soap dispensers)
+// ð¢ Green  = Food-prep / kitchen surfaces (countertops, appliances, stovetop)
+// ðµ Blue   = Low-risk general / glass / electronics (windows, desks, lobbies)
 
 const RAG_COLORS = [
-  { color:"#FF4757", emoji:"🔴", name:"Red Rag",    zone:"High-Risk Restroom",     uses:["Toilets","Urinals","Restroom floors","Bodily fluid cleanup"],          never:["Kitchen","Living areas","Client's belongings"], bgColor:"#FF475715" },
-  { color:"#FFB800", emoji:"🟡", name:"Yellow Rag", zone:"Moderate-Risk Restroom", uses:["Bathroom sinks","Countertops","Mirrors","Soap dispensers","Door handles (restroom)"], never:["Toilets/urinals","Kitchen food surfaces"], bgColor:"#FFB80015" },
-  { color:"#2ED573", emoji:"🟢", name:"Green Rag",  zone:"Kitchen / Food Prep",    uses:["Kitchen counters","Stovetop exterior","Microwave exterior","Sink","Appliance surfaces"], never:["Bathrooms","Floors"], bgColor:"#2ED57315" },
-  { color:"#3B82F6", emoji:"🔵", name:"Blue Rag",   zone:"General / Low-Risk",     uses:["Desks & surfaces","Windows & glass","Mirrors (non-restroom)","Electronics","Baseboards","Living areas"], never:["Bathrooms","Kitchen food prep"], bgColor:"#3B82F615" },
+  { color:"#FF4757", emoji:"ð´", name:"Red Rag",    zone:"High-Risk Restroom",     uses:["Toilets","Urinals","Restroom floors","Bodily fluid cleanup"],          never:["Kitchen","Living areas","Client's belongings"], bgColor:"#FF475715" },
+  { color:"#FFB800", emoji:"ð¡", name:"Yellow Rag", zone:"Moderate-Risk Restroom", uses:["Bathroom sinks","Countertops","Mirrors","Soap dispensers","Door handles (restroom)"], never:["Toilets/urinals","Kitchen food surfaces"], bgColor:"#FFB80015" },
+  { color:"#2ED573", emoji:"ð¢", name:"Green Rag",  zone:"Kitchen / Food Prep",    uses:["Kitchen counters","Stovetop exterior","Microwave exterior","Sink","Appliance surfaces"], never:["Bathrooms","Floors"], bgColor:"#2ED57315" },
+  { color:"#3B82F6", emoji:"ðµ", name:"Blue Rag",   zone:"General / Low-Risk",     uses:["Desks & surfaces","Windows & glass","Mirrors (non-restroom)","Electronics","Baseboards","Living areas"], never:["Bathrooms","Kitchen food prep"], bgColor:"#3B82F615" },
 ];
 
 const TRAINING_MODULES = [
   {
     id: 1,
     title: "Welcome & Have Us Clean Standards",
-    icon: "🏠",
+    icon: "ð ",
     duration: "8 min read",
     category: "Foundations",
     badge: "Start Here",
     badgeColor: C.accent,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+like+a+pro+professional+cleaning+system",
-    videoChannel: "Clean My Space — Melissa Maker (Toronto, 2M subscribers)",
-    videoTitle: "How to Clean Like a Pro — The 3-Wave Professional System",
+    videoChannel: "Clean My Space â Melissa Maker (Toronto, 2M subscribers)",
+    videoTitle: "How to Clean Like a Pro â The 3-Wave Professional System",
     keyPoints: [
-      "Always arrive 5 minutes early — being on time is being late",
+      "Always arrive 5 minutes early â being on time is being late",
       "Wear your uniform at all times during the job",
-      "Greet clients warmly — you represent the Have Us Clean brand",
+      "Greet clients warmly â you represent the Have Us Clean brand",
       "Never use a client's personal products, food, or belongings",
       "If something is fragile or valuable, clean around it or ask the client",
       "Lock up and confirm with client before leaving every job",
     ],
-    content: `Welcome to the CleanPro team! You're joining a professional cleaning company that operates across Ontario (Canada) and Arizona (USA). Our reputation is built on three things: consistency, trustworthiness, and attention to detail.\n\nYour job is not just to clean — it's to make clients feel cared for. A clean home reduces stress, improves health, and creates a lasting impression. You are the face of our company inside every client's home.\n\nProfessionalism checklist: ✅ Clean uniform ✅ Arrive early ✅ Phone on silent ✅ No strong perfume ✅ Bring your own supplies ✅ Never bring guests to a job ✅ Report anything unusual immediately.`,
+    content: `Welcome to the CleanPro team! You're joining a professional cleaning company that operates across Ontario (Canada) and Arizona (USA). Our reputation is built on three things: consistency, trustworthiness, and attention to detail.\n\nYour job is not just to clean â it's to make clients feel cared for. A clean home reduces stress, improves health, and creates a lasting impression. You are the face of our company inside every client's home.\n\nProfessionalism checklist: â Clean uniform â Arrive early â Phone on silent â No strong perfume â Bring your own supplies â Never bring guests to a job â Report anything unusual immediately.`,
     quiz: [
-      { q: "What should you do if a client's valuable item is blocking the surface you need to clean?", a: "Clean around it or ask the client how they'd like you to handle it — never move valuables without permission." },
-      { q: "What time should you arrive for a 9:00 AM job?", a: "8:55 AM — always aim to be 5 minutes early, never late." },
+      { q: "What should you do if a client's valuable item is blocking the surface you need to clean?", a: "Clean around it or ask the client how they'd like you to handle it â never move valuables without permission." },
+      { q: "What time should you arrive for a 9:00 AM job?", a: "8:55 AM â always aim to be 5 minutes early, never late." },
     ],
   },
   {
     id: 2,
-    title: "Color RAG System — No Cross-Contamination",
-    icon: "🎨",
+    title: "Color RAG System â No Cross-Contamination",
+    icon: "ð¨",
     duration: "12 min read",
     category: "Core Skills",
     badge: "Critical",
     badgeColor: C.red,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+microfiber+cloths+color+coded+cross+contamination",
-    videoChannel: "Clean My Space — Melissa Maker",
-    videoTitle: "Colour-Coded Microfiber — No Cross Contamination",
+    videoChannel: "Clean My Space â Melissa Maker",
+    videoTitle: "Colour-Coded Microfiber â No Cross Contamination",
     ragModule: true,
     keyPoints: [
-      "🔴 Red = Toilets & urinals ONLY — never leaves the bathroom",
-      "🟡 Yellow = Other restroom surfaces (sinks, mirrors, dispensers)",
-      "🟢 Green = Kitchen & food-prep surfaces only",
-      "🔵 Blue = General cleaning, glass, desks, living areas",
+      "ð´ Red = Toilets & urinals ONLY â never leaves the bathroom",
+      "ð¡ Yellow = Other restroom surfaces (sinks, mirrors, dispensers)",
+      "ð¢ Green = Kitchen & food-prep surfaces only",
+      "ðµ Blue = General cleaning, glass, desks, living areas",
       "NEVER use a rag from a higher-risk zone in a lower-risk zone",
       "After each job: bag all used rags by color for washing",
-      "Wash colors separately — never mix red rags with green",
+      "Wash colors separately â never mix red rags with green",
     ],
-    content: `The Color RAG system is the #1 way to prevent cross-contamination — the transfer of bacteria and germs from dirty areas to clean ones. Cross-contamination is a serious health risk and a liability issue for CleanPro.\n\nStudies show that contaminating a single surface can spread a tracer virus to 40–60% of other surfaces in a space. One toilet rag used on a kitchen counter can transfer E. coli and other pathogens that cause illness.\n\nThe rule is simple: each color stays in its zone, every single time. No exceptions, even if a rag looks clean. Your clients are trusting you with their family's health.`,
+    content: `The Color RAG system is the #1 way to prevent cross-contamination â the transfer of bacteria and germs from dirty areas to clean ones. Cross-contamination is a serious health risk and a liability issue for CleanPro.\n\nStudies show that contaminating a single surface can spread a tracer virus to 40â60% of other surfaces in a space. One toilet rag used on a kitchen counter can transfer E. coli and other pathogens that cause illness.\n\nThe rule is simple: each color stays in its zone, every single time. No exceptions, even if a rag looks clean. Your clients are trusting you with their family's health.`,
     quiz: [
-      { q: "You're cleaning a bathroom and need to wipe the mirror. Which rag do you use?", a: "Yellow — mirrors are a moderate-risk restroom surface. Never use the red rag on mirrors." },
-      { q: "Can you use a blue rag in the kitchen?", a: "Only for non-food surfaces like cabinet exteriors, high-level dusting, or window sills. Never on food prep counters — that requires green." },
+      { q: "You're cleaning a bathroom and need to wipe the mirror. Which rag do you use?", a: "Yellow â mirrors are a moderate-risk restroom surface. Never use the red rag on mirrors." },
+      { q: "Can you use a blue rag in the kitchen?", a: "Only for non-food surfaces like cabinet exteriors, high-level dusting, or window sills. Never on food prep counters â that requires green." },
       { q: "After a job, how should you handle used rags?", a: "Bag all used rags by color. Wash separately. Never mix colors in the wash. Never re-use between jobs without washing first." },
     ],
   },
   {
     id: 3,
-    title: "Wet vs. Dry Rag — The Streak-Free Method",
-    icon: "💧",
+    title: "Wet vs. Dry Rag â The Streak-Free Method",
+    icon: "ð§",
     duration: "10 min read",
     category: "Core Skills",
     badge: "Pro Technique",
     badgeColor: C.blue,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+mirrors+windows+streak+free+microfiber",
-    videoChannel: "Clean My Space — Melissa Maker",
-    videoTitle: "Streak-Free Mirrors & Glass — Wet Then Dry Microfiber Technique",
+    videoChannel: "Clean My Space â Melissa Maker",
+    videoTitle: "Streak-Free Mirrors & Glass â Wet Then Dry Microfiber Technique",
     keyPoints: [
-      "Dry microfiber: use for dusting — the static charge grabs and traps particles",
-      "Damp microfiber: use for grime, oils, dried residue — moisture activates capillary pull",
+      "Dry microfiber: use for dusting â the static charge grabs and traps particles",
+      "Damp microfiber: use for grime, oils, dried residue â moisture activates capillary pull",
       "Soaking wet = wrong: too much water loses grip and spreads dirt instead of trapping it",
       "The two-step glass method: damp side first to lift grime, dry side to buff streak-free",
-      "Fold your cloth into quarters — you get 8 clean sides from one cloth",
-      "Spray surfaces, not the cloth — gives you control and avoids over-saturation",
-      "NEVER use fabric softener when washing microfiber — it clogs the fibers permanently",
+      "Fold your cloth into quarters â you get 8 clean sides from one cloth",
+      "Spray surfaces, not the cloth â gives you control and avoids over-saturation",
+      "NEVER use fabric softener when washing microfiber â it clogs the fibers permanently",
     ],
-    content: `Microfiber is the gold standard in professional cleaning because its microscopic fibers create a static charge that physically traps dust, bacteria, and grime — not just pushes it around. But using it wrong produces streaks and misses dirt.\n\nTHE TWO-STEP METHOD (for glass, mirrors, stainless steel):\n1. Lightly dampen half your cloth with water or glass cleaner\n2. Wipe the surface with the damp side to lift grime and product residue\n3. Immediately follow with the dry side to buff away moisture and prevent streaks\n\nThis technique works because the damp pass loosens and picks up dirt while the dry pass removes the moisture film that causes streaks. No paper towels needed.\n\nTHE DRY METHOD (dusting):\nA dry microfiber cloth generates static electricity that attracts dust like a magnet. Use it dry on: blinds, electronics, wood furniture, shelves. Shake out when loaded; don't drag a full cloth as it re-deposits.`,
+    content: `Microfiber is the gold standard in professional cleaning because its microscopic fibers create a static charge that physically traps dust, bacteria, and grime â not just pushes it around. But using it wrong produces streaks and misses dirt.\n\nTHE TWO-STEP METHOD (for glass, mirrors, stainless steel):\n1. Lightly dampen half your cloth with water or glass cleaner\n2. Wipe the surface with the damp side to lift grime and product residue\n3. Immediately follow with the dry side to buff away moisture and prevent streaks\n\nThis technique works because the damp pass loosens and picks up dirt while the dry pass removes the moisture film that causes streaks. No paper towels needed.\n\nTHE DRY METHOD (dusting):\nA dry microfiber cloth generates static electricity that attracts dust like a magnet. Use it dry on: blinds, electronics, wood furniture, shelves. Shake out when loaded; don't drag a full cloth as it re-deposits.`,
     wetDryGuide: [
-      { surface:"Glass & Mirrors",       method:"Damp → Dry",  why:"Damp lifts residue; dry buffs streak-free" },
-      { surface:"Stainless Steel",        method:"Damp → Dry",  why:"Follow the grain; dry buff removes water marks" },
+      { surface:"Glass & Mirrors",       method:"Damp â Dry",  why:"Damp lifts residue; dry buffs streak-free" },
+      { surface:"Stainless Steel",        method:"Damp â Dry",  why:"Follow the grain; dry buff removes water marks" },
       { surface:"Wood Furniture",         method:"Dry first",   why:"Dry traps dust; use barely damp only if sticky" },
-      { surface:"Countertops (kitchen)",  method:"Damp",        why:"Green rag, damp — dissolves food residue; air-dry" },
+      { surface:"Countertops (kitchen)",  method:"Damp",        why:"Green rag, damp â dissolves food residue; air-dry" },
       { surface:"Toilet bowl interior",   method:"Wet + product",why:"Red rag + toilet cleaner; full saturation needed" },
-      { surface:"Bathroom sink/faucet",   method:"Damp → Dry",  why:"Yellow rag damp to clean, dry to shine chrome" },
+      { surface:"Bathroom sink/faucet",   method:"Damp â Dry",  why:"Yellow rag damp to clean, dry to shine chrome" },
       { surface:"Electronics/TV screen",  method:"Barely damp", why:"Excess moisture damages electronics; never spray directly" },
-      { surface:"Baseboards",             method:"Dry first → Damp",why:"Dry removes loose dust; damp for sticky buildup" },
-      { surface:"Floors (hard)",          method:"Damp mop",    why:"Don't soak — excess water damages wood and grout" },
+      { surface:"Baseboards",             method:"Dry first â Damp",why:"Dry removes loose dust; damp for sticky buildup" },
+      { surface:"Floors (hard)",          method:"Damp mop",    why:"Don't soak â excess water damages wood and grout" },
     ],
     quiz: [
       { q: "You're cleaning a mirror and see streaks left behind. What went wrong?", a: "Either the cloth was too wet (no dry follow-up), the cloth had fabric softener residue, or you sprayed too much product. Fix: use the two-step damp-then-dry method." },
-      { q: "Should you spray cleaner directly onto a TV screen?", a: "Never spray directly. Spray a barely damp cloth and wipe gently — direct spray can seep into edges and damage electronics." },
+      { q: "Should you spray cleaner directly onto a TV screen?", a: "Never spray directly. Spray a barely damp cloth and wipe gently â direct spray can seep into edges and damage electronics." },
     ],
   },
   {
     id: 4,
     title: "Rag Care & Laundry Protocol",
-    icon: "🧺",
+    icon: "ð§º",
     duration: "8 min read",
     category: "Core Skills",
     badge: "Hygiene",
     badgeColor: "#A78BFA",
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+wash+microfiber+cloths+no+fabric+softener",
-    videoChannel: "Clean My Space — Melissa Maker",
-    videoTitle: "How to Wash Microfiber Cloths — What NOT to Do",
+    videoChannel: "Clean My Space â Melissa Maker",
+    videoTitle: "How to Wash Microfiber Cloths â What NOT to Do",
     keyPoints: [
       "Microfiber: cold/warm wash, gentle detergent, NO fabric softener, low heat dry",
       "Cotton rags: hot wash OK, NO fabric softener, high heat to sanitize",
-      "Wash colors separately — red never with green; prevent dye and bacteria transfer",
-      "No bleach on microfiber — destroys the fibers permanently",
+      "Wash colors separately â red never with green; prevent dye and bacteria transfer",
+      "No bleach on microfiber â destroys the fibers permanently",
       "Replace rags showing pilling, weak absorption, or permanent stains",
       "Each rag can last 100+ washes if cared for properly",
-      "Never put away damp rags — leads to mold and odor",
+      "Never put away damp rags â leads to mold and odor",
     ],
-    content: `Your rags are your tools. A clogged or damaged microfiber cloth will streak, skip dirt, and actually spread bacteria instead of trapping it. Proper care isn't optional — it protects your clients and protects the company.\n\nMICROFIBER CARE RULES:\n✅ Wash in warm water (under 105°F / 40°C) with gentle, fragrance-free detergent\n✅ Wash microfiber ONLY with other microfiber — cotton lint clogs the fibers\n✅ Dry on LOW heat or air dry\n❌ NEVER use fabric softener — permanently coats fibers, destroys absorption\n❌ NEVER use bleach — degrades polyester fibers\n❌ NEVER iron microfiber cloths\n\nCOTTON/TERRY RAG CARE:\n✅ Hot wash with regular detergent to sanitize\n✅ Can use diluted bleach every 3–4 washes to fully sanitize\n✅ Hot dry is fine — high heat kills bacteria in cotton\n❌ Still no fabric softener — reduces absorbency`,
+    content: `Your rags are your tools. A clogged or damaged microfiber cloth will streak, skip dirt, and actually spread bacteria instead of trapping it. Proper care isn't optional â it protects your clients and protects the company.\n\nMICROFIBER CARE RULES:\nâ Wash in warm water (under 105Â°F / 40Â°C) with gentle, fragrance-free detergent\nâ Wash microfiber ONLY with other microfiber â cotton lint clogs the fibers\nâ Dry on LOW heat or air dry\nâ NEVER use fabric softener â permanently coats fibers, destroys absorption\nâ NEVER use bleach â degrades polyester fibers\nâ NEVER iron microfiber cloths\n\nCOTTON/TERRY RAG CARE:\nâ Hot wash with regular detergent to sanitize\nâ Can use diluted bleach every 3â4 washes to fully sanitize\nâ Hot dry is fine â high heat kills bacteria in cotton\nâ Still no fabric softener â reduces absorbency`,
     quiz: [
       { q: "Why can't you use fabric softener on microfiber cloths?", a: "Fabric softener leaves a waxy coating that clogs the microscopic fibers, blocking their ability to trap dirt and absorb moisture. The cloth will start leaving streaks and spreading bacteria instead of removing it." },
       { q: "How should you dry used microfiber rags between jobs?", a: "Never put them away damp. Allow to fully air dry or use low dryer heat before storing. Damp storage creates mold and odor." },
@@ -7325,31 +7370,31 @@ const TRAINING_MODULES = [
   {
     id: 5,
     title: "Room-by-Room Cleaning Procedure",
-    icon: "🏡",
+    icon: "ð¡",
     duration: "20 min read",
     category: "Procedures",
     badge: "Full Walkthrough",
     badgeColor: C.gold,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+bathroom+professionally+fast+efficient",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Clean a Bathroom Fast & Professionally",
     keyPoints: [
-      "Always work TOP → BOTTOM (dust falls down — clean it last)",
-      "Always work BACK → FRONT (don't walk over cleaned areas)",
+      "Always work TOP â BOTTOM (dust falls down â clean it last)",
+      "Always work BACK â FRONT (don't walk over cleaned areas)",
       "Start each room by removing trash and clearing surfaces",
-      "Bathroom: red rag → toilet first, then yellow for sinks/mirrors",
+      "Bathroom: red rag â toilet first, then yellow for sinks/mirrors",
       "Kitchen: green rag for food surfaces, blue for high shelves/windows",
       "Living areas: dry blue rag for dusting, then vacuum, then mop last",
       "Final sweep: check corners, under furniture, and light switches",
     ],
     roomGuide: [
-      { room:"Bathroom",     icon:"🚽", ragColor:"🔴+🟡", steps:["Spray toilet bowl, let sit 2 min","Red rag: scrub toilet bowl, wipe exterior, base","Yellow rag: sinks, faucets, countertop","Yellow rag: mirror (damp then dry for streak-free)","Yellow rag: soap/towel dispensers, door handles","Mop floor last (dedicated bathroom mop — red handle)"] },
-      { room:"Kitchen",      icon:"🍳", ragColor:"🟢+🔵", steps:["Green rag: countertops, wipe all food prep surfaces","Green rag: stovetop exterior (check for grime build-up)","Green rag: sink and faucet","Blue rag: upper cabinets exterior, window sills","Blue rag: microwave exterior and handle","Sweep and mop floor last (separate kitchen mop)"] },
-      { room:"Living Room",  icon:"🛋", ragColor:"🔵",    steps:["Dry blue rag: all surfaces top to bottom (shelves → tables → baseboards)","Blue damp: wipe TV stand, coffee table if sticky","Glass surfaces: damp then dry method","Vacuum upholstery if included in service","Vacuum floor, including under furniture edges","Mop if hard floors"] },
-      { room:"Bedroom",      icon:"🛏", ragColor:"🔵",    steps:["Remove and replace linens if requested","Dry blue rag: dust all surfaces (nightstands, dresser, fan blades)","Wipe mirrors (damp then dry)","Vacuum under bed and along baseboards","Vacuum/mop floors last"] },
-      { room:"Entry/Stairs", icon:"🚪", ragColor:"🔵",    steps:["Dust light fixtures and railings","Wipe door handles and switch plates","Vacuum stairs — use crevice tool on edges","Mop hard entry floors last (this is the exit — work backward)"] },
+      { room:"Bathroom",     icon:"ð½", ragColor:"ð´+ð¡", steps:["Spray toilet bowl, let sit 2 min","Red rag: scrub toilet bowl, wipe exterior, base","Yellow rag: sinks, faucets, countertop","Yellow rag: mirror (damp then dry for streak-free)","Yellow rag: soap/towel dispensers, door handles","Mop floor last (dedicated bathroom mop â red handle)"] },
+      { room:"Kitchen",      icon:"ð³", ragColor:"ð¢+ðµ", steps:["Green rag: countertops, wipe all food prep surfaces","Green rag: stovetop exterior (check for grime build-up)","Green rag: sink and faucet","Blue rag: upper cabinets exterior, window sills","Blue rag: microwave exterior and handle","Sweep and mop floor last (separate kitchen mop)"] },
+      { room:"Living Room",  icon:"ð", ragColor:"ðµ",    steps:["Dry blue rag: all surfaces top to bottom (shelves â tables â baseboards)","Blue damp: wipe TV stand, coffee table if sticky","Glass surfaces: damp then dry method","Vacuum upholstery if included in service","Vacuum floor, including under furniture edges","Mop if hard floors"] },
+      { room:"Bedroom",      icon:"ð", ragColor:"ðµ",    steps:["Remove and replace linens if requested","Dry blue rag: dust all surfaces (nightstands, dresser, fan blades)","Wipe mirrors (damp then dry)","Vacuum under bed and along baseboards","Vacuum/mop floors last"] },
+      { room:"Entry/Stairs", icon:"ðª", ragColor:"ðµ",    steps:["Dust light fixtures and railings","Wipe door handles and switch plates","Vacuum stairs â use crevice tool on edges","Mop hard entry floors last (this is the exit â work backward)"] },
     ],
-    content: `The order you clean matters as much as how you clean. Professionals follow the same systematic approach every time — it removes human error, saves time, and produces consistent results that impress clients.\n\nTHE GOLDEN RULE: Top to bottom, back to front. Dust and debris fall down — if you vacuum first then dust, you're vacuuming twice. If you clean toward the exit, you never step on a clean floor.`,
+    content: `The order you clean matters as much as how you clean. Professionals follow the same systematic approach every time â it removes human error, saves time, and produces consistent results that impress clients.\n\nTHE GOLDEN RULE: Top to bottom, back to front. Dust and debris fall down â if you vacuum first then dust, you're vacuuming twice. If you clean toward the exit, you never step on a clean floor.`,
     quiz: [
       { q: "You're in a kitchen. Which rag do you use on the stovetop? What about the window above the sink?", a: "Stovetop = Green rag (food-prep surface). Window above sink = Blue rag (glass/general surface). Never use the same rag for both." },
       { q: "Why do we clean back-to-front?", a: "So you never step or walk over surfaces you've already cleaned. You always exit through the last area cleaned." },
@@ -7358,51 +7403,51 @@ const TRAINING_MODULES = [
   {
     id: 6,
     title: "Safety & Chemical Handling",
-    icon: "🧪",
+    icon: "ð§ª",
     duration: "15 min read",
     category: "Safety",
     badge: "Required",
     badgeColor: C.red,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+cleaning+products+you+should+never+mix+dangerous",
-    videoChannel: "Clean My Space — Melissa Maker",
-    videoTitle: "Cleaning Products You Should NEVER Mix — Chemical Safety",
+    videoChannel: "Clean My Space â Melissa Maker",
+    videoTitle: "Cleaning Products You Should NEVER Mix â Chemical Safety",
     keyPoints: [
-      "NEVER mix bleach + ammonia — creates toxic chloramine gas",
-      "NEVER mix bleach + vinegar — creates chlorine gas",
-      "NEVER mix hydrogen peroxide + vinegar — creates corrosive peracetic acid",
-      "Always read product labels before use — dilution ratios matter",
+      "NEVER mix bleach + ammonia â creates toxic chloramine gas",
+      "NEVER mix bleach + vinegar â creates chlorine gas",
+      "NEVER mix hydrogen peroxide + vinegar â creates corrosive peracetic acid",
+      "Always read product labels before use â dilution ratios matter",
       "Wear gloves for all chemical use; eye protection for sprays",
-      "Ensure ventilation — open windows when using strong products",
+      "Ensure ventilation â open windows when using strong products",
       "Store all chemicals upright and sealed, away from heat",
       "In case of skin contact: flush with water for 15+ minutes",
     ],
-    content: `Chemical safety is non-negotiable. Every year cleaning workers are injured by accidental chemical mixing — most of which happens when people use multiple products without reading labels.\n\nDANGEROUS COMBINATIONS TO MEMORIZE:\n🚫 Bleach + Ammonia → Chloramine gas (lung damage)\n🚫 Bleach + Vinegar → Chlorine gas (toxic)\n🚫 Bleach + Rubbing Alcohol → Chloroform + other toxins\n🚫 Hydrogen Peroxide + Vinegar → Peracetic acid (corrosive)\n\nPROTECTIVE EQUIPMENT:\n✅ Nitrile gloves — always for any chemical\n✅ Safety glasses — when spraying overhead or using strong products\n✅ Ventilation — open windows, use exhaust fans\n✅ Never eat or drink while cleaning with chemicals`,
+    content: `Chemical safety is non-negotiable. Every year cleaning workers are injured by accidental chemical mixing â most of which happens when people use multiple products without reading labels.\n\nDANGEROUS COMBINATIONS TO MEMORIZE:\nð« Bleach + Ammonia â Chloramine gas (lung damage)\nð« Bleach + Vinegar â Chlorine gas (toxic)\nð« Bleach + Rubbing Alcohol â Chloroform + other toxins\nð« Hydrogen Peroxide + Vinegar â Peracetic acid (corrosive)\n\nPROTECTIVE EQUIPMENT:\nâ Nitrile gloves â always for any chemical\nâ Safety glasses â when spraying overhead or using strong products\nâ Ventilation â open windows, use exhaust fans\nâ Never eat or drink while cleaning with chemicals`,
     quiz: [
-      { q: "A surface has bleach on it from your last pass. You grab a bottle of vinegar-based cleaner to tackle a stain. Is this safe?", a: "NO — never. Bleach + vinegar creates chlorine gas. Wait until the bleach has fully dried and been rinsed, or use only one product at a time on a surface." },
+      { q: "A surface has bleach on it from your last pass. You grab a bottle of vinegar-based cleaner to tackle a stain. Is this safe?", a: "NO â never. Bleach + vinegar creates chlorine gas. Wait until the bleach has fully dried and been rinsed, or use only one product at a time on a surface." },
     ],
   },
   {
     id: 7,
     title: "Using the CleanPro App",
-    icon: "📱",
+    icon: "ð±",
     duration: "10 min read",
     category: "Tools",
     badge: "App Training",
     badgeColor: C.accent,
     videoUrl: "https://www.youtube.com/results?search_query=cleaning+business+app+GPS+checkin+job+management+tutorial",
-    videoChannel: "Have Us Clean Internal Training — record your own 5-min phone video!",
-    videoTitle: "Using the Have Us Clean App — GPS Check-In, Photos & Job Completion",
+    videoChannel: "Have Us Clean Internal Training â record your own 5-min phone video!",
+    videoTitle: "Using the Have Us Clean App â GPS Check-In, Photos & Job Completion",
     keyPoints: [
       "Check your schedule in the Jobs tab every morning",
-      "GPS Check-In the moment you arrive — this starts your time log",
-      "Take BEFORE photos before touching anything — protects you and the client",
+      "GPS Check-In the moment you arrive â this starts your time log",
+      "Take BEFORE photos before touching anything â protects you and the client",
       "Mark the job 'In Progress' when you start cleaning",
-      "Log any upsells you sold — this adds to your pay",
-      "Take AFTER photos when complete — proof of quality",
-      "Write your end-of-job summary — mention anything unusual",
-      "GPS Check-Out when you leave — closes the job",
+      "Log any upsells you sold â this adds to your pay",
+      "Take AFTER photos when complete â proof of quality",
+      "Write your end-of-job summary â mention anything unusual",
+      "GPS Check-Out when you leave â closes the job",
     ],
-    content: `The Have Us Clean app is your digital work order, time clock, and quality record all in one. Using it properly protects you if there's ever a dispute with a client, and it ensures you get paid accurately for every minute and every upsell.\n\nTHE JOB WORKFLOW:\n1. Receive job notification → check details (address, time, client notes)\n2. Navigate to address via Directions button\n3. GPS Check-In on arrival → takes your location as proof\n4. Take BEFORE photos — every room, every questionable surface\n5. Clean according to your checklist\n6. Log any upsells you discussed with the client\n7. Take AFTER photos — every area you cleaned\n8. Write a brief summary: what was done, any issues, client feedback\n9. GPS Check-Out — job is complete`,
+    content: `The Have Us Clean app is your digital work order, time clock, and quality record all in one. Using it properly protects you if there's ever a dispute with a client, and it ensures you get paid accurately for every minute and every upsell.\n\nTHE JOB WORKFLOW:\n1. Receive job notification â check details (address, time, client notes)\n2. Navigate to address via Directions button\n3. GPS Check-In on arrival â takes your location as proof\n4. Take BEFORE photos â every room, every questionable surface\n5. Clean according to your checklist\n6. Log any upsells you discussed with the client\n7. Take AFTER photos â every area you cleaned\n8. Write a brief summary: what was done, any issues, client feedback\n9. GPS Check-Out â job is complete`,
     quiz: [
       { q: "Why do we take before photos before starting a clean?", a: "To document the condition of the home before you touched anything. If a client later claims something was broken or damaged, your before photos prove it was already in that condition." },
     ],
@@ -7410,238 +7455,238 @@ const TRAINING_MODULES = [
   {
     id: 8,
     title: "Upsells & Client Communication",
-    icon: "💬",
+    icon: "ð¬",
     duration: "10 min read",
     category: "Sales",
     badge: "Earn More",
     badgeColor: C.gold,
     videoUrl: "https://www.youtube.com/results?search_query=Angela+Brown+Savvy+Cleaner+how+to+upsell+cleaning+services+clients",
-    videoChannel: "Savvy Cleaner — Angela Brown (cleaning business specialist)",
+    videoChannel: "Savvy Cleaner â Angela Brown (cleaning business specialist)",
     videoTitle: "How to Upsell Cleaning Services Professionally",
     keyPoints: [
-      "Upsells earn YOU more money — they're added to your job pay",
+      "Upsells earn YOU more money â they're added to your job pay",
       "Always frame upsells as observations, not pressure",
-      "Use the line: 'I noticed your [oven/fridge/carpet] could use some attention — would you like me to add that today?'",
+      "Use the line: 'I noticed your [oven/fridge/carpet] could use some attention â would you like me to add that today?'",
       "Never add a service without the client's explicit approval",
-      "Log every upsell in the app immediately — it records your extra pay",
+      "Log every upsell in the app immediately â it records your extra pay",
       "The best upsells: oven interior, fridge interior, carpet steam, window wash",
-      "Never push back if declined — always stay friendly",
+      "Never push back if declined â always stay friendly",
     ],
-    content: `Upsells are the fastest way to increase your earnings on every job. They're not about selling — they're about genuinely noticing things the client needs and making it easy for them to say yes.\n\nTHE UPSELL FORMULA:\n"I noticed [specific thing you observed]. Would you like me to take care of that today? It's [service name] and I can do it in about [time estimate]."\n\nExample: "I noticed the inside of your oven has some build-up. I can do a deep oven clean today — it takes about 20 minutes. Would you like me to add that?"\n\nThis works because it's specific, honest, and gives them a choice. Most clients will say yes if they trust you — and trust is built through consistent, excellent work.`,
+    content: `Upsells are the fastest way to increase your earnings on every job. They're not about selling â they're about genuinely noticing things the client needs and making it easy for them to say yes.\n\nTHE UPSELL FORMULA:\n"I noticed [specific thing you observed]. Would you like me to take care of that today? It's [service name] and I can do it in about [time estimate]."\n\nExample: "I noticed the inside of your oven has some build-up. I can do a deep oven clean today â it takes about 20 minutes. Would you like me to add that?"\n\nThis works because it's specific, honest, and gives them a choice. Most clients will say yes if they trust you â and trust is built through consistent, excellent work.`,
     quiz: [
-      { q: "A client says no to your upsell offer. What do you do?", a: "Smile and say 'No problem at all!' and continue with the regular clean. Never push back, never act disappointed. Clients who feel respected come back — and often say yes next time." },
+      { q: "A client says no to your upsell offer. What do you do?", a: "Smile and say 'No problem at all!' and continue with the regular clean. Never push back, never act disappointed. Clients who feel respected come back â and often say yes next time." },
     ],
   },
   {
     id: 9,
     title: "Handling Issues & Complaints",
-    icon: "🛡️",
+    icon: "ð¡ï¸",
     duration: "8 min read",
     category: "Professionalism",
     badge: "Must Know",
     badgeColor: "#A78BFA",
     videoUrl: "https://www.youtube.com/results?search_query=Angela+Brown+Savvy+Cleaner+handling+unhappy+clients+complaints",
-    videoChannel: "Savvy Cleaner — Angela Brown",
+    videoChannel: "Savvy Cleaner â Angela Brown",
     videoTitle: "Handling Unhappy Clients in Your Cleaning Business",
     keyPoints: [
-      "Stay calm — never argue or get defensive",
+      "Stay calm â never argue or get defensive",
       "Apologize sincerely even if you're not sure it was your fault",
       "Take photos of any claimed damage immediately",
-      "Contact your supervisor immediately — do not handle disputes alone",
+      "Contact your supervisor immediately â do not handle disputes alone",
       "Never promise refunds or make commitments on behalf of the company",
       "Document everything in your job summary in the app",
       "A calm, caring response turns most complaints into loyal clients",
     ],
-    content: `Client complaints feel personal, but they're a business moment. The way you handle a complaint has more impact on client retention than the original issue. Studies show clients who have a complaint handled well are more loyal than those who never had a problem at all.\n\nTHE COMPLAINT PROTOCOL:\n1. Listen fully — don't interrupt\n2. Apologize sincerely: "I'm really sorry to hear that. That's not the experience we want you to have."\n3. Take photos if any physical damage is claimed\n4. Say: "I'm going to contact my supervisor right now to make sure this gets resolved for you."\n5. Call/message supervisor immediately\n6. Log everything in the job summary in the app\n7. Follow up — your supervisor will handle resolution\n\nNEVER SAY: "That wasn't me / that was already there / you'll need to talk to someone else."`,
+    content: `Client complaints feel personal, but they're a business moment. The way you handle a complaint has more impact on client retention than the original issue. Studies show clients who have a complaint handled well are more loyal than those who never had a problem at all.\n\nTHE COMPLAINT PROTOCOL:\n1. Listen fully â don't interrupt\n2. Apologize sincerely: "I'm really sorry to hear that. That's not the experience we want you to have."\n3. Take photos if any physical damage is claimed\n4. Say: "I'm going to contact my supervisor right now to make sure this gets resolved for you."\n5. Call/message supervisor immediately\n6. Log everything in the job summary in the app\n7. Follow up â your supervisor will handle resolution\n\nNEVER SAY: "That wasn't me / that was already there / you'll need to talk to someone else."`,
     quiz: [
-      { q: "A client calls while you're still on-site and says you broke their vase. You didn't see it break. What do you do?", a: "Stay calm. Apologize. Take photos of the area. Do NOT argue or deny. Call your supervisor immediately. Write everything in your job summary. Never promise to pay for it yourself — let the company handle it." },
+      { q: "A client calls while you're still on-site and says you broke their vase. You didn't see it break. What do you do?", a: "Stay calm. Apologize. Take photos of the area. Do NOT argue or deny. Call your supervisor immediately. Write everything in your job summary. Never promise to pay for it yourself â let the company handle it." },
     ],
   },
 
-  // ── ADD-ON MODULE 10: Inside Oven ──────────────────────────────────────────
+  // ââ ADD-ON MODULE 10: Inside Oven ââââââââââââââââââââââââââââââââââââââââââ
   {
     id: 10,
     title: "Add-On: Inside Oven Clean",
-    icon: "🔥",
+    icon: "ð¥",
     duration: "12 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: "#FF6B6B",
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+inside+oven+non+self+cleaning+professionally",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Clean a Non-Self-Cleaning Oven Like a Pro",
     keyPoints: [
-      "Always check if oven is COOL before starting — never clean a hot oven",
-      "Remove racks first — soak in bathtub or sink with dishwasher tabs, 30+ min",
+      "Always check if oven is COOL before starting â never clean a hot oven",
+      "Remove racks first â soak in bathtub or sink with dishwasher tabs, 30+ min",
       "Mix 4 parts baking soda : 1 part dish soap : 1 part water into a paste",
-      "Apply paste to all interior walls, floor, ceiling, and door — avoid heating elements and fans",
-      "Let sit 20–30 min minimum — dwell time does the work, not elbow grease",
+      "Apply paste to all interior walls, floor, ceiling, and door â avoid heating elements and fans",
+      "Let sit 20â30 min minimum â dwell time does the work, not elbow grease",
       "Scrub with damp Scotch-Brite pad, use a razor scraper on stubborn spots",
       "Rinse with wet microfiber cloth, finish with vinegar wipe to cut residue",
-      "Glass door: use Bar Keepers Friend — do NOT take door apart (voids warranty)",
-      "Total time: 45–60 min for a standard oven",
+      "Glass door: use Bar Keepers Friend â do NOT take door apart (voids warranty)",
+      "Total time: 45â60 min for a standard oven",
     ],
-    content: `The inside oven clean is one of our most popular and highest-valued add-ons. Done properly it takes about 45–60 minutes and leaves a result clients always photograph and talk about.
+    content: `The inside oven clean is one of our most popular and highest-valued add-ons. Done properly it takes about 45â60 minutes and leaves a result clients always photograph and talk about.
 
 BEFORE YOU START:
-✅ Confirm oven is completely cool
-✅ Remove everything from inside including racks
-✅ Put racks in bathtub or large sink covered with hot water + 2 dishwasher tabs
-✅ Pull out the oven drawer and vacuum underneath
+â Confirm oven is completely cool
+â Remove everything from inside including racks
+â Put racks in bathtub or large sink covered with hot water + 2 dishwasher tabs
+â Pull out the oven drawer and vacuum underneath
 
 THE PASTE METHOD (best for heavy buildup):
 1. Mix: 4 tbsp baking soda + 1 tbsp dish soap + 1 tbsp water = thick paste
 2. Apply with your hands (gloves on) to ALL interior surfaces
-3. Avoid fans, coils, heating elements — mask with paper towel if needed
-4. Wait 20–30 minutes — resist scrubbing early
-5. Scrub with wet Scotch-Brite — use razor scraper on carbonised buildup
+3. Avoid fans, coils, heating elements â mask with paper towel if needed
+4. Wait 20â30 minutes â resist scrubbing early
+5. Scrub with wet Scotch-Brite â use razor scraper on carbonised buildup
 6. Rinse thoroughly with wet microfiber (baking soda leaves white residue if not rinsed)
 7. Final wipe with vinegar-dampened cloth to cut any remaining grease
 
 DOOR GLASS:
-• Interior glass: Bar Keepers Friend + scrub pad, rinse clean
-• Between the panes: leave it — do not take door apart
+â¢ Interior glass: Bar Keepers Friend + scrub pad, rinse clean
+â¢ Between the panes: leave it â do not take door apart
 
 OVEN RACKS:
-• After 30+ min soak, scrub with steel pad — grease lifts easily
-• Rinse and dry before replacing`,
+â¢ After 30+ min soak, scrub with steel pad â grease lifts easily
+â¢ Rinse and dry before replacing`,
     quiz: [
-      { q: "Client asks you to clean inside a hot oven — what do you say?", a: "Say: 'I need the oven to be fully cool before I can safely clean the interior. Can we do this one first, or shall I come back to the oven at the end?' Never clean a hot oven." },
-      { q: "You apply the paste and go to scrub after 5 minutes. It's not working. Why?", a: "Dwell time is everything. The paste needs 20–30 minutes to penetrate and break down the grease. Going in too early means you're doing 10x the work. Always let it sit." },
+      { q: "Client asks you to clean inside a hot oven â what do you say?", a: "Say: 'I need the oven to be fully cool before I can safely clean the interior. Can we do this one first, or shall I come back to the oven at the end?' Never clean a hot oven." },
+      { q: "You apply the paste and go to scrub after 5 minutes. It's not working. Why?", a: "Dwell time is everything. The paste needs 20â30 minutes to penetrate and break down the grease. Going in too early means you're doing 10x the work. Always let it sit." },
     ],
   },
 
-  // ── ADD-ON MODULE 11: Inside Fridge ─────────────────────────────────────────
+  // ââ ADD-ON MODULE 11: Inside Fridge âââââââââââââââââââââââââââââââââââââââââ
   {
     id: 11,
     title: "Add-On: Inside Fridge Clean",
-    icon: "🧊",
+    icon: "ð§",
     duration: "10 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: "#3B82F6",
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+refrigerator+inside+shelves+drawers+efficiently",
-    videoChannel: "Clean My Space — Melissa Maker",
-    videoTitle: "How to Clean Your Fridge Inside — Fast & Efficiently",
+    videoChannel: "Clean My Space â Melissa Maker",
+    videoTitle: "How to Clean Your Fridge Inside â Fast & Efficiently",
     keyPoints: [
       "Ask client before starting: any food to keep? Any expired to toss?",
-      "Remove ALL shelves and drawers — wash separately in the sink",
+      "Remove ALL shelves and drawers â wash separately in the sink",
       "Green rag for all food-contact surfaces (food prep zone)",
-      "Warm water + small amount of dish soap — no bleach inside a fridge",
-      "Wipe top to bottom, back to front — don't forget the door seals",
-      "Dry completely before replacing contents — moisture causes mold",
+      "Warm water + small amount of dish soap â no bleach inside a fridge",
+      "Wipe top to bottom, back to front â don't forget the door seals",
+      "Dry completely before replacing contents â moisture causes mold",
       "Deodorise with baking soda wipe on interior walls if there's odour",
       "Replace shelves and drawers only when fully dry",
     ],
-    content: `The inside fridge clean is a quick, high-impact add-on that clients love. Most people avoid cleaning their fridge because it means emptying it. You do that for them — that's the value.
+    content: `The inside fridge clean is a quick, high-impact add-on that clients love. Most people avoid cleaning their fridge because it means emptying it. You do that for them â that's the value.
 
 STEP BY STEP:
-1. Ask client: anything specific to keep? Remove all food — set aside on counter or cooler
+1. Ask client: anything specific to keep? Remove all food â set aside on counter or cooler
 2. Remove all shelves and drawers and bring to sink
 3. Wash shelves and drawers: warm water + dish soap, rinse, set to air dry
 4. Inside fridge cavity: spray lightly with warm soapy water
-5. Use GREEN rag — wipe all interior walls, top to bottom, back to front
-6. Door seals: use a damp cloth and get into the grooves — this is where mold hides
-7. Vegetable drawers: scrub any residue — these get the worst buildup
+5. Use GREEN rag â wipe all interior walls, top to bottom, back to front
+6. Door seals: use a damp cloth and get into the grooves â this is where mold hides
+7. Vegetable drawers: scrub any residue â these get the worst buildup
 8. Deodorise: light wipe with baking soda paste on walls if there's smell
 9. Dry everything completely with a clean cloth
 10. Replace dry shelves and drawers, replace food
 
 IMPORTANT:
-❌ No bleach inside a fridge — food contact surface
-❌ Don't replace wet shelves — causes mould
-✅ Green rag only for all food surfaces`,
+â No bleach inside a fridge â food contact surface
+â Don't replace wet shelves â causes mould
+â Green rag only for all food surfaces`,
     quiz: [
-      { q: "Which rag colour do you use inside the fridge and why?", a: "Green — the fridge is a food prep/food storage surface. Green rags are designated for kitchen food-contact surfaces. Never use red (restroom) or blue (general) inside a fridge." },
+      { q: "Which rag colour do you use inside the fridge and why?", a: "Green â the fridge is a food prep/food storage surface. Green rags are designated for kitchen food-contact surfaces. Never use red (restroom) or blue (general) inside a fridge." },
     ],
   },
 
-  // ── ADD-ON MODULE 12: Inside Cabinets ───────────────────────────────────────
+  // ââ ADD-ON MODULE 12: Inside Cabinets âââââââââââââââââââââââââââââââââââââââ
   {
     id: 12,
     title: "Add-On: Inside Cabinets Clean",
-    icon: "🗄️",
+    icon: "ðï¸",
     duration: "10 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: "#A78BFA",
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+kitchen+cabinets+inside+professionally",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Clean Inside Kitchen Cabinets",
     keyPoints: [
-      "Only done on EMPTY cabinets — this is a move-in/move-out add-on typically",
-      "Remove any shelf liners first — discard old ones, client may want new",
+      "Only done on EMPTY cabinets â this is a move-in/move-out add-on typically",
+      "Remove any shelf liners first â discard old ones, client may want new",
       "Green rag for kitchen cabinet interiors (food-contact zone)",
       "Damp wipe all shelves, walls, corners, and door interiors",
-      "Pay attention to hinges and corners — crumbs hide here",
+      "Pay attention to hinges and corners â crumbs hide here",
       "Dry completely before replacing anything",
-      "Check for signs of pests or mould — report to supervisor immediately if found",
+      "Check for signs of pests or mould â report to supervisor immediately if found",
       "Do NOT reorganise client belongings without permission",
     ],
     content: `Inside cabinets is most commonly requested on move-in/move-out jobs where the unit is empty. Occasionally recurring clients request it as a seasonal deep-clean add-on.
 
 WHEN IT APPLIES:
-• Move-In / Move-Out jobs — always offer this
-• Deep Clean add-on — client requests it seasonally
-• Only worth doing on EMPTY cabinets — don't move client belongings without permission
+â¢ Move-In / Move-Out jobs â always offer this
+â¢ Deep Clean add-on â client requests it seasonally
+â¢ Only worth doing on EMPTY cabinets â don't move client belongings without permission
 
 STEP BY STEP:
-1. Remove old shelf liners if present — discard unless client says otherwise
+1. Remove old shelf liners if present â discard unless client says otherwise
 2. Vacuum out crumbs and debris with a hand vacuum or brush
-3. Green damp rag — wipe all shelf surfaces top to bottom
+3. Green damp rag â wipe all shelf surfaces top to bottom
 4. Wipe interior walls of each cabinet, including the door interior
-5. Get into corners and around hinges — crumbs pack in here
+5. Get into corners and around hinges â crumbs pack in here
 6. Wipe drawer interiors if included
 7. Dry with a clean dry cloth before replacing anything
 
 FLAGS TO REPORT:
-• Any sign of pest activity (droppings, damage)
-• Visible mould or water damage
-• Do NOT attempt to clean mould yourself — this is a supervisor call`,
+â¢ Any sign of pest activity (droppings, damage)
+â¢ Visible mould or water damage
+â¢ Do NOT attempt to clean mould yourself â this is a supervisor call`,
     quiz: [
-      { q: "You open a cabinet and notice what looks like mouse droppings. What do you do?", a: "Stop. Do not touch or clean it. Take a photo. Contact your supervisor immediately. This is a health hazard that requires a specialist — you are not equipped or insured to handle this. Be calm and professional when informing the client." },
+      { q: "You open a cabinet and notice what looks like mouse droppings. What do you do?", a: "Stop. Do not touch or clean it. Take a photo. Contact your supervisor immediately. This is a health hazard that requires a specialist â you are not equipped or insured to handle this. Be calm and professional when informing the client." },
     ],
   },
 
-  // ── ADD-ON MODULE 13: Interior Windows ──────────────────────────────────────
+  // ââ ADD-ON MODULE 13: Interior Windows ââââââââââââââââââââââââââââââââââââââ
   {
     id: 13,
     title: "Add-On: Interior Window Wash",
-    icon: "🪟",
+    icon: "ðª",
     duration: "8 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: C.blue,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+windows+streak+free+microfiber+inside",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Clean Windows Streak-Free Every Time",
     keyPoints: [
       "Blue rag ONLY for all glass surfaces",
-      "The two-step method: damp side first → dry side buff — no exceptions",
+      "The two-step method: damp side first â dry side buff â no exceptions",
       "Spray lightly onto cloth, NOT directly onto window (spraying onto glass causes drips)",
-      "Wipe in S-pattern or Z-pattern — never circular (circular = streaks)",
-      "Get sill and frame too — dust settles here and undoes your glass work",
-      "This is priced per window — count and confirm with client before starting",
+      "Wipe in S-pattern or Z-pattern â never circular (circular = streaks)",
+      "Get sill and frame too â dust settles here and undoes your glass work",
+      "This is priced per window â count and confirm with client before starting",
       "Screens: remove and scrub gently with soft brush if client requests",
     ],
     content: `Interior window washing is one of the cleanest, most visible results you can deliver. Clients see it every day. Get it streak-free and they'll book it every time.
 
 THE TWO-STEP METHOD:
 1. Lightly spray glass cleaner or water onto a DAMP blue microfiber cloth (not the glass)
-2. Wipe glass in a consistent S or Z pattern — top to bottom, side to side
-3. Immediately follow with a DRY blue microfiber cloth — buff in same pattern
-4. Check from an angle with light — if you see streaks, the second wipe wasn't dry enough
+2. Wipe glass in a consistent S or Z pattern â top to bottom, side to side
+3. Immediately follow with a DRY blue microfiber cloth â buff in same pattern
+4. Check from an angle with light â if you see streaks, the second wipe wasn't dry enough
 
 WHY STREAKS HAPPEN:
-• Too much product — use less
-• Wiping in circles — wipe in straight lines
-• Not following up with a dry cloth
-• Using a cloth that has fabric softener residue — won't absorb
+â¢ Too much product â use less
+â¢ Wiping in circles â wipe in straight lines
+â¢ Not following up with a dry cloth
+â¢ Using a cloth that has fabric softener residue â won't absorb
 
 SILL AND FRAME:
-• Dry blue rag: dust the sill first
-• Damp cloth: wipe down sill and frame
-• Don't let water sit on wood windowsills — dry immediately
+â¢ Dry blue rag: dust the sill first
+â¢ Damp cloth: wipe down sill and frame
+â¢ Don't let water sit on wood windowsills â dry immediately
 
 COUNTING WINDOWS:
 This add-on is priced per window. Before starting, do a quick count and confirm with client. If number is higher than quoted, message your supervisor before proceeding.`,
@@ -7650,160 +7695,160 @@ This add-on is priced per window. Before starting, do a quick count and confirm 
     ],
   },
 
-  // ── ADD-ON MODULE 14: Baseboards ────────────────────────────────────────────
+  // ââ ADD-ON MODULE 14: Baseboards ââââââââââââââââââââââââââââââââââââââââââââ
   {
     id: 14,
     title: "Add-On: Baseboards & Detail Clean",
-    icon: "📐",
+    icon: "ð",
     duration: "8 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: C.gold,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+clean+baseboards+fast+efficiently+without+bending",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Clean Baseboards Fast Without Killing Your Back",
     keyPoints: [
-      "Blue rag for baseboards — general low-risk surface",
+      "Blue rag for baseboards â general low-risk surface",
       "Dry first: run dry blue microfiber along top of baseboard to collect dust",
       "Damp second: follow with damp blue cloth for sticky buildup and scuffs",
-      "Melissa Maker trick: wrap microfiber around a flat mop head — clean standing up",
-      "Work room by room, consistent direction — don't zig-zag",
-      "Pay attention to corners and behind doors — most partners miss these",
-      "White painted baseboards show everything — finish with dry buff to prevent watermarks",
+      "Melissa Maker trick: wrap microfiber around a flat mop head â clean standing up",
+      "Work room by room, consistent direction â don't zig-zag",
+      "Pay attention to corners and behind doors â most partners miss these",
+      "White painted baseboards show everything â finish with dry buff to prevent watermarks",
       "Deep Clean and Move-In/Out jobs: baseboards are always included in the scope",
     ],
-    content: `Baseboards are one of the most-noticed details clients check after a clean. Most people don't do them themselves — so when you do them well, it stands out.
+    content: `Baseboards are one of the most-noticed details clients check after a clean. Most people don't do them themselves â so when you do them well, it stands out.
 
 THE TECHNIQUE:
-1. Dry blue microfiber: run along the full length of baseboard top-edge first — this grabs the dust layer
-2. Check for sticky buildup or scuffs — these need a damp pass
-3. Damp blue cloth: wipe full baseboard — top, face, and bottom edge
+1. Dry blue microfiber: run along the full length of baseboard top-edge first â this grabs the dust layer
+2. Check for sticky buildup or scuffs â these need a damp pass
+3. Damp blue cloth: wipe full baseboard â top, face, and bottom edge
 4. White painted baseboards: follow with a dry cloth to prevent water marks
 5. Use a soft toothbrush for corner buildup (heavier detail jobs)
 
-MELISSA MAKER HACK — No bending required:
+MELISSA MAKER HACK â No bending required:
 Wrap a microfiber cloth around a flat mop head using an elastic band. Now you can clean the entire baseboard line standing up, room by room. Fast and no back pain.
 
 SCOPE:
-• Deep Clean: baseboards always included
-• Refresh / Full Home: spot-clean visible marks only
-• Move-In/Out: full baseboard scrub throughout
-• As a standalone add-on: full clean all rooms`,
+â¢ Deep Clean: baseboards always included
+â¢ Refresh / Full Home: spot-clean visible marks only
+â¢ Move-In/Out: full baseboard scrub throughout
+â¢ As a standalone add-on: full clean all rooms`,
     quiz: [
-      { q: "What's the right order — damp first or dry first on baseboards, and why?", a: "Dry first. A dry microfiber cloth has static that grabs loose dust off the top of the baseboard. If you go damp first, you're turning all that dust into muddy smears that take longer to clean. Dry captures, damp finishes." },
+      { q: "What's the right order â damp first or dry first on baseboards, and why?", a: "Dry first. A dry microfiber cloth has static that grabs loose dust off the top of the baseboard. If you go damp first, you're turning all that dust into muddy smears that take longer to clean. Dry captures, damp finishes." },
     ],
   },
 
-  // ── ADD-ON MODULE 15: Carpet Cleaning ───────────────────────────────────────
+  // ââ ADD-ON MODULE 15: Carpet Cleaning âââââââââââââââââââââââââââââââââââââââ
   {
     id: 15,
     title: "Add-On: Carpet Cleaning",
-    icon: "🛋️",
+    icon: "ðï¸",
     duration: "10 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: C.accent,
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+remove+carpet+stains+professionally+without+machine",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Remove Carpet Stains Like a Pro",
     keyPoints: [
-      "BLOT, never rub — rubbing spreads the stain and damages fibres",
-      "Work from the outside edge of the stain inward — never from the centre out",
-      "Cold water for protein stains (blood, food, pet) — hot water sets them permanently",
+      "BLOT, never rub â rubbing spreads the stain and damages fibres",
+      "Work from the outside edge of the stain inward â never from the centre out",
+      "Cold water for protein stains (blood, food, pet) â hot water sets them permanently",
       "Dish soap + cold water is your first line solution for most stains",
-      "For pet odour: enzyme cleaner only — regular cleaners mask smell, don't eliminate it",
-      "Always test any product on a hidden area first — carpet dye can lift",
-      "Do NOT over-wet carpet — excess moisture causes mould and subfloor damage",
-      "Heavy carpet steam: this requires professional equipment — quote accordingly",
+      "For pet odour: enzyme cleaner only â regular cleaners mask smell, don't eliminate it",
+      "Always test any product on a hidden area first â carpet dye can lift",
+      "Do NOT over-wet carpet â excess moisture causes mould and subfloor damage",
+      "Heavy carpet steam: this requires professional equipment â quote accordingly",
     ],
     content: `Carpet cleaning ranges from spot treatment to full steam, depending on what's booked. Know which one you're doing before you start.
 
 SPOT TREATMENT (included in most jobs):
-1. Blot fresh stains immediately — never rub
-2. Apply cold water to a clean cloth — blot from outside in
-3. Mix 1 tsp dish soap + 1 cup cold water — blot onto stain
-4. Blot clean water to rinse — repeat until stain lifts
+1. Blot fresh stains immediately â never rub
+2. Apply cold water to a clean cloth â blot from outside in
+3. Mix 1 tsp dish soap + 1 cup cold water â blot onto stain
+4. Blot clean water to rinse â repeat until stain lifts
 5. Place a clean towel over the area and press firmly to absorb moisture
 
 COMMON STAINS:
-• Coffee / Tea: dish soap + cold water → blot → rinse
-• Red wine: cold water blot immediately → club soda → blot dry
-• Pet urine: enzyme cleaner ONLY — do not use regular cleaner (masks, doesn't neutralise)
-• Blood: cold water only — NEVER hot (sets permanently)
-• Grease: dish soap — grease-cutting formula works here
+â¢ Coffee / Tea: dish soap + cold water â blot â rinse
+â¢ Red wine: cold water blot immediately â club soda â blot dry
+â¢ Pet urine: enzyme cleaner ONLY â do not use regular cleaner (masks, doesn't neutralise)
+â¢ Blood: cold water only â NEVER hot (sets permanently)
+â¢ Grease: dish soap â grease-cutting formula works here
 
 STEAM CLEANING ADD-ON:
-This requires a rented or owned carpet steam machine. Time: 45–90 min depending on area. Always let client know carpet will be damp for 2–4 hours — plan schedule accordingly.
+This requires a rented or owned carpet steam machine. Time: 45â90 min depending on area. Always let client know carpet will be damp for 2â4 hours â plan schedule accordingly.
 
 WHEN TO FLAG:
-• Any stains that won't lift after 2 attempts — photograph and note in job summary
-• Carpet that smells of mould or is visibly damaged — do not attempt`,
+â¢ Any stains that won't lift after 2 attempts â photograph and note in job summary
+â¢ Carpet that smells of mould or is visibly damaged â do not attempt`,
     quiz: [
-      { q: "A client has a fresh red wine spill on white carpet. What do you do first?", a: "Blot immediately with a clean white cloth — work from the outside of the stain inward. Use cold water. Never rub. Club soda can help lift the remaining colour. Do NOT use hot water or scrub. Speed and blotting are everything with red wine." },
+      { q: "A client has a fresh red wine spill on white carpet. What do you do first?", a: "Blot immediately with a clean white cloth â work from the outside of the stain inward. Use cold water. Never rub. Club soda can help lift the remaining colour. Do NOT use hot water or scrub. Speed and blotting are everything with red wine." },
     ],
   },
 
-  // ── ADD-ON MODULE 16: Pet Hair & Heavy Detail ────────────────────────────────
+  // ââ ADD-ON MODULE 16: Pet Hair & Heavy Detail ââââââââââââââââââââââââââââââââ
   {
     id: 16,
     title: "Add-On: Pet Hair & Heavy Detail",
-    icon: "🐾",
+    icon: "ð¾",
     duration: "10 min read",
     category: "Add-Ons",
     badge: "Paid Add-On",
     badgeColor: "#FF8C42",
     videoUrl: "https://www.youtube.com/results?search_query=Clean+My+Space+how+to+remove+pet+hair+furniture+carpet+efficiently",
-    videoChannel: "Clean My Space — Melissa Maker",
+    videoChannel: "Clean My Space â Melissa Maker",
     videoTitle: "How to Remove Pet Hair from Everything",
     keyPoints: [
-      "Vacuum first — always — before any wet cleaning on pet hair jobs",
-      "Rubber gloves trick: dampen rubber gloves, rub upholstery — hair balls up for easy removal",
+      "Vacuum first â always â before any wet cleaning on pet hair jobs",
+      "Rubber gloves trick: dampen rubber gloves, rub upholstery â hair balls up for easy removal",
       "Squeegee on carpet: drags embedded pet hair to surface better than vacuum alone",
       "Lint roller for upholstery surfaces and cushion edges",
       "Pet hair in corners: vacuum crevice tool, then damp cloth to collect remainder",
-      "Enzyme cleaner for any pet accident odours — regular cleaner doesn't neutralise",
+      "Enzyme cleaner for any pet accident odours â regular cleaner doesn't neutralise",
       "Inform supervisor and note in job summary if pet hair is extreme (extra time needed)",
       "Always wash your own rags separately after a pet hair job",
     ],
-    content: `Pet hair and heavy detail is its own add-on because it adds significant time to a job. A home with 2 shedding dogs can add 45–90 minutes to a standard clean. Always flag scope before starting.
+    content: `Pet hair and heavy detail is its own add-on because it adds significant time to a job. A home with 2 shedding dogs can add 45â90 minutes to a standard clean. Always flag scope before starting.
 
 TOOLS FOR PET HAIR:
-• Vacuum with pet attachment: first pass everywhere
-• Rubber gloves (damp): rub upholstery in one direction — hair balls up
-• Lint roller: cushion edges, throw pillows, fabric surfaces
-• Rubber squeegee on carpet: drag across carpet surface — lifts embedded hair
-• Damp microfiber: wipe hard surfaces (shelving, baseboards) — picks up fine hair
+â¢ Vacuum with pet attachment: first pass everywhere
+â¢ Rubber gloves (damp): rub upholstery in one direction â hair balls up
+â¢ Lint roller: cushion edges, throw pillows, fabric surfaces
+â¢ Rubber squeegee on carpet: drag across carpet surface â lifts embedded hair
+â¢ Damp microfiber: wipe hard surfaces (shelving, baseboards) â picks up fine hair
 
 FURNITURE SEQUENCE:
 1. Vacuum all cushions with pet attachment
-2. Remove cushions — vacuum underneath and the seat frame
+2. Remove cushions â vacuum underneath and the seat frame
 3. Damp rubber glove pass on fabric surfaces
 4. Lint roll edges and seams
 5. Replace cushions neatly
 
 PET ODOUR:
-• Enzyme cleaner only for spots of pet urine or accident — spray, let dwell 5 min, blot
-• Baking soda on carpet overnight (if pre-approved) removes general pet odour
-• Never use air freshener as a substitute — clients with allergies react to fragrance
+â¢ Enzyme cleaner only for spots of pet urine or accident â spray, let dwell 5 min, blot
+â¢ Baking soda on carpet overnight (if pre-approved) removes general pet odour
+â¢ Never use air freshener as a substitute â clients with allergies react to fragrance
 
 SCOPE FLAG:
-If you arrive and pet hair is extreme (multiple animals, long-haired breeds, months of buildup) — photograph and contact supervisor before starting. Extra time = extra charge.`,
+If you arrive and pet hair is extreme (multiple animals, long-haired breeds, months of buildup) â photograph and contact supervisor before starting. Extra time = extra charge.`,
     quiz: [
-      { q: "You're vacuuming a sofa and pet hair just keeps moving around instead of being picked up. What technique helps?", a: "Dampen rubber gloves and rub the fabric in one direction — the friction and static pull the hair into clumps you can then pick up easily. A rubber squeegee also works on fabric surfaces. Vacuum after to collect the clumps." },
+      { q: "You're vacuuming a sofa and pet hair just keeps moving around instead of being picked up. What technique helps?", a: "Dampen rubber gloves and rub the fabric in one direction â the friction and static pull the hair into clumps you can then pick up easily. A rubber squeegee also works on fabric surfaces. Vacuum after to collect the clumps." },
     ],
   },
 ];
 
 
-// ─── MODULE VIEWER ────────────────────────────────────────────────────────────
+// âââ MODULE VIEWER ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModule, quizAnswerVisible, setQuizAnswerVisible }) {
   const [tab, setTab] = useState("content");
   const tabs = [
-    { id:"content",  label:"📖 Content" },
-    ...(mod.ragModule    ? [{ id:"rag",    label:"🎨 RAG Chart" }]      : []),
-    ...(mod.wetDryGuide  ? [{ id:"wetdry", label:"💧 Wet/Dry Guide" }]  : []),
-    ...(mod.roomGuide    ? [{ id:"rooms",  label:"🏡 Room Guide" }]     : []),
-    ...(mod.quiz         ? [{ id:"quiz",   label:"✏️ Quiz" }]           : []),
+    { id:"content",  label:"ð Content" },
+    ...(mod.ragModule    ? [{ id:"rag",    label:"ð¨ RAG Chart" }]      : []),
+    ...(mod.wetDryGuide  ? [{ id:"wetdry", label:"ð§ Wet/Dry Guide" }]  : []),
+    ...(mod.roomGuide    ? [{ id:"rooms",  label:"ð¡ Room Guide" }]     : []),
+    ...(mod.quiz         ? [{ id:"quiz",   label:"âï¸ Quiz" }]           : []),
   ];
 
   return (
@@ -7812,18 +7857,18 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
         {/* Badges */}
         <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:14, alignItems:"center" }}>
           <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${mod.badgeColor}22`, color:mod.badgeColor, border:`1px solid ${mod.badgeColor}44` }}>{mod.badge}</span>
-          <span style={S.badge("blue")}>📁 {mod.category}</span>
-          <span style={S.badge("gold")}>⏱ {mod.duration}</span>
+          <span style={S.badge("blue")}>ð {mod.category}</span>
+          <span style={S.badge("gold")}>â± {mod.duration}</span>
         </div>
 
         {/* Video section */}
         <div style={{ background:C.surface, borderRadius:12, overflow:"hidden", marginBottom:16 }}>
           <div style={{ background:"linear-gradient(135deg,#0A0F1E,#1A2235)", padding:18, display:"flex", alignItems:"center", gap:14 }}>
-            <div style={{ width:48, height:48, borderRadius:12, background:"linear-gradient(135deg,#FF4757,#FF6B81)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>▶</div>
+            <div style={{ width:48, height:48, borderRadius:12, background:"linear-gradient(135deg,#FF4757,#FF6B81)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>â¶</div>
             <div style={{ flex:1 }}>
               <div style={{ fontWeight:700, fontSize:14, marginBottom:3 }}>{mod.videoTitle}</div>
-              <div style={{ fontSize:12, color:C.accent, marginBottom:2 }}>📺 {mod.videoChannel}</div>
-              <div style={{ fontSize:11, color:C.dim }}>Opens a real YouTube search for this exact topic — pick the video that best fits your team.</div>
+              <div style={{ fontSize:12, color:C.accent, marginBottom:2 }}>ðº {mod.videoChannel}</div>
+              <div style={{ fontSize:11, color:C.dim }}>Opens a real YouTube search for this exact topic â pick the video that best fits your team.</div>
             </div>
             <a
               href={mod.videoUrl}
@@ -7831,21 +7876,21 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
               rel="noopener noreferrer"
               style={{ ...S.btn("primary"), textDecoration:"none", fontSize:12, padding:"7px 14px", flexShrink:0 }}
             >
-              🔍 Find Videos
+              ð Find Videos
             </a>
           </div>
           <div style={{ padding:"8px 14px", background:C.bg, fontSize:11, color:C.dim, display:"flex", alignItems:"center", gap:6 }}>
-            <span style={{ color:C.gold }}>💡</span>
+            <span style={{ color:C.gold }}>ð¡</span>
             <span>Record your own training video and replace the <code style={{color:C.accent}}>videoUrl</code> in TRAINING_MODULES with your YouTube link.</span>
           </div>
         </div>
 
         {/* Key points */}
         <div style={{ background:`${mod.badgeColor}11`, border:`1px solid ${mod.badgeColor}33`, borderRadius:10, padding:14, marginBottom:14 }}>
-          <div style={{ fontWeight:700, fontSize:13, color:mod.badgeColor, marginBottom:8 }}>⚡ Key Points</div>
+          <div style={{ fontWeight:700, fontSize:13, color:mod.badgeColor, marginBottom:8 }}>â¡ Key Points</div>
           {mod.keyPoints.map((pt, i) => (
             <div key={i} style={{ display:"flex", gap:8, fontSize:13, padding:"3px 0", color:C.text }}>
-              <span style={{ color:mod.badgeColor, flexShrink:0 }}>✓</span>{pt}
+              <span style={{ color:mod.badgeColor, flexShrink:0 }}>â</span>{pt}
             </div>
           ))}
         </div>
@@ -7865,7 +7910,7 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
         {/* RAG Chart */}
         {tab === "rag" && (
           <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-            <div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>Each color stays in its designated zone — no exceptions, even if a rag looks clean.</div>
+            <div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>Each color stays in its designated zone â no exceptions, even if a rag looks clean.</div>
             {RAG_COLORS.map(rag => (
               <div key={rag.name} style={{ borderRadius:12, overflow:"hidden", border:`2px solid ${rag.color}44` }}>
                 <div style={{ background:rag.bgColor, padding:"12px 16px", display:"flex", alignItems:"center", gap:12 }}>
@@ -7877,12 +7922,12 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", background:C.card }}>
                   <div style={{ padding:"10px 14px", borderRight:`1px solid ${C.border}` }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:C.accent, textTransform:"uppercase", marginBottom:5 }}>✅ Use For</div>
-                    {rag.uses.map(u => <div key={u} style={{ fontSize:12, color:C.text, padding:"2px 0" }}>• {u}</div>)}
+                    <div style={{ fontSize:11, fontWeight:700, color:C.accent, textTransform:"uppercase", marginBottom:5 }}>â Use For</div>
+                    {rag.uses.map(u => <div key={u} style={{ fontSize:12, color:C.text, padding:"2px 0" }}>â¢ {u}</div>)}
                   </div>
                   <div style={{ padding:"10px 14px" }}>
-                    <div style={{ fontSize:11, fontWeight:700, color:C.red, textTransform:"uppercase", marginBottom:5 }}>🚫 Never Use For</div>
-                    {rag.never.map(n => <div key={n} style={{ fontSize:12, color:C.muted, padding:"2px 0" }}>• {n}</div>)}
+                    <div style={{ fontSize:11, fontWeight:700, color:C.red, textTransform:"uppercase", marginBottom:5 }}>ð« Never Use For</div>
+                    {rag.never.map(n => <div key={n} style={{ fontSize:12, color:C.muted, padding:"2px 0" }}>â¢ {n}</div>)}
                   </div>
                 </div>
               </div>
@@ -7944,10 +7989,10 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
             <div style={{ fontSize:13, color:C.muted, marginBottom:4 }}>Test your knowledge before moving on.</div>
             {mod.quiz.map((q, i) => (
               <div key={i} style={{ ...S.cardSm, borderLeft:`4px solid ${C.gold}` }}>
-                <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>❓ {q.q}</div>
+                <div style={{ fontWeight:700, fontSize:14, marginBottom:10 }}>â {q.q}</div>
                 {quizAnswerVisible[`${mod.id}-${i}`] ? (
                   <div style={{ background:C.accentDim, borderRadius:8, padding:"10px 14px", fontSize:13, color:C.text, lineHeight:1.6 }}>
-                    ✅ <strong>Answer:</strong> {q.a}
+                    â <strong>Answer:</strong> {q.a}
                   </div>
                 ) : (
                   <button style={S.btn("ghost")} onClick={() => setQuizAnswerVisible(v => ({ ...v, [`${mod.id}-${i}`]: true }))}>
@@ -7963,7 +8008,7 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
         {partnerId && (
           <div style={{ marginTop:18, paddingTop:14, borderTop:`1px solid ${C.border}` }}>
             <button style={{ ...S.btn("primary"), width:"100%" }} onClick={() => completeModule(partnerId, mod.id)}>
-              ✅ Mark Complete — {partners.find(p => p.id === partnerId)?.name}
+              â Mark Complete â {partners.find(p => p.id === partnerId)?.name}
             </button>
           </div>
         )}
@@ -7972,17 +8017,17 @@ function ModuleViewer({ mod, partnerId, partners, completeModule, setActiveModul
   );
 }
 
-// ─── ANIME GUIDE ─────────────────────────────────────────────────────────────
+// âââ ANIME GUIDE âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const ANIME_GUIDE_TOPICS = [
-  { id:"start",   label:"🌸 Getting Started",      prompt:"Explain how to log into the Have Us Clean partner portal and what a new partner sees when they first open the app. Be welcoming and clear." },
-  { id:"jobs",    label:"📋 Your Jobs Tab",         prompt:"Explain how a partner finds their assigned jobs in the Have Us Clean app, how to read the job details, and what to check before heading to a job." },
-  { id:"gps",     label:"📍 GPS Check-In",          prompt:"Walk a partner through exactly how to GPS check-in when they arrive at a job and GPS check-out when they leave, and why it matters." },
-  { id:"photos",  label:"📸 Before & After Photos", prompt:"Explain the importance of taking before and after photos on every job, how to do it properly in the app, and what makes a good photo." },
-  { id:"upsells", label:"💰 Upsells & Add-Ons",    prompt:"Explain how to identify and offer upsells to clients during a job — things like inside oven, fridge, baseboards — and how to add them in the app without being pushy." },
-  { id:"complete",label:"✅ Completing a Job",      prompt:"Walk a partner through the full end-of-job process: final check, summary note, checkout, and what happens after the job is marked complete." },
-  { id:"pay",     label:"💵 Your Pay",              prompt:"Explain how partner pay works at Have Us Clean — 65% of each job's client price — how to view pending and earned pay in the app, and when pay is processed." },
-  { id:"rag",     label:"🎨 RAG Colour System",     prompt:"Explain the RAG (Red/Yellow/Green/Blue) microfibre colour-coding system used at Have Us Clean in a fun, memorable way a new partner won't forget." },
-  { id:"issues",  label:"🆘 Handling Problems",     prompt:"Explain what a partner should do if something goes wrong on a job — broken item, unhappy client, locked out, or running late — step by step using the Have Us Clean app." },
+  { id:"start",   label:"ð¸ Getting Started",      prompt:"Explain how to log into the Have Us Clean partner portal and what a new partner sees when they first open the app. Be welcoming and clear." },
+  { id:"jobs",    label:"ð Your Jobs Tab",         prompt:"Explain how a partner finds their assigned jobs in the Have Us Clean app, how to read the job details, and what to check before heading to a job." },
+  { id:"gps",     label:"ð GPS Check-In",          prompt:"Walk a partner through exactly how to GPS check-in when they arrive at a job and GPS check-out when they leave, and why it matters." },
+  { id:"photos",  label:"ð¸ Before & After Photos", prompt:"Explain the importance of taking before and after photos on every job, how to do it properly in the app, and what makes a good photo." },
+  { id:"upsells", label:"ð° Upsells & Add-Ons",    prompt:"Explain how to identify and offer upsells to clients during a job â things like inside oven, fridge, baseboards â and how to add them in the app without being pushy." },
+  { id:"complete",label:"â Completing a Job",      prompt:"Walk a partner through the full end-of-job process: final check, summary note, checkout, and what happens after the job is marked complete." },
+  { id:"pay",     label:"ðµ Your Pay",              prompt:"Explain how partner pay works at Have Us Clean â 65% of each job's client price â how to view pending and earned pay in the app, and when pay is processed." },
+  { id:"rag",     label:"ð¨ RAG Colour System",     prompt:"Explain the RAG (Red/Yellow/Green/Blue) microfibre colour-coding system used at Have Us Clean in a fun, memorable way a new partner won't forget." },
+  { id:"issues",  label:"ð Handling Problems",     prompt:"Explain what a partner should do if something goes wrong on a job â broken item, unhappy client, locked out, or running late â step by step using the Have Us Clean app." },
 ];
 
 function AnimeGuide() {
@@ -7996,11 +8041,11 @@ function AnimeGuide() {
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior:"smooth" }); }, [response, loading]);
 
-  const SYSTEM = `You are Yuki, a friendly anime-style AI training guide for Have Us Clean — a professional cleaning company in Toronto, Canada and Arizona, USA.
+  const SYSTEM = `You are Yuki, a friendly anime-style AI training guide for Have Us Clean â a professional cleaning company in Toronto, Canada and Arizona, USA.
 Your job is to help new cleaning partners learn the Have Us Clean app and cleaning procedures.
 Personality: warm, encouraging, slightly anime-flavoured (use "Yosh!", "Ganbatte!" occasionally), clear numbered steps, emojis to aid scanning.
-Always reinforce: RAG colour system (🔴 red=toilets only, 🟡 yellow=sinks/mirrors, 🟢 green=kitchen, 🔵 blue=general/glass), partner pay = 65% of client price.
-Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning is skilled work.`;
+Always reinforce: RAG colour system (ð´ red=toilets only, ð¡ yellow=sinks/mirrors, ð¢ green=kitchen, ðµ blue=general/glass), partner pay = 65% of client price.
+Responses: 150â250 words, clear steps or bullets. Be encouraging â cleaning is skilled work.`;
 
   const ask = async (prompt, isFollowUp = false) => {
     setLoading(true); setExpression("loading"); setResponse("");
@@ -8012,12 +8057,12 @@ Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning 
         body: JSON.stringify({ model:"claude-sonnet-4-20250514", max_tokens:600, system:SYSTEM, messages:msgs }),
       });
       const data = await res.json();
-      const text = data.content?.[0]?.text || "No response — check your API connection.";
+      const text = data.content?.[0]?.text || "No response â check your API connection.";
       setResponse(text); setExpression("talking");
       setHistory([...msgs, { role:"assistant", content:text }]);
     } catch {
       setExpression("error");
-      setResponse("Connection error. Add ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables.");
+      setResponse("Connection error. Add ANTHROPIC_API_KEY in Vercel â Settings â Environment Variables.");
     }
     setLoading(false);
   };
@@ -8027,13 +8072,13 @@ Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning 
     const q = followUp; setFollowUp(""); ask(q, true);
   };
 
-  const yukiEmoji = loading ? "💭" : expression === "error" ? "😅" : expression === "talking" ? "✨" : "🌸";
-  const idleBubble = "Hi! I'm Yuki, your Have Us Clean training guide! 🌸\nTap any topic below and I'll walk you through it step by step!\nYosh — let's learn! ✨";
+  const yukiEmoji = loading ? "ð­" : expression === "error" ? "ð" : expression === "talking" ? "â¨" : "ð¸";
+  const idleBubble = "Hi! I'm Yuki, your Have Us Clean training guide! ð¸\nTap any topic below and I'll walk you through it step by step!\nYosh â let's learn! â¨";
 
   return (
     <div>
       <div style={{ textAlign:"center", marginBottom:20 }}>
-        <div style={{ fontWeight:800, fontSize:22, background:"linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>🌸 Yuki — AI App Guide</div>
+        <div style={{ fontWeight:800, fontSize:22, background:"linear-gradient(135deg,#A78BFA,#7C3AED)", WebkitBackgroundClip:"text", WebkitTextFillColor:"transparent" }}>ð¸ Yuki â AI App Guide</div>
         <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>Your personal Have Us Clean training companion</div>
       </div>
 
@@ -8048,12 +8093,12 @@ Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning 
               {yukiEmoji}
             </div>
             <div style={{ marginTop:6, fontWeight:800, fontSize:13, color:"#A78BFA" }}>Yuki</div>
-            <div style={{ fontSize:10, color:"#7C3AED99" }}>AI Guide ✨</div>
+            <div style={{ fontSize:10, color:"#7C3AED99" }}>AI Guide â¨</div>
           </div>
           {/* Bubble */}
           <div style={{ flex:1, background:"#7C3AED15", borderRadius:16, border:`1px solid #7C3AED44`, padding:"14px 16px", minHeight:76 }}>
             {loading
-              ? <div style={{ color:"#A78BFA", fontSize:14, display:"flex", alignItems:"center", gap:8 }}>💭 <span>Thinking...</span></div>
+              ? <div style={{ color:"#A78BFA", fontSize:14, display:"flex", alignItems:"center", gap:8 }}>ð­ <span>Thinking...</span></div>
               : <div style={{ fontSize:13, color:C.text, lineHeight:1.75, whiteSpace:"pre-wrap" }}>{response || idleBubble}</div>
             }
           </div>
@@ -8087,23 +8132,23 @@ Responses: 150–250 words, clear steps or bullets. Be encouraging — cleaning 
               placeholder="e.g. What if the client isn't home when I arrive?"
               value={followUp} onChange={e => setFollowUp(e.target.value)}
               onKeyDown={e => e.key==="Enter" && handleFollowUp()} disabled={loading} />
-            <button style={{ ...S.btn("primary"), background:"#7C3AED", flexShrink:0 }} onClick={handleFollowUp} disabled={loading || !followUp.trim()}>Ask ✨</button>
+            <button style={{ ...S.btn("primary"), background:"#7C3AED", flexShrink:0 }} onClick={handleFollowUp} disabled={loading || !followUp.trim()}>Ask â¨</button>
           </div>
           {history.length >= 4 && (
-            <button style={{ ...S.btn("ghost"), fontSize:12, marginTop:10 }} onClick={() => { setHistory([]); setResponse(""); setExpression("idle"); setSelectedTopic(null); }}>🔄 Start fresh</button>
+            <button style={{ ...S.btn("ghost"), fontSize:12, marginTop:10 }} onClick={() => { setHistory([]); setResponse(""); setExpression("idle"); setSelectedTopic(null); }}>ð Start fresh</button>
           )}
         </div>
       )}
 
       <div style={{ marginTop:14, fontSize:11, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
-        Yuki is powered by Claude AI · Requires ANTHROPIC_API_KEY in Vercel settings<br/>
+        Yuki is powered by Claude AI Â· Requires ANTHROPIC_API_KEY in Vercel settings<br/>
         Yuki knows the Have Us Clean app, RAG system, pay structure, and all service procedures
       </div>
     </div>
   );
 }
 
-// ─── ONBOARDING COMPONENT ─────────────────────────────────────────────────────
+// âââ ONBOARDING COMPONENT âââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingProgress }) {
   const completedModules    = onboardingProgress;
   const setCompletedModules = setOnboardingProgress;
@@ -8141,13 +8186,13 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
   return (
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
-        <div style={S.h2}>🎓 Partner Onboarding & Training</div>
+        <div style={S.h2}>ð Partner Onboarding & Training</div>
         <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-          <button style={S.navBtn(!selectedPartner && !showAnimeGuide)} onClick={() => { setSelectedPartner(null); setShowAnimeGuide(false); }}>📚 Training Library</button>
-          <button style={{ ...S.navBtn(showAnimeGuide), background: showAnimeGuide ? "#7C3AED22" : "transparent", color: showAnimeGuide ? "#A78BFA" : C.muted, borderBottom: showAnimeGuide ? "2px solid #A78BFA" : "2px solid transparent" }} onClick={() => { setShowAnimeGuide(true); setSelectedPartner(null); }}>🌸 AI App Guide</button>
+          <button style={S.navBtn(!selectedPartner && !showAnimeGuide)} onClick={() => { setSelectedPartner(null); setShowAnimeGuide(false); }}>ð Training Library</button>
+          <button style={{ ...S.navBtn(showAnimeGuide), background: showAnimeGuide ? "#7C3AED22" : "transparent", color: showAnimeGuide ? "#A78BFA" : C.muted, borderBottom: showAnimeGuide ? "2px solid #A78BFA" : "2px solid transparent" }} onClick={() => { setShowAnimeGuide(true); setSelectedPartner(null); }}>ð¸ AI App Guide</button>
           {partners.map(p => (
             <button key={p.id} style={S.navBtn(selectedPartner?.id === p.id)} onClick={() => { setSelectedPartner(p); setShowAnimeGuide(false); }}>
-              {p.avatar} {p.name.split(" ")[0]} {p.onboarded ? "✅" : ""}
+              {p.avatar} {p.name.split(" ")[0]} {p.onboarded ? "â" : ""}
             </button>
           ))}
         </div>
@@ -8155,8 +8200,8 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
 
       {onboardingPartners.length > 0 && !showAnimeGuide && (
         <div style={{ background:C.goldDim, border:`1px solid ${C.gold}44`, borderRadius:12, padding:"12px 18px", marginBottom:18 }}>
-          <div style={{ fontWeight:700, color:C.gold, marginBottom:2 }}>🔔 {onboardingPartners.length} partner(s) awaiting onboarding</div>
-          <div style={{ fontSize:13, color:C.muted }}>{onboardingPartners.map(p => p.name).join(", ")} — click their name above to begin</div>
+          <div style={{ fontWeight:700, color:C.gold, marginBottom:2 }}>ð {onboardingPartners.length} partner(s) awaiting onboarding</div>
+          <div style={{ fontSize:13, color:C.muted }}>{onboardingPartners.map(p => p.name).join(", ")} â click their name above to begin</div>
         </div>
       )}
 
@@ -8166,15 +8211,15 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
       {!showAnimeGuide && (
       <div>
       <div style={S.grid4}>
-        <StatCard label="Total Modules" value={TRAINING_MODULES.length} icon="📚" color={C.blue} />
-        <StatCard label="Partners Onboarded" value={partners.filter(p=>p.onboarded).length} icon="✅" color={C.accent} />
-        <StatCard label="In Training" value={partners.filter(p=>!p.onboarded).length} icon="🎓" color={C.gold} />
-        <StatCard label="RAG Colors" value="4" icon="🎨" color={C.red} sub="Red/Yellow/Green/Blue" />
+        <StatCard label="Total Modules" value={TRAINING_MODULES.length} icon="ð" color={C.blue} />
+        <StatCard label="Partners Onboarded" value={partners.filter(p=>p.onboarded).length} icon="â" color={C.accent} />
+        <StatCard label="In Training" value={partners.filter(p=>!p.onboarded).length} icon="ð" color={C.gold} />
+        <StatCard label="RAG Colors" value="4" icon="ð¨" color={C.red} sub="Red/Yellow/Green/Blue" />
       </div>
 
       <div style={S.divider} />
 
-      {/* ── LIBRARY VIEW ── */}
+      {/* ââ LIBRARY VIEW ââ */}
       {!selectedPartner && (
         <div>
           {/* Category filter */}
@@ -8186,7 +8231,7 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
 
           {/* RAG Quick Reference Card */}
           <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
-            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>🎨 Color RAG System — Quick Reference</div>
+            <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>ð¨ Color RAG System â Quick Reference</div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))", gap:10 }}>
               {RAG_COLORS.map(rag => (
                 <div key={rag.name} style={{ background:rag.bgColor, borderRadius:10, padding:"12px 14px", border:`1px solid ${rag.color}44`, textAlign:"center" }}>
@@ -8208,13 +8253,13 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
                       <div style={{ fontWeight:800, fontSize:15 }}>{mod.title}</div>
                       <span style={{ padding:"2px 9px", borderRadius:20, fontSize:10, fontWeight:800, background:`${mod.badgeColor}22`, color:mod.badgeColor }}>{mod.badge}</span>
                     </div>
-                    <div style={{ fontSize:12, color:C.muted }}>📁 {mod.category} · ⏱ {mod.duration}
-                      {mod.videoTitle && <span style={{ color:C.red, marginLeft:8 }}>▶ Video included</span>}
-                      {mod.ragModule && <span style={{ color:C.accent, marginLeft:8 }}>🎨 RAG chart</span>}
-                      {mod.wetDryGuide && <span style={{ color:C.blue, marginLeft:8 }}>💧 Wet/Dry guide</span>}
+                    <div style={{ fontSize:12, color:C.muted }}>ð {mod.category} Â· â± {mod.duration}
+                      {mod.videoTitle && <span style={{ color:C.red, marginLeft:8 }}>â¶ Video included</span>}
+                      {mod.ragModule && <span style={{ color:C.accent, marginLeft:8 }}>ð¨ RAG chart</span>}
+                      {mod.wetDryGuide && <span style={{ color:C.blue, marginLeft:8 }}>ð§ Wet/Dry guide</span>}
                     </div>
                   </div>
-                  <button style={S.btn("ghost")} onClick={e => { e.stopPropagation(); setActiveModule({ ...mod, partnerId: null }); }}>View →</button>
+                  <button style={S.btn("ghost")} onClick={e => { e.stopPropagation(); setActiveModule({ ...mod, partnerId: null }); }}>View â</button>
                 </div>
               </div>
             ))}
@@ -8222,7 +8267,7 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
         </div>
       )}
 
-      {/* ── PARTNER PROGRESS VIEW ── */}
+      {/* ââ PARTNER PROGRESS VIEW ââ */}
       {selectedPartner && (
         <div>
           <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
@@ -8230,9 +8275,9 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
               <div style={S.avatar(avatarColors[selectedPartner.id % 4])}>{selectedPartner.avatar}</div>
               <div style={{ flex:1 }}>
                 <div style={{ fontWeight:800, fontSize:18 }}>{selectedPartner.name}</div>
-                <div style={{ fontSize:13, color:C.muted }}>{selectedPartner.email} · {selectedPartner.phone}</div>
+                <div style={{ fontSize:13, color:C.muted }}>{selectedPartner.email} Â· {selectedPartner.phone}</div>
               </div>
-              <span style={S.badge(selectedPartner.onboarded?"green":"gold")}>{selectedPartner.onboarded?"✅ Fully Onboarded":"⏳ Training In Progress"}</span>
+              <span style={S.badge(selectedPartner.onboarded?"green":"gold")}>{selectedPartner.onboarded?"â Fully Onboarded":"â³ Training In Progress"}</span>
             </div>
             {/* Progress bar */}
             <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -8243,7 +8288,7 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
             </div>
             <div style={{ fontSize:12, color:C.muted, marginTop:6 }}>
               {(completedModules[selectedPartner.id]||[]).length} of {TRAINING_MODULES.length} modules complete
-              {selectedPartner.onboarded ? " — All training done! 🎉" : " — complete all modules to activate partner"}
+              {selectedPartner.onboarded ? " â All training done! ð" : " â complete all modules to activate partner"}
             </div>
           </div>
 
@@ -8253,15 +8298,15 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
               return (
                 <div key={mod.id} style={{ ...S.card, borderLeft:`4px solid ${done?C.accent:C.border}`, opacity:done?0.75:1, transition:"opacity 0.2s" }}>
                   <div style={{ display:"flex", alignItems:"center", gap:12, flexWrap:"wrap" }}>
-                    <div style={{ fontSize:26, flexShrink:0 }}>{done?"✅":mod.icon}</div>
+                    <div style={{ fontSize:26, flexShrink:0 }}>{done?"â":mod.icon}</div>
                     <div style={{ flex:1 }}>
                       <div style={{ fontWeight:700, fontSize:14 }}>{mod.title}</div>
-                      <div style={{ fontSize:12, color:C.muted }}>⏱ {mod.duration} · 📁 {mod.category}</div>
+                      <div style={{ fontSize:12, color:C.muted }}>â± {mod.duration} Â· ð {mod.category}</div>
                     </div>
                     <div style={{ display:"flex", gap:8 }}>
                       <span style={{ padding:"2px 9px", borderRadius:20, fontSize:10, fontWeight:800, background:`${mod.badgeColor}22`, color:mod.badgeColor }}>{mod.badge}</span>
                       <button style={S.btn(done?"ghost":"sm")} onClick={() => setActiveModule({ ...mod, partnerId: selectedPartner.id })}>
-                        {done?"Review":"Start →"}
+                        {done?"Review":"Start â"}
                       </button>
                     </div>
                   </div>
@@ -8292,7 +8337,7 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
 
 
 
-// ─── GPS TRACKING ────────────────────────────────────────────────────────────
+// âââ GPS TRACKING ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function GPSTracking({ jobs, setJobs, partners }) {
   const [locating, setLocating] = useState(false);
   const [myLocation, setMyLocation] = useState(null);
@@ -8366,9 +8411,9 @@ function GPSTracking({ jobs, setJobs, partners }) {
       <div style={styles.h2}>GPS Check-In / Tracking</div>
 
       <div style={styles.grid3}>
-        <StatCard label="Currently On-Site" value={activeNow} icon="📍" color={C.accent} sub="partners working now" />
-        <StatCard label="Checked In Today" value={checkedInCount} icon="🟢" color={C.blue} sub="total check-ins" />
-        <StatCard label="Jobs Wrapped Up" value={checkedOutCount} icon="🏁" color={C.gold} sub="checked out" />
+        <StatCard label="Currently On-Site" value={activeNow} icon="ð" color={C.accent} sub="partners working now" />
+        <StatCard label="Checked In Today" value={checkedInCount} icon="ð¢" color={C.blue} sub="total check-ins" />
+        <StatCard label="Jobs Wrapped Up" value={checkedOutCount} icon="ð" color={C.gold} sub="checked out" />
       </div>
 
       <div style={styles.divider} />
@@ -8398,7 +8443,7 @@ function GPSTracking({ jobs, setJobs, partners }) {
             const pos = positions[idx % positions.length];
             const isActive = job.checkIn && !job.checkOut;
             return (
-              <div key={job.id} style={{ position: "absolute", ...pos, transform: "translate(-50%,-100%)", zIndex: 10, cursor: "pointer" }} title={`${partner?.name} — ${job.client}`}>
+              <div key={job.id} style={{ position: "absolute", ...pos, transform: "translate(-50%,-100%)", zIndex: 10, cursor: "pointer" }} title={`${partner?.name} â ${job.client}`}>
                 {/* Pulse ring */}
                 {isActive && (
                   <div style={{
@@ -8434,7 +8479,7 @@ function GPSTracking({ jobs, setJobs, partners }) {
           })}
 
           {/* Compass */}
-          <div style={{ position: "absolute", top: 12, right: 14, fontSize: 20, opacity: 0.4 }}>🧭</div>
+          <div style={{ position: "absolute", top: 12, right: 14, fontSize: 20, opacity: 0.4 }}>ð§­</div>
 
           {/* Legend */}
           <div style={{ position: "absolute", bottom: 12, left: 14, display: "flex", gap: 12 }}>
@@ -8462,11 +8507,11 @@ function GPSTracking({ jobs, setJobs, partners }) {
                 <div style={styles.avatar(avatarColors[job.partnerId % 4])}>{partner?.avatar}</div>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 700, fontSize: 14 }}>{partner?.name}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{job.client} · checked in {job.checkIn}</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{job.client} Â· checked in {job.checkIn}</div>
                 </div>
                 {job.checkInCoords && (
                   <button style={styles.btn("ghost")} onClick={() => openMaps(job.checkInCoords, job.address)}>
-                    🗺 View
+                    ðº View
                   </button>
                 )}
               </div>
@@ -8492,8 +8537,8 @@ function GPSTracking({ jobs, setJobs, partners }) {
               <div style={{ display: "flex", alignItems: "flex-start", gap: 14, flexWrap: "wrap" }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontWeight: 800, fontSize: 16 }}>{job.client}</div>
-                  <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>📍 {job.address}</div>
-                  <div style={{ fontSize: 13, color: C.muted }}>👷 {partner?.name} · {job.time}</div>
+                  <div style={{ fontSize: 13, color: C.muted, marginTop: 2 }}>ð {job.address}</div>
+                  <div style={{ fontSize: 13, color: C.muted }}>ð· {partner?.name} Â· {job.time}</div>
                 </div>
                 <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
               </div>
@@ -8504,7 +8549,7 @@ function GPSTracking({ jobs, setJobs, partners }) {
                   <div style={styles.label}>Check-In</div>
                   {job.checkIn ? (
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: C.accent }}>✅ {job.checkIn}</div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: C.accent }}>â {job.checkIn}</div>
                       {job.checkInCoords && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{job.checkInCoords.lat.toFixed(4)}, {job.checkInCoords.lng.toFixed(4)}</div>}
                     </div>
                   ) : (
@@ -8515,7 +8560,7 @@ function GPSTracking({ jobs, setJobs, partners }) {
                   <div style={styles.label}>Check-Out</div>
                   {job.checkOut ? (
                     <div>
-                      <div style={{ fontWeight: 800, fontSize: 16, color: C.gold }}>🏁 {job.checkOut}</div>
+                      <div style={{ fontWeight: 800, fontSize: 16, color: C.gold }}>ð {job.checkOut}</div>
                       {job.checkOutCoords && <div style={{ fontSize: 11, color: C.muted, marginTop: 2 }}>{job.checkOutCoords.lat.toFixed(4)}, {job.checkOutCoords.lng.toFixed(4)}</div>}
                     </div>
                   ) : (
@@ -8530,22 +8575,22 @@ function GPSTracking({ jobs, setJobs, partners }) {
                   <button style={{ ...styles.btn("primary"), display: "flex", alignItems: "center", gap: 6 }}
                     onClick={() => getLocation(job, "checkin")}
                     disabled={locating && selectedJob?.id === job.id}>
-                    {locating && selectedJob?.id === job.id && actionType === "checkin" ? "📡 Getting GPS..." : "📍 GPS Check-In"}
+                    {locating && selectedJob?.id === job.id && actionType === "checkin" ? "ð¡ Getting GPS..." : "ð GPS Check-In"}
                   </button>
                 )}
                 {canCheckOut && (
                   <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", display: "flex", alignItems: "center", gap: 6 }}
                     onClick={() => getLocation(job, "checkout")}
                     disabled={locating && selectedJob?.id === job.id}>
-                    {locating && selectedJob?.id === job.id && actionType === "checkout" ? "📡 Getting GPS..." : "🏁 GPS Check-Out"}
+                    {locating && selectedJob?.id === job.id && actionType === "checkout" ? "ð¡ Getting GPS..." : "ð GPS Check-Out"}
                   </button>
                 )}
                 <button style={styles.btn("ghost")} onClick={() => openDirections(job.address)}>
-                  🧭 Directions
+                  ð§­ Directions
                 </button>
                 {job.checkInCoords && (
                   <button style={styles.btn("ghost")} onClick={() => openMaps(job.checkInCoords, job.address)}>
-                    🗺 View on Map
+                    ðº View on Map
                   </button>
                 )}
               </div>
@@ -8570,8 +8615,8 @@ function GPSTracking({ jobs, setJobs, partners }) {
                 <span style={{ fontWeight: 600 }}>{partner?.name.split(" ")[0]}</span>
               </div>
               <div style={{ color: C.muted, display: "flex", alignItems: "center" }}>{job.client}</div>
-              <div style={{ color: job.checkIn ? C.accent : C.dim, display: "flex", alignItems: "center" }}>{job.checkIn || "—"}</div>
-              <div style={{ color: job.checkOut ? C.gold : C.dim, display: "flex", alignItems: "center" }}>{job.checkOut || "—"}</div>
+              <div style={{ color: job.checkIn ? C.accent : C.dim, display: "flex", alignItems: "center" }}>{job.checkIn || "â"}</div>
+              <div style={{ color: job.checkOut ? C.gold : C.dim, display: "flex", alignItems: "center" }}>{job.checkOut || "â"}</div>
             </div>
           );
         })}
@@ -8585,29 +8630,29 @@ function GPSTracking({ jobs, setJobs, partners }) {
 
 
 
-// ─── SWOT ANALYSIS ───────────────────────────────────────────────────────────
+// âââ SWOT ANALYSIS âââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const SWOT_DATA = {
   strengths: [
-    { title: "All-in-One Partner Management", detail: "Unlike Connecteam (workforce only) or Swept (commercial ops only), CleanPro unifies partner scheduling, GPS check-in, pay tracking, and onboarding in a single tool — zero app-switching." },
+    { title: "All-in-One Partner Management", detail: "Unlike Connecteam (workforce only) or Swept (commercial ops only), CleanPro unifies partner scheduling, GPS check-in, pay tracking, and onboarding in a single tool â zero app-switching." },
     { title: "Built-In Training & Onboarding", detail: "Competitors like Housecall Pro and Jobber have no native onboarding modules. CleanPro's step-by-step training tracks completion per partner and auto-activates them, cutting ramp-up time." },
-    { title: "GPS Check-In with Time Verification", detail: "Matches Connecteam and ZenMaid's GPS clock-in capability. Partners can check in/out from the field with location capture — preventing time theft and disputes." },
+    { title: "GPS Check-In with Time Verification", detail: "Matches Connecteam and ZenMaid's GPS clock-in capability. Partners can check in/out from the field with location capture â preventing time theft and disputes." },
     { title: "Upsell Logic Baked In", detail: "Most platforms treat upsells as manual line items. CleanPro surfaces upsell options at job creation and automatically adds per-upsell pay bonuses for partners, incentivizing them to sell up." },
-    { title: "Residential + Commercial Lead Intake", detail: "Jobber and ZenMaid offer booking widgets, but CleanPro separates residential and commercial lead flows with tailored quote logic — a differentiation most platforms miss." },
-    { title: "Zero Subscription Cost", detail: "Enterprise platforms like ServiceTitan and Jobber charge $49–$349+/month. CleanPro is fully owned by you with no recurring SaaS fees." },
+    { title: "Residential + Commercial Lead Intake", detail: "Jobber and ZenMaid offer booking widgets, but CleanPro separates residential and commercial lead flows with tailored quote logic â a differentiation most platforms miss." },
+    { title: "Zero Subscription Cost", detail: "Enterprise platforms like ServiceTitan and Jobber charge $49â$349+/month. CleanPro is fully owned by you with no recurring SaaS fees." },
   ],
   weaknesses: [
     { title: "No Native Payment Processing", detail: "Jobber, Housecall Pro, and ZenMaid all integrate Stripe or Square for in-app payments. CleanPro currently tracks pay but doesn't process partner payouts or client charges natively." },
-    { title: "No QuickBooks / Accounting Sync", detail: "Industry leaders integrate with QuickBooks Online for seamless bookkeeping. Without this, financial reconciliation requires manual export — a gap at scale." },
+    { title: "No QuickBooks / Accounting Sync", detail: "Industry leaders integrate with QuickBooks Online for seamless bookkeeping. Without this, financial reconciliation requires manual export â a gap at scale." },
     { title: "No Client-Facing Portal", detail: "Jobber's client hub lets customers approve quotes, view job history, and pay invoices online 24/7. CleanPro currently manages everything from the owner side only." },
     { title: "No Route Optimization", detail: "Service Fusion and Field Promax offer automated route planning to minimize drive time between jobs. CleanPro provides directions but no multi-stop optimization." },
     { title: "No Automated SMS / Email Reminders", detail: "ZenMaid's top feature is automated client appointment reminders. CleanPro doesn't yet send confirmations or follow-ups, which increases no-shows." },
-    { title: "Single-User / Local State Only", detail: "Current version stores data in memory. No cloud sync means partners can't log in from their own phones independently — a key need for field workers." },
+    { title: "Single-User / Local State Only", detail: "Current version stores data in memory. No cloud sync means partners can't log in from their own phones independently â a key need for field workers." },
   ],
   opportunities: [
     { title: "AI-Powered Quote Engine", detail: "No current competitor uses AI to auto-generate dynamic quotes based on sq footage, job type, and history. CleanPro's Claude integration gives it a unique path here." },
     { title: "$380B Growing Market", detail: "The global cleaning services market is valued at ~$380B in 2025 with ~70% of firms moving to digital tools. Early movers with full-stack platforms capture loyalty fast." },
-    { title: "Commercial Cleaning Underserved", detail: "Most platforms skew residential. Commercial clients (60% of industry revenue) need multi-site management, compliance docs, and contract billing — areas CleanPro's commercial lead tab begins to address." },
-    { title: "Geofencing & Compliance Alerts", detail: "Adding geofence enforcement (flag check-ins >0.5mi from job site) would address a major pain point — time fraud — that only enterprise tools like ServiceTitan currently tackle." },
+    { title: "Commercial Cleaning Underserved", detail: "Most platforms skew residential. Commercial clients (60% of industry revenue) need multi-site management, compliance docs, and contract billing â areas CleanPro's commercial lead tab begins to address." },
+    { title: "Geofencing & Compliance Alerts", detail: "Adding geofence enforcement (flag check-ins >0.5mi from job site) would address a major pain point â time fraud â that only enterprise tools like ServiceTitan currently tackle." },
     { title: "Franchise / Multi-Location Expansion", detail: "A white-label or multi-location version could serve cleaning franchises, a segment currently requiring expensive custom builds or ServiceTitan's high-cost tiers." },
     { title: "Recurring Booking Automation", detail: "Weekly/biweekly recurring cleans are the backbone of residential revenue. Automating recurring job creation and partner assignment is a high-demand, underdeveloped feature." },
   ],
@@ -8615,17 +8660,17 @@ const SWOT_DATA = {
     { title: "Housecall Pro's Network Effect", detail: "With 40,000+ businesses and deep QuickBooks/Google/Stripe integrations, Housecall Pro's ecosystem is hard to replicate. Switching costs create stickiness for existing users." },
     { title: "ZenMaid's Niche Specialization", detail: "ZenMaid is purpose-built for maid/residential services with features like rotation scheduling and automated client follow-ups. In the residential segment, it's a formidable narrow competitor." },
     { title: "Jobber's Brand Authority", detail: "Jobber is one of the most trusted names in field service software with robust marketing, G2 awards, and a large support team. Brand trust is a real barrier for independent tools." },
-    { title: "Data Security & Compliance Risk", detail: "Handling client addresses, payment data, and GPS location data creates GDPR/CCPA obligations. Enterprise platforms have legal teams for compliance — custom builds carry liability exposure." },
+    { title: "Data Security & Compliance Risk", detail: "Handling client addresses, payment data, and GPS location data creates GDPR/CCPA obligations. Enterprise platforms have legal teams for compliance â custom builds carry liability exposure." },
     { title: "Field Adoption Resistance", detail: "Partners in the cleaning industry skew toward older demographics who may resist app-based workflows. Competitors with simpler mobile UX (like ZenMaid) have lower partner friction." },
     { title: "Feature Parity Race", detail: "Platforms like Connecteam and Jobber ship updates continuously. Without a dedicated dev team, CleanPro risks feature gaps widening over time as competitors add AI, integrations, and analytics." },
   ],
 };
 
 const SWOT_CONFIG = [
-  { key: "strengths", label: "Strengths", icon: "💪", color: C.accent, dimColor: C.accentDim, corner: "Internal · Positive" },
-  { key: "weaknesses", label: "Weaknesses", icon: "⚠️", color: C.red, dimColor: C.redDim, corner: "Internal · Negative" },
-  { key: "opportunities", label: "Opportunities", icon: "🚀", color: C.blue, dimColor: C.blueDim, corner: "External · Positive" },
-  { key: "threats", label: "Threats", icon: "🛡️", color: C.gold, dimColor: C.goldDim, corner: "External · Negative" },
+  { key: "strengths", label: "Strengths", icon: "ðª", color: C.accent, dimColor: C.accentDim, corner: "Internal Â· Positive" },
+  { key: "weaknesses", label: "Weaknesses", icon: "â ï¸", color: C.red, dimColor: C.redDim, corner: "Internal Â· Negative" },
+  { key: "opportunities", label: "Opportunities", icon: "ð", color: C.blue, dimColor: C.blueDim, corner: "External Â· Positive" },
+  { key: "threats", label: "Threats", icon: "ð¡ï¸", color: C.gold, dimColor: C.goldDim, corner: "External Â· Negative" },
 ];
 
 function SWOTAnalysis() {
@@ -8635,9 +8680,9 @@ function SWOTAnalysis() {
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <div style={styles.h2}>SWOT Analysis — Have Us Clean vs. Industry</div>
+        <div style={styles.h2}>SWOT Analysis â Have Us Clean vs. Industry</div>
         <div style={{ color: C.muted, fontSize: 14, maxWidth: 700 }}>
-          Benchmarked against Housecall Pro, Jobber, ZenMaid, Connecteam, Swept, ServiceTitan, and Field Promax — the top cleaning business platforms of 2025.
+          Benchmarked against Housecall Pro, Jobber, ZenMaid, Connecteam, Swept, ServiceTitan, and Field Promax â the top cleaning business platforms of 2025.
         </div>
       </div>
 
@@ -8675,7 +8720,7 @@ function SWOTAnalysis() {
                     style={{ width: "100%", background: "none", border: "none", cursor: "pointer", padding: "10px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, textAlign: "left" }}
                   >
                     <div style={{ fontWeight: 700, fontSize: 13, color: C.text, flex: 1 }}>{item.title}</div>
-                    <span style={{ color, fontSize: 16, flexShrink: 0 }}>{expanded[`${key}-${i}`] ? "▲" : "▼"}</span>
+                    <span style={{ color, fontSize: 16, flexShrink: 0 }}>{expanded[`${key}-${i}`] ? "â²" : "â¼"}</span>
                   </button>
                   {expanded[`${key}-${i}`] && (
                     <div style={{ padding: "0 20px 14px", fontSize: 13, color: C.muted, lineHeight: 1.65, borderLeft: `3px solid ${color}`, marginLeft: 20, marginRight: 20, paddingLeft: 12 }}>
@@ -8691,7 +8736,7 @@ function SWOTAnalysis() {
 
       {/* Summary Scorecard */}
       <div style={{ ...styles.card, marginTop: 28 }}>
-        <div style={styles.h3}>📊 Competitive Scorecard — Have Us Clean vs. Leaders</div>
+        <div style={styles.h3}>ð Competitive Scorecard â Have Us Clean vs. Leaders</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 560 }}>
             <thead>
@@ -8703,33 +8748,33 @@ function SWOTAnalysis() {
             </thead>
             <tbody>
               {[
-                ["Partner/Staff Management","✅","✅","✅","✅","✅"],
-                ["Multifamily / Property Focus","❌","❌","❌","❌","✅"],
-                ["AI Dispatch + ML Pricing","⚠️","❌","❌","❌","✅"],
-                ["GPS Check-In / Tracking","✅","✅","⚠️","✅","✅"],
-                ["Job Scheduling","✅","✅","✅","✅","✅"],
-                ["Before/After Photos","✅","✅","✅","⚠️","❌"],
-                ["Upsell Engine","✅","❌","❌","❌","❌"],
-                ["Built-In Training/Onboarding","✅","❌","❌","❌","✅"],
-                ["Lead Intake + Quote Builder","✅","⚠️","✅","❌","❌"],
-                ["Residential + Commercial Split","✅","⚠️","⚠️","✅","❌"],
-                ["Client-Facing Portal","❌","✅","✅","✅","✅"],
-                ["Native Payment Processing","❌","✅","✅","✅","✅"],
-                ["QuickBooks Integration","❌","✅","✅","✅","❌"],
-                ["Auto SMS/Email Reminders","❌","✅","✅","✅","✅"],
-                ["SaaS Subscription Cost","Free","$49–$129/mo","$49–$349/mo","$29–$99/mo","Commission %"],
+                ["Partner/Staff Management","â","â","â","â","â"],
+                ["Multifamily / Property Focus","â","â","â","â","â"],
+                ["AI Dispatch + ML Pricing","â ï¸","â","â","â","â"],
+                ["GPS Check-In / Tracking","â","â","â ï¸","â","â"],
+                ["Job Scheduling","â","â","â","â","â"],
+                ["Before/After Photos","â","â","â","â ï¸","â"],
+                ["Upsell Engine","â","â","â","â","â"],
+                ["Built-In Training/Onboarding","â","â","â","â","â"],
+                ["Lead Intake + Quote Builder","â","â ï¸","â","â","â"],
+                ["Residential + Commercial Split","â","â ï¸","â ï¸","â","â"],
+                ["Client-Facing Portal","â","â","â","â","â"],
+                ["Native Payment Processing","â","â","â","â","â"],
+                ["QuickBooks Integration","â","â","â","â","â"],
+                ["Auto SMS/Email Reminders","â","â","â","â","â"],
+                ["SaaS Subscription Cost","Free","$49â$129/mo","$49â$349/mo","$29â$99/mo","Commission %"],
               ].map(([feat, ...vals], ri) => (
                 <tr key={ri} style={{ borderBottom: `1px solid ${C.border}`, background: ri % 2 === 0 ? "transparent" : "#ffffff04" }}>
                   <td style={{ padding: "10px 12px", fontWeight: 600, color: C.text }}>{feat}</td>
                   {vals.map((v, vi) => (
-                    <td key={vi} style={{ padding: "10px 12px", textAlign: "center", color: v === "✅" ? C.accent : v === "❌" ? C.red : v === "⚠️" ? C.gold : C.muted, fontWeight: vi === 0 ? 800 : 600 }}>{v}</td>
+                    <td key={vi} style={{ padding: "10px 12px", textAlign: "center", color: v === "â" ? C.accent : v === "â" ? C.red : v === "â ï¸" ? C.gold : C.muted, fontWeight: vi === 0 ? 800 : 600 }}>{v}</td>
                   ))}
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-        <div style={{ marginTop: 14, fontSize: 12, color: C.dim }}>✅ Full feature · ⚠️ Partial / add-on required · ❌ Not available</div>
+        <div style={{ marginTop: 14, fontSize: 12, color: C.dim }}>â Full feature Â· â ï¸ Partial / add-on required Â· â Not available</div>
       </div>
     </div>
   );
@@ -8737,7 +8782,7 @@ function SWOTAnalysis() {
 
 
 
-// ─── CLIENT PORTAL ────────────────────────────────────────────────────────────
+// âââ CLIENT PORTAL ââââââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab }) {
   const [selectedClient, setSelectedClient] = useState(null);
   const [filterType, setFilterType] = useState("all");
@@ -8775,17 +8820,17 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
     const quotedLeads = c.clientLeads.filter(l => l.status !== "Lost");
     return (
       <div>
-        <button style={{ ...S.btn("ghost"), marginBottom:20, fontSize:13 }} onClick={() => setSelectedClient(null)}>← Back to All Clients</button>
+        <button style={{ ...S.btn("ghost"), marginBottom:20, fontSize:13 }} onClick={() => setSelectedClient(null)}>â Back to All Clients</button>
 
         {/* Client header */}
         <div style={{ ...S.card, marginBottom:20, background:"linear-gradient(135deg,#0A0F1E,#1A2235)" }}>
           <div style={{ display:"flex", alignItems:"center", gap:16, flexWrap:"wrap", marginBottom:16 }}>
-            <div style={{ width:56, height:56, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>🏠</div>
+            <div style={{ width:56, height:56, borderRadius:14, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>ð </div>
             <div style={{ flex:1 }}>
               <div style={{ fontWeight:800, fontSize:22 }}>{c.name}</div>
-              {c.email && <div style={{ fontSize:13, color:C.muted }}>📧 {c.email}</div>}
-              {c.phone && <div style={{ fontSize:13, color:C.muted }}>📞 {c.phone}</div>}
-              {c.address && <div style={{ fontSize:13, color:C.muted }}>📍 {c.address}</div>}
+              {c.email && <div style={{ fontSize:13, color:C.muted }}>ð§ {c.email}</div>}
+              {c.phone && <div style={{ fontSize:13, color:C.muted }}>ð {c.phone}</div>}
+              {c.address && <div style={{ fontSize:13, color:C.muted }}>ð {c.address}</div>}
             </div>
             <div style={{ textAlign:"right" }}>
               <div style={{ fontWeight:800, fontSize:28, color:C.accent }}>{region?.currencySymbol || "$"}{c.totalSpent.toLocaleString()}</div>
@@ -8819,7 +8864,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
         {quotedLeads.length > 0 && (
           <div style={{ ...S.card, marginBottom:20 }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-              <div style={S.h3}>📄 Quote History</div>
+              <div style={S.h3}>ð Quote History</div>
               <button style={S.btn("sm")} onClick={() => setTab("res")}>+ New Quote</button>
             </div>
             {quotedLeads.map(lead => {
@@ -8829,7 +8874,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
                 <div key={lead.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
                   <div>
                     <div style={{ fontWeight:700, fontSize:14 }}>{lead.serviceType}</div>
-                    <div style={{ fontSize:12, color:C.muted }}>{lead.dwellingType} · {lead.frequency} · {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ""}</div>
+                    <div style={{ fontSize:12, color:C.muted }}>{lead.dwellingType} Â· {lead.frequency} Â· {lead.createdAt ? new Date(lead.createdAt).toLocaleDateString() : ""}</div>
                     {lead.addons?.length > 0 && <div style={{ fontSize:11, color:C.dim }}>+ {lead.addons?.map(id=>RES_ADDONS.find(x=>x.id===id)?.label).filter(Boolean).join(", ")}</div>}
                   </div>
                   <div style={{ display:"flex", alignItems:"center", gap:10 }}>
@@ -8848,10 +8893,10 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
         {/* Job history */}
         <div style={S.card}>
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
-            <div style={S.h3}>🧹 Job History</div>
+            <div style={S.h3}>ð§¹ Job History</div>
             <button style={S.btn("sm")} onClick={() => setTab("jobs")}>View All Jobs</button>
           </div>
-          {c.clientJobs.length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No jobs yet — book a quote to create the first job.</div>}
+          {c.clientJobs.length === 0 && <div style={{ color:C.muted, fontSize:13 }}>No jobs yet â book a quote to create the first job.</div>}
           {c.clientJobs.slice().reverse().map(job => {
             const partner = partners?.find(p => p.id === job.partnerId);
             const statusColor = job.status==="completed" ? C.accent : job.status==="in-progress" ? C.gold : C.blue;
@@ -8859,7 +8904,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
               <div key={job.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
                 <div>
                   <div style={{ fontWeight:700, fontSize:14 }}>{job.type}</div>
-                  <div style={{ fontSize:12, color:C.muted }}>{job.date} · {job.time}{partner ? ` · ${partner.name}` : ""}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{job.date} Â· {job.time}{partner ? ` Â· ${partner.name}` : ""}</div>
                   {job.upsells?.length > 0 && <div style={{ fontSize:11, color:C.gold }}>+ {job.upsells.join(", ")}</div>}
                   {job.summary && <div style={{ fontSize:11, color:C.muted, marginTop:2, fontStyle:"italic" }}>"{job.summary}"</div>}
                 </div>
@@ -8879,17 +8924,17 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
     <div>
       <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
         <div>
-          <div style={S.h2}>🌐 Client Portal</div>
-          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Live data from Quotes + Jobs — updates automatically</div>
+          <div style={S.h2}>ð Client Portal</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Live data from Quotes + Jobs â updates automatically</div>
         </div>
         <button style={S.btn("primary")} onClick={() => setTab("res")}>+ New Quote</button>
       </div>
 
       <div style={S.grid4}>
-        <StatCard label="Total Clients"   value={clients.length}         icon="👤" color={C.accent} />
-        <StatCard label="Active"          value={activeClients}          icon="✅" color={C.blue}   />
-        <StatCard label="Total Revenue"   value={`$${totalRevenue.toLocaleString()}`} icon="💰" color={C.gold} />
-        <StatCard label="Quoted / Active" value={clients.filter(c=>c.latestQuote).length} icon="📄" color={C.accent} />
+        <StatCard label="Total Clients"   value={clients.length}         icon="ð¤" color={C.accent} />
+        <StatCard label="Active"          value={activeClients}          icon="â" color={C.blue}   />
+        <StatCard label="Total Revenue"   value={`$${totalRevenue.toLocaleString()}`} icon="ð°" color={C.gold} />
+        <StatCard label="Quoted / Active" value={clients.filter(c=>c.latestQuote).length} icon="ð" color={C.accent} />
       </div>
 
       <div style={S.divider} />
@@ -8903,10 +8948,10 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
 
       {clients.length === 0 && (
         <div style={{ ...S.card, textAlign:"center", padding:40 }}>
-          <div style={{ fontSize:40, marginBottom:12 }}>📭</div>
+          <div style={{ fontSize:40, marginBottom:12 }}>ð­</div>
           <div style={{ fontWeight:800, fontSize:18, marginBottom:8 }}>No clients yet</div>
-          <div style={{ color:C.muted, fontSize:14, marginBottom:20 }}>Add your first lead in the Quotes tab — it will appear here automatically.</div>
-          <button style={S.btn("primary")} onClick={() => setTab("res")}>Go to Quotes →</button>
+          <div style={{ color:C.muted, fontSize:14, marginBottom:20 }}>Add your first lead in the Quotes tab â it will appear here automatically.</div>
+          <button style={S.btn("primary")} onClick={() => setTab("res")}>Go to Quotes â</button>
         </div>
       )}
 
@@ -8915,13 +8960,13 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
           <div key={c.name} style={{ ...S.card, cursor:"pointer" }} onClick={() => setSelectedClient(c)}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", flexWrap:"wrap", gap:10 }}>
               <div style={{ display:"flex", alignItems:"center", gap:12 }}>
-                <div style={{ width:44, height:44, borderRadius:12, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>🏠</div>
+                <div style={{ width:44, height:44, borderRadius:12, background:`linear-gradient(135deg,${C.accent},#0088FF)`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>ð </div>
                 <div>
                   <div style={{ fontWeight:800, fontSize:16 }}>{c.name}</div>
-                  <div style={{ fontSize:12, color:C.muted }}>{c.email || "No email"} · {c.address || "No address"}</div>
+                  <div style={{ fontSize:12, color:C.muted }}>{c.email || "No email"} Â· {c.address || "No address"}</div>
                   <div style={{ display:"flex", gap:6, marginTop:4, flexWrap:"wrap" }}>
-                    {c.nextJob && <span style={S.badge("green")}>📅 Next: {c.nextJob.date}</span>}
-                    {c.latestQuote && <span style={S.badge("gold")}>📄 {c.latestQuote.status}</span>}
+                    {c.nextJob && <span style={S.badge("green")}>ð Next: {c.nextJob.date}</span>}
+                    {c.latestQuote && <span style={S.badge("gold")}>ð {c.latestQuote.status}</span>}
                     {c.clientJobs.length > 0 && <span style={S.badge("blue")}>{c.clientJobs.length} job{c.clientJobs.length!==1?"s":""}</span>}
                   </div>
                 </div>
@@ -8938,7 +8983,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab })
   );
 }
 
-// ─── QUICKBOOKS SYNC ─────────────────────────────────────────────────────────
+// âââ QUICKBOOKS SYNC âââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 function QuickBooksSync({ jobs, partners }) {
   const [connected, setConnected] = useState(false);
   const [syncing, setSyncing] = useState(false);
@@ -8963,7 +9008,7 @@ function QuickBooksSync({ jobs, partners }) {
     setTimeout(() => {
       setConnected(true);
       setSyncing(false);
-      setSyncLog([{ time: new Date().toLocaleTimeString(), msg: "✅ Connected to QuickBooks Online — Company: CleanPro Services LLC", type:"success" }]);
+      setSyncLog([{ time: new Date().toLocaleTimeString(), msg: "â Connected to QuickBooks Online â Company: CleanPro Services LLC", type:"success" }]);
     }, 1800);
   };
 
@@ -8974,7 +9019,7 @@ function QuickBooksSync({ jobs, partners }) {
     setTimeout(() => {
       const newLogs = selected.map(inv => ({
         time: new Date().toLocaleTimeString(),
-        msg: `✅ Synced ${inv.id} — ${inv.client} — $${inv.amount.toFixed(2)} → QuickBooks Invoices`,
+        msg: `â Synced ${inv.id} â ${inv.client} â $${inv.amount.toFixed(2)} â QuickBooks Invoices`,
         type: "success"
       }));
       setSyncLog(l => [...newLogs, ...l]);
@@ -8994,24 +9039,24 @@ function QuickBooksSync({ jobs, partners }) {
 
   return (
     <div>
-      <div style={styles.h2}>🔗 QuickBooks Integration</div>
+      <div style={styles.h2}>ð QuickBooks Integration</div>
 
       {/* Connection Status */}
       <div style={{ ...styles.card, marginBottom: 24, borderLeft: `4px solid ${connected ? C.accent : C.gold}` }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12 }}>
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
-            <div style={{ fontSize: 36 }}>💚</div>
+            <div style={{ fontSize: 36 }}>ð</div>
             <div>
               <div style={{ fontWeight: 800, fontSize: 18 }}>QuickBooks Online</div>
               <div style={{ fontSize: 13, color: connected ? C.accent : C.gold, fontWeight: 700 }}>
-                {connected ? "✅ Connected — Have Us Clean Services LLC" : "⚠️ Not Connected"}
+                {connected ? "â Connected â Have Us Clean Services LLC" : "â ï¸ Not Connected"}
               </div>
               {lastSync && <div style={{ fontSize: 12, color: C.muted }}>Last synced: {lastSync}</div>}
             </div>
           </div>
           {!connected ? (
             <button style={styles.btn("primary")} onClick={connectQB} disabled={syncing}>
-              {syncing ? "Connecting..." : "🔗 Connect QuickBooks"}
+              {syncing ? "Connecting..." : "ð Connect QuickBooks"}
             </button>
           ) : (
             <button style={{ ...styles.btn("ghost") }} onClick={() => { setConnected(false); setSyncLog([]); }}>Disconnect</button>
@@ -9023,20 +9068,20 @@ function QuickBooksSync({ jobs, partners }) {
         <>
           {/* Sync Options */}
           <div style={styles.grid3}>
-            <StatCard label="Invoices Ready" value={invoiceQueue.length} icon="📄" color={C.blue} sub="completed jobs" />
-            <StatCard label="Total Invoice Value" value={`$${invoiceQueue.reduce((a,b)=>a+(b.amount),0).toFixed(0)}`} icon="💵" color={C.accent} />
-            <StatCard label="Partner Pay to Export" value={`$${invoiceQueue.reduce((a,b)=>a+b.partnerPay,0).toFixed(0)}`} icon="👥" color={C.gold} />
+            <StatCard label="Invoices Ready" value={invoiceQueue.length} icon="ð" color={C.blue} sub="completed jobs" />
+            <StatCard label="Total Invoice Value" value={`$${invoiceQueue.reduce((a,b)=>a+(b.amount),0).toFixed(0)}`} icon="ðµ" color={C.accent} />
+            <StatCard label="Partner Pay to Export" value={`$${invoiceQueue.reduce((a,b)=>a+b.partnerPay,0).toFixed(0)}`} icon="ð¥" color={C.gold} />
           </div>
 
           <div style={styles.divider} />
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 14 }}>
-            <div style={styles.h3}>Invoice Queue — Sync to QuickBooks</div>
+            <div style={styles.h3}>Invoice Queue â Sync to QuickBooks</div>
             <div style={{ display: "flex", gap: 8 }}>
               <button style={styles.btn("ghost")} onClick={selectAll}>Select All</button>
-              <button style={styles.btn("ghost")} onClick={exportCSV}>⬇ Export CSV</button>
+              <button style={styles.btn("ghost")} onClick={exportCSV}>â¬ Export CSV</button>
               <button style={styles.btn("primary")} onClick={runSync} disabled={syncing || !selectedInvoices.length}>
-                {syncing ? "Syncing..." : `🔄 Sync ${selectedInvoices.length || ""} to QB`}
+                {syncing ? "Syncing..." : `ð Sync ${selectedInvoices.length || ""} to QB`}
               </button>
             </div>
           </div>
@@ -9046,11 +9091,11 @@ function QuickBooksSync({ jobs, partners }) {
               <div key={inv.id} style={{ ...styles.cardSm, display: "flex", alignItems: "center", gap: 12, cursor: "pointer", border: `1px solid ${selectedInvoices.includes(inv.id) ? C.accent : C.border}`, background: selectedInvoices.includes(inv.id) ? C.accentDim : C.card }}
                 onClick={() => toggleInvoice(inv.id)}>
                 <div style={{ width: 20, height: 20, borderRadius: 6, border: `2px solid ${selectedInvoices.includes(inv.id)?C.accent:C.dim}`, background: selectedInvoices.includes(inv.id)?C.accent:"transparent", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, color: "#0A0F1E", flexShrink: 0 }}>
-                  {selectedInvoices.includes(inv.id) ? "✓" : ""}
+                  {selectedInvoices.includes(inv.id) ? "â" : ""}
                 </div>
                 <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{inv.id} — {inv.client}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{inv.date} · {inv.type} · Partner: {inv.partnerName}</div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{inv.id} â {inv.client}</div>
+                  <div style={{ fontSize: 12, color: C.muted }}>{inv.date} Â· {inv.type} Â· Partner: {inv.partnerName}</div>
                 </div>
                 <div style={{ textAlign: "right" }}>
                   <div style={{ fontWeight: 800, color: C.accent }}>${inv.amount.toFixed(2)}</div>
@@ -9062,15 +9107,15 @@ function QuickBooksSync({ jobs, partners }) {
 
           {/* What gets synced */}
           <div style={{ ...styles.card, marginTop: 24 }}>
-            <div style={styles.h3}>📋 What Syncs to QuickBooks</div>
+            <div style={styles.h3}>ð What Syncs to QuickBooks</div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(200px,1fr))", gap: 10 }}>
               {[
-                ["📄","Customer Invoices","Job totals → QB Invoices"],
-                ["💸","Partner Expenses","Partner pay → QB Bills"],
-                ["👤","Client Records","New clients → QB Customers"],
-                ["🔄","Payment Status","Paid jobs → QB Payments"],
-                ["📊","Revenue Reports","Monthly summaries"],
-                ["🏷️","Job Categories","Service types → QB Items"],
+                ["ð","Customer Invoices","Job totals â QB Invoices"],
+                ["ð¸","Partner Expenses","Partner pay â QB Bills"],
+                ["ð¤","Client Records","New clients â QB Customers"],
+                ["ð","Payment Status","Paid jobs â QB Payments"],
+                ["ð","Revenue Reports","Monthly summaries"],
+                ["ð·ï¸","Job Categories","Service types â QB Items"],
               ].map(([icon,title,sub]) => (
                 <div key={title} style={{ background: C.surface, borderRadius: 10, padding: "12px 14px" }}>
                   <div style={{ fontSize: 22, marginBottom: 4 }}>{icon}</div>
@@ -9084,7 +9129,7 @@ function QuickBooksSync({ jobs, partners }) {
           {/* Sync Log */}
           {syncLog.length > 0 && (
             <div style={{ ...styles.card, marginTop: 20 }}>
-              <div style={styles.h3}>🕐 Sync Log</div>
+              <div style={styles.h3}>ð Sync Log</div>
               <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
                 {syncLog.map((log, i) => (
                   <div key={i} style={{ fontSize: 12, color: log.type==="success"?C.accent:C.red, fontFamily: "monospace", padding: "4px 0", borderBottom: `1px solid ${C.border}` }}>
@@ -9099,12 +9144,12 @@ function QuickBooksSync({ jobs, partners }) {
 
       {!connected && (
         <div style={{ ...styles.card, textAlign: "center", padding: 40 }}>
-          <div style={{ fontSize: 48, marginBottom: 12 }}>💚</div>
+          <div style={{ fontSize: 48, marginBottom: 12 }}>ð</div>
           <div style={{ fontWeight: 800, fontSize: 18, marginBottom: 8 }}>Connect Your QuickBooks Account</div>
           <div style={{ fontSize: 14, color: C.muted, marginBottom: 20, maxWidth: 400, margin: "0 auto 20px" }}>
             Sync completed jobs as invoices, partner pay as expenses, and client records automatically. No double-entry, no spreadsheets.
           </div>
-          <button style={styles.btn("primary")} onClick={connectQB}>🔗 Connect QuickBooks Online</button>
+          <button style={styles.btn("primary")} onClick={connectQB}>ð Connect QuickBooks Online</button>
         </div>
       )}
     </div>
@@ -9113,11 +9158,11 @@ function QuickBooksSync({ jobs, partners }) {
 
 
 
-// ─── PRICING STRATEGY ────────────────────────────────────────────────────────
+// âââ PRICING STRATEGY ââââââââââââââââââââââââââââââââââââââââââââââââââââââââ
 const TIERS = [
   {
-    name: "Starter", price: 29, color: C.blue, icon: "🌱",
-    tagline: "Perfect for 1–3 partners just getting organized",
+    name: "Starter", price: 29, color: C.blue, icon: "ð±",
+    tagline: "Perfect for 1â3 partners just getting organized",
     features: [
       "Up to 3 active partners","Unlimited job bookings","GPS check-in / check-out",
       "Residential lead intake + quotes","Before & after photos","Basic pay tracking",
@@ -9128,8 +9173,8 @@ const TIERS = [
     highlight: false,
   },
   {
-    name: "Growth", price: 59, color: C.accent, icon: "🚀",
-    tagline: "Best for growing teams of 4–10 partners",
+    name: "Growth", price: 59, color: C.accent, icon: "ð",
+    tagline: "Best for growing teams of 4â10 partners",
     features: [
       "Up to 10 active partners","Everything in Starter",
       "Commercial leads + contract quotes","Client portal (quotes, invoices, payments)",
@@ -9138,11 +9183,11 @@ const TIERS = [
       "Revenue & partner pay reports",
     ],
     notIncluded: ["Multi-location management","White-label branding"],
-    cta: "Most Popular — Start Free Trial",
+    cta: "Most Popular â Start Free Trial",
     highlight: true,
   },
   {
-    name: "Pro", price: 99, color: C.gold, icon: "⚡",
+    name: "Pro", price: 99, color: C.gold, icon: "â¡",
     tagline: "For established businesses scaling fast",
     features: [
       "Unlimited partners","Everything in Growth",
@@ -9166,22 +9211,22 @@ function PricingStrategy() {
     { name: "Jobber", starter: 29, mid: 99, top: 199, notes: "No cleaning-specific features" },
     { name: "Housecall Pro", starter: 59, mid: 189, top: 329, notes: "Multi-industry, not cleaning-focused" },
     { name: "BookingKoala", starter: 65, mid: 130, top: 197, notes: "Not cleaning-specific" },
-    { name: "CleanPro ✨", starter: 29, mid: 59, top: 99, notes: "Cleaning-specific, all-in-one", highlight: true },
+    { name: "CleanPro â¨", starter: 29, mid: 59, top: 99, notes: "Cleaning-specific, all-in-one", highlight: true },
   ];
 
   return (
     <div>
       <div style={{ marginBottom: 24 }}>
-        <div style={styles.h2}>💰 Subscription Pricing Strategy</div>
+        <div style={styles.h2}>ð° Subscription Pricing Strategy</div>
         <div style={{ color: C.muted, fontSize: 14 }}>Research-backed pricing to be the best value in the market while building a sustainable SaaS business.</div>
       </div>
 
       {/* The business case */}
       <div style={{ ...styles.card, marginBottom: 28, borderLeft: `4px solid ${C.accent}` }}>
-        <div style={styles.h3}>Should You Charge a Subscription? Yes — Here's Why</div>
+        <div style={styles.h3}>Should You Charge a Subscription? Yes â Here's Why</div>
         <div style={{ fontSize: 14, color: C.muted, lineHeight: 1.75 }}>
           The market is clear: <strong style={{ color: C.text }}>cleaning businesses will pay for software that saves them time and money.</strong> ZenMaid has 3,000+ paying users. Jobber and Housecall Pro serve tens of thousands. The $380B cleaning industry is actively digitizing, with 70% of firms now using software. <br/><br/>
-          CleanPro's unique advantage: it's <strong style={{ color: C.accent }}>the only platform combining partner management, GPS, onboarding, upsell logic, residential + commercial leads, and QuickBooks sync</strong> — features that individually cost $49–$329/mo on competitor platforms. At $29–$99/mo, you're the obvious best-value choice.
+          CleanPro's unique advantage: it's <strong style={{ color: C.accent }}>the only platform combining partner management, GPS, onboarding, upsell logic, residential + commercial leads, and QuickBooks sync</strong> â features that individually cost $49â$329/mo on competitor platforms. At $29â$99/mo, you're the obvious best-value choice.
         </div>
       </div>
 
@@ -9205,8 +9250,8 @@ function PricingStrategy() {
               {billing === "annual" && <span style={{ marginLeft: 8, fontSize: 12, color: C.accent, fontWeight: 700 }}>Save ${Math.round(tier.price * discount * 12)}/yr</span>}
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: 7, marginBottom: 20 }}>
-              {tier.features.map(f => <div key={f} style={{ fontSize: 13, color: C.text, display: "flex", gap: 8 }}><span style={{ color: tier.color }}>✓</span>{f}</div>)}
-              {tier.notIncluded.map(f => <div key={f} style={{ fontSize: 13, color: C.dim, display: "flex", gap: 8 }}><span>✗</span>{f}</div>)}
+              {tier.features.map(f => <div key={f} style={{ fontSize: 13, color: C.text, display: "flex", gap: 8 }}><span style={{ color: tier.color }}>â</span>{f}</div>)}
+              {tier.notIncluded.map(f => <div key={f} style={{ fontSize: 13, color: C.dim, display: "flex", gap: 8 }}><span>â</span>{f}</div>)}
             </div>
             <button style={{ ...styles.btn(tier.highlight?"primary":"ghost"), width: "100%", background: tier.highlight ? tier.color : "transparent", color: tier.highlight ? "#0A0F1E" : tier.color, border: `1px solid ${tier.color}` }}>
               {tier.cta}
@@ -9217,7 +9262,7 @@ function PricingStrategy() {
 
       {/* Competitor price comparison */}
       <div style={styles.card}>
-        <div style={styles.h3}>📊 Competitive Price Positioning</div>
+        <div style={styles.h3}>ð Competitive Price Positioning</div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 500 }}>
             <thead>
@@ -9244,44 +9289,44 @@ function PricingStrategy() {
 
       {/* Revenue projections */}
       <div style={{ ...styles.card, marginTop: 20 }}>
-        <div style={styles.h3}>📈 Revenue Potential — If You License CleanPro</div>
+        <div style={styles.h3}>ð Revenue Potential â If You License CleanPro</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(180px,1fr))", gap: 12 }}>
           {[
-            { users: 50, avg: 59, label: "50 clients × $59/mo", mrr: 2950 },
-            { users: 100, avg: 59, label: "100 clients × $59/mo", mrr: 5900 },
-            { users: 250, avg: 65, label: "250 clients × $65 avg", mrr: 16250 },
-            { users: 500, avg: 65, label: "500 clients × $65 avg", mrr: 32500 },
+            { users: 50, avg: 59, label: "50 clients Ã $59/mo", mrr: 2950 },
+            { users: 100, avg: 59, label: "100 clients Ã $59/mo", mrr: 5900 },
+            { users: 250, avg: 65, label: "250 clients Ã $65 avg", mrr: 16250 },
+            { users: 500, avg: 65, label: "500 clients Ã $65 avg", mrr: 32500 },
           ].map(row => (
             <div key={row.users} style={{ background: C.surface, borderRadius: 12, padding: 16, textAlign: "center" }}>
               <div style={{ fontSize: 11, color: C.muted, fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.05em" }}>{row.label}</div>
               <div style={{ fontSize: 26, fontWeight: 800, color: C.accent, marginTop: 6 }}>${row.mrr.toLocaleString()}</div>
-              <div style={{ fontSize: 12, color: C.muted }}>MRR · ${(row.mrr*12).toLocaleString()}/yr</div>
+              <div style={{ fontSize: 12, color: C.muted }}>MRR Â· ${(row.mrr*12).toLocaleString()}/yr</div>
             </div>
           ))}
         </div>
         <div style={{ marginTop: 16, fontSize: 13, color: C.muted, lineHeight: 1.7 }}>
-          💡 <strong style={{ color: C.text }}>Opportunity:</strong> If you white-label and license CleanPro to other cleaning businesses, even 100 subscribers at $59/mo = <strong style={{ color: C.accent }}>$70,800/year</strong> in recurring revenue — on top of using it for your own business.
+          ð¡ <strong style={{ color: C.text }}>Opportunity:</strong> If you white-label and license CleanPro to other cleaning businesses, even 100 subscribers at $59/mo = <strong style={{ color: C.accent }}>$70,800/year</strong> in recurring revenue â on top of using it for your own business.
         </div>
       </div>
 
       {/* Roadmap to address weaknesses */}
       <div style={{ ...styles.card, marginTop: 20 }}>
-        <div style={styles.h3}>🗺️ Roadmap — Turning Weaknesses into Wins</div>
+        <div style={styles.h3}>ðºï¸ Roadmap â Turning Weaknesses into Wins</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {[
-            { status:"✅ Built", item:"QuickBooks sync (invoice + expense export)", tier:"Growth" },
-            { status:"✅ Built", item:"Client portal (quotes, invoices, reviews, portal link)", tier:"Growth" },
-            { status:"✅ Built", item:"GPS check-in / check-out with location capture", tier:"All" },
-            { status:"🔜 Next", item:"Stripe/Square payment processing (client pays in-app)", tier:"Growth" },
-            { status:"🔜 Next", item:"Automated SMS appointment reminders", tier:"Growth" },
-            { status:"🔜 Next", item:"Recurring job auto-scheduling", tier:"Starter+" },
-            { status:"🔮 Future", item:"Geofencing — flag off-site check-ins", tier:"Pro" },
-            { status:"🔮 Future", item:"AI scheduling assistant (ZenMaid users want this!)", tier:"Pro" },
-            { status:"🔮 Future", item:"Cloud sync — partners log in from own phones", tier:"All" },
-            { status:"🔮 Future", item:"White-label for franchise licensing", tier:"Pro" },
+            { status:"â Built", item:"QuickBooks sync (invoice + expense export)", tier:"Growth" },
+            { status:"â Built", item:"Client portal (quotes, invoices, reviews, portal link)", tier:"Growth" },
+            { status:"â Built", item:"GPS check-in / check-out with location capture", tier:"All" },
+            { status:"ð Next", item:"Stripe/Square payment processing (client pays in-app)", tier:"Growth" },
+            { status:"ð Next", item:"Automated SMS appointment reminders", tier:"Growth" },
+            { status:"ð Next", item:"Recurring job auto-scheduling", tier:"Starter+" },
+            { status:"ð® Future", item:"Geofencing â flag off-site check-ins", tier:"Pro" },
+            { status:"ð® Future", item:"AI scheduling assistant (ZenMaid users want this!)", tier:"Pro" },
+            { status:"ð® Future", item:"Cloud sync â partners log in from own phones", tier:"All" },
+            { status:"ð® Future", item:"White-label for franchise licensing", tier:"Pro" },
           ].map((r,i) => (
             <div key={i} style={{ display:"flex", alignItems:"center", gap:12, padding:"8px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap" }}>
-              <span style={{ fontSize:13, color: r.status.startsWith("✅")?C.accent:r.status.startsWith("🔜")?C.gold:C.muted, fontWeight:700, minWidth:80 }}>{r.status}</span>
+              <span style={{ fontSize:13, color: r.status.startsWith("â")?C.accent:r.status.startsWith("ð")?C.gold:C.muted, fontWeight:700, minWidth:80 }}>{r.status}</span>
               <span style={{ flex:1, fontSize:13, color:C.text }}>{r.item}</span>
               <span style={{ ...styles.badge(r.tier==="All"?"green":r.tier==="Growth"?"blue":"gold"), fontSize:10 }}>{r.tier}</span>
             </div>
