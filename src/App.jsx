@@ -3064,25 +3064,25 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       </div>
 
 <LeadList
-  filteredLeads={filteredLeads}
-  calcResQuote={calcResQuote}
+  leads={leads}
+  filterStatus={filterStatus}
+  searchQuery={searchQuery}
   region={region}
-  HUC_STATUS_COLOR={HUC_STATUS_COLOR}
-  HUC_STATUSES={HUC_STATUSES}
-  C={C}
   S={S}
-  fmt={fmt}
-  RES_ADDONS={RES_ADDONS}
-  updateLeadField={updateLeadField}
-  setViewLead={setViewLead}
-  setEditLead={setEditLead}
-  setShowEditForm={setShowEditForm}
-  setConfirmDeleteRes={setConfirmDeleteRes}
+  calcResQuote={calcResQuote}
   confirmDeleteRes={confirmDeleteRes}
-  handleDeleteRes={handleDeleteRes}
-  sendQuote={sendQuote}
-  bookLead={bookLead}
-  confirmPayment={confirmPayment}
+  onView={setViewLead}
+  onEdit={(lead) => {
+    setEditLead({ ...lead });
+    setShowEditForm(true);
+  }}
+  onDelete={setConfirmDeleteRes}
+  onConfirmDelete={handleDeleteRes}
+  onCancelDelete={() => setConfirmDeleteRes(null)}
+  onStatusChange={updateLeadField}
+  onQuote={sendQuote}
+  onBook={bookLead}
+  onPay={confirmPayment}
 />
 
       {/* New Lead Form */}
