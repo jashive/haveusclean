@@ -1,7 +1,7 @@
 import React from "react";
 import { C } from "../../lib/constants";
 import LeadCard from "./LeadCard";
-import { filterLeads } from "../features/leads/leadUtils";
+import { filterLeads } from "./leadUtils";
 /**
  * LeadList
  *
