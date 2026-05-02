@@ -8,6 +8,7 @@ import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartView
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import LeadList from "./features/leads/LeadList";
+import { cleanResidentialLeads } from "./features/leads/residentialCleanup";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
