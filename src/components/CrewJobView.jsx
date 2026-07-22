@@ -1,182 +1,102 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
+
+// Haversine formula to calculate distance in meters between two lat/lng points
+function getDistanceInMeters(lat1, lon1, lat2, lon2) {
+  const R = 6371e3; // Earth's radius in meters
+  const φ1 = (lat1 * Math.PI) / 180;
+  const φ2 = (lat2 * Math.PI) / 180;
+  const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+  const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+  const a =
+    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+  return R * c; // Distance in meters
+}
 
 export default function CrewJobView({ job }) {
   const [jobStatus, setJobStatus] = useState(job?.status || 'scheduled');
-  const [checklist, setChecklist] = useState([
-    { id: 1, label: 'Dust all accessible surfaces & blinds', done: false },
-    { id: 2, label: 'Wipe countertops & sanitize sinks', done: false },
-    { id: 3, label: 'Vacuum & mop all floors', done: false },
-    { id: 4, label: 'Clean & sanitize bathrooms/toilets', done: false },
-    { id: 5, label: 'Empty all trash cans & replace liners', done: false },
-  ]);
-  const [photos, setPhotos] = useState({ before: null, after: null });
+  const [isWithinGeofence, setIsWithinGeofence] = useState(false);
+  const [currentDistance, setCurrentDistance] = useState(null);
+  const [geoError, setGeoError] = useState(null);
 
-  const toggleTask = (id) => {
-    setChecklist((prev) =>
-      prev.map((item) => (item.id === id ? { ...item, done: !item.done } : item))
-    );
-  };
+  // Default target coordinates (e.g. Toronto / job site lat/lng)
+  const targetLat = job?.lat || 43.6532;
+  const targetLng = job?.lng || -79.3832;
+  const MAX_RADIUS_METERS = 150; // Cleaner must be within 150m to clock in
 
-  const handlePhotoUpload = (type, e) => {
-    const file = e.target.files[0];
-    if (file) {
-      setPhotos((prev) => ({ ...prev, [type]: URL.createObjectURL(file) }));
+  // Track Cleaner Location
+  useEffect(() => {
+    if (!navigator.geolocation) {
+      setGeoError('Geolocation is not supported by your browser.');
+      return;
     }
-  };
 
-  const progressPercentage = Math.round(
-    (checklist.filter((i) => i.done).length / checklist.length) * 100
-  );
+    const watchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        const dist = getDistanceInMeters(latitude, longitude, targetLat, targetLng);
+        setCurrentDistance(Math.round(dist));
+        setIsWithinGeofence(dist <= MAX_RADIUS_METERS);
+        setGeoError(null);
+      },
+      (err) => {
+        setGeoError('GPS Location Access Denied. Please enable location.');
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+    );
+
+    return () => navigator.geolocation.clearWatch(watchId);
+  }, [targetLat, targetLng]);
 
   return (
     <div className="max-w-md mx-auto bg-slate-900 text-white min-h-screen p-4 flex flex-col justify-between">
-      
-      {/* Header Info */}
       <div>
+        {/* Job Header */}
         <div className="flex justify-between items-center mb-4 pb-3 border-b border-slate-800">
           <div>
             <span className="text-xs uppercase tracking-wide text-cyan-400 font-semibold">Today's Job</span>
             <h1 className="text-xl font-bold">{job?.client_name || 'Sarah M. — 2BR Condo'}</h1>
-            <p className="text-xs text-slate-400">{job?.service_address || '123 King St W, Apt 402'}</p>
+            <p className="text-xs text-slate-400">{job?.service_address || '123 King St W, Toronto'}</p>
           </div>
-          <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${
-            jobStatus === 'completed' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-            jobStatus === 'in_progress' ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' :
-            'bg-slate-800 text-slate-400'
-          }`}>
-            {jobStatus.replace('_', ' ').toUpperCase()}
-          </span>
         </div>
 
-        {/* Quick Action Buttons */}
-        <div className="grid grid-cols-2 gap-2 mb-6">
-          {jobStatus === 'scheduled' && (
-            <button
-              onClick={() => setJobStatus('in_progress')}
-              className="col-span-2 py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-xl shadow-lg transition-all"
-            >
-              ▶️ Clock In & Start Clean
-            </button>
-          )}
-
-          {jobStatus === 'in_progress' && (
-            <>
-              <a
-                href={`https://maps.google.com/?q=${encodeURIComponent(job?.service_address || '123 King St W')}`}
-                target="_blank"
-                rel="noreferrer"
-                className="py-2.5 bg-slate-800 text-center text-xs font-semibold rounded-lg hover:bg-slate-700"
-              >
-                🗺️ Navigate GPS
-              </a>
-              <button
-                onClick={() => alert("SMS Sent to Client: 'Cleaner is on the way!'")}
-                className="py-2.5 bg-slate-800 text-center text-xs font-semibold rounded-lg hover:bg-slate-700"
-              >
-                📲 Text Client ETA
-              </button>
-            </>
+        {/* Geofence Status Indicator */}
+        <div className="mb-4 p-3 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            <span className={`w-3 h-3 rounded-full ${isWithinGeofence ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`}></span>
+            <span className="text-xs font-semibold">
+              {isWithinGeofence ? 'At Job Site (Geofence Verified)' : 'Outside Geofence Zone'}
+            </span>
+          </div>
+          {currentDistance !== null && (
+            <span className="text-xs text-slate-400">{currentDistance}m away</span>
           )}
         </div>
 
-        {/* Room Checklist */}
-        <div className="mb-6">
-          <div className="flex justify-between items-center mb-2">
-            <h2 className="text-sm font-bold text-slate-300">Cleaning Checklist</h2>
-            <span className="text-xs font-semibold text-cyan-400">{progressPercentage}% Done</span>
+        {geoError && (
+          <div className="mb-4 p-2.5 bg-red-900/40 border border-red-700 text-red-300 text-xs rounded-lg">
+            ⚠️ {geoError}
           </div>
+        )}
 
-          <div className="w-full bg-slate-800 rounded-full h-2 mb-3">
-            <div
-              className="bg-cyan-400 h-2 rounded-full transition-all duration-300"
-              style={{ width: `${progressPercentage}%` }}
-            ></div>
-          </div>
-
-          <div className="space-y-2">
-            {checklist.map((item) => (
-              <label
-                key={item.id}
-                onClick={() => toggleTask(item.id)}
-                className={`flex items-center p-3 rounded-lg border text-xs cursor-pointer transition-all ${
-                  item.done
-                    ? 'bg-slate-800/40 border-slate-800 text-slate-500 line-through'
-                    : 'bg-slate-800 border-slate-700 text-slate-200'
-                }`}
-              >
-                <input
-                  type="checkbox"
-                  checked={item.done}
-                  onChange={() => {}}
-                  className="mr-3 h-4 w-4 rounded accent-cyan-400"
-                />
-                {item.label}
-              </label>
-            ))}
-          </div>
-        </div>
-
-        {/* Photo Uploads */}
-        <div className="mb-6">
-          <h2 className="text-sm font-bold text-slate-300 mb-2">Job Photos</h2>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">Before Photo</label>
-              <div className="border-2 border-dashed border-slate-700 rounded-lg p-3 text-center bg-slate-800/50 relative">
-                {photos.before ? (
-                  <img src={photos.before} alt="Before" className="h-20 w-full object-cover rounded" />
-                ) : (
-                  <span className="text-xs text-slate-400">📷 Upload</span>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handlePhotoUpload('before', e)}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-[11px] text-slate-400 mb-1">After Photo</label>
-              <div className="border-2 border-dashed border-slate-700 rounded-lg p-3 text-center bg-slate-800/50 relative">
-                {photos.after ? (
-                  <img src={photos.after} alt="After" className="h-20 w-full object-cover rounded" />
-                ) : (
-                  <span className="text-xs text-slate-400">📷 Upload</span>
-                )}
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => handlePhotoUpload('after', e)}
-                  className="absolute inset-0 opacity-0 cursor-pointer"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
+        {/* Clock In Button (Gated by Geofence) */}
+        {jobStatus === 'scheduled' && (
+          <button
+            onClick={() => setJobStatus('in_progress')}
+            disabled={!isWithinGeofence}
+            className={`w-full py-3.5 font-bold rounded-xl shadow-lg transition-all ${
+              isWithinGeofence
+                ? 'bg-cyan-500 hover:bg-cyan-400 text-slate-950 cursor-pointer'
+                : 'bg-slate-800 text-slate-500 cursor-not-allowed border border-slate-700'
+            }`}
+          >
+            {isWithinGeofence ? '▶️ Clock In & Start Clean' : `Arrive within ${MAX_RADIUS_METERS}m to Clock In`}
+          </button>
+        )}
       </div>
-
-      {/* Complete Job & Auto Charge */}
-      {jobStatus === 'in_progress' && (
-        <button
-          onClick={() => {
-            setJobStatus('completed');
-            alert('Job marked as completed! Client card will be automatically charged.');
-          }}
-          disabled={progressPercentage < 100}
-          className={`w-full py-3.5 font-bold rounded-xl shadow-lg transition-all ${
-            progressPercentage === 100
-              ? 'bg-emerald-500 hover:bg-emerald-400 text-slate-950 cursor-pointer'
-              : 'bg-slate-800 text-slate-500 cursor-not-allowed'
-          }`}
-        >
-          {progressPercentage === 100
-            ? '✅ Complete Job & Auto-Charge Client'
-            : `Complete Checklist (${progressPercentage}%)`}
-        </button>
-      )}
-
     </div>
   );
 }
