@@ -34,9 +34,15 @@ const C = {
   text: "#F0F6FF", muted: "#8899AA", dim: "#445566",
 };
 
+const HUC_STATUSES = ["New", "Quoted", "Follow Up", "Booked", "Completed", "Lost"];
+const HUC_STATUS_COLOR = {
+  "New": C.blue, "Quoted": C.gold, "Follow Up": "#FF6B6B",
+  "Booked": C.accent, "Completed": C.accent, "Lost": C.dim,
+};
+
 const REGIONS = {
-  "ON": { id: "ON", country: "CA", flag: "🇨🇦", label: "Ontario, Canada", currency: "CAD", currencySymbol: "CA$", locale: "en-CA" },
-  "AZ": { id: "AZ", country: "US", flag: "🇺🇸", label: "Arizona, USA", currency: "USD", currencySymbol: "$", locale: "en-US" },
+  "ON": { id: "ON", country: "CA", flag: "🇨🇦", label: "Ontario, Canada", currency: "CAD", currencySymbol: "CA$", locale: "en-CA", tax: { name: "HST", rate: 0.13 } },
+  "AZ": { id: "AZ", country: "US", flag: "🇺🇸", label: "Arizona, USA", currency: "USD", currencySymbol: "$", locale: "en-US", tax: { name: "TPT", rate: 0.0 } },
 };
 
 let ACTIVE_REGION = REGIONS["ON"];
@@ -88,6 +94,155 @@ function StatCard({ label, value, sub, color, icon }) {
   );
 }
 
+function Modal({ title, children, onClose, wide }) {
+  return (
+    <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:999, display:"flex", alignItems:"flex-start", justifyContent:"center", overflowY:"auto", padding:"16px 12px" }}
+      onClick={e => { if(e.target === e.currentTarget) onClose(); }}>
+      <div style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:16, padding:"20px 18px", width:"100%", maxWidth: wide ? 720 : 520, margin:"auto", boxSizing:"border-box" }}
+        onClick={e => e.stopPropagation()}>
+        <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:16 }}>
+          <div style={{ fontSize:16, fontWeight:800 }}>{title}</div>
+          <button onClick={onClose} style={{ background:"none", border:"none", color:C.muted, fontSize:24, cursor:"pointer" }}>×</button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+// ─── TAB COMPONENTS ──────────────────────────────────────────────────────────
+
+function DashboardView({ jobs, partners, region }) {
+  return (
+    <div>
+      <div style={{ marginBottom: 20 }}>
+        <h2 style={S.h2}>Good morning! 👋</h2>
+        <p style={{ color: C.muted, fontSize: 14 }}>Overview for {BRAND.name} — {region.label}</p>
+      </div>
+      <div style={S.grid4}>
+        <StatCard label="Jobs Today" value={jobs.length} icon="📅" color={C.accent} />
+        <StatCard label="Active Partners" value={partners.length} icon="👥" color={C.blue} />
+        <StatCard label="Revenue" value={`${region.currencySymbol}530`} icon="💵" color={C.gold} />
+        <StatCard label="Gross Profit" value={`${region.currencySymbol}185`} icon="📈" color={C.purple} />
+      </div>
+      <div style={S.divider} />
+      <div style={S.card}>
+        <div style={S.h3}>Today's Schedule</div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {jobs.map(j => (
+            <div key={j.id} style={{ ...S.cardSm, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 800 }}>{j.client}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>📍 {j.address} · 📅 {j.date} at {j.time}</div>
+              </div>
+              <span style={S.badge(j.status === "scheduled" ? "blue" : "green")}>{j.status}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function JobsView({ jobs, setJobs, partners }) {
+  const [showModal, setShowModal] = useState(false);
+  const [newJob, setNewJob] = useState({ client: "", address: "", type: "Full Home Clean", date: TODAY_DATE, time: "9:00 AM", hours: 3 });
+
+  const addJob = () => {
+    setJobs([...jobs, { ...newJob, id: Date.now(), partnerId: 1, status: "scheduled", clientPrice: 200, partnerPay: 130, profit: 70 }]);
+    setShowModal(false);
+  };
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+        <div style={S.h2}>📋 Jobs & Work Orders</div>
+        <button style={S.btn("primary")} onClick={() => setShowModal(true)}>+ New Job</button>
+      </div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {jobs.map(j => (
+          <div key={j.id} style={S.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontWeight: 800, fontSize: 16 }}>{j.client}</div>
+                <div style={{ fontSize: 13, color: C.muted }}>📍 {j.address}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>📅 {j.date} at {j.time} · {j.type}</div>
+              </div>
+              <div style={{ textAlign: "right" }}>
+                <span style={S.badge(j.status === "scheduled" ? "blue" : "green")}>{j.status}</span>
+                <div style={{ fontWeight: 800, color: C.accent, marginTop: 4 }}>${j.clientPrice}</div>
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+      {showModal && (
+        <Modal title="Book New Job" onClose={() => setShowModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div><div style={S.label}>Client Name</div><input style={S.input} value={newJob.client} onChange={e => setNewJob({ ...newJob, client: e.target.value })} placeholder="Sarah M." /></div>
+            <div><div style={S.label}>Address</div><input style={S.input} value={newJob.address} onChange={e => setNewJob({ ...newJob, address: e.target.value })} placeholder="123 Main St" /></div>
+            <div><div style={S.label}>Date</div><input style={S.input} type="date" value={newJob.date} onChange={e => setNewJob({ ...newJob, date: e.target.value })} /></div>
+            <button style={S.btn("primary")} onClick={addJob}>Save Job</button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+}
+
+function ResidentialLeadsView({ region }) {
+  return (
+    <div style={S.card}>
+      <div style={S.h2}>🏠 Residential Quotes & Leads</div>
+      <p style={{ color: C.muted, fontSize: 14 }}>Instant estimates, pricing grid, and client quote generation.</p>
+    </div>
+  );
+}
+
+function CommercialLeadsView({ region }) {
+  return (
+    <div style={S.card}>
+      <div style={S.h2}>🏢 Commercial Proposals</div>
+      <p style={{ color: C.muted, fontSize: 14 }}>Contract pricing per square foot for office and commercial spaces.</p>
+    </div>
+  );
+}
+
+function FinanceView({ region }) {
+  return (
+    <div>
+      <div style={S.h2}>💰 Partner Pay & Financials</div>
+      <div style={S.grid3}>
+        <StatCard label="Partner Split" value="65%" icon="👥" color={C.accent} sub="Partner earnings" />
+        <StatCard label="Company Margin" value="35%" icon="🏢" color={C.gold} sub="Gross profit" />
+        <StatCard label="Tax System" value={region.tax.name} icon="🇨🇦" color={C.blue} sub={`${region.tax.rate * 100}% rate`} />
+      </div>
+    </div>
+  );
+}
+
+function PartnersView({ partners, setPartners }) {
+  return (
+    <div>
+      <div style={S.h2}>👥 Active Cleaning Partners</div>
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {partners.map(p => (
+          <div key={p.id} style={{ ...S.cardSm, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <div style={S.avatar()}>{p.avatar}</div>
+              <div>
+                <div style={{ fontWeight: 700 }}>{p.name}</div>
+                <div style={{ fontSize: 12, color: C.muted }}>{p.phone} · ${p.payRate}/hr</div>
+              </div>
+            </div>
+            <span style={S.badge("green")}>{p.status}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── MAIN APP COMPONENT ────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("dashboard");
@@ -120,7 +275,6 @@ export default function App() {
               alert("🎉 Booking submitted! Thank you for choosing Have Us Clean.");
             }
           } catch (err) {
-            // Fallback for standalone frontend test
             alert("🎉 Booking confirmed! Thank you for choosing Have Us Clean.");
           }
         }} />
@@ -132,7 +286,6 @@ export default function App() {
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
       { id:"jobs",       label:"📋 Jobs",          desc:"All jobs & work orders" },
-      { id:"recurring",  label:"🔄 Recurring",     desc:"Recurring job schedules" },
       { id:"gps",        label:"📍 GPS",           desc:"Check-in / check-out" },
     ]},
     { id:"quotes",   label:"💬 Quotes", color: C.gold, tabs:[
@@ -141,7 +294,6 @@ export default function App() {
     ]},
     { id:"finance",  label:"💰 Finance", color: "#FF6B6B", tabs:[
       { id:"pay",        label:"💰 Partner Pay",   desc:"Pay tracking & history" },
-      { id:"stripe",     label:"💳 Payments",      desc:"Client payments" },
     ]},
     { id:"team",     label:"👥 Team", color: C.gold, tabs:[
       { id:"partners",    label:"👥 Partners",       desc:"Partner profiles & availability" },
@@ -152,6 +304,7 @@ export default function App() {
 
   return (
     <div style={S.app}>
+      {/* Top Bar Header */}
       <header style={S.header}>
         <div style={S.logo}>
           <div style={S.logoMark}>{BRAND.logoMark}</div>
@@ -170,7 +323,7 @@ export default function App() {
         </div>
       </header>
 
-      {/* Main Navigation Bar */}
+      {/* Primary Category Tabs */}
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display:"flex", gap:4, overflowX:"auto" }}>
         {NAV_GROUPS.map(g => {
           const isActive = g.id === activeGroup.id;
@@ -191,7 +344,7 @@ export default function App() {
         })}
       </div>
 
-      {/* Sub Navigation Bar */}
+      {/* Sub-Tabs Row */}
       <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "6px 16px", display:"flex", gap:4, overflowX:"auto" }}>
         {activeGroup.tabs.map(t => {
           const isActive = tab === t.id;
@@ -213,101 +366,15 @@ export default function App() {
         })}
       </div>
 
-      {/* Main View Router */}
+      {/* Main Interactive Content Area */}
       <main style={S.main}>
-        {tab === "dashboard" && (
-          <div>
-            <div style={{ marginBottom: 20 }}>
-              <h2 style={S.h2}>Good morning! 👋</h2>
-              <p style={{ color: C.muted, fontSize: 14 }}>Overview for {BRAND.name} — {activeRegion.label}</p>
-            </div>
-            <div style={S.grid4}>
-              <StatCard label="Jobs Today" value={jobs.length} icon="📅" color={C.accent} />
-              <StatCard label="Active Partners" value={partners.length} icon="👥" color={C.blue} />
-              <StatCard label="Revenue" value={`${activeRegion.currencySymbol}530`} icon="💵" color={C.gold} />
-              <StatCard label="Gross Profit" value={`${activeRegion.currencySymbol}185`} icon="📈" color={C.purple} />
-            </div>
-          </div>
-        )}
-
-        {tab === "jobs" && (
-          <div style={S.card}>
-            <div style={S.h2}>📋 Scheduled Jobs</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {jobs.map(j => (
-                <div key={j.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <div>
-                    <div style={{ fontWeight: 800 }}>{j.client}</div>
-                    <div style={{ fontSize: 12, color: C.muted }}>📍 {j.address} · 📅 {j.date} at {j.time}</div>
-                  </div>
-                  <span style={S.badge(j.status==="scheduled"?"blue":"green")}>{j.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {tab === "recurring" && (
-          <div style={S.card}>
-            <div style={S.h2}>🔄 Recurring Schedules</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>Bi-weekly and monthly customer rotations configured.</p>
-          </div>
-        )}
-
-        {tab === "gps" && (
-          <div style={S.card}>
-            <div style={S.h2}>📍 GPS Check-In Tracker</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>Real-time location verification active for cleaning crews.</p>
-          </div>
-        )}
-
-        {tab === "res" && (
-          <div style={S.card}>
-            <div style={S.h2}>🏠 Residential Quotes</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>Manage incoming quotes and client estimates.</p>
-          </div>
-        )}
-
-        {tab === "com" && (
-          <div style={S.card}>
-            <div style={S.h2}>🏢 Commercial Quotes</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>Commercial proposals and contract estimation engine.</p>
-          </div>
-        )}
-
-        {tab === "pay" && (
-          <div style={S.card}>
-            <div style={S.h2}>💰 Partner Pay</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>65% partner revenue splits and weekly payout summaries.</p>
-          </div>
-        )}
-
-        {tab === "stripe" && (
-          <div style={S.card}>
-            <div style={S.h2}>💳 Stripe Payments</div>
-            <p style={{ color: C.muted, fontSize: 14 }}>Automated card processing and receipt engine.</p>
-          </div>
-        )}
-
-        {tab === "partners" && (
-          <div style={S.card}>
-            <div style={S.h2}>👥 Active Partners</div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              {partners.map(p => (
-                <div key={p.id} style={{ ...S.cardSm, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                  <div style={{ display:"flex", alignItems:"center", gap:10 }}>
-                    <div style={S.avatar()}>{p.avatar}</div>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{p.name}</div>
-                      <div style={{ fontSize: 12, color: C.muted }}>{p.phone} · ${p.payRate}/hr</div>
-                    </div>
-                  </div>
-                  <span style={S.badge("green")}>{p.status}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
+        {tab === "dashboard" && <DashboardView jobs={jobs} partners={partners} region={activeRegion} />}
+        {tab === "jobs"      && <JobsView jobs={jobs} setJobs={setJobs} partners={partners} />}
+        {tab === "gps"       && <div style={S.card}><div style={S.h2}>📍 GPS Check-In Tracker</div><p style={{color: C.muted}}>GPS Check-In and active location tracking standard across field partners.</p></div>}
+        {tab === "res"       && <ResidentialLeadsView region={activeRegion} />}
+        {tab === "com"       && <CommercialLeadsView region={activeRegion} />}
+        {tab === "pay"       && <FinanceView region={activeRegion} />}
+        {tab === "partners"  && <PartnersView partners={partners} setPartners={setPartners} />}
       </main>
 
       {isMobile && <MobileBottomNav activeTab={tab} onTabChange={setTab} />}
