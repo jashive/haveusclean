@@ -1448,9 +1448,9 @@ function WhiteLabel() {
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
           {[
             { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
-            { icon:"☁️", label:"Cloud Database", status:"Coming Soon", color:C.muted, note:"Firebase / Supabase" },
+            { icon:"☁️", label:"Cloud Database", status:"Active (Supabase)", color:"#22c55e", note:"Firebase / Supabase" },
             { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
-            { icon:"🔄", label:"Real-Time Sync", status:"Coming Soon", color:C.muted, note:"Live updates across devices" },
+            { icon:"🔄", label:"Real-Time Sync", status:"Active (Supabase)", color:"#22c55e", note:"Live updates across devices" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>
               <div style={{ fontSize:28, marginBottom:6 }}>{item.icon}</div>
@@ -5336,6 +5336,18 @@ export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
   const [tab, setTab] = useState("dashboard");
   const isMobile                        = useMobileNav();
+  const [showRegionBanner, setShowRegionBanner] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.matchMedia("(min-width: 768px)").matches;
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const mediaQuery = window.matchMedia("(min-width: 768px)");
+    const update = () => setShowRegionBanner(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener?.("change", update);
+    return () => mediaQuery.removeEventListener?.("change", update);
+  }, []);
   const [jobs, setJobs] = useState(() => {
     if (typeof window === "undefined") return initJobs;
     try {
@@ -6158,12 +6170,14 @@ export default function App() {
         </div>
 
         {/* Region Banner inline */}
-        <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, justifyContent:"center", flexWrap:"wrap" }}>
-          <span style={{ fontSize:14 }}>{activeRegion.flag}</span>
-          <span style={{ color: activeRegion.id==="ON" ? "#FF6B6B" : C.blue, fontWeight:700, fontSize:13 }}>{activeRegion.label}</span>
-          <span style={{ color:C.dim, fontSize:12 }}>·</span>
-          <span style={{ color:C.muted, fontSize:12 }}>{activeRegion.id==="ON" ? "CAD · 13% HST" : "USD · Services Tax-Exempt"}</span>
-        </div>
+        {showRegionBanner && (
+          <div style={{ display:"flex", alignItems:"center", gap:8, flex:1, justifyContent:"center", flexWrap:"wrap" }}>
+            <span style={{ fontSize:14 }}>{activeRegion.flag}</span>
+            <span style={{ color: activeRegion.id==="ON" ? "#FF6B6B" : C.blue, fontWeight:700, fontSize:13 }}>{activeRegion.label}</span>
+            <span style={{ color:C.dim, fontSize:12 }}>·</span>
+            <span style={{ color:C.muted, fontSize:12 }}>{activeRegion.id==="ON" ? "CAD · 13% HST" : "USD · Services Tax-Exempt"}</span>
+          </div>
+        )}
 
         <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
