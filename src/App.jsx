@@ -4471,6 +4471,7 @@ const SUPABASE_CONFIG = getSupabaseConfig(typeof import.meta !== "undefined" ? i
 const DB_KEYS = {
   jobs:               "cp:jobs",
   partners:           "cp:partners",
+  salesReps:          "cp:sales_reps",
   leadsRes:           "cp:leads_res",
   leadsCom:           "cp:leads_com",
   region:             "cp:region",
@@ -4499,6 +4500,7 @@ const toStrId = (v) => v !== undefined && v !== null ? String(v) : String(Date.n
 const SB = {
   "cp:jobs":                { table:"huc_jobs",         pk:"id",            isArray:true  },
   "cp:partners":            { table:"huc_partners",     pk:"id",            isArray:true  },
+  "cp:sales_reps":          { table:"huc_sales_reps",   pk:"id",            isArray:true  },
   "cp:leads_res":           { table:"huc_leads_res",    pk:"id",            isArray:true  },
   "cp:cold_leads":          { table:"huc_leads_cold",   pk:"lead_id",       isArray:true  },
   "cp:onboarding_progress": { table:"partner_progress", pk:"partner_id",    isArray:false },
@@ -5752,12 +5754,24 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   );
 }
 
+const ROLE_STORAGE_KEY = "cp:user_role";
+const PARTNER_PORTAL_PIN_KEY = "cp:partner_portal_pin";
+const SALES_PORTAL_PIN_KEY = "cp:sales_portal_pin";
+const ROLE_VALUES = new Set(["admin", "sales", "partner"]);
+const ADMIN_PORTAL_PIN = "000000";
+
 const ROLE_TAB_ALLOWLIST = {
-  partner: new Set(["partnerview"]),
-  sales: new Set(["salesview", "cold", "res", "com", "jobs", "partners", "ai"]),
+  partner: new Set(["partnerview", "onboarding"]),
+  sales: new Set(["salesview", "cold", "res", "jobs", "schedule", "partners"]),
 };
 
 const LAST_ACTIVE_TAB_KEY = "cp:last_active_tab";
+const TAB_QUERY_ALIASES = {
+  partnerview: "partner-view",
+};
+const QUERY_TAB_ALIASES = {
+  "partner-view": "partnerview",
+};
 const ALL_TAB_IDS = new Set([
   "dashboard", "ops_mgr", "jobs", "recurring", "gps", "geo",
   "res", "com", "cold", "intake",
@@ -5768,13 +5782,35 @@ const ALL_TAB_IDS = new Set([
   "tax", "db", "whitelabel", "pricing", "swot", "diagnostic", "schedule",
 ]);
 
+function normalizeTabId(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return QUERY_TAB_ALIASES[raw] || raw;
+}
+
+function getTabQueryValue(tabId) {
+  return TAB_QUERY_ALIASES[tabId] || tabId;
+}
+
+function getInitialRole() {
+  if (typeof window === "undefined") return "admin";
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const roleParam = String(params.get("role") || "").toLowerCase();
+    if (ROLE_VALUES.has(roleParam)) return roleParam;
+    const stored = String(localStorage.getItem(ROLE_STORAGE_KEY) || "").toLowerCase();
+    if (ROLE_VALUES.has(stored)) return stored;
+  } catch {}
+  return "admin";
+}
+
 function getInitialTab() {
   if (typeof window === "undefined") return "dashboard";
   try {
     const params = new URLSearchParams(window.location.search);
-    const urlTab = params.get("tab");
+    const urlTab = normalizeTabId(params.get("tab"));
     if (urlTab && ALL_TAB_IDS.has(urlTab)) return urlTab;
-    const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
+    const savedTab = normalizeTabId(localStorage.getItem(LAST_ACTIVE_TAB_KEY));
     if (savedTab && ALL_TAB_IDS.has(savedTab)) return savedTab;
   } catch {}
   return "dashboard";
@@ -5848,10 +5884,104 @@ function SalesView({ activeRole, onEnterSales, onExitSales, setTab }) {
   );
 }
 
+function getDefaultPartnerPin(partner = {}) {
+  return String(partner?.phone || "").replace(/\D/g, "").slice(-4) || "0000";
+}
+
+function generateUniquePin(existingPins = new Set()) {
+  for (let i = 0; i < 5000; i += 1) {
+    const next = String(Math.floor(1000 + Math.random() * 9000));
+    if (!existingPins.has(next)) return next;
+  }
+  return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function RoleSelectionGate({
+  adminPin,
+  setAdminPin,
+  salesPin,
+  setSalesPin,
+  partnerPin,
+  setPartnerPin,
+  error,
+  onEnterAdmin,
+  onEnterSales,
+  onEnterPartner,
+}) {
+  return (
+    <div style={{ ...S.app, alignItems: "center", justifyContent: "center", minHeight: "100vh", padding: 20 }}>
+      <div style={{ ...S.card, width: "100%", maxWidth: 560, border: `1px solid ${C.border}` }}>
+        <div style={{ fontSize: 24, fontWeight: 800, marginBottom: 8 }}>Select Portal</div>
+        <div style={{ color: C.muted, fontSize: 14, marginBottom: 18 }}>Choose your workspace. Role persists on this device.</div>
+
+        <div style={{ display: "grid", gap: 12 }}>
+          <div style={{ ...S.cardSm, border: `1px solid ${C.border}` }}>
+            <div style={{ fontWeight: 700, marginBottom: 8 }}>Admin Dashboard</div>
+            <div style={{ color: C.muted, fontSize: 13, marginBottom: 10 }}>Full access to all operations, finance, clients, and settings.</div>
+            <input
+              style={S.input}
+              type="password"
+              inputMode="numeric"
+              placeholder="Enter Admin PIN"
+              value={adminPin}
+              onChange={(e) => setAdminPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+              onKeyDown={(e) => e.key === "Enter" && onEnterAdmin()}
+            />
+            <button style={{ ...S.btn("primary"), width: "100%", marginTop: 8 }} onClick={onEnterAdmin}>Enter Admin Dashboard</button>
+          </div>
+
+          <div style={{ ...S.cardSm, border: `1px solid ${C.border}` }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Sales Representative Portal</div>
+            <div style={{ color: C.muted, fontSize: 13, marginBottom: 10 }}>Cold Outreach, Quotes, Schedule/Booking, Team Availability.</div>
+            <input
+              style={S.input}
+              type="password"
+              inputMode="numeric"
+              placeholder="Enter Sales PIN"
+              value={salesPin}
+              onChange={(e) => setSalesPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              onKeyDown={(e) => e.key === "Enter" && onEnterSales()}
+            />
+            <button style={{ ...S.btn("primary"), width: "100%", marginTop: 8 }} onClick={onEnterSales}>Enter Sales Portal</button>
+          </div>
+
+          <div style={{ ...S.cardSm, border: `1px solid ${C.border}` }}>
+            <div style={{ fontWeight: 700, marginBottom: 6 }}>Partner / Field Staff Portal</div>
+            <div style={{ color: C.muted, fontSize: 13, marginBottom: 10 }}>My Jobs Today, Upcoming Schedule, Upload Photos/Notes, Onboarding.</div>
+            <input
+              style={S.input}
+              type="password"
+              inputMode="numeric"
+              placeholder="Enter Partner PIN"
+              value={partnerPin}
+              onChange={(e) => setPartnerPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              onKeyDown={(e) => e.key === "Enter" && onEnterPartner()}
+            />
+            <button style={{ ...S.btn("primary"), width: "100%", marginTop: 8 }} onClick={onEnterPartner}>Enter Partner Portal</button>
+          </div>
+        </div>
+
+        {error && <div style={{ marginTop: 12, color: C.red, fontSize: 13 }}>{error}</div>}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
   const [tab, setTab] = useState(() => getInitialTab());
-  const [accessRole, setAccessRole] = useState("admin");
+  const [accessRole, setAccessRole] = useState(() => getInitialRole());
+  const [showRoleGate, setShowRoleGate] = useState(() => getInitialRole() === "admin");
+  const [roleGatePin, setRoleGatePin] = useState("");
+  const [salesPortalPinInput, setSalesPortalPinInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { return String(localStorage.getItem(SALES_PORTAL_PIN_KEY) || ""); } catch { return ""; }
+  });
+  const [partnerPortalPinInput, setPartnerPortalPinInput] = useState(() => {
+    if (typeof window === "undefined") return "";
+    try { return String(localStorage.getItem(PARTNER_PORTAL_PIN_KEY) || ""); } catch { return ""; }
+  });
+  const [roleGateError, setRoleGateError] = useState("");
   const isMobile                        = useMobileNav();
   const [showRegionBanner, setShowRegionBanner] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -5908,6 +6038,7 @@ export default function App() {
       return Boolean(
         localStorage.getItem("cp:jobs") ||
         localStorage.getItem("cp:partners") ||
+        localStorage.getItem(DB_KEYS.salesReps) ||
         localStorage.getItem("cp:cold_leads")
       );
     } catch {
@@ -5932,24 +6063,37 @@ export default function App() {
   const [activityLog, setActivityLog] = useState([]);
   const saveTimer = useRef(null);
   const coldLeadsSaveTimer = useRef(null);
+  const [salesReps, setSalesReps] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const savedSales = localStorage.getItem(DB_KEYS.salesReps);
+      if (savedSales) {
+        const parsed = JSON.parse(savedSales);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return [];
+  });
 
   const setTabGuarded = useCallback((nextTab) => {
-    if (nextTab === "partnerview") {
+    const normalizedTab = normalizeTabId(nextTab);
+    if (!normalizedTab) return;
+    if (normalizedTab === "partnerview") {
       setAccessRole("partner");
       setTab("partnerview");
       return;
     }
-    if (nextTab === "salesview") {
+    if (normalizedTab === "salesview") {
       setAccessRole("sales");
       setTab("salesview");
       return;
     }
-    if (!canAccessTab(accessRole, nextTab)) {
+    if (!canAccessTab(accessRole, normalizedTab)) {
       if (accessRole === "partner") setTab("partnerview");
       if (accessRole === "sales") setTab("salesview");
       return;
     }
-    setTab(nextTab);
+    setTab(normalizedTab);
   }, [accessRole]);
 
   useEffect(() => {
@@ -5959,6 +6103,14 @@ export default function App() {
   }, [accessRole, tab]);
 
   useEffect(() => {
+    if (currentPath !== "/") return;
+    if (accessRole === "partner") {
+      const nextTab = normalizeTabId(tab);
+      if (!ROLE_TAB_ALLOWLIST.partner.has(nextTab)) setTab("partnerview");
+    }
+  }, [accessRole, currentPath, tab]);
+
+  useEffect(() => {
     if (typeof window === "undefined") return;
     if (!ALL_TAB_IDS.has(tab)) return;
     try {
@@ -5966,10 +6118,162 @@ export default function App() {
     } catch {}
     if (currentPath !== "/") return;
     const url = new URL(window.location.href);
-    if (url.searchParams.get("tab") === tab) return;
-    url.searchParams.set("tab", tab);
+    const tabQueryValue = getTabQueryValue(tab);
+    const prevTabQuery = url.searchParams.get("tab");
+    const prevRoleQuery = url.searchParams.get("role");
+    if (accessRole === "admin") url.searchParams.delete("role");
+    else url.searchParams.set("role", accessRole);
+    url.searchParams.set("tab", tabQueryValue);
+    const nextRoleQuery = accessRole === "admin" ? null : accessRole;
+    if (prevTabQuery === tabQueryValue && prevRoleQuery === nextRoleQuery) return;
     window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
-  }, [tab, currentPath]);
+  }, [tab, currentPath, accessRole]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      localStorage.setItem(ROLE_STORAGE_KEY, accessRole);
+    } catch {}
+  }, [accessRole]);
+
+  const enterPortalRole = useCallback((role) => {
+    setAccessRole(role);
+    setShowRoleGate(false);
+    setRoleGateError("");
+    if (role === "partner") {
+      setTab("partnerview");
+      return;
+    }
+    if (role === "sales") {
+      setTab("salesview");
+      return;
+    }
+    setTab("dashboard");
+  }, []);
+
+  const handleAdminPortalEntry = useCallback(() => {
+    if (roleGatePin !== ADMIN_PORTAL_PIN) {
+      setRoleGateError("Invalid Admin PIN.");
+      return;
+    }
+    setRoleGatePin("");
+    enterPortalRole("admin");
+  }, [enterPortalRole, roleGatePin]);
+
+  const handleSalesPortalEntry = useCallback(() => {
+    const pin = String(salesPortalPinInput || "").trim();
+    if (!pin) {
+      setRoleGateError("Enter a Sales PIN.");
+      return;
+    }
+    const matched = salesReps.find((rep) => String(rep.pin || "") === pin);
+    if (!matched) {
+      setRoleGateError("Invalid Sales PIN.");
+      return;
+    }
+    try { localStorage.setItem(SALES_PORTAL_PIN_KEY, pin); } catch {}
+    setSalesPortalPinInput(pin);
+    enterPortalRole("sales");
+  }, [enterPortalRole, salesPortalPinInput, salesReps]);
+
+  const handlePartnerPortalEntry = useCallback(() => {
+    const pin = String(partnerPortalPinInput || "").trim();
+    if (!pin) {
+      setRoleGateError("Enter a Partner PIN.");
+      return;
+    }
+    const matched = partners.find((partner) => String(partner.pin || getDefaultPartnerPin(partner)) === pin);
+    if (!matched) {
+      setRoleGateError("Invalid Partner PIN.");
+      return;
+    }
+    try { localStorage.setItem(PARTNER_PORTAL_PIN_KEY, pin); } catch {}
+    setPartnerPortalPinInput(pin);
+    enterPortalRole("partner");
+  }, [enterPortalRole, partnerPortalPinInput, partners]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isLoading || currentPath !== "/") return;
+    const params = new URLSearchParams(window.location.search);
+    const roleParam = String(params.get("role") || "").toLowerCase();
+    const deepLinkPin = String(params.get("pin") || "").trim();
+
+    if (!ROLE_VALUES.has(roleParam)) {
+      if (accessRole === "admin") setShowRoleGate(true);
+      return;
+    }
+
+    if (roleParam === "admin") {
+      if (deepLinkPin && deepLinkPin === ADMIN_PORTAL_PIN) {
+        enterPortalRole("admin");
+      } else if (accessRole === "admin") {
+        setShowRoleGate(true);
+      }
+      return;
+    }
+
+    if (roleParam === "partner") {
+      const partnerId = String(params.get("partnerId") || "");
+      const matched = partners.find((partner) => {
+        const pin = String(partner.pin || getDefaultPartnerPin(partner));
+        if (partnerId && String(partner.id) !== partnerId) return false;
+        return Boolean(deepLinkPin) && deepLinkPin === pin;
+      });
+      if (matched) {
+        try { localStorage.setItem(PARTNER_PORTAL_PIN_KEY, deepLinkPin); } catch {}
+        enterPortalRole("partner");
+      }
+      return;
+    }
+
+    if (roleParam === "sales") {
+      const repId = String(params.get("repId") || "");
+      const matched = salesReps.find((rep) => {
+        const pin = String(rep.pin || "");
+        if (!pin || !deepLinkPin) return false;
+        if (repId && String(rep.id) !== repId) return false;
+        return pin === deepLinkPin;
+      });
+      if (matched) {
+        try { localStorage.setItem(SALES_PORTAL_PIN_KEY, deepLinkPin); } catch {}
+        enterPortalRole("sales");
+      }
+    }
+  }, [accessRole, currentPath, enterPortalRole, isLoading, partners, salesReps]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (isLoading || currentPath !== "/") return;
+
+    if (accessRole === "sales") {
+      const pin = String(localStorage.getItem(SALES_PORTAL_PIN_KEY) || "").trim();
+      const ok = Boolean(pin) && salesReps.some((rep) => String(rep.pin || "") === pin);
+      if (!ok) {
+        setShowRoleGate(true);
+      } else {
+        setShowRoleGate(false);
+        setTab("salesview");
+      }
+      return;
+    }
+
+    if (accessRole === "partner") {
+      const pin = String(localStorage.getItem(PARTNER_PORTAL_PIN_KEY) || "").trim();
+      const ok = Boolean(pin) && partners.some((partner) => String(partner.pin || getDefaultPartnerPin(partner)) === pin);
+      if (!ok) {
+        setShowRoleGate(true);
+      } else {
+        setShowRoleGate(false);
+        setTab("partnerview");
+      }
+      return;
+    }
+
+    if (accessRole === "admin") {
+      setShowRoleGate(true);
+    }
+  }, [accessRole, currentPath, isLoading, partners, salesReps]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -6029,9 +6333,10 @@ export default function App() {
 
     async function loadAll() {
       try {
-        const [savedJobs, savedPartners, savedRegion, log, savedResLeads, savedColdLeads, savedProgress, savedClients, savedInvoices, connected] = await Promise.all([
+        const [savedJobs, savedPartners, savedSalesReps, savedRegion, log, savedResLeads, savedColdLeads, savedProgress, savedClients, savedInvoices, connected] = await Promise.all([
           dbGet(DB_KEYS.jobs),
           dbGet(DB_KEYS.partners),
+          dbGet(DB_KEYS.salesReps),
           dbGet(DB_KEYS.region),
           dbGet(DB_KEYS.activity),
           dbGet(DB_KEYS.leadsRes),
@@ -6053,6 +6358,7 @@ export default function App() {
         setIsCloudConnected(Boolean(connected));
         if (savedJobs)      setJobs(savedJobs);
         if (savedPartners)  setPartners(savedPartners);
+        if (savedSalesReps) setSalesReps(savedSalesReps);
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
         if (log)            setActivityLog(log);
         if (savedClients)   setClients(savedClients);
@@ -6160,6 +6466,15 @@ export default function App() {
     };
     syncPartners();
   }, [partners, isLoading, isCloudConnected]);
+
+  useEffect(() => {
+    if (isLoading) return;
+    const syncSales = async () => {
+      const ok = await dbSet(DB_KEYS.salesReps, salesReps);
+      if (ok) setDbStatus(isCloudConnected ? "synced" : "local");
+    };
+    syncSales();
+  }, [salesReps, isLoading, isCloudConnected]);
 
   // ── Auto-save resLeads — with write-time validator ──
   // Filters junk before every write so dirty data never enters Supabase
@@ -6567,6 +6882,16 @@ export default function App() {
     });
   }, [isCloudConnected]);
 
+  const setSalesRepsDB = useCallback((updater) => {
+    setSalesReps(prev => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      void dbSet(DB_KEYS.salesReps, next).then(() => {
+        setDbStatus(isCloudConnected ? "synced" : "local");
+      }).catch(() => {});
+      return next;
+    });
+  }, [isCloudConnected]);
+
   // Refresh activity log from storage
   const refreshLog = useCallback(async () => {
     const log = await dbGet(DB_KEYS.activity);
@@ -6578,6 +6903,7 @@ export default function App() {
     await Promise.all([
       dbSet(DB_KEYS.jobs,     initJobs),
       dbSet(DB_KEYS.partners, initPartners),
+      dbSet(DB_KEYS.salesReps, []),
       dbSet(DB_KEYS.clients, []),
       dbSet(DB_KEYS.invoices, []),
       dbDelete(DB_KEYS.leadsRes),
@@ -6588,6 +6914,7 @@ export default function App() {
     ]);
     setJobs(initJobs);
     setPartners(initPartners);
+    setSalesReps([]);
     setClients([]);
     setInvoices([]);
     setResLeads([]);
@@ -6607,6 +6934,7 @@ export default function App() {
       region: activeRegion.id,
       jobs,
       partners,
+      salesReps,
       clients,
       invoices,
       activityLog,
@@ -6807,6 +7135,23 @@ export default function App() {
     );
   }
 
+  if (currentPath === "/" && showRoleGate) {
+    return (
+      <RoleSelectionGate
+        adminPin={roleGatePin}
+        setAdminPin={setRoleGatePin}
+        salesPin={salesPortalPinInput}
+        setSalesPin={setSalesPortalPinInput}
+        partnerPin={partnerPortalPinInput}
+        setPartnerPin={setPartnerPortalPinInput}
+        error={roleGateError}
+        onEnterAdmin={handleAdminPortalEntry}
+        onEnterSales={handleSalesPortalEntry}
+        onEnterPartner={handlePartnerPortalEntry}
+      />
+    );
+  }
+
   return (
     <div style={S.app}>
 {/* ── TOP HEADER: Logo + Region + DB status ── */}
@@ -6830,6 +7175,18 @@ export default function App() {
         )}
 
         <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
+          {accessRole === "admin" && (
+            <button
+              style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px" }}
+              onClick={() => {
+                setRoleGateError("");
+                setRoleGatePin("");
+                setShowRoleGate(true);
+              }}
+            >
+              Switch Role
+            </button>
+          )}
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
           {/* DB sync pill */}
           <div
@@ -6938,7 +7295,7 @@ export default function App() {
         {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTabGuarded} invoices={invoices} />}
         {tab==="sms"            && <SMSReminders      jobs={regionJobs} />}
         {tab==="marketing"      && <MarketingHub      region={activeRegion} />}
-        {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} />}
+        {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} salesReps={salesReps} setSalesReps={setSalesRepsDB} accessRole={accessRole} />}
         {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} setJobs={setJobsDB} onboardingProgress={onboardingProgress} onExitRole={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="salesview"      && <SalesView         activeRole={accessRole} onEnterSales={() => setAccessRole("sales")} onExitSales={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
@@ -8193,78 +8550,201 @@ function JobsLegacy({ jobs, setJobs, partners }) {
 
 
 // ─── PARTNERS ────────────────────────────────────────────────────────────────
-function Partners({ partners, setPartners, jobs }) {
+function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = () => {}, accessRole = "admin" }) {
+  const [teamTab, setTeamTab] = useState("partners");
   const [showModal, setShowModal] = useState(false);
+  const [showSalesModal, setShowSalesModal] = useState(false);
   const [newP, setNewP] = useState({ name: "", phone: "", email: "", payRate: 22, availability: [] });
+  const [newSalesRep, setNewSalesRep] = useState({ name: "", phone: "", email: "", commissionRate: 8, territory: "Ontario" });
+
+  const isAdmin = accessRole === "admin";
+  const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  const partnerJobs = (id) => jobs.filter(j => j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id)));
+  const pendingPay = (id) => jobs.filter(j => (j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id))) && j.status !== "completed").reduce((a, b) => a + (b.pay || 0), 0);
+
+  const buildPartnerInvite = (partner) => {
+    const pin = String(partner.pin || getDefaultPartnerPin(partner));
+    return `${baseUrl}/?role=partner&tab=partner-view&partnerId=${encodeURIComponent(String(partner.id))}&pin=${encodeURIComponent(pin)}`;
+  };
+
+  const buildSalesInvite = (rep) => {
+    const pin = String(rep.pin || "");
+    return `${baseUrl}/?role=sales&tab=salesview&repId=${encodeURIComponent(String(rep.id))}&pin=${encodeURIComponent(pin)}`;
+  };
+
+  const copyText = async (value) => {
+    try { await navigator.clipboard?.writeText(value); } catch {}
+  };
 
   const handleAdd = () => {
-    const initials = newP.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2);
-    setPartners([...partners, { ...newP, id: Date.now(), status: "onboarding", rating: 0, jobsDone: 0, onboarded: false, avatar: initials }]);
+    const initials = newP.name.split(" ").map(w => w[0]).join("").toUpperCase().slice(0, 2) || "NP";
+    const pin = getDefaultPartnerPin(newP);
+    setPartners(prev => [...prev, { ...newP, id: Date.now(), pin, status: "onboarding", rating: 0, jobsDone: 0, onboarded: false, avatar: initials }]);
     setShowModal(false);
     setNewP({ name: "", phone: "", email: "", payRate: 22, availability: [] });
   };
 
-  const toggleDay = (d) => setNewP({ ...newP, availability: newP.availability.includes(d) ? newP.availability.filter(x => x !== d) : [...newP.availability, d] });
+  const handleAddSalesRep = () => {
+    const allPins = new Set([
+      ...partners.map(p => String(p.pin || getDefaultPartnerPin(p))),
+      ...salesReps.map(rep => String(rep.pin || "")),
+    ]);
+    const pin = generateUniquePin(allPins);
+    const rep = {
+      id: Date.now(),
+      role: "sales",
+      status: "active",
+      name: newSalesRep.name,
+      phone: newSalesRep.phone,
+      email: newSalesRep.email,
+      commissionRate: Number(newSalesRep.commissionRate || 0),
+      territory: newSalesRep.territory || "Ontario",
+      pin,
+      createdAt: new Date().toISOString(),
+    };
+    setSalesReps(prev => [rep, ...prev]);
+    setShowSalesModal(false);
+    setNewSalesRep({ name: "", phone: "", email: "", commissionRate: 8, territory: "Ontario" });
+  };
 
-  const partnerJobs = (id) => jobs.filter(j => j.partnerId === id);
-  const partnerEarnings = (id) => jobs.filter(j => j.partnerId === id && j.status === "completed").reduce((a, b) => a + b.pay, 0);
-  const pendingPay = (id) => jobs.filter(j => j.partnerId === id && j.status !== "completed").reduce((a, b) => a + b.pay, 0);
+  const toggleDay = (d) => setNewP({ ...newP, availability: newP.availability.includes(d) ? newP.availability.filter(x => x !== d) : [...newP.availability, d] });
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
-        <div style={styles.h2}>Partners</div>
-        <button style={styles.btn("primary")} onClick={() => setShowModal(true)}>+ Add Partner</button>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+        <div style={styles.h2}>Team Workspace</div>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          <button style={styles.navBtn(teamTab === "partners")} onClick={() => setTeamTab("partners")}>Partners</button>
+          <button style={styles.navBtn(teamTab === "sales")} onClick={() => setTeamTab("sales")}>Sales Team</button>
+          {isAdmin && teamTab === "partners" && <button style={styles.btn("primary")} onClick={() => setShowModal(true)}>+ Add Partner</button>}
+          {isAdmin && teamTab === "sales" && <button style={styles.btn("primary")} onClick={() => setShowSalesModal(true)}>+ Add Sales Rep</button>}
+        </div>
       </div>
 
-      <div style={styles.grid2}>
-        {partners.map(p => (
-          <div key={p.id} style={styles.card}>
-            <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
-              <div style={styles.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
-                <div style={{ fontSize: 13, color: C.muted }}>{p.phone} · {p.email}</div>
-                <div style={{ marginTop: 6 }}>
-                  <span style={styles.badge(p.status === "active" ? "green" : p.status === "available" ? "blue" : "gold")}>{p.status}</span>
-                  {p.rating > 0 && <span style={{ marginLeft: 8, fontSize: 13, color: C.gold }}>⭐ {p.rating}</span>}
+      {teamTab === "partners" && (
+        <div style={styles.grid2}>
+          {partners.map(p => {
+            const pin = String(p.pin || getDefaultPartnerPin(p));
+            const inviteLink = buildPartnerInvite(p);
+            return (
+              <div key={p.id} style={styles.card}>
+                <div style={{ display: "flex", gap: 14, alignItems: "flex-start" }}>
+                  <div style={styles.avatar(avatarColors[p.id % 4])}>{p.avatar}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>{p.name}</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{p.phone} · {p.email}</div>
+                    <div style={{ marginTop: 6 }}>
+                      <span style={styles.badge(p.status === "active" ? "green" : p.status === "available" ? "blue" : "gold")}>{p.status}</span>
+                      {p.rating > 0 && <span style={{ marginLeft: 8, fontSize: 13, color: C.gold }}>⭐ {p.rating}</span>}
+                    </div>
+                  </div>
+                </div>
+
+                <div style={{ ...styles.divider, margin: "14px 0" }} />
+
+                <div style={{ display: "grid", gridTemplateColumns: isAdmin ? "1fr 1fr 1fr" : "1fr", gap: 10, textAlign: "center" }}>
+                  {isAdmin && (
+                    <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${p.payRate}/hr</div>
+                      <div style={{ fontSize: 11, color: C.muted }}>Pay Rate</div>
+                    </div>
+                  )}
+                  <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: C.blue }}>{partnerJobs(p.id).length}</div>
+                    <div style={{ fontSize: 11, color: C.muted }}>Total Jobs</div>
+                  </div>
+                  {isAdmin && (
+                    <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
+                      <div style={{ fontWeight: 800, fontSize: 18, color: C.gold }}>${pendingPay(p.id)}</div>
+                      <div style={{ fontSize: 11, color: C.muted }}>Pay Due</div>
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <div style={styles.label}>Portal PIN & Invite</div>
+                  <div style={{ fontSize: 13, color: C.text, marginTop: 6 }}>PIN: <strong>{pin}</strong></div>
+                  <div style={{ fontSize: 11, color: C.muted, marginTop: 4, wordBreak: "break-all" }}>{inviteLink}</div>
+                  <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                    <button style={styles.btn("ghost")} onClick={() => copyText(inviteLink)}>Copy Invite Link</button>
+                    {isAdmin && (
+                      <button
+                        style={styles.btn("ghost")}
+                        onClick={() => {
+                          const takenPins = new Set([
+                            ...partners.filter(x => x.id !== p.id).map(x => String(x.pin || getDefaultPartnerPin(x))),
+                            ...salesReps.map(rep => String(rep.pin || "")),
+                          ]);
+                          const nextPin = generateUniquePin(takenPins);
+                          setPartners(prev => prev.map(item => item.id === p.id ? { ...item, pin: nextPin } : item));
+                        }}
+                      >Regenerate PIN</button>
+                    )}
+                  </div>
+                </div>
+
+                <div style={{ marginTop: 14 }}>
+                  <div style={styles.label}>Availability</div>
+                  <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                    {DAYS.map(d => (
+                      <span key={d} style={{
+                        padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 700,
+                        background: p.availability.includes(d) ? C.accentDim : C.surface,
+                        color: p.availability.includes(d) ? C.accent : C.dim,
+                        border: `1px solid ${p.availability.includes(d) ? C.accent + "44" : C.border}`
+                      }}>{d}</span>
+                    ))}
+                  </div>
                 </div>
               </div>
-            </div>
+            );
+          })}
+        </div>
+      )}
 
-            <div style={{ ...styles.divider, margin: "14px 0" }} />
-
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10, textAlign: "center" }}>
-              <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
-                <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${p.payRate}/hr</div>
-                <div style={{ fontSize: 11, color: C.muted }}>Pay Rate</div>
+      {teamTab === "sales" && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {salesReps.length === 0 && (
+            <div style={S.card}>No sales reps added yet.</div>
+          )}
+          {salesReps.map(rep => {
+            const inviteLink = buildSalesInvite(rep);
+            return (
+              <div key={rep.id} style={S.card}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 16 }}>{rep.name}</div>
+                    <div style={{ fontSize: 13, color: C.muted }}>{rep.phone} · {rep.email}</div>
+                    <div style={{ marginTop: 6, fontSize: 12, color: C.muted }}>Territory: <strong style={{ color: C.text }}>{rep.territory}</strong> · Commission: <strong style={{ color: C.gold }}>{rep.commissionRate}%</strong></div>
+                  </div>
+                  <div style={{ textAlign: "right" }}>
+                    <div style={{ fontSize: 12, color: C.muted }}>Sales PIN</div>
+                    <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>{rep.pin}</div>
+                  </div>
+                </div>
+                <div style={{ fontSize: 11, color: C.muted, marginTop: 8, wordBreak: "break-all" }}>{inviteLink}</div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
+                  <button style={styles.btn("ghost")} onClick={() => copyText(inviteLink)}>Copy Invite Link</button>
+                  {isAdmin && (
+                    <button
+                      style={styles.btn("ghost")}
+                      onClick={() => {
+                        const takenPins = new Set([
+                          ...salesReps.filter(x => x.id !== rep.id).map(x => String(x.pin || "")),
+                          ...partners.map(p => String(p.pin || getDefaultPartnerPin(p))),
+                        ]);
+                        const nextPin = generateUniquePin(takenPins);
+                        setSalesReps(prev => prev.map(item => item.id === rep.id ? { ...item, pin: nextPin } : item));
+                      }}
+                    >Regenerate PIN</button>
+                  )}
+                </div>
               </div>
-              <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
-                <div style={{ fontWeight: 800, fontSize: 18, color: C.blue }}>{partnerJobs(p.id).length}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>Total Jobs</div>
-              </div>
-              <div style={{ background: C.surface, borderRadius: 10, padding: "10px 8px" }}>
-                <div style={{ fontWeight: 800, fontSize: 18, color: C.gold }}>${pendingPay(p.id)}</div>
-                <div style={{ fontSize: 11, color: C.muted }}>Pay Due</div>
-              </div>
-            </div>
-
-            <div style={{ marginTop: 14 }}>
-              <div style={styles.label}>Availability</div>
-              <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
-                {DAYS.map(d => (
-                  <span key={d} style={{
-                    padding: "3px 9px", borderRadius: 6, fontSize: 11, fontWeight: 700,
-                    background: p.availability.includes(d) ? C.accentDim : C.surface,
-                    color: p.availability.includes(d) ? C.accent : C.dim,
-                    border: `1px solid ${p.availability.includes(d) ? C.accent + "44" : C.border}`
-                  }}>{d}</span>
-                ))}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
+            );
+          })}
+        </div>
+      )}
 
       {showModal && (
         <Modal title="Add New Partner" onClose={() => setShowModal(false)}>
@@ -8287,6 +8767,19 @@ function Partners({ partners, setPartners, jobs }) {
               </div>
             </div>
             <button style={{ ...styles.btn("primary"), width: "100%" }} onClick={handleAdd} disabled={!newP.name}>Add Partner & Start Onboarding</button>
+          </div>
+        </Modal>
+      )}
+
+      {showSalesModal && (
+        <Modal title="Add Sales Representative" onClose={() => setShowSalesModal(false)}>
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div><div style={styles.label}>Full Name</div><input style={styles.input} value={newSalesRep.name} onChange={e => setNewSalesRep({ ...newSalesRep, name: e.target.value })} placeholder="Alex Rivera" /></div>
+            <div><div style={styles.label}>Phone</div><input style={styles.input} value={newSalesRep.phone} onChange={e => setNewSalesRep({ ...newSalesRep, phone: e.target.value })} placeholder="555-0199" /></div>
+            <div><div style={styles.label}>Email</div><input style={styles.input} value={newSalesRep.email} onChange={e => setNewSalesRep({ ...newSalesRep, email: e.target.value })} placeholder="alex@haveusclean.ca" /></div>
+            <div><div style={styles.label}>Commission Rate (%)</div><input style={styles.input} type="number" min={0} max={50} value={newSalesRep.commissionRate} onChange={e => setNewSalesRep({ ...newSalesRep, commissionRate: Number(e.target.value || 0) })} /></div>
+            <div><div style={styles.label}>Assigned Territory / Region</div><input style={styles.input} value={newSalesRep.territory} onChange={e => setNewSalesRep({ ...newSalesRep, territory: e.target.value })} placeholder="Ontario" /></div>
+            <button style={{ ...styles.btn("primary"), width: "100%" }} onClick={handleAddSalesRep} disabled={!newSalesRep.name || !newSalesRep.email}>Create Sales Profile</button>
           </div>
         </Modal>
       )}
