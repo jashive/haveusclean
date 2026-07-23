@@ -5350,6 +5350,7 @@ export default function App() {
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
   const [resLeads, setResLeads] = useState([]);
+  const [bookingConfirmation, setBookingConfirmation] = useState(null);
   const [coldLeads, setColdLeads] = useState([]); // load from Supabase on boot
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
   const [coldFilterMkt, setColdFilterMkt] = useState("All"); // persists market filter
@@ -5363,13 +5364,33 @@ export default function App() {
 
   // Dedicated Standalone Route for /book
   if (currentPath === "/book") {
+    if (bookingConfirmation) {
+      return (
+        <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
+          <div style={{ maxWidth: 640, width: "100%", background: "#111827", border: "1px solid #334155", borderRadius: 20, padding: 28, boxShadow: "0 10px 30px rgba(0,0,0,0.25)" }}>
+            <div style={{ fontSize: 40, marginBottom: 12 }}>✅</div>
+            <h1 className="text-3xl font-extrabold text-white">Booking Confirmed</h1>
+            <p className="text-slate-400 mt-2">Thanks, {bookingConfirmation.client || bookingConfirmation.name}. Your cleaning request has been received.</p>
+            <div style={{ marginTop: 18, display: "grid", gap: 10, color: "#e2e8f0" }}>
+              <div><strong>Service:</strong> {bookingConfirmation.type || bookingConfirmation.serviceType}</div>
+              <div><strong>Date:</strong> {bookingConfirmation.date}</div>
+              <div><strong>Time:</strong> {bookingConfirmation.time}</div>
+              <div><strong>Address:</strong> {bookingConfirmation.address}</div>
+              <div><strong>Total:</strong> ${Number(bookingConfirmation.clientPrice || bookingConfirmation.totalPrice || 0).toFixed(2)}</div>
+            </div>
+            <p className="text-slate-400 mt-4 text-sm">A confirmation email has been sent to {bookingConfirmation.email || "your inbox"}.</p>
+          </div>
+        </div>
+      );
+    }
+
     return (
       <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-extrabold text-white">Book Your Cleaning Service</h1>
           <p className="text-slate-400 text-sm mt-2">Instant estimates & secure booking in under 60 seconds.</p>
         </div>
-        <BookingWidget onBookingSubmit={(bookingData) => {
+        <BookingWidget onBookingSubmit={async (bookingData) => {
           const fullName = bookingData.fullName || bookingData.name || "New Client";
           const totalPrice = Number(bookingData?.priceSummary?.finalTotal ?? bookingData?.totalPrice ?? 201.5);
           const selectedAddons = bookingData?.selectedAddons || bookingData?.selectedAddOns || [];
@@ -5393,26 +5414,52 @@ export default function App() {
             upsells: selectedAddons,
           };
 
-          setJobs((prevJobs) => {
-            const nextJobs = [newJob, ...prevJobs];
+          try {
+            const response = await fetch("/api/bookings/create", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                bookingData: {
+                  ...bookingData,
+                  fullName,
+                  serviceType,
+                  selectedAddons,
+                  selectedDate: bookingDate,
+                  selectedTimeSlot: bookingTime,
+                  totalPrice,
+                },
+              }),
+            });
 
-            try {
-              localStorage.setItem("cp:jobs", JSON.stringify(nextJobs));
-            } catch {}
+            const result = await response.json().catch(() => ({}));
+            if (!response.ok || !result?.success) {
+              throw new Error(result?.error || "Booking request failed.");
+            }
 
-            void (async () => {
+            setJobs((prevJobs) => {
+              const nextJobs = [newJob, ...prevJobs];
+
               try {
-                await sbFetch("jobs", {
-                  method: "POST",
-                  body: JSON.stringify(newJob),
-                });
+                localStorage.setItem("cp:jobs", JSON.stringify(nextJobs));
               } catch {}
-            })();
 
-            return nextJobs;
-          });
+              void (async () => {
+                try {
+                  await sbFetch("jobs", {
+                    method: "POST",
+                    body: JSON.stringify(newJob),
+                  });
+                } catch {}
+              })();
 
-          alert(`🎉 Thank you ${fullName}! Your booking is confirmed for $${totalPrice.toFixed(2)}.`);
+              return nextJobs;
+            });
+
+            setBookingConfirmation(newJob);
+          } catch (error) {
+            console.error("Booking submission failed", error);
+            alert(`Booking could not be completed: ${error.message}`);
+          }
         }} />
       </div>
     );
