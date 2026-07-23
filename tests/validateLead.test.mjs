@@ -14,10 +14,10 @@ test('keeps a row with only a city instead of dropping it', () => {
   assert.equal(result.reason, '');
 });
 
-test('keeps a row with a fallback id and no extra fields', () => {
+test('rejects a row with only a fallback id and no extra fields', () => {
   const result = validateLead({ id: 'lead-42' });
-  assert.equal(result.valid, true);
-  assert.equal(result.reason, '');
+  assert.equal(result.valid, false);
+  assert.match(result.reason, /empty/i);
 });
 
 test('marks placeholder or test records invalid', () => {

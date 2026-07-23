@@ -1848,7 +1848,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (!Array.isArray(rows) || rows.length === 0) return [];
       return rows
         .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
-        .filter(Boolean);
+        .filter(Boolean)
+        .filter((lead) => validateLead(lead).valid);
     } catch {
       return [];
     }

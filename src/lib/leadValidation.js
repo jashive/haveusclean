@@ -14,6 +14,7 @@ export function validateLead(lead) {
     return { valid: false, reason: 'placeholder or test record' };
   }
 
+  const looksLikeFallbackId = /^lead[-_]/i.test(normalized.lead_id);
   const hasMeaningfulContent = Boolean(
     normalized.company ||
     normalized.city ||
@@ -23,7 +24,7 @@ export function validateLead(lead) {
     normalized.segment ||
     normalized.buyer_title ||
     normalized.market ||
-    normalized.lead_id
+    (normalized.lead_id && !looksLikeFallbackId)
   );
 
   if (!hasMeaningfulContent) {
