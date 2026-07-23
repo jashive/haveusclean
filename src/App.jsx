@@ -5603,6 +5603,29 @@ const ROLE_TAB_ALLOWLIST = {
   sales: new Set(["salesview", "cold", "res", "com", "jobs", "partners", "ai"]),
 };
 
+const LAST_ACTIVE_TAB_KEY = "cp:last_active_tab";
+const ALL_TAB_IDS = new Set([
+  "dashboard", "ops_mgr", "jobs", "recurring", "gps", "geo",
+  "res", "com", "cold", "intake",
+  "agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops",
+  "pay", "stripe", "qb",
+  "portal", "clientview", "followup", "sms", "marketing",
+  "partners", "partnerview", "salesview", "onboarding", "ai",
+  "tax", "db", "whitelabel", "pricing", "swot", "diagnostic", "schedule",
+]);
+
+function getInitialTab() {
+  if (typeof window === "undefined") return "dashboard";
+  try {
+    const params = new URLSearchParams(window.location.search);
+    const urlTab = params.get("tab");
+    if (urlTab && ALL_TAB_IDS.has(urlTab)) return urlTab;
+    const savedTab = localStorage.getItem(LAST_ACTIVE_TAB_KEY);
+    if (savedTab && ALL_TAB_IDS.has(savedTab)) return savedTab;
+  } catch {}
+  return "dashboard";
+}
+
 function canAccessTab(role, tabId) {
   if (role === "admin") return true;
   const allowlist = ROLE_TAB_ALLOWLIST[role];
@@ -5673,7 +5696,7 @@ function SalesView({ activeRole, onEnterSales, onExitSales, setTab }) {
 
 export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
-  const [tab, setTab] = useState("dashboard");
+  const [tab, setTab] = useState(() => getInitialTab());
   const [accessRole, setAccessRole] = useState("admin");
   const isMobile                        = useMobileNav();
   const [showRegionBanner, setShowRegionBanner] = useState(() => {
@@ -5699,11 +5722,44 @@ export default function App() {
     } catch {}
     return initJobs;
   });
-  const [partners, setPartners] = useState(initPartners);
+  const [partners, setPartners] = useState(() => {
+    if (typeof window === "undefined") return initPartners;
+    try {
+      const savedPartners = localStorage.getItem("cp:partners");
+      if (savedPartners) {
+        const parsed = JSON.parse(savedPartners);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return initPartners;
+  });
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
   const [resLeads, setResLeads] = useState([]);
   const [bookingConfirmation, setBookingConfirmation] = useState(null);
-  const [coldLeads, setColdLeads] = useState([]); // load from Supabase on boot
+  const [coldLeads, setColdLeads] = useState(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const saved = localStorage.getItem("cp:cold_leads");
+      if (!saved) return [];
+      const parsed = JSON.parse(saved);
+      if (!Array.isArray(parsed)) return [];
+      const SAMPLE_IDS = new Set(["ON-0101", "ON-0201", "AZ-0101", "AZ-0201", "ON-0301"]);
+      return parsed.filter(l => !SAMPLE_IDS.has(l?.lead_id));
+    } catch {}
+    return [];
+  });
+  const [hasFastLocalCache] = useState(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return Boolean(
+        localStorage.getItem("cp:jobs") ||
+        localStorage.getItem("cp:partners") ||
+        localStorage.getItem("cp:cold_leads")
+      );
+    } catch {
+      return false;
+    }
+  });
   const [coldPage, setColdPage] = useState(0); // persists pagination across tab switches
   const [coldFilterMkt, setColdFilterMkt] = useState("All"); // persists market filter
   const [clients, setClients] = useState([]);
@@ -5746,6 +5802,19 @@ export default function App() {
     if (accessRole === "partner") setTab("partnerview");
     if (accessRole === "sales") setTab("salesview");
   }, [accessRole, tab]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!ALL_TAB_IDS.has(tab)) return;
+    try {
+      localStorage.setItem(LAST_ACTIVE_TAB_KEY, tab);
+    } catch {}
+    if (currentPath !== "/") return;
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("tab") === tab) return;
+    url.searchParams.set("tab", tab);
+    window.history.replaceState({}, "", `${url.pathname}?${url.searchParams.toString()}${url.hash}`);
+  }, [tab, currentPath]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -6576,7 +6645,7 @@ export default function App() {
   }
 
   // ── Loading screen ──
-  if (isLoading) {
+  if (isLoading && !hasFastLocalCache) {
     return (
       <div style={{ ...S.app, alignItems:"center", justifyContent:"center", minHeight:"100vh" }}>
 <div style={{ textAlign:"center" }}>
