@@ -1,15 +1,17 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import ConfirmDrawer from "./components/ConfirmDrawer";
-import BookingWidget from "./components/BookingWidget";
+import React, { useState, useEffect, useRef, useCallback, useMemo, lazy, Suspense } from "react";
 import MobileBottomNav, { useMobileNav, MOBILE_NAV_HEIGHT } from "./components/MobileBottomNav";
-import MySchedule from "./pages/MySchedule";
-import StatusBadge from "./components/StatusBadge";
 import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartViews";
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
+
+const ConfirmDrawer = lazy(() => import("./components/ConfirmDrawer"));
+const BookingWidget = lazy(() => import("./components/BookingWidget"));
+const MySchedule = lazy(() => import("./pages/MySchedule"));
+const ColdOutreachView = lazy(() => import("./features/leads/ColdOutreachView"));
+const JobsView = lazy(() => import("./features/jobs/JobsView"));
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -1673,6 +1675,8 @@ const mergeLeadLists = (prevLeads, incomingLeads) => {
 };
 
 const COLD_SYNC_AT_KEY = "cp:last_synced_at:cold_leads";
+const JOB_VIRTUALIZE_THRESHOLD = 75;
+const JOB_ROW_HEIGHT = 256;
 
 const normalizeLeadPhone = (value = "") => String(value || "").replace(/\D/g, "");
 
@@ -1840,7 +1844,7 @@ const SAMPLE_COLD_LEADS = [
   { lead_id:"ON-0301", company:"Vaughan Corporate Centre", city:"Vaughan", market:"Ontario", segment:"Property Manager", buyer_title:"Building Manager", pain_point:"Tenant complaints about lobby and elevator cleanliness", first_offer:"common area cleaning", priority_score:4, next_action:"Walk the building", cold_email:"", follow_up_email:"", linkedin_note:"", call_opener:"", status:"Meeting Booked", owner:"Jason", notes:"Tour booked Apr 18 @ 10am" },
 ];
 
-function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () => {}, deletedLeadIds = new Set(), setDeletedLeadIds = () => {}, filterMktProp = "All", setFilterMktProp = () => {} }) {
+function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage = () => {}, deletedLeadIds = new Set(), setDeletedLeadIds = () => {}, filterMktProp = "All", setFilterMktProp = () => {} }) {
   const leads    = coldLeads;
   const setLeads = setColdLeads;
   const [viewLead, setViewLead]         = useState(null);
@@ -1863,12 +1867,45 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [syncStats, setSyncStats]       = useState({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
   const [syncProgress, setSyncProgress] = useState({ loaded:0, total:0, stage:"Idle" });
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
+  const persistQueueRef = useRef(new Map());
+  const persistQueueTimerRef = useRef(null);
+  const snapshotTimerRef = useRef(null);
   const PAGE_SIZE = 100;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
     buyer_title:"", pain_point:"", first_offer:"office cleaning",
     priority_score:3, notes:""
   });
+
+  const persistLeadSnapshot = useCallback((nextLeads) => {
+    if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+    snapshotTimerRef.current = setTimeout(() => {
+      try { localStorage.setItem("cp:cold_leads", JSON.stringify(nextLeads)); } catch {}
+    }, 200);
+  }, []);
+
+  const queueLeadPersist = useCallback((lead) => {
+    const lid = String(lead?.lead_id || lead?.id || "").trim();
+    if (!lid) return;
+    persistQueueRef.current.set(lid, {
+      lead_id: lid,
+      data: normalizeLeadRecord(lead),
+      updated_at: new Date().toISOString(),
+    });
+    if (persistQueueTimerRef.current) clearTimeout(persistQueueTimerRef.current);
+    persistQueueTimerRef.current = setTimeout(async () => {
+      const rows = Array.from(persistQueueRef.current.values());
+      persistQueueRef.current.clear();
+      if (rows.length === 0) return;
+      try {
+        await sbFetch("huc_leads_cold?on_conflict=lead_id", {
+          method: "POST",
+          body: JSON.stringify(rows),
+          headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        });
+      } catch {}
+    }, 300);
+  }, []);
 
   const loadCachedColdLeads = async () => {
     try {
@@ -1902,7 +1939,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (incoming.length === 0) return false;
       setLeads(prev => {
         const next = mergeLeadLists(prev, incoming);
-        try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+        persistLeadSnapshot(next);
         return next;
       });
       return true;
@@ -1958,7 +1995,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         if (cachedLeads.length > 0) {
           const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
           setColdLeads(mergedCached);
-          try { localStorage.setItem("cp:cold_leads", JSON.stringify(mergedCached)); } catch {}
+          persistLeadSnapshot(mergedCached);
           setSyncError(reason || "The live sheet sync is unavailable right now. Showing your cached leads instead.");
           setLastSynced(`Cached ${mergedCached.length} leads`);
           setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
@@ -2073,7 +2110,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const final = mergeLeadLists(baseMerged, newLeads);
 
       setColdLeads(final);
-      try { localStorage.setItem("cp:cold_leads", JSON.stringify(final)); } catch {}
+      persistLeadSnapshot(final);
       setSyncProgress({ loaded: newLeads.length, total: validLeads.length, stage: "Saving new leads to cloud..." });
       setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + existingSkipped, saved: 0 });
 
@@ -2120,7 +2157,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       if (cachedLeads.length > 0) {
         const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
         setColdLeads(mergedCached);
-        try { localStorage.setItem("cp:cold_leads", JSON.stringify(mergedCached)); } catch {}
+        persistLeadSnapshot(mergedCached);
         setSyncError("The live sheet sync hit an unexpected error, so your cached leads are being shown instead.");
         setLastSynced(`Cached ${mergedCached.length} leads`);
         setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
@@ -2171,17 +2208,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     });
     if (cleaned.length !== leads.length) {
       setLeads(cleaned);
-      sbSet("cp:cold_leads", cleaned).catch(()=>{});
+      persistLeadSnapshot(cleaned);
     }
-  });
+  }, [leads, persistLeadSnapshot, setLeads]);
 
-  // Filter leads — hide truly empty rows but keep leads with lead_id
-  const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-  const getActiveLeads = (overrides = {}) => {
-    const status = overrides.status ?? filterStatus;
-    const market = overrides.market ?? filterMkt;
-    const segment = overrides.segment ?? filterSeg;
-    const seenCompanies = new Set();
+  const normalizedLeads = useMemo(() => {
     const normalizeCompany = (name) => {
       let n = (name || "").trim();
       n = n.replace(/→.*/g, "").trim();
@@ -2196,25 +2227,52 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         .replace(/\s+/g, " ")
         .trim();
     };
-    return leads.filter(l => {
-      if (!l?.company?.trim()) return false;
-      const normalizedMarket = normalizeLeadMarket(l);
+
+    return leads.map((lead) => ({
+      lead,
+      market: normalizeLeadMarket(lead),
+      status: lead?.status || "New",
+      segment: lead?.segment || "",
+      companyKey: `${normalizeCompany(lead?.company || "")}|${String(lead?.city || "").trim().toLowerCase()}`,
+    }));
+  }, [leads]);
+
+  const filterLeadRows = useCallback((status, market, segment) => {
+    const seenCompanies = new Set();
+    const results = [];
+    for (const row of normalizedLeads) {
+      const { lead, market: normalizedMarket, status: leadStatus, segment: leadSegment, companyKey } = row;
+      if (!lead?.company?.trim()) continue;
       const marketMatch = market === "All" ||
         (market === "Ontario" && normalizedMarket === "Ontario") ||
         (market === "Arizona" && normalizedMarket === "Arizona");
-      if (!marketMatch) return false;
-      if (status !== "All" && (l.status || "New") !== status) return false;
-      if (segment !== "All" && l.segment !== segment) return false;
-      const normCompany = normalizeCompany(l.company);
-      const normCity = (l.city || "").trim().toLowerCase();
-      const key = normCompany + "|" + normCity;
-      if (!normCompany) return false;
-      if (seenCompanies.has(key)) return false;
-      seenCompanies.add(key);
-      return true;
-    });
-  };
-  const filtered = getActiveLeads();
+      if (!marketMatch) continue;
+      if (status !== "All" && leadStatus !== status) continue;
+      if (segment !== "All" && leadSegment !== segment) continue;
+      if (!companyKey || seenCompanies.has(companyKey)) continue;
+      seenCompanies.add(companyKey);
+      results.push(lead);
+    }
+    return results;
+  }, [normalizedLeads]);
+
+  const filtered = useMemo(() => filterLeadRows(filterStatus, filterMkt, filterSeg), [filterLeadRows, filterStatus, filterMkt, filterSeg]);
+  const statusCounts = useMemo(() => {
+    const counts = new Map();
+    counts.set("All", filterLeadRows("All", filterMkt, filterSeg).length);
+    COLD_STATUSES.forEach((status) => counts.set(status, filterLeadRows(status, filterMkt, filterSeg).length));
+    return counts;
+  }, [filterLeadRows, filterMkt, filterSeg]);
+  const marketCounts = useMemo(() => {
+    const counts = new Map();
+    ["All", "Ontario", "Arizona"].forEach((market) => counts.set(market, filterLeadRows(filterStatus, market, filterSeg).length));
+    return counts;
+  }, [filterLeadRows, filterStatus, filterSeg]);
+  const segmentCounts = useMemo(() => {
+    const counts = new Map();
+    ["All","Office","Medical","Dental","Industrial-Office","Property Manager"].forEach((segment) => counts.set(segment, filterLeadRows(filterStatus, filterMkt, segment).length));
+    return counts;
+  }, [filterLeadRows, filterStatus, filterMkt]);
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   // If page is out of range (e.g. after deletion or filter change), correct it immediately
@@ -2254,6 +2312,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const contacted = filtered.filter(l => l.status !== "New").length;
   const convRate  = total > 0 ? Math.round((won / total) * 100) : 0;
 
+  useEffect(() => {
+    return () => {
+      if (persistQueueTimerRef.current) clearTimeout(persistQueueTimerRef.current);
+      if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+    };
+  }, []);
+
   const updateStatus = async (id, status, extra = {}) => {
     let updatedLead = null;
     setLeads(ls => {
@@ -2272,24 +2337,30 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         updatedLead = nextLead;
         return nextLead;
       });
-      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      persistLeadSnapshot(next);
       if (updatedLead && (viewLead?.lead_id === id || viewLead?.id === id)) {
         setViewLead(updatedLead);
       }
       return next;
     });
     if (updatedLead) {
-      await persistLeadToSupabase(updatedLead);
+      queueLeadPersist(updatedLead);
     }
   };
 
   const updateNotes = (id, notes) => {
+    let updatedLead = null;
     setLeads(ls => {
-      const next = ls.map(l => l.lead_id === id ? { ...l, notes } : l);
-      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      const next = ls.map(l => {
+        if (l.lead_id !== id) return l;
+        updatedLead = { ...l, notes, updated_at: new Date().toISOString() };
+        return updatedLead;
+      });
+      persistLeadSnapshot(next);
       return next;
     });
     if (viewLead?.lead_id === id) setViewLead(v => ({ ...v, notes }));
+    if (updatedLead) queueLeadPersist(updatedLead);
   };
 
   const copy = (text, key) => {
@@ -2307,8 +2378,18 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const sections = parseOutreachSections(text);
       setUpgradedContent(sections);
       // Also save upgraded content back to lead
-      setLeads(ls => ls.map(l => l.lead_id === lead.lead_id ? { ...l, ...sections } : l));
+      let updatedLead = null;
+      setLeads(ls => {
+        const next = ls.map(l => {
+          if (l.lead_id !== lead.lead_id) return l;
+          updatedLead = { ...l, ...sections, updated_at: new Date().toISOString() };
+          return updatedLead;
+        });
+        persistLeadSnapshot(next);
+        return next;
+      });
       setViewLead(v => ({ ...v, ...sections }));
+      if (updatedLead) queueLeadPersist(updatedLead);
     } catch {
       alert("Upgrade failed. Check your API connection.");
     }
@@ -2337,10 +2418,10 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     });
     setLeads(ls => {
       const next = [newLead, ...ls];
-      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      persistLeadSnapshot(next);
       return next;
     });
-    await persistLeadToSupabase(newLead);
+    queueLeadPersist(newLead);
     setShowManual(false);
     setManualForm({ company:"", city:"", market:"Ontario", segment:"Office", buyer_title:"", pain_point:"", first_offer:"office cleaning", priority_score:3, notes:"" });
     setViewLead(newLead);
@@ -2482,11 +2563,16 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                         const val = e.target.value.trim();
                         if (!val) return;
                         const updated = { ...viewLead, [field]: val };
-                        setLeads(ls => ls.map(l =>
-                          (l.lead_id || l.id) === (viewLead.lead_id || viewLead.id)
-                            ? { ...l, [field]: val } : l
-                        ));
+                        setLeads(ls => {
+                          const next = ls.map(l =>
+                            (l.lead_id || l.id) === (viewLead.lead_id || viewLead.id)
+                              ? { ...l, [field]: val, updated_at: new Date().toISOString() } : l
+                          );
+                          persistLeadSnapshot(next);
+                          return next;
+                        });
                         setViewLead(updated);
+                        queueLeadPersist({ ...updated, updated_at: new Date().toISOString() });
                       }}
                     />
                   </div>
@@ -2612,7 +2698,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
         {['All', ...COLD_STATUSES].map(s => {
           const col = COLD_STATUS_COLOR[s] || C.accent;
-          const count = s === "All" ? getActiveLeads({ status: "All", market: filterMkt, segment: filterSeg }).length : getActiveLeads({ status: s, market: filterMkt, segment: filterSeg }).length;
+          const count = statusCounts.get(s) || 0;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setPage(0); }}
@@ -2628,7 +2714,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
         {["All", "Ontario", "Arizona"].map(m => {
-          const count = getActiveLeads({ status: filterStatus, market: m, segment: filterSeg }).length;
+          const count = marketCounts.get(m) || 0;
           return (
             <button key={m} onClick={() => handleSetFilterMkt(m)}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
@@ -2640,7 +2726,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           );
         })}
         {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => {
-          const count = getActiveLeads({ status: filterStatus, market: filterMkt, segment: seg }).length;
+          const count = segmentCounts.get(seg) || 0;
           return (
             <button key={seg} onClick={() => { setFilterSeg(seg); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
@@ -3639,27 +3725,29 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       )}
 
       {/* ── ConfirmDrawer — replaces window.confirm for edit modal lead delete ── */}
-      <ConfirmDrawer
-        open={confirmDrawerOpen}
-        title="Delete this lead?"
-        message="This cannot be undone. The lead will be permanently removed."
-        confirmLabel="Yes, Delete"
-        cancelLabel="Keep Lead"
-        variant="danger"
-        onConfirm={async () => {
-          const lid = String(editLead?.id || "");
-          setConfirmDrawerOpen(false);
-          setResLeads(ls => {
-            const next = ls.filter(l => l.id !== editLead?.id);
-            dbSet(DB_KEYS.leadsRes, next);
-            return next;
-          });
-          try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-          setShowEditForm(false);
-          setEditLead(null);
-        }}
-        onCancel={() => setConfirmDrawerOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <ConfirmDrawer
+          open={confirmDrawerOpen}
+          title="Delete this lead?"
+          message="This cannot be undone. The lead will be permanently removed."
+          confirmLabel="Yes, Delete"
+          cancelLabel="Keep Lead"
+          variant="danger"
+          onConfirm={async () => {
+            const lid = String(editLead?.id || "");
+            setConfirmDrawerOpen(false);
+            setResLeads(ls => {
+              const next = ls.filter(l => l.id !== editLead?.id);
+              dbSet(DB_KEYS.leadsRes, next);
+              return next;
+            });
+            try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+            setShowEditForm(false);
+            setEditLead(null);
+          }}
+          onCancel={() => setConfirmDrawerOpen(false)}
+        />
+      </Suspense>
       {viewLead && (
         <Modal title={`📄 Quote — ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
           <div>
@@ -3964,27 +4052,29 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       )}
 
       {/* ── ConfirmDrawer — commercial edit modal lead delete ── */}
-      <ConfirmDrawer
-        open={confirmDrawerOpen}
-        title="Delete this lead?"
-        message="This cannot be undone. The lead will be permanently removed."
-        confirmLabel="Yes, Delete"
-        cancelLabel="Keep Lead"
-        variant="danger"
-        onConfirm={async () => {
-          const lid = String(editLead?.id || "");
-          setConfirmDrawerOpen(false);
-          setResLeads(ls => {
-            const next = ls.filter(l => l.id !== editLead?.id);
-            dbSet(DB_KEYS.leadsRes, next);
-            return next;
-          });
-          try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-          setShowEditForm(false);
-          setEditLead(null);
-        }}
-        onCancel={() => setConfirmDrawerOpen(false)}
-      />
+      <Suspense fallback={null}>
+        <ConfirmDrawer
+          open={confirmDrawerOpen}
+          title="Delete this lead?"
+          message="This cannot be undone. The lead will be permanently removed."
+          confirmLabel="Yes, Delete"
+          cancelLabel="Keep Lead"
+          variant="danger"
+          onConfirm={async () => {
+            const lid = String(editLead?.id || "");
+            setConfirmDrawerOpen(false);
+            setResLeads(ls => {
+              const next = ls.filter(l => l.id !== editLead?.id);
+              dbSet(DB_KEYS.leadsRes, next);
+              return next;
+            });
+            try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
+            setShowEditForm(false);
+            setEditLead(null);
+          }}
+          onCancel={() => setConfirmDrawerOpen(false)}
+        />
+      </Suspense>
       {viewLead && (
         <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
           {(() => { const q=calcComQuote(viewLead, region); return (
@@ -5841,6 +5931,7 @@ export default function App() {
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [activityLog, setActivityLog] = useState([]);
   const saveTimer = useRef(null);
+  const coldLeadsSaveTimer = useRef(null);
 
   const setTabGuarded = useCallback((nextTab) => {
     if (nextTab === "partnerview") {
@@ -6103,28 +6194,17 @@ export default function App() {
   // ── Auto-save coldLeads ──
   useEffect(() => {
     if (isLoading) return;
-    // Write cold leads directly to Supabase sequentially
-    if (coldLeads && coldLeads.length > 0) {
-      (async () => {
-        const BATCH = 50;
-        for (let i = 0; i < coldLeads.length; i += BATCH) {
-          const batch = coldLeads.slice(i, i + BATCH);
-          const rows = batch.map(lead => ({
-            lead_id: String(lead.lead_id || lead.id || `LD-${Date.now()}-${Math.random()}`),
-            data: lead,
-            updated_at: new Date().toISOString(),
-          }));
-          try {
-            await sbFetch("huc_leads_cold", {
-              method: "POST",
-              body: JSON.stringify(rows),
-              headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-            });
-          } catch { /* continue */ }
-        }
-      })();
-    }
-    dbSet(DB_KEYS.coldLeads, coldLeads); // also save to localStorage as backup
+    if (coldLeadsSaveTimer.current) clearTimeout(coldLeadsSaveTimer.current);
+    coldLeadsSaveTimer.current = setTimeout(async () => {
+      try {
+        const serialized = JSON.stringify(coldLeads);
+        if (hasArtifactStorage) await window.storage.set(DB_KEYS.coldLeads, serialized);
+        else if (hasLocalStorage) localStorage.setItem(DB_KEYS.coldLeads, serialized);
+      } catch {}
+    }, 250);
+    return () => {
+      if (coldLeadsSaveTimer.current) clearTimeout(coldLeadsSaveTimer.current);
+    };
   }, [coldLeads, isLoading]);
 
   // ── Auto-save onboarding progress ──
@@ -6631,6 +6711,7 @@ export default function App() {
           <h1 className="text-3xl font-extrabold text-white">Book Your Cleaning Service</h1>
           <p className="text-slate-400 text-sm mt-2">Instant estimates & secure booking in under 60 seconds.</p>
         </div>
+        <Suspense fallback={<div style={{ color: "#94a3b8", fontSize: 14 }}>Loading booking flow...</div>}>
         <BookingWidget onBookingSubmit={async (bookingData) => {
           const fullName = bookingData.fullName || bookingData.name || "New Client";
           const totalPrice = Number(bookingData?.priceSummary?.finalTotal ?? bookingData?.totalPrice ?? 201.5);
@@ -6696,6 +6777,7 @@ export default function App() {
             alert(`Booking could not be completed: ${error.message}`);
           }
         }} />
+        </Suspense>
       </div>
     );
   }
@@ -6834,13 +6916,13 @@ export default function App() {
       <main style={{ ...S.main, paddingBottom: isMobile ? MOBILE_NAV_HEIGHT + 16 : undefined }}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTabGuarded} />}
-        {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
+        {tab==="jobs"           && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading jobs...</div>}><JobsView jobs={regionJobs} setJobs={setJobsDB} partners={regionPartners} /></Suspense>}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTabGuarded} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
+        {tab==="cold"           && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading cold outreach...</div>}><ColdOutreachView region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} /></Suspense>}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
@@ -6866,7 +6948,7 @@ export default function App() {
         {tab==="whitelabel"     && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
         {tab==="pricing"        && <PricingStrategy />}
         {tab==="swot"           && <SWOTAnalysis />}
-        {tab==="schedule"       && <MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} />}
+        {tab==="schedule"       && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading schedule...</div>}><MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} /></Suspense>}
         {tab==="diagnostic"     && <SystemDiagnostic jobs={jobs} partners={partners} resLeads={resLeads} coldLeads={coldLeads} region={activeRegion} />}
       </main>
     </div>
@@ -7710,7 +7792,7 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
 
 
 // ─── JOBS ────────────────────────────────────────────────────────────────────
-function Jobs({ jobs, setJobs, partners }) {
+function JobsLegacy({ jobs, setJobs, partners }) {
   const [filter, setFilter] = useState("all");
   const [showModal, setShowModal] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
@@ -7719,7 +7801,7 @@ function Jobs({ jobs, setJobs, partners }) {
   const [summaryText, setSummaryText] = useState("");
   const [newJob, setNewJob] = useState({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: "scheduled", pay: 0 });
 
-  const filtered = filter === "all" ? jobs : jobs.filter(j => j.status === filter);
+  const filtered = useMemo(() => (filter === "all" ? jobs : jobs.filter(j => j.status === filter)), [filter, jobs]);
 
   const calcPay = (partnerId, hours, upsells) => {
     const partner = partners.find(p => p.id === parseInt(partnerId));
@@ -7756,6 +7838,61 @@ function Jobs({ jobs, setJobs, partners }) {
     setNewJob({ ...newJob, upsells: u });
   };
 
+  const renderJobCard = useCallback((job, wrapperStyle = null) => {
+    const jobPartners = (job.partnerIds || [job.partnerId]).map(id => partners.find(p => p.id === id)).filter(Boolean);
+    return (
+      <div key={job.id} style={{ ...styles.card, ...(wrapperStyle || {}) }}>
+        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: 17 }}>{job.client}</div>
+            <div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>📍 {job.address}</div>
+            <div style={{ color: C.muted, fontSize: 13 }}>📅 {job.date} at {job.time} · {job.type}</div>
+            {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{jobPartners.map(p=>p.name).join(" + ")}</strong></div>}
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
+            <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.pay}</div>
+            <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {(job.upsells||[]).length} upsells</div>
+          </div>
+        </div>
+
+        {(job.upsells||[]).length > 0 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={styles.label}>Upsells</div>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {(job.upsells||[]).map(u => <span key={u} style={styles.badge("gold")}>{u}</span>)}
+            </div>
+          </div>
+        )}
+
+        {job.status === "completed" && job.summary && (
+          <div style={{ marginTop: 12, background: C.surface, borderRadius: 10, padding: "10px 14px" }}>
+            <div style={styles.label}>End-of-Job Summary</div>
+            <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>{job.summary}</div>
+          </div>
+        )}
+
+        <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>▶ Start Job</button>}
+          {job.status === "in-progress" && (
+            <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", minHeight: 44 }} onClick={() => {
+              setPendingCompleteId(job.id);
+              setSummaryText("");
+              setSummaryDrawerOpen(true);
+            }}>✅ Complete Job</button>
+          )}
+          <button style={styles.btn("ghost")} onClick={() => setSelectedJob(job)}>📸 Photos & Details</button>
+        </div>
+      </div>
+    );
+  }, [partners, summaryText]);
+
+  const JobRow = useCallback(({ index, style, ariaAttributes, jobs: rowJobs, renderCard }) => (
+    <div style={{ ...style, paddingBottom: 14, boxSizing: "border-box" }} {...ariaAttributes}>
+      {renderCard(rowJobs[index], { marginBottom: 0, height: JOB_ROW_HEIGHT - 14, overflow: "hidden" })}
+    </div>
+  ), []);
+
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 20, flexWrap: "wrap", gap: 12 }}>
@@ -7772,54 +7909,17 @@ function Jobs({ jobs, setJobs, partners }) {
       </div>
 
       <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-        {filtered.map(job => {
-          const jobPartners = (job.partnerIds || [job.partnerId]).map(id => partners.find(p => p.id === id)).filter(Boolean);
-          return (
-            <div key={job.id} style={styles.card}>
-              <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: 17 }}>{job.client}</div>
-                  <div style={{ color: C.muted, fontSize: 13, marginTop: 3 }}>📍 {job.address}</div>
-                  <div style={{ color: C.muted, fontSize: 13 }}>📅 {job.date} at {job.time} · {job.type}</div>
-                  {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{jobPartners.map(p=>p.name).join(" + ")}</strong></div>}
-                </div>
-                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-                  <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
-                  <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.pay}</div>
-                  <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {(job.upsells||[]).length} upsells</div>
-                </div>
-              </div>
-
-              {(job.upsells||[]).length > 0 && (
-                <div style={{ marginTop: 12 }}>
-                  <div style={styles.label}>Upsells</div>
-                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                    {(job.upsells||[]).map(u => <span key={u} style={styles.badge("gold")}>{u}</span>)}
-                  </div>
-                </div>
-              )}
-
-              {job.status === "completed" && job.summary && (
-                <div style={{ marginTop: 12, background: C.surface, borderRadius: 10, padding: "10px 14px" }}>
-                  <div style={styles.label}>End-of-Job Summary</div>
-                  <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6 }}>{job.summary}</div>
-                </div>
-              )}
-
-              <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>▶ Start Job</button>}
-                {job.status === "in-progress" && (
-                  <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", minHeight: 44 }} onClick={() => {
-                    setPendingCompleteId(job.id);
-                    setSummaryText("");
-                    setSummaryDrawerOpen(true);
-                  }}>✅ Complete Job</button>
-                )}
-                <button style={styles.btn("ghost")} onClick={() => setSelectedJob(job)}>📸 Photos & Details</button>
-              </div>
-            </div>
-          );
-        })}
+        {filtered.length > JOB_VIRTUALIZE_THRESHOLD ? (
+          <VirtualList
+            rowComponent={JobRow}
+            rowCount={filtered.length}
+            rowHeight={JOB_ROW_HEIGHT}
+            rowProps={{ jobs: filtered, renderCard: renderJobCard }}
+            style={{ height: 720 }}
+          />
+        ) : (
+          filtered.map(job => renderJobCard(job))
+        )}
       </div>
 
       {/* ── Summary drawer — replaces window.prompt for job completion ── */}
