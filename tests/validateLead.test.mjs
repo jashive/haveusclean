@@ -8,17 +8,16 @@ test('accepts a complete lead', () => {
   assert.equal(result.reason, '');
 });
 
-test('marks a lead invalid when company and contact are missing', () => {
+test('keeps a row with only a city instead of dropping it', () => {
   const result = validateLead({ lead_id: 'ON-1002', city: 'Toronto' });
-  assert.equal(result.valid, false);
-  assert.match(result.reason, /missing company/i);
+  assert.equal(result.valid, true);
+  assert.equal(result.reason, '');
 });
 
-test('marks duplicate IDs invalid when a duplicate is seen', () => {
-  const seen = new Set(['ON-1003']);
-  const result = validateLead({ lead_id: 'ON-1003', company: 'Bluewave Co', email: 'ops@example.com' }, seen);
-  assert.equal(result.valid, false);
-  assert.match(result.reason, /duplicate/i);
+test('keeps a row with a fallback id and no extra fields', () => {
+  const result = validateLead({ id: 'lead-42' });
+  assert.equal(result.valid, true);
+  assert.equal(result.reason, '');
 });
 
 test('marks placeholder or test records invalid', () => {

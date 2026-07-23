@@ -1821,8 +1821,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
   const [syncStats, setSyncStats]       = useState({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
+  const [syncProgress, setSyncProgress] = useState({ loaded:0, total:0, stage:"Idle" });
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
-  const PAGE_SIZE = 15;
+  const PAGE_SIZE = 100;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
     buyer_title:"", pain_point:"", first_offer:"office cleaning",
@@ -1857,15 +1858,31 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const syncSheet = async () => {
     setLoadingSheet(true);
     setSyncError("");
+    setSyncProgress({ loaded: 0, total: 0, stage: "Fetching leads..." });
     try {
-      const res = await fetch("/api/sheet");
-      const data = await res.json();
-      if (data.error) {
-        setSyncError(data.error + (data.help ? " — " + data.help : ""));
-        setLoadingSheet(false);
-        return;
+      const PAGE_SIZE = 2500;
+      let offset = 0;
+      const rawLeads = [];
+      let totalCount = 0;
+
+      while (true) {
+        const res = await fetch(`/api/sheet?start=${offset}&limit=${PAGE_SIZE}`);
+        const data = await res.json();
+        if (data.error) {
+          setSyncError(data.error + (data.help ? " — " + data.help : ""));
+          setLoadingSheet(false);
+          return;
+        }
+
+        const pageLeads = Array.isArray(data.leads) ? data.leads : [];
+        if (pageLeads.length > 0) rawLeads.push(...pageLeads);
+        totalCount = data.total_count || data.raw_count || data.count || totalCount;
+        setSyncProgress({ loaded: rawLeads.length, total: totalCount || rawLeads.length, stage: `Fetching leads... ${rawLeads.length.toLocaleString()} / ${Math.max(totalCount || rawLeads.length, rawLeads.length).toLocaleString()}` });
+
+        if (!pageLeads.length || pageLeads.length < PAGE_SIZE || !data.has_more) break;
+        offset += PAGE_SIZE;
       }
-      const rawLeads = Array.isArray(data.leads) ? data.leads : [];
+
       if (rawLeads.length === 0) {
         setSyncError("Sheet returned 0 leads. Make sure your n8n has run and the sheet has data.");
         setSyncStats({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
@@ -1873,18 +1890,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         return;
       }
 
-      // ── Step 1: Validate, normalize, and count leads explicitly ──
-      const seenIds = new Set();
       const validLeads = [];
       const invalidLeads = [];
       let skipped = 0;
+      const seenLeadIds = new Set();
 
       for (const lead of rawLeads) {
         const lid = String(lead?.lead_id || lead?.id || "").trim();
-        if (!lid) {
-          invalidLeads.push({ lead, reason: "missing lead_id" });
-          continue;
-        }
         if (deletedLeadIds.has(lid)) {
           skipped += 1;
           continue;
@@ -1892,13 +1904,13 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
         const normalizedLead = {
           ...lead,
-          lead_id: lid,
-          id: lead?.id || lid,
+          lead_id: lid || `lead-${validLeads.length + invalidLeads.length + 1}`,
+          id: lead?.id || lid || `lead-${validLeads.length + invalidLeads.length + 1}`,
           market: (() => {
             const m = (lead.market || "").trim().toLowerCase();
             if (m.includes("ontario")) return "Ontario";
             if (m.includes("arizona")) return "Arizona";
-            const id = lid.toUpperCase();
+            const id = (lid || "").toUpperCase();
             if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
             if (id.startsWith("AZ-")) return "Arizona";
             const city = (lead.city || "").toLowerCase();
@@ -1910,13 +1922,17 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           })(),
         };
 
-        const validation = validateLead(normalizedLead, seenIds);
+        const validation = validateLead(normalizedLead);
         if (!validation.valid) {
           invalidLeads.push({ lead: normalizedLead, reason: validation.reason });
           continue;
         }
 
-        seenIds.add(lid);
+        if (seenLeadIds.has(normalizedLead.lead_id)) {
+          normalizedLead.lead_id = `${normalizedLead.lead_id}-${seenLeadIds.size + 1}`;
+          normalizedLead.id = normalizedLead.lead_id;
+        }
+        seenLeadIds.add(normalizedLead.lead_id);
         validLeads.push(normalizedLead);
       }
 
@@ -1927,7 +1943,6 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         return;
       }
 
-      // ── Step 2: Merge with existing state ──
       const prevLeads = coldLeads || [];
       const prevMap = Object.fromEntries(prevLeads.map(l => [l.lead_id, l]));
       const merged = validLeads.map(sheetLead => ({
@@ -1943,7 +1958,6 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const manualLeads = prevLeads.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
       const combined = [...manualLeads, ...merged];
 
-      // ── Step 3: Deduplicate by lead_id — n8n guarantees unique stable IDs per business ──
       const leadMap = new Map();
       for (const lead of combined) {
         const key = String(lead.lead_id || lead.id || "").trim();
@@ -1952,53 +1966,40 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         if (!existing) {
           leadMap.set(key, lead);
         } else {
-          // Keep version with more data (edited status, notes, outreach content)
           const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
           if (score(lead) > score(existing)) leadMap.set(key, lead);
         }
       }
       const final = Array.from(leadMap.values());
 
-      // ── Step 4: Update React state (pure — no side effects) ──
       setColdLeads(final);
       try { localStorage.setItem("cp:cold_leads", JSON.stringify(final)); } catch {}
-      const summary = `v5.38 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · final ${final.length}`;
+      setSyncProgress({ loaded: final.length, total: totalCount || final.length, stage: "Saving to pipeline..." });
+      const summary = `v5.39 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · final ${final.length}`;
       setLastSynced(summary);
       setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped, saved: 0 });
 
-      // ── Step 5: Write to Supabase — larger batches to stay under rate limit ──
-      const BATCH = 100;      // 100 leads per request reduces total request count
-      const PARALLEL = 2;     // only 2 parallel to avoid rate limit
+      const BATCH = 100;
+      const PARALLEL = 2;
       let written = 0;
       let lastError = "";
-
-      // Dedupe by lead_id — Postgres rejects batches with duplicate primary keys
-      // Also: skip any lead without a real lead_id (don't invent random ones that pollute Supabase)
       const leadIdMap = new Map();
       let supabaseSkipped = 0;
       for (const lead of final) {
         const lid = String(lead.lead_id || lead.id || "").trim();
-        // Only accept lead_ids that look like real IDs (have a prefix like ON-, AZ-, LD-)
-        // Reject empty IDs and IDs that look like failed fallbacks (LD-17... timestamp pattern)
         if (!lid || /^LD-17\d{11}/.test(lid)) { supabaseSkipped++; continue; }
         if (!leadIdMap.has(lid)) leadIdMap.set(lid, { lead, lid });
       }
       const uniqueFinal = Array.from(leadIdMap.values());
 
       const batches = [];
-      for (let i = 0; i < uniqueFinal.length; i += BATCH) {
-        batches.push(uniqueFinal.slice(i, i + BATCH));
-      }
+      for (let i = 0; i < uniqueFinal.length; i += BATCH) batches.push(uniqueFinal.slice(i, i + BATCH));
 
       for (let i = 0; i < batches.length; i += PARALLEL) {
         const chunk = batches.slice(i, i + PARALLEL);
-        setLastSynced(`v5.36 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
+        setLastSynced(`v5.39 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
         const promises = chunk.map(batch => {
-          const rows = batch.map(({ lead, lid }) => ({
-            lead_id: lid,
-            data: lead,
-            updated_at: new Date().toISOString(),
-          }));
+          const rows = batch.map(({ lead, lid }) => ({ lead_id: lid, data: lead, updated_at: new Date().toISOString() }));
           return sbFetch("huc_leads_cold?on_conflict=lead_id", {
             method: "POST",
             body: JSON.stringify(rows),
@@ -2014,19 +2015,17 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           }).catch(e => { lastError = "exception: " + (e.message || e); return null; });
         });
         await Promise.all(promises);
-        // Rate limit safety: small pause between rounds
-        if (i + PARALLEL < batches.length) {
-          await new Promise(res => setTimeout(res, 200));
-        }
+        if (i + PARALLEL < batches.length) await new Promise(res => setTimeout(res, 200));
       }
+
       const finalMsg = written === uniqueFinal.length
-        ? `v5.38 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} ✅`
+        ? `v5.39 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} ✅`
         : written > 0
-        ? `v5.38 · partial: fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} · ${lastError}`
-        : `v5.38 · FAILED · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved 0/${uniqueFinal.length} · ${lastError || "no response"}`;
+        ? `v5.39 · partial: fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} · ${lastError}`
+        : `v5.39 · FAILED · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved 0/${uniqueFinal.length} · ${lastError || "no response"}`;
       setLastSynced(finalMsg);
       setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + supabaseSkipped, saved: written });
-
+      setSyncProgress({ loaded: rawLeads.length, total: totalCount || rawLeads.length, stage: "Sync complete" });
     } catch (err) {
       setSyncError("Network error: " + err.message);
     }
@@ -2147,7 +2146,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   // Snap-back removed: was resetting page on every 15s sync
 
   // Stats based on the active filtered lead array
-  const total     = filtered.length;
+  const total     = leads.length;
   const hot       = filtered.filter(l => l.priority_score >= 4).length;
   const booked    = filtered.filter(l => l.status === "Meeting Booked").length;
   const won       = filtered.filter(l => l.status === "Won").length;
@@ -2495,6 +2494,17 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           Your n8n agent appends leads daily to your Google Sheet. Hit <strong style={{ color:C.text }}>Sync Sheet</strong> to pull them live.<br/>
           <strong style={{ color:C.gold }}>First time?</strong> Add <code style={{ background:C.surface, padding:"1px 6px", borderRadius:4 }}>GOOGLE_SHEETS_API_KEY</code> to Vercel → Settings → Environment Variables. Also make sure your Google Sheet is shared as <strong style={{ color:C.text }}>Anyone with the link can view</strong>.
         </div>
+        {loadingSheet && (
+          <div style={{ marginTop:10 }}>
+            <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:C.text, marginBottom:4 }}>
+              <span>{syncProgress.stage}</span>
+              <span>{syncProgress.loaded.toLocaleString()} / {syncProgress.total.toLocaleString()}</span>
+            </div>
+            <div style={{ height:8, background:C.surface, borderRadius:999, overflow:"hidden" }}>
+              <div style={{ height:"100%", width:`${syncProgress.total ? Math.min(100, Math.round((syncProgress.loaded / syncProgress.total) * 100)) : 0}%`, background:`linear-gradient(90deg, ${C.accent}, ${C.blue})`, transition:"width 160ms ease" }} />
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Filters */}
