@@ -6012,6 +6012,9 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
 }
 
 const ROLE_STORAGE_KEY = "cp:user_role";
+const AUTH_STORAGE_KEY = "cp:is_authenticated";
+const ADMIN_PORTAL_PIN_KEY = "cp:admin_portal_pin";
+const ADMIN_USERS_KEY = "cp:admin_users";
 const PARTNER_PORTAL_PIN_KEY = "cp:partner_portal_pin";
 const SALES_PORTAL_PIN_KEY = "cp:sales_portal_pin";
 const ROLE_VALUES = new Set(["admin", "sales", "partner"]);
@@ -6055,7 +6058,7 @@ const ALL_TAB_IDS = new Set([
   "agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops",
   "pay", "stripe", "qb",
   "portal", "clientview", "followup", "sms", "marketing",
-  "partners", "partnerview", "salesview", "onboarding", "ai",
+  "partners", "partnerview", "salesview", "admins", "onboarding", "ai",
   "tax", "db", "whitelabel", "pricing", "swot", "diagnostic", "schedule",
 ]);
 
@@ -6079,6 +6082,64 @@ function getInitialRole() {
     if (ROLE_VALUES.has(stored)) return stored;
   } catch {}
   return "admin";
+}
+
+function getInitialAuthState() {
+  if (typeof window === "undefined") return false;
+  try {
+    return localStorage.getItem(AUTH_STORAGE_KEY) === "true";
+  } catch {}
+  return false;
+}
+
+function getAdminPortalPin() {
+  if (typeof window !== "undefined") {
+    try {
+      const stored = String(localStorage.getItem(ADMIN_PORTAL_PIN_KEY) || "").trim();
+      if (stored) return stored;
+    } catch {}
+  }
+  return ADMIN_PORTAL_PIN;
+}
+
+function sanitizeAdminUsers(input = []) {
+  const uniquePins = new Set();
+  return (Array.isArray(input) ? input : [])
+    .map((user, index) => {
+      const pin = String(user?.pin || "").replace(/\D/g, "").slice(0, 6);
+      const name = String(user?.name || "").trim() || `Admin ${index + 1}`;
+      if (pin.length < 4 || uniquePins.has(pin)) return null;
+      uniquePins.add(pin);
+      return {
+        id: user?.id || `${Date.now()}-${index}`,
+        name,
+        pin,
+        createdAt: user?.createdAt || new Date().toISOString(),
+      };
+    })
+    .filter(Boolean);
+}
+
+function readStoredAdminUsers() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(localStorage.getItem(ADMIN_USERS_KEY) || "[]");
+    return sanitizeAdminUsers(parsed);
+  } catch {
+    return [];
+  }
+}
+
+function getInitialAdminUsers() {
+  const stored = readStoredAdminUsers();
+  if (stored.length > 0) return stored;
+  return [{ id: "admin-default", name: "Owner Admin", pin: getAdminPortalPin(), createdAt: new Date().toISOString() }];
+}
+
+function getPrimaryAdminPin() {
+  const users = readStoredAdminUsers();
+  if (users.length > 0) return users[0].pin;
+  return getAdminPortalPin();
 }
 
 function getInitialTab() {
@@ -6243,7 +6304,7 @@ function RoleSelectionGate({
         {error && <div style={{ marginTop: 12, color: C.red, fontSize: 13 }}>{error}</div>}
         {SHOW_PORTAL_HELPER_NOTE && (
           <div style={{ marginTop: 10, color: C.dim, fontSize: 12, lineHeight: 1.5 }}>
-            Default Admin PIN: {ADMIN_PORTAL_PIN} | Sales: {SALES_PORTAL_PIN} | Partner: {PARTNER_PORTAL_PIN}
+            Admin PIN: {getPrimaryAdminPin()} | Sales: {SALES_PORTAL_PIN} | Partner: {PARTNER_PORTAL_PIN}
           </div>
         )}
       </div>
@@ -6255,7 +6316,9 @@ export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
   const [tab, setTab] = useState(() => getInitialTab());
   const [accessRole, setAccessRole] = useState(() => getInitialRole());
-  const [showRoleGate, setShowRoleGate] = useState(() => getInitialRole() === "admin");
+  const [isAuthenticated, setIsAuthenticated] = useState(() => getInitialAuthState());
+  const [adminUsers, setAdminUsers] = useState(() => getInitialAdminUsers());
+  const [showRoleGate, setShowRoleGate] = useState(() => !getInitialAuthState());
   const [roleGatePin, setRoleGatePin] = useState("");
   const [salesPortalPinInput, setSalesPortalPinInput] = useState(() => {
     if (typeof window === "undefined") return "";
@@ -6420,10 +6483,22 @@ export default function App() {
     } catch {}
   }, [accessRole]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const normalized = sanitizeAdminUsers(adminUsers);
+    if (normalized.length === 0) return;
+    try {
+      localStorage.setItem(ADMIN_USERS_KEY, JSON.stringify(normalized));
+      localStorage.setItem(ADMIN_PORTAL_PIN_KEY, String(normalized[0].pin || ""));
+    } catch {}
+  }, [adminUsers]);
+
   const enterPortalRole = useCallback((role) => {
+    setIsAuthenticated(true);
     setAccessRole(role);
     setShowRoleGate(false);
     setRoleGateError("");
+    try { localStorage.setItem(AUTH_STORAGE_KEY, "true"); } catch {}
     setTab((prev) => {
       const current = normalizeTabId(prev);
       if (role === "admin") return current || "dashboard";
@@ -6434,14 +6509,20 @@ export default function App() {
 
   const handleAdminPortalEntry = useCallback(() => {
     const normalizedPin = String(roleGatePin || "").trim();
-    if (!(normalizedPin === "" || normalizedPin === ADMIN_PORTAL_PIN)) {
+    if (!normalizedPin) {
+      setRoleGateError("Enter an Admin PIN.");
+      return;
+    }
+    const valid = adminUsers.some((user) => String(user?.pin || "") === normalizedPin);
+    if (!valid) {
       setRoleGateError("Invalid Admin PIN.");
       return;
     }
     setRoleGatePin("");
+    try { localStorage.setItem(AUTH_STORAGE_KEY, "true"); } catch {}
     try { localStorage.setItem(ROLE_STORAGE_KEY, "admin"); } catch {}
     enterPortalRole("admin");
-  }, [enterPortalRole, roleGatePin]);
+  }, [adminUsers, enterPortalRole, roleGatePin]);
 
   const handleSalesPortalEntry = useCallback(() => {
     const pin = String(salesPortalPinInput || "").trim();
@@ -6480,19 +6561,25 @@ export default function App() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isLoading || currentPath !== "/") return;
+    if (localStorage.getItem(AUTH_STORAGE_KEY) === "true") {
+      setIsAuthenticated(true);
+      setShowRoleGate(false);
+      return;
+    }
     const params = new URLSearchParams(window.location.search);
     const roleParam = String(params.get("role") || "").toLowerCase();
     const deepLinkPin = String(params.get("pin") || "").trim();
 
     if (!ROLE_VALUES.has(roleParam)) {
-      if (accessRole === "admin") setShowRoleGate(true);
+      if (!isAuthenticated) setShowRoleGate(true);
       return;
     }
 
     if (roleParam === "admin") {
-      if (!deepLinkPin || deepLinkPin === ADMIN_PORTAL_PIN) {
+      const valid = adminUsers.some((user) => String(user?.pin || "") === deepLinkPin);
+      if (valid) {
         enterPortalRole("admin");
-      } else if (accessRole === "admin") {
+      } else if (accessRole === "admin" && !isAuthenticated) {
         setShowRoleGate(true);
       }
       return;
@@ -6525,42 +6612,19 @@ export default function App() {
         enterPortalRole("sales");
       }
     }
-  }, [accessRole, currentPath, enterPortalRole, isLoading, partners, salesReps]);
+  }, [accessRole, adminUsers, currentPath, enterPortalRole, isAuthenticated, isLoading, partners, salesReps]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (isLoading || currentPath !== "/") return;
-
-    if (accessRole === "sales") {
-      const pin = String(localStorage.getItem(SALES_PORTAL_PIN_KEY) || "").trim();
-      const ok = Boolean(pin) && salesReps.some((rep) => String(rep.pin || "") === pin);
-      if (!ok) {
-        setShowRoleGate(true);
-      } else {
-        setShowRoleGate(false);
-        const nextTab = normalizeTabId(tab);
-        if (!canAccessTab("sales", nextTab)) setTab("salesview");
-      }
+    const persistedAuth = localStorage.getItem(AUTH_STORAGE_KEY) === "true";
+    if (persistedAuth) {
+      if (!isAuthenticated) setIsAuthenticated(true);
+      setShowRoleGate(false);
       return;
     }
-
-    if (accessRole === "partner") {
-      const pin = String(localStorage.getItem(PARTNER_PORTAL_PIN_KEY) || "").trim();
-      const ok = Boolean(pin) && partners.some((partner) => String(partner.pin || getDefaultPartnerPin(partner)) === pin);
-      if (!ok) {
-        setShowRoleGate(true);
-      } else {
-        setShowRoleGate(false);
-        const nextTab = normalizeTabId(tab);
-        if (!canAccessTab("partner", nextTab)) setTab("partnerview");
-      }
-      return;
-    }
-
-    if (accessRole === "admin") {
-      setShowRoleGate(true);
-    }
-  }, [accessRole, currentPath, isLoading, partners, salesReps, tab]);
+    if (!isAuthenticated) setShowRoleGate(true);
+  }, [currentPath, isAuthenticated, isLoading, tab]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -7316,6 +7380,7 @@ export default function App() {
       { id:"partners",    label:"👥 Partners",       desc:"Partner profiles & availability" },
       { id:"partnerview", label:"📋 Partner View",   desc:"What your partners see" },
       { id:"salesview",   label:"📈 Sales View",     desc:"Sales role access and workspace" },
+      { id:"admins",      label:"🛡️ Admin Access",   desc:"Manage admin users and PIN access" },
       { id:"onboarding",  label:"🎓 Onboarding",     desc:"Training & certification" },
       { id:"ai",          label:"🗓️ AI Scheduling",  desc:"AI-powered schedule optimizer" },
     ]},
@@ -7456,7 +7521,7 @@ export default function App() {
     );
   }
 
-  if (currentPath === "/" && showRoleGate) {
+  if (currentPath === "/" && showRoleGate && !isAuthenticated) {
     return (
       <RoleSelectionGate
         adminPin={roleGatePin}
@@ -7500,12 +7565,26 @@ export default function App() {
             <button
               style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px" }}
               onClick={() => {
+                setIsAuthenticated(false);
+                setAccessRole("admin");
+                try {
+                  localStorage.removeItem(AUTH_STORAGE_KEY);
+                  localStorage.removeItem(ROLE_STORAGE_KEY);
+                } catch {}
                 setRoleGateError("");
                 setRoleGatePin("");
                 setShowRoleGate(true);
               }}
             >
               Switch Role
+            </button>
+          )}
+          {accessRole === "admin" && isAuthenticated && (
+            <button
+              style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px" }}
+              onClick={() => setTabGuarded("admins")}
+            >
+              Manage Admins
             </button>
           )}
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
@@ -7589,6 +7668,22 @@ export default function App() {
       )}
 
       <style>{`@keyframes dbpulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
+      {SHOW_PORTAL_HELPER_NOTE && (
+        <div style={{ position: "fixed", right: 12, bottom: 12, zIndex: 9999, pointerEvents: "none" }}>
+          <div style={{
+            background: "#0b1220e6",
+            border: `1px solid ${isAuthenticated ? "#00D4AA66" : "#FF6B6B66"}`,
+            color: isAuthenticated ? "#00D4AA" : "#FF6B6B",
+            borderRadius: 999,
+            padding: "6px 10px",
+            fontSize: 11,
+            fontWeight: 700,
+            letterSpacing: "0.02em",
+          }}>
+            Auth: {isAuthenticated ? "active" : "inactive"} · Role: {accessRole}
+          </div>
+        </div>
+      )}
       {isMobile && accessRole === "admin" && <MobileBottomNav activeTab={tab} onTabChange={setTabGuarded} />}
 
       <main style={{ ...S.main, paddingBottom: isMobile ? MOBILE_NAV_HEIGHT + 16 : undefined }}>
@@ -7619,6 +7714,7 @@ export default function App() {
         {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} salesReps={salesReps} setSalesReps={setSalesRepsDB} accessRole={accessRole} />}
         {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} setJobs={setJobsDB} onboardingProgress={onboardingProgress} onExitRole={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="salesview"      && <SalesView         activeRole={accessRole} onEnterSales={() => setAccessRole("sales")} onExitSales={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
+        {tab==="admins"         && accessRole === "admin" && <AdminAccessManager adminUsers={adminUsers} setAdminUsers={setAdminUsers} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="tax"            && accessRole === "admin" && <TaxCompliance     region={activeRegion} />}
@@ -8932,6 +9028,25 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
     setNewSalesRep({ name: "", phone: "", email: "", commissionRate: 8, territory: "Ontario" });
   };
 
+  const removePartner = (partnerId) => {
+    const hasAssignedJobs = jobs.some(
+      (job) => job.partnerId === partnerId || (Array.isArray(job.partnerIds) && job.partnerIds.includes(partnerId))
+    );
+    if (hasAssignedJobs) {
+      alert("This partner is assigned to jobs. Reassign those jobs before deleting this partner.");
+      return;
+    }
+    const confirmed = window.confirm("Delete this partner profile?");
+    if (!confirmed) return;
+    setPartners((prev) => prev.filter((item) => item.id !== partnerId));
+  };
+
+  const removeSalesRep = (repId) => {
+    const confirmed = window.confirm("Delete this sales rep profile?");
+    if (!confirmed) return;
+    setSalesReps((prev) => prev.filter((item) => item.id !== repId));
+  };
+
   const toggleDay = (d) => setNewP({ ...newP, availability: newP.availability.includes(d) ? newP.availability.filter(x => x !== d) : [...newP.availability, d] });
 
   return (
@@ -9005,6 +9120,14 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                         }}
                       >Regenerate PIN</button>
                     )}
+                    {isAdmin && (
+                      <button
+                        style={{ ...styles.btn("ghost"), color: C.red, borderColor: `${C.red}55` }}
+                        onClick={() => removePartner(p.id)}
+                      >
+                        Delete Partner
+                      </button>
+                    )}
                   </div>
                 </div>
 
@@ -9063,6 +9186,14 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                       }}
                     >Regenerate PIN</button>
                   )}
+                  {isAdmin && (
+                    <button
+                      style={{ ...styles.btn("ghost"), color: C.red, borderColor: `${C.red}55` }}
+                      onClick={() => removeSalesRep(rep.id)}
+                    >
+                      Delete Sales Rep
+                    </button>
+                  )}
                 </div>
               </div>
             );
@@ -9107,6 +9238,98 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
           </div>
         </Modal>
       )}
+    </div>
+  );
+}
+
+function AdminAccessManager({ adminUsers = [], setAdminUsers = () => {} }) {
+  const [name, setName] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  const addAdmin = () => {
+    const nextName = String(name || "").trim();
+    const nextPin = String(pin || "").replace(/\D/g, "").slice(0, 6);
+    if (!nextName) {
+      setError("Admin name is required.");
+      return;
+    }
+    if (nextPin.length < 4) {
+      setError("Admin PIN must be 4 to 6 digits.");
+      return;
+    }
+    if (adminUsers.some((user) => String(user?.pin || "") === nextPin)) {
+      setError("This PIN is already used by another admin.");
+      return;
+    }
+    const next = {
+      id: `admin-${Date.now()}`,
+      name: nextName,
+      pin: nextPin,
+      createdAt: new Date().toISOString(),
+    };
+    setAdminUsers((prev) => [next, ...prev]);
+    setName("");
+    setPin("");
+    setError("");
+  };
+
+  const removeAdmin = (id) => {
+    if (adminUsers.length <= 1) {
+      setError("At least one admin user is required.");
+      return;
+    }
+    setAdminUsers((prev) => prev.filter((user) => user.id !== id));
+    setError("");
+  };
+
+  return (
+    <div>
+      <div style={S.h2}>🛡️ Admin Access</div>
+      <div style={{ color: C.muted, fontSize: 13, marginTop: -12, marginBottom: 16 }}>
+        Add or remove admin users. Any listed PIN can unlock the Admin Dashboard.
+      </div>
+
+      <div style={{ ...S.card, marginBottom: 14 }}>
+        <div style={{ fontWeight: 800, marginBottom: 10 }}>Add Admin User</div>
+        <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr auto", gap: 10 }}>
+          <input
+            style={S.input}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="Admin name"
+          />
+          <input
+            style={S.input}
+            value={pin}
+            onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 6))}
+            inputMode="numeric"
+            type="password"
+            placeholder="PIN"
+          />
+          <button style={S.btn("primary")} onClick={addAdmin}>Add Admin</button>
+        </div>
+        {error && <div style={{ color: C.red, fontSize: 12, marginTop: 8 }}>{error}</div>}
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {adminUsers.map((user, idx) => (
+          <div key={user.id} style={{ ...S.cardSm, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+            <div>
+              <div style={{ fontWeight: 800 }}>{user.name}</div>
+              <div style={{ color: C.muted, fontSize: 12 }}>
+                PIN: {user.pin} {idx === 0 ? "· Primary" : ""}
+              </div>
+            </div>
+            <button
+              style={{ ...S.btn("ghost"), color: C.red, borderColor: `${C.red}44` }}
+              onClick={() => removeAdmin(user.id)}
+            >
+              Delete
+            </button>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
