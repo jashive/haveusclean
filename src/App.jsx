@@ -7,8 +7,6 @@ import StatusBadge from "./components/StatusBadge";
 import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartViews";
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
-
-// Import BookingWidget
 import BookingWidget from "./components/BookingWidget";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
@@ -427,6 +425,7 @@ const S = {
   grid4: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,140px),1fr))", gap:10 },
   row2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,220px),1fr))", gap:12 },
 };
+const styles = S;
 
 function StatCard({ label, value, sub, color, icon }) {
   return (
@@ -535,12 +534,12 @@ function calcComQuote(f, region = ACTIVE_REGION) {
   const taxRate = region.id === "ON" ? region.tax.rate : 0;
   const taxAmount = preTaxTotal * taxRate;
   const finalTotal = preTaxTotal + taxAmount;
+
   const profit = companyProfitFromPrice(preTaxTotal);
   const margin = preTaxTotal > 0 ? ((profit/preTaxTotal)*100).toFixed(1) : "0";
   const visitsPerMonth = f.frequency==="Daily"?22:f.frequency==="Weekly"?4:f.frequency==="Bi-Weekly"?2:1;
   const monthly = finalTotal * visitsPerMonth;
   const contract = monthly * (f.contractMonths||1);
-
   return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:partnerPayFromPrice(preTaxTotal), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
 }
 
@@ -662,8 +661,6 @@ function SWOTAnalysis() {
 
 // ─── COLD OUTREACH PIPELINE ──────────────────────────────────────────────────
 function ColdOutreach({ region, coldLeads, setColdLeads }) {
-  const [filterMkt, setFilterMkt] = useState("All");
-
   return (
     <div>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
@@ -705,45 +702,6 @@ function ColdOutreach({ region, coldLeads, setColdLeads }) {
   );
 }
 
-// ─── DATABASE LAYER & KEYS ───────────────────────────────────────────────────
-const DB_KEYS = {
-  jobs: "cp:jobs", partners: "cp:partners", leadsRes: "cp:leads_res",
-  leadsCom: "cp:leads_com", region: "cp:region", settings: "cp:settings",
-  activity: "cp:activity_log", coldLeads: "cp:cold_leads", onboardingProgress: "cp:onboarding_progress",
-};
-
-const SUPABASE_URL  = "https://opazwghrohmfykzxxsjk.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
-
-async function sbFetch(path, opts = {}) {
-  try {
-    const { headers: optsHeaders, ...restOpts } = opts;
-    return await fetch(`${SUPABASE_URL}/rest/v1/${path}`, {
-      ...restOpts,
-      headers: {
-        "apikey": SUPABASE_ANON,
-        "Authorization": `Bearer ${SUPABASE_ANON}`,
-        "Content-Type": "application/json",
-        ...(optsHeaders || {}),
-      },
-    });
-  } catch { return null; }
-}
-
-async function dbGet(key) {
-  try {
-    const v = localStorage.getItem(key);
-    return v ? JSON.parse(v) : null;
-  } catch { return null; }
-}
-
-async function dbSet(key, value) {
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-    return true;
-  } catch { return false; }
-}
-
 // ─── MAIN APP COMPONENT ────────────────────────────────────────────────────────
 export default function App() {
   const [tab, setTab] = useState("dashboard");
@@ -756,7 +714,7 @@ export default function App() {
 
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
 
-  // Dedicated Standalone Route: /book
+  // Standalone Route Check for /book
   if (currentPath === "/book") {
     return (
       <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
