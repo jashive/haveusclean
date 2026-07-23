@@ -4016,12 +4016,12 @@ const toStrId = (v) => v !== undefined && v !== null ? String(v) : String(Date.n
 
 // Supabase table config
 const SB = {
-  "cp:jobs":                { table:"huc_jobs",      pk:"id",         isArray:true  },
-  "cp:partners":            { table:"huc_partners",  pk:"id",         isArray:true  },
-  "cp:leads_res":           { table:"huc_leads_res", pk:"id",         isArray:true  },
-  "cp:cold_leads":          { table:"huc_leads_cold",pk:"lead_id",    isArray:true  },
-  "cp:onboarding_progress": { table:"huc_onboarding",pk:"partner_id", isArray:false },
-  "cp:region":              { table:"huc_settings",  pk:"key",        isArray:false },
+  "cp:jobs":                { table:"huc_jobs",         pk:"id",            isArray:true  },
+  "cp:partners":            { table:"huc_partners",     pk:"id",            isArray:true  },
+  "cp:leads_res":           { table:"huc_leads_res",    pk:"id",            isArray:true  },
+  "cp:cold_leads":          { table:"huc_leads_cold",   pk:"lead_id",       isArray:true  },
+  "cp:onboarding_progress": { table:"partner_progress", pk:"partner_id",    isArray:false },
+  "cp:region":              { table:"huc_settings",     pk:"key",           isArray:false },
 };
 
 async function sbFetch(path, opts = {}) {
@@ -4077,7 +4077,25 @@ async function sbGet(key) {
     }
     if (key === "cp:onboarding_progress") {
       const obj = {};
-      rows.forEach(r => { if (r.partner_id) obj[r.partner_id] = r.completed_modules || []; });
+      const progressRows = rows.filter(r => r.partner_id);
+      if (progressRows.some(r => r.module_id !== undefined)) {
+        progressRows.forEach(r => {
+          const partnerId = String(r.partner_id);
+          if (!partnerId) return;
+          const existing = obj[partnerId] || [];
+          if (r.module_id && !existing.includes(String(r.module_id))) {
+            existing.push(String(r.module_id));
+          }
+          obj[partnerId] = existing;
+        });
+        return Object.keys(obj).length > 0 ? obj : null;
+      }
+      progressRows.forEach(r => {
+        const partnerId = String(r.partner_id);
+        if (r.completed_modules) {
+          obj[partnerId] = Array.isArray(r.completed_modules) ? r.completed_modules : [];
+        }
+      });
       return Object.keys(obj).length > 0 ? obj : null;
     }
     // Array tables: return array of data objects
@@ -4102,14 +4120,23 @@ async function sbSet(key, value) {
     if (key === "cp:onboarding_progress") {
       if (!value || typeof value !== "object") return true;
       const rows = Object.entries(value)
-        .filter(([k]) => k)
-        .map(([partner_id, modules]) => ({
-          partner_id: String(partner_id),
-          completed_modules: Array.isArray(modules) ? modules : [],
-          updated_at: new Date().toISOString(),
-        }));
+        .filter(([partnerId]) => partnerId)
+        .flatMap(([partnerId, modules]) => {
+          const moduleList = Array.isArray(modules) ? modules : [];
+          return moduleList
+            .filter(Boolean)
+            .map(moduleId => ({
+              partner_id: String(partnerId),
+              module_id: String(moduleId),
+              completed_at: new Date().toISOString(),
+            }));
+        });
       if (rows.length === 0) return true;
-      await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows) });
+      await sbFetch(`${cfg.table}?on_conflict=partner_id,module_id`, {
+        method: "POST",
+        body: JSON.stringify(rows),
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      });
       return true;
     }
     // Array tables (jobs, partners, leads)
@@ -5361,7 +5388,18 @@ export default function App() {
           const realLeads = savedColdLeads.filter(l => !SAMPLE_IDS.has(l.lead_id));
           if (realLeads.length > 0) setColdLeads(realLeads);
         }
-        if (savedProgress)  setOnboardingProgress(savedProgress);
+        if (savedProgress) {
+          const normalizedProgress = typeof savedProgress === "object" && !Array.isArray(savedProgress)
+            ? Object.fromEntries(Object.entries(savedProgress).map(([partnerId, modules]) => [String(partnerId), Array.isArray(modules) ? modules : []]))
+            : {};
+          setOnboardingProgress(normalizedProgress);
+          const completedIds = new Set(
+            Object.entries(normalizedProgress)
+              .filter(([, modules]) => Array.isArray(modules) && modules.length >= TRAINING_MODULES.length)
+              .map(([partnerId]) => String(partnerId))
+          );
+          setPartners(prev => prev.map(p => completedIds.has(String(p.id)) ? { ...p, onboarded: true, status: "available" } : p));
+        }
         setDbStatus("supabase");
       } catch {
         if (!cancelled) setDbStatus("local");
@@ -5453,6 +5491,9 @@ export default function App() {
   // ── Auto-save onboarding progress ──
   useEffect(() => {
     if (isLoading) return;
+    try {
+      localStorage.setItem("cp:onboarding_progress", JSON.stringify(onboardingProgress));
+    } catch {}
     dbSet(DB_KEYS.onboardingProgress, onboardingProgress);
   }, [onboardingProgress, isLoading]);
 
@@ -8419,15 +8460,41 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
     return Math.round((done / TRAINING_MODULES.length) * 100);
   };
 
-  const completeModule = (partnerId, moduleId) => {
-    const current = completedModules[partnerId] || [];
-    if (!current.includes(moduleId)) {
-      const updated = { ...completedModules, [partnerId]: [...current, moduleId] };
-      setCompletedModules(updated);
-      if (updated[partnerId].length === TRAINING_MODULES.length) {
-        setPartners(partners.map(p => p.id === partnerId ? { ...p, onboarded: true, status: "available" } : p));
-      }
+  const completeModule = async (partnerId, moduleId) => {
+    if (!partnerId || !moduleId) {
+      setActiveModule(null);
+      return;
     }
+
+    const current = Array.isArray(completedModules[partnerId]) ? completedModules[partnerId] : [];
+    if (current.includes(moduleId)) {
+      setActiveModule(null);
+      return;
+    }
+
+    const updated = { ...completedModules, [partnerId]: [...current, moduleId] };
+    setCompletedModules(updated);
+
+    try {
+      localStorage.setItem("cp:onboarding_progress", JSON.stringify(updated));
+    } catch {}
+
+    if (updated[partnerId].length === TRAINING_MODULES.length) {
+      setPartners(prev => prev.map(p => p.id === partnerId ? { ...p, onboarded: true, status: "available" } : p));
+    }
+
+    try {
+      await sbFetch("partner_progress?on_conflict=partner_id,module_id", {
+        method: "POST",
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          partner_id: String(partnerId),
+          module_id: String(moduleId),
+          completed_at: new Date().toISOString(),
+        }),
+      });
+    } catch {}
+
     setActiveModule(null);
   };
 
