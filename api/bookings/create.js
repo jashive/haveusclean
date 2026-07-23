@@ -1,8 +1,23 @@
 // api/bookings/create.js — Receives widget booking submissions
-import Stripe from 'stripe';
 import nodemailer from 'nodemailer';
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+async function stripeRequest(path, options = {}) {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) throw new Error('STRIPE_SECRET_KEY not configured');
+  const response = await fetch(`https://api.stripe.com/v1${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+      ...(options.headers || {}),
+    },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    throw new Error(data.error?.message || 'Stripe request failed');
+  }
+  return data;
+}
 
 function formatCurrency(value) {
   const amount = Number(value || 0);
@@ -41,9 +56,13 @@ export default async function handler(req, res) {
     const booking = getBookingPayload(req.body);
 
     if (booking.paymentMethodId && booking.customerId) {
-      await stripe.paymentMethods.attach(booking.paymentMethodId, { customer: booking.customerId });
-      await stripe.customers.update(booking.customerId, {
-        invoice_settings: { default_payment_method: booking.paymentMethodId },
+      await stripeRequest(`/payment_methods/${booking.paymentMethodId}/attach`, {
+        method: 'POST',
+        body: new URLSearchParams({ customer: booking.customerId }).toString(),
+      });
+      await stripeRequest(`/customers/${booking.customerId}`, {
+        method: 'POST',
+        body: new URLSearchParams({ 'invoice_settings[default_payment_method]': booking.paymentMethodId }).toString(),
       });
     }
 
