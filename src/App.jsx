@@ -299,11 +299,11 @@ const HUC_STATUS_COLOR = {
 
 // ─── PROFIT MARGIN CONFIG ────────────────────────────────────────────────────
 // Have Us Clean pay structure:
-//   Partner earns 65% of the client price (pre-tax)
-//   Company keeps 35% of the client price (gross profit)
-const PARTNER_SHARE = 0.65;
-const COMPANY_SHARE = 0.35;
-const PROFIT_MARGIN = 0.35;
+//   Partner earns 60% of the client price (pre-tax)
+//   Company keeps 40% of the client price (gross profit)
+const PARTNER_SHARE = 0.60;
+const COMPANY_SHARE = 0.40;
+const PROFIT_MARGIN = 0.40;
 
 const partnerPayFromPrice  = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
 const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
@@ -706,11 +706,11 @@ function QuoteBox({ q, type = "res" }) {
 
       <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:10, marginTop:12 }}>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
-          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PARTNER PAY (65%)</div>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>PARTNER 60%</div>
           <div style={{ fontSize:18, fontWeight:800, color:C.blue }}>{f(q.partnerPay)}</div>
         </div>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
-          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>COMPANY (35%)</div>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>COMPANY 40%</div>
           <div style={{ fontSize:18, fontWeight:800, color:C.gold }}>{f(q.profit)}</div>
         </div>
         <div style={{ background:C.bg, borderRadius:9, padding:"10px 12px", textAlign:"center" }}>
@@ -7455,14 +7455,14 @@ function Pay({ partners, jobs }) {
     <div>
       <div style={S.h2}>💰 Partner Pay</div>
       <div style={{ fontSize:13, color:C.muted, marginTop:-14, marginBottom:18 }}>
-        Pay structure: <strong style={{ color:C.blue }}>Partner 65%</strong> · <strong style={{ color:C.gold }}>Company 35%</strong> of each job's client price
+        Pay structure: <strong style={{ color:C.blue }}>Partner 60%</strong> · <strong style={{ color:C.gold }}>Company 40%</strong> of each job's client price
       </div>
 
       <div style={S.grid4}>
         <StatCard label="Total Revenue"      value={`$${totalRevenue.toLocaleString()}`}  icon="💵" color={C.accent} />
         <StatCard label="Partner Pay (Total)" value={`$${totalEarned.toLocaleString()}`}   icon="👥" color={C.blue}   sub="completed jobs" />
         <StatCard label="Pending Pay"         value={`$${totalPending.toLocaleString()}`}  icon="⏳" color={C.gold}   sub="scheduled jobs" />
-        <StatCard label="Company Kept"        value={`$${companyTotal.toLocaleString()}`}  icon="🏢" color={C.accent} sub="35% of all jobs" />
+        <StatCard label="Company Kept"        value={`$${companyTotal.toLocaleString()}`}  icon="🏢" color={C.accent} sub="40% of all jobs" />
       </div>
 
       <div style={S.divider} />
@@ -7488,7 +7488,7 @@ function Pay({ partners, jobs }) {
                 <div style={{ textAlign:"right" }}>
                   <div style={{ fontWeight:800, fontSize:22, color:C.gold }}>${pending.toLocaleString()} <span style={{ fontSize:12, fontWeight:600, color:C.muted }}>DUE</span></div>
                   <div style={{ fontSize:13, color:C.muted }}>${earned.toLocaleString()} paid all-time</div>
-                  <div style={{ fontSize:11, color:C.blue, marginTop:2 }}>65% of each job</div>
+                  <div style={{ fontSize:11, color:C.blue, marginTop:2 }}>60% of each job</div>
                 </div>
               </div>
 
