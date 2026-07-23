@@ -1488,6 +1488,105 @@ const SEGMENT_META = {
   "Dental":            { icon:"🦷", color:"#06B6D4", tone:"dental practice / patient environment" },
 };
 
+const normalizeLeadMarket = (lead) => {
+  const m = (lead?.market || "").trim().toLowerCase();
+  if (m.includes("ontario")) return "Ontario";
+  if (m.includes("arizona")) return "Arizona";
+  const id = (lead?.lead_id || lead?.id || "").toUpperCase();
+  if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
+  if (id.startsWith("AZ-")) return "Arizona";
+  const city = (lead?.city || "").toLowerCase();
+  const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa","stouffville","barrie"];
+  const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills","paradise valley"];
+  if (ontarioCities.some(c => city.includes(c))) return "Ontario";
+  if (arizonaCities.some(c => city.includes(c))) return "Arizona";
+  return "";
+};
+
+const normalizeLeadRecord = (lead, fallback = {}) => {
+  const normalizedMarket = normalizeLeadMarket(lead);
+  const normalized = {
+    ...fallback,
+    ...lead,
+    lead_id: String(lead?.lead_id || lead?.id || fallback?.lead_id || "").trim(),
+    id: lead?.id || lead?.lead_id || fallback?.id || undefined,
+    company: lead?.company || fallback?.company || "",
+    city: lead?.city || fallback?.city || "",
+    market: normalizedMarket || lead?.market || fallback?.market || "Ontario",
+    segment: lead?.segment || fallback?.segment || "Office",
+    status: lead?.status || fallback?.status || "New",
+    notes: lead?.notes ?? fallback?.notes ?? "",
+    cold_email: lead?.cold_email ?? fallback?.cold_email ?? "",
+    follow_up_email: lead?.follow_up_email ?? fallback?.follow_up_email ?? "",
+    linkedin_note: lead?.linkedin_note ?? fallback?.linkedin_note ?? "",
+    call_opener: lead?.call_opener ?? fallback?.call_opener ?? "",
+    assigned_rep: lead?.assigned_rep ?? fallback?.assigned_rep ?? "",
+    last_contacted_at: lead?.last_contacted_at ?? fallback?.last_contacted_at ?? null,
+    updated_at: lead?.updated_at || fallback?.updated_at || new Date().toISOString(),
+    source_lane: lead?.source_lane || fallback?.source_lane || "n8n",
+  };
+  return normalized;
+};
+
+const mergeLeadLists = (prevLeads, incomingLeads) => {
+  const merged = new Map();
+  prevLeads.forEach(lead => {
+    const key = String(lead?.lead_id || lead?.id || "").trim();
+    if (key) merged.set(key, normalizeLeadRecord(lead));
+  });
+  incomingLeads.forEach(lead => {
+    const key = String(lead?.lead_id || lead?.id || "").trim();
+    if (!key) return;
+    const current = merged.get(key);
+    const incoming = normalizeLeadRecord(lead, current || {});
+    if (!current) {
+      merged.set(key, incoming);
+      return;
+    }
+    const currentTime = new Date(current.updated_at || 0).getTime();
+    const incomingTime = new Date(incoming.updated_at || 0).getTime();
+    merged.set(key, incomingTime > currentTime ? incoming : { ...current, ...incoming, market: incoming.market || current.market, status: incoming.status || current.status });
+  });
+  return Array.from(merged.values()).sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
+};
+
+const persistLeadToSupabase = async (lead) => {
+  const lid = String(lead?.lead_id || lead?.id || "").trim();
+  if (!lid) return null;
+  const normalized = normalizeLeadRecord(lead);
+  const payload = {
+    lead_id: lid,
+    data: normalized,
+    updated_at: normalized.updated_at || new Date().toISOString(),
+  };
+  try {
+    const patchRes = await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ data: normalized, updated_at: payload.updated_at }),
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    });
+    if (patchRes && patchRes.ok) return payload;
+  } catch {}
+  try {
+    await sbFetch("huc_leads_cold?on_conflict=lead_id", {
+      method: "POST",
+      body: JSON.stringify([payload]),
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    });
+  } catch {}
+  return payload;
+};
+
+const formatLeadContactBadge = (value) => {
+  if (!value) return "";
+  try {
+    const date = new Date(value);
+    return `Contacted ${date.toLocaleString([], { month:"short", day:"numeric", hour:"numeric", minute:"2-digit" })}`;
+  } catch {
+    return "Contacted recently";
+  }
+};
+
 // Industry-aware email upgrade prompts
 const SEGMENT_EMAIL_CONTEXT = {
   "Office": {
@@ -1599,12 +1698,37 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
+  const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
   const PAGE_SIZE = 15;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
     buyer_title:"", pain_point:"", first_offer:"office cleaning",
     priority_score:3, notes:""
   });
+
+  const refreshFromSupabase = async () => {
+    try {
+      setRefreshingLeadSync(true);
+      const r = await sbFetch("huc_leads_cold?select=*");
+      if (!r || !r.ok) return false;
+      const rows = await r.json();
+      if (!Array.isArray(rows) || rows.length === 0) return false;
+      const incoming = rows
+        .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
+        .filter(Boolean);
+      if (incoming.length === 0) return false;
+      setLeads(prev => {
+        const next = mergeLeadLists(prev, incoming);
+        try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+        return next;
+      });
+      return true;
+    } catch {
+      return false;
+    } finally {
+      setRefreshingLeadSync(false);
+    }
+  };
 
   // Pull live leads from Google Sheet via Vercel proxy
   const syncSheet = async () => {
@@ -1693,6 +1817,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       // ── Step 4: Update React state (pure — no side effects) ──
       setColdLeads(final);
+      try { localStorage.setItem("cp:cold_leads", JSON.stringify(final)); } catch {}
       setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
 
       // ── Step 5: Write to Supabase — larger batches to stay under rate limit ──
@@ -1805,88 +1930,45 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
   // Filter leads — hide truly empty rows but keep leads with lead_id
   const PLACEHOLDER = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-  const filtered = (() => {
-    const JUNK_CHECK = /\[Your Name\]|\[City\]|\[Name\]/i;
-    // Filter out rows where company field contains email body / signatures / greetings
-    // These come from n8n Parse outreach writing wrong data into the company field
-    const isFakeCompany = (name) => {
-      if (!name) return true;
-      if (name.length > 80) return true;
-      if (/@/.test(name)) return true;                           // email address
-      if (/\|/.test(name)) return true;                          // pipe = signature
-      if (/\d{3}-\d{3}-\d{4}/.test(name)) return true;          // phone number
-      if (/\. [A-Z]/.test(name)) return true;                    // sentence pattern
-      if (/,\s*(hi|hello|dear)/i.test(name)) return true;        // comma + greeting
-      if (/^(hi |hello |dear |i |i'm |i've |i'd |i noticed|i came|i wanted|i understand|i see |i hope|i know|i work|i'm reaching|this is danae|danae|have us clean|haveusclean|905-|and i|we specialize|ensuring,|maintaining a clean|as the |as a |at |is the |is a )/i.test(name.trim())) return true;
-      if (/just like yours/i.test(name)) return true;
-      if (/clean(ing)? (dental|medical|office|your)/i.test(name)) return true;
-      if (/\bpatients?\b|\btenants?\b|\bclients?\b/i.test(name)) return true;
-      if (/have us clean/i.test(name)) return true;
-      if (/info@|haveusclean\.ca/i.test(name)) return true;
-      // Sentence fragment: ends with period BUT not a business suffix like Inc. Corp. Ltd.
-      if (name.trim().endsWith(".") && !/\b(inc|corp|ltd|co|llc|llp|plc|sa|pty|mgmt)\.$/.test(name.trim().toLowerCase())) return true;
-      if (/\b(tailored for|tailored to|seamlessly|dependable services|high-quality cleaning|compliant cleaning|cleaning services|cleaning that|cleaning for|cleaning to)\b/i.test(name)) return true;
-      if (/(common area.{0,30}clean|keeping.{0,20}pristine|help keep them|enhance your|support your efforts|explore how we can|committed to quality|keeping.*spotless|discuss how our|I see .{3,30}manages)/i.test(name)) return true;
-      return false;
-    };
+  const getActiveLeads = (overrides = {}) => {
+    const status = overrides.status ?? filterStatus;
+    const market = overrides.market ?? filterMkt;
+    const segment = overrides.segment ?? filterSeg;
     const seenCompanies = new Set();
-    // Aggressively normalize company name so variants like "ABC Inc" and "ABC Ltd." both collapse
     const normalizeCompany = (name) => {
       let n = (name || "").trim();
-      // Extract real company name from enrichment opener pattern
-      // e.g. "As the Facility Manager at 360 Medical Centre → making a lasting impression"
-      // Strip everything from "→" onwards first
       n = n.replace(/→.*/g, "").trim();
-      // Now extract "at COMPANY_NAME" pattern
       const atMatch = n.match(/\bat\s+(.+)$/i);
       if (atMatch) n = atMatch[1].trim();
-      // Handle leading "At COMPANY_NAME" with nothing before it
       const atStart = n.match(/^[Aa]t\s+(.+)$/);
       if (atStart) n = atStart[1].trim();
       return n
-        // Strip trailing business suffixes
         .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "")
-        .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "") // run twice to catch "ABC Inc Ltd"
-        // Strip all punctuation
+        .replace(/[\s,]+(inc|incorporated|ltd|limited|llc|l\.l\.c|corp|corporation|co|company|plc|llp|lp|gmbh|sa|pty|group|holdings|enterprises|services|solutions|partners|associates|the)\b\.?$/gi, "")
         .replace(/[.,''"`''""\-–—&()/\\|:;!?*#]/g, " ")
-        // Collapse whitespace
         .replace(/\s+/g, " ")
         .trim();
     };
     return leads.filter(l => {
       if (!l?.company?.trim()) return false;
-      // Normalize market — handle any casing or whitespace from n8n
-      const normalizedMarket = (() => {
-        const m = (l.market||"").trim().toLowerCase();
-        if (m.includes("ontario")) return "Ontario";
-        if (m.includes("arizona")) return "Arizona";
-        const id = (l.lead_id||l.id||"").toUpperCase();
-        if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
-        if (id.startsWith("AZ-")) return "Arizona";
-        const city = (l.city||"").toLowerCase();
-        if (["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa"].some(c=>city.includes(c))) return "Ontario";
-        if (["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale"].some(c=>city.includes(c))) return "Arizona";
-        return "";
-      })();
-      // Apply market filter BEFORE dedup so each market has its own dedup scope
-      const marketMatch = filterMkt === "All" ||
-        (filterMkt === "Ontario" && normalizedMarket === "Ontario") ||
-        (filterMkt === "Arizona" && normalizedMarket === "Arizona");
+      const normalizedMarket = normalizeLeadMarket(l);
+      const marketMatch = market === "All" ||
+        (market === "Ontario" && normalizedMarket === "Ontario") ||
+        (market === "Arizona" && normalizedMarket === "Arizona");
       if (!marketMatch) return false;
-      // Apply status and segment filters
-      if (filterStatus !== "All" && l.status !== filterStatus) return false;
-      if (filterSeg    !== "All" && l.segment !== filterSeg)    return false;
-      // Dedup by NORMALIZED company name — catches "ABC" = "ABC Inc." = "ABC Ltd"
-      // Also include city so "Acme Phoenix" and "Acme Scottsdale" stay separate
+      if (status !== "All" && (l.status || "New") !== status) return false;
+      if (segment !== "All" && l.segment !== segment) return false;
       const normCompany = normalizeCompany(l.company);
-      const normCity    = (l.city || "").trim().toLowerCase();
+      const normCity = (l.city || "").trim().toLowerCase();
       const key = normCompany + "|" + normCity;
-      if (!normCompany) return false; // empty after normalization = junk
+      if (!normCompany) return false;
       if (seenCompanies.has(key)) return false;
       seenCompanies.add(key);
       return true;
     });
-  })();
+  };
+  const filtered = getActiveLeads();
+
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE) || 1;
   // If page is out of range (e.g. after deletion or filter change), correct it immediately
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
@@ -1894,7 +1976,19 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
   // Reset page when filters change
   // Reset to page 0 when filters change
-  useEffect(() => { setPage(0); }, [filterStatus, filterSeg]);
+  useEffect(() => { setPage(0); }, [filterStatus, filterSeg, filterMkt]);
+
+  // Poll Supabase for updates from other devices and keep state in sync
+  useEffect(() => {
+    let cancelled = false;
+    const tick = async () => {
+      if (cancelled) return;
+      await refreshFromSupabase();
+    };
+    tick();
+    const timer = setInterval(tick, 8000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, []);
 
   // ── Auto-sync on mount — pulls fresh leads from Google Sheet automatically ──
   // Runs on every mount (tab switch won't remount, but page refresh will)
@@ -1905,21 +1999,49 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
   // Snap-back removed: was resetting page on every 15s sync
 
-  // Stats
-  const total     = leads.length;
-  const hot       = leads.filter(l => l.priority_score >= 4).length;
-  const booked    = leads.filter(l => l.status === "Meeting Booked").length;
-  const won       = leads.filter(l => l.status === "Won").length;
-  const contacted = leads.filter(l => l.status !== "New").length;
+  // Stats based on the active filtered lead array
+  const total     = filtered.length;
+  const hot       = filtered.filter(l => l.priority_score >= 4).length;
+  const booked    = filtered.filter(l => l.status === "Meeting Booked").length;
+  const won       = filtered.filter(l => l.status === "Won").length;
+  const contacted = filtered.filter(l => l.status !== "New").length;
   const convRate  = total > 0 ? Math.round((won / total) * 100) : 0;
 
-  const updateStatus = (id, status) => {
-    setLeads(ls => ls.map(l => l.id === id || l.lead_id === id ? { ...l, status } : l));
-    if (viewLead?.lead_id === id) setViewLead(v => ({ ...v, status }));
+  const updateStatus = async (id, status, extra = {}) => {
+    let updatedLead = null;
+    setLeads(ls => {
+      const next = ls.map(l => {
+        const match = l.id === id || l.lead_id === id;
+        if (!match) return l;
+        const nextLead = {
+          ...l,
+          status,
+          ...extra,
+          ...(status === "Contacted" ? {
+            last_contacted_at: extra.last_contacted_at || new Date().toISOString(),
+            assigned_rep: extra.assigned_rep || l.assigned_rep || "Current Rep",
+          } : {}),
+        };
+        updatedLead = nextLead;
+        return nextLead;
+      });
+      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      if (updatedLead && (viewLead?.lead_id === id || viewLead?.id === id)) {
+        setViewLead(updatedLead);
+      }
+      return next;
+    });
+    if (updatedLead) {
+      await persistLeadToSupabase(updatedLead);
+    }
   };
 
   const updateNotes = (id, notes) => {
-    setLeads(ls => ls.map(l => l.lead_id === id ? { ...l, notes } : l));
+    setLeads(ls => {
+      const next = ls.map(l => l.lead_id === id ? { ...l, notes } : l);
+      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      return next;
+    });
     if (viewLead?.lead_id === id) setViewLead(v => ({ ...v, notes }));
   };
 
@@ -1953,19 +2075,25 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   };
 
   // Add manual lead
-  const addManualLead = () => {
+  const addManualLead = async () => {
     if (!manualForm.company.trim()) return;
     const prefix = manualForm.market === "Arizona" ? "AZ" : "ON";
     const num = String(leads.length + 1).padStart(4, "0");
-    const newLead = {
+    const newLead = normalizeLeadRecord({
       ...manualForm,
       lead_id: `${prefix}-M${num}`,
       status: "New",
       owner: "Jason",
       cold_email: "", follow_up_email: "", linkedin_note: "", call_opener: "",
       source_lane: "Manual Entry",
-    };
-    setLeads(ls => [newLead, ...ls]);
+      updated_at: new Date().toISOString(),
+    });
+    setLeads(ls => {
+      const next = [newLead, ...ls];
+      try { localStorage.setItem("cp:cold_leads", JSON.stringify(next)); } catch {}
+      return next;
+    });
+    await persistLeadToSupabase(newLead);
     setShowManual(false);
     setManualForm({ company:"", city:"", market:"Ontario", segment:"Office", buyer_title:"", pain_point:"", first_offer:"office cleaning", priority_score:3, notes:"" });
     setViewLead(newLead);
@@ -2051,7 +2179,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
               const col = COLD_STATUS_COLOR[s];
               const active = viewLead.status === s;
               return (
-                <button key={s} onClick={() => updateStatus(viewLead.lead_id, s)}
+                <button key={s} onClick={() => updateStatus(viewLead.lead_id, s, s === "Contacted" ? { assigned_rep: viewLead.assigned_rep || "Current Rep" } : {})}
                   style={{ padding:"6px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700,
                     background: active ? `${col}33` : C.surface,
                     color: active ? col : C.muted,
@@ -2193,11 +2321,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       </div>
 
       {/* Stats */}
-      <div style={S.grid4}>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,180px),1fr))", gap:12 }}>
         <StatCard label="Total Pipeline"   value={total}     icon="🎯" color={C.blue}   />
         <StatCard label="Hot Leads (4-5)"  value={hot}       icon="🔥" color={C.red}    />
         <StatCard label="Meetings Booked"  value={booked}    icon="📅" color={C.accent} />
         <StatCard label="Won"              value={won}       icon="🏆" color={C.gold}   sub={`${convRate}% conv.`} />
+        <StatCard label="Conversion Rate %" value={`${convRate}%`} icon="📈" color={C.purple} />
       </div>
 
       <div style={S.divider} />
@@ -2222,9 +2351,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       {/* Filters */}
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
-        {["All", ...COLD_STATUSES].map(s => {
+        {['All', ...COLD_STATUSES].map(s => {
           const col = COLD_STATUS_COLOR[s] || C.accent;
-          const count = s === "All" ? leads.length : leads.filter(l => l.status === s).length;
+          const count = s === "All" ? getActiveLeads({ status: "All", market: filterMkt, segment: filterSeg }).length : getActiveLeads({ status: s, market: filterMkt, segment: filterSeg }).length;
           const active = filterStatus === s;
           return (
             <button key={s} onClick={() => { setFilterStatus(s); setPage(0); }}
@@ -2240,13 +2369,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
 
       <div style={{ display:"flex", gap:8, marginBottom:18, flexWrap:"wrap" }}>
         {["All", "Ontario", "Arizona"].map(m => {
-          const count = m === "All"
-            ? leads.filter(l=>l?.company?.trim()).length
-            : leads.filter(l => {
-                if (!l?.company?.trim()) return false;
-                const lm = (l.market||"").trim().toLowerCase();
-                return m === "Ontario" ? lm.includes("ontario") : lm.includes("arizona");
-              }).length;
+          const count = getActiveLeads({ status: filterStatus, market: m, segment: filterSeg }).length;
           return (
             <button key={m} onClick={() => handleSetFilterMkt(m)}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
@@ -2258,7 +2381,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
           );
         })}
         {["All","Office","Medical","Dental","Industrial-Office","Property Manager"].map(seg => {
-          const count = seg === "All" ? leads.filter(l=>l?.company?.trim()).length : leads.filter(l=>l?.segment===seg && l?.company?.trim()).length;
+          const count = getActiveLeads({ status: filterStatus, market: filterMkt, segment: seg }).length;
           return (
             <button key={seg} onClick={() => { setFilterSeg(seg); setPage(0); }}
               style={{ padding:"4px 12px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:600,
@@ -2328,6 +2451,11 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                     </div>
                     <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
                       <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status||"New"}</span>
+                      {lead.status === "Contacted" && lead.last_contacted_at && (
+                        <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.goldDim, color:C.gold }}>
+                          {formatLeadContactBadge(lead.last_contacted_at)}
+                        </span>
+                      )}
                       {hasOutreach && <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.accentDim, color:C.accent }}>✉️</span>}
                       <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.surface, color:C.muted }}>{lead.market==="Ontario"?"🇨🇦":"🇺🇸"}</span>
                     </div>
