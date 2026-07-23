@@ -9,6 +9,7 @@ import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartView
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
+import { validateLead } from "./lib/leadValidation";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -1819,6 +1820,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
+  const [syncStats, setSyncStats]       = useState({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
   const PAGE_SIZE = 15;
   const [manualForm, setManualForm]     = useState({
@@ -1863,43 +1865,64 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         setLoadingSheet(false);
         return;
       }
-      if (!data.leads || data.leads.length === 0) {
+      const rawLeads = Array.isArray(data.leads) ? data.leads : [];
+      if (rawLeads.length === 0) {
         setSyncError("Sheet returned 0 leads. Make sure your n8n has run and the sheet has data.");
+        setSyncStats({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
         setLoadingSheet(false);
         return;
       }
 
-      // ── Step 1: Clean and normalize leads ──
-      const PLACEHOLDER_PATTERNS = /\[Your Name\]|\[City\]|\[Name\]|\[Company\]|\[Location\]/i;
-      const validLeads = data.leads
-        .filter(l => {
-          if (!l?.company?.trim()) return false;
-          if (PLACEHOLDER_PATTERNS.test(JSON.stringify(l))) return false;
-          const lid = String(l.lead_id || l.id || "");
-          if (!lid) return false;
-          if (deletedLeadIds.has(lid)) return false;
-          return true;
-        })
-        .map(l => ({
-          ...l,
+      // ── Step 1: Validate, normalize, and count leads explicitly ──
+      const seenIds = new Set();
+      const validLeads = [];
+      const invalidLeads = [];
+      let skipped = 0;
+
+      for (const lead of rawLeads) {
+        const lid = String(lead?.lead_id || lead?.id || "").trim();
+        if (!lid) {
+          invalidLeads.push({ lead, reason: "missing lead_id" });
+          continue;
+        }
+        if (deletedLeadIds.has(lid)) {
+          skipped += 1;
+          continue;
+        }
+
+        const normalizedLead = {
+          ...lead,
+          lead_id: lid,
+          id: lead?.id || lid,
           market: (() => {
-            const m = (l.market||"").trim().toLowerCase();
+            const m = (lead.market || "").trim().toLowerCase();
             if (m.includes("ontario")) return "Ontario";
             if (m.includes("arizona")) return "Arizona";
-            const id = (l.lead_id||l.id||"").toUpperCase();
+            const id = lid.toUpperCase();
             if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
             if (id.startsWith("AZ-")) return "Arizona";
-            const city = (l.city||"").toLowerCase();
+            const city = (lead.city || "").toLowerCase();
             const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa","stouffville","barrie"];
             const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills","paradise valley"];
             if (ontarioCities.some(c => city.includes(c))) return "Ontario";
             if (arizonaCities.some(c => city.includes(c))) return "Arizona";
-            return l.market || "";
+            return lead.market || "";
           })(),
-        }));
+        };
+
+        const validation = validateLead(normalizedLead, seenIds);
+        if (!validation.valid) {
+          invalidLeads.push({ lead: normalizedLead, reason: validation.reason });
+          continue;
+        }
+
+        seenIds.add(lid);
+        validLeads.push(normalizedLead);
+      }
 
       if (validLeads.length === 0) {
-        setSyncError("Sheet returned leads but none had a company name.");
+        setSyncError(`Sheet returned ${rawLeads.length} rows but none passed validation${invalidLeads.length ? ` (${invalidLeads[0].reason})` : ""}.`);
+        setSyncStats({ fetched: rawLeads.length, valid: 0, invalid: invalidLeads.length, skipped, saved: 0 });
         setLoadingSheet(false);
         return;
       }
@@ -1939,7 +1962,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       // ── Step 4: Update React state (pure — no side effects) ──
       setColdLeads(final);
       try { localStorage.setItem("cp:cold_leads", JSON.stringify(final)); } catch {}
-      setLastSynced(`v5.30 · ${new Date().toLocaleTimeString()} · fetched ${data.leads.length} · validated ${validLeads.length} · final ${final.length}`);
+      const summary = `v5.38 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · final ${final.length}`;
+      setLastSynced(summary);
+      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped, saved: 0 });
 
       // ── Step 5: Write to Supabase — larger batches to stay under rate limit ──
       const BATCH = 100;      // 100 leads per request reduces total request count
@@ -1950,12 +1975,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       // Dedupe by lead_id — Postgres rejects batches with duplicate primary keys
       // Also: skip any lead without a real lead_id (don't invent random ones that pollute Supabase)
       const leadIdMap = new Map();
-      let skipped = 0;
+      let supabaseSkipped = 0;
       for (const lead of final) {
         const lid = String(lead.lead_id || lead.id || "").trim();
         // Only accept lead_ids that look like real IDs (have a prefix like ON-, AZ-, LD-)
         // Reject empty IDs and IDs that look like failed fallbacks (LD-17... timestamp pattern)
-        if (!lid || /^LD-17\d{11}/.test(lid)) { skipped++; continue; }
+        if (!lid || /^LD-17\d{11}/.test(lid)) { supabaseSkipped++; continue; }
         if (!leadIdMap.has(lid)) leadIdMap.set(lid, { lead, lid });
       }
       const uniqueFinal = Array.from(leadIdMap.values());
@@ -1995,11 +2020,12 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         }
       }
       const finalMsg = written === uniqueFinal.length
-        ? `v5.37 · ${new Date().toLocaleTimeString()} · ${written}/${uniqueFinal.length} saved · ${skipped} skipped (no ID) ✅`
+        ? `v5.38 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} ✅`
         : written > 0
-        ? `v5.37 · partial: ${written}/${uniqueFinal.length} saved · ${lastError}`
-        : `v5.37 · FAILED · 0/${uniqueFinal.length} · ${lastError || "no response"}`;
+        ? `v5.38 · partial: fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} · ${lastError}`
+        : `v5.38 · FAILED · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved 0/${uniqueFinal.length} · ${lastError || "no response"}`;
       setLastSynced(finalMsg);
+      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + supabaseSkipped, saved: written });
 
     } catch (err) {
       setSyncError("Network error: " + err.message);
@@ -2447,6 +2473,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         <StatCard label="Hot Leads (4-5)"  value={hot}       icon="🔥" color={C.red}    />
         <StatCard label="Meetings Booked"  value={booked}    icon="📅" color={C.accent} />
         <StatCard label="Won"              value={won}       icon="🏆" color={C.gold}   sub={`${convRate}% conv.`} />
+        <StatCard label="Validation"       value={`${syncStats.valid}/${syncStats.fetched}`} icon="✅" color={C.purple} sub={`${syncStats.invalid} invalid · ${syncStats.skipped} skipped`} />
         <StatCard label="Conversion Rate %" value={`${convRate}%`} icon="📈" color={C.purple} />
       </div>
 

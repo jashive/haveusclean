@@ -2,6 +2,8 @@
 // NO API KEY NEEDED — just requires sheet to be shared "Anyone with the link can view"
 // This uses Google's built-in CSV export which works on any public sheet
 
+import { validateLead } from '../src/lib/leadValidation.js';
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
@@ -61,8 +63,11 @@ export default async function handler(req, res) {
 
     const headers = parseCSVLine(rows[0]);
     const EXCLUDE = ['output']; // skip raw n8n pipeline column
+    const seenIds = new Set();
+    const leads = [];
+    let invalidCount = 0;
 
-    const leads = rows.slice(1).map(row => {
+    for (const row of rows.slice(1)) {
       const values = parseCSVLine(row);
       const obj = {};
       headers.forEach((h, i) => {
@@ -91,12 +96,20 @@ export default async function handler(req, res) {
       if (!obj.status) obj.status = 'New';
       if (!obj.owner)  obj.owner  = 'Jason';
 
-      return obj;
-    }).filter(l => l.lead_id && l.lead_id.trim() !== '');
+      const validation = validateLead(obj, seenIds);
+      if (!validation.valid) {
+        invalidCount += 1;
+        continue;
+      }
+      seenIds.add(String(obj.lead_id || obj.id || '').trim());
+      leads.push(obj);
+    }
 
     return res.status(200).json({
       leads,
       count: leads.length,
+      raw_count: rows.length - 1,
+      invalid_count: invalidCount,
       synced_at: new Date().toISOString()
     });
 
