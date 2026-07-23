@@ -1,6 +1,7 @@
 // ─── HAVE US CLEAN v3.0 ── Operating System ──────────────────────────────────
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import ConfirmDrawer from "./components/ConfirmDrawer";
+import BookingWidget from "./components/BookingWidget";
 import MobileBottomNav, { useMobileNav, MOBILE_NAV_HEIGHT } from "./components/MobileBottomNav";
 import MySchedule from "./pages/MySchedule";
 import StatusBadge from "./components/StatusBadge";
@@ -5177,6 +5178,17 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
 }
 
 export default function App() {
+  const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
+
+  // Dedicated Standalone Route for /book
+  if (currentPath === "/book") {
+    return (
+      <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
+        <BookingWidget onBookingSubmit={() => alert("🎉 Booking submitted successfully!")} />
+      </div>
+    );
+  }
+
   const [tab, setTab] = useState("dashboard");
   const isMobile                        = useMobileNav();
   const [jobs, setJobs] = useState(initJobs);
