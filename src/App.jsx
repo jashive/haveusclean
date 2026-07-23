@@ -8974,6 +8974,7 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   const [showSalesModal, setShowSalesModal] = useState(false);
   const [newP, setNewP] = useState({ name: "", phone: "", email: "", payRate: 22, availability: [] });
   const [newSalesRep, setNewSalesRep] = useState({ name: "", phone: "", email: "", commissionRate: 8, territory: "Ontario" });
+  const [copiedInviteByPartnerId, setCopiedInviteByPartnerId] = useState({});
 
   const isAdmin = accessRole === "admin";
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
@@ -8985,7 +8986,7 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
 
   const buildPartnerInvite = (partner) => {
     const pin = String(partner.pin || getDefaultPartnerPin(partner));
-    return `${baseUrl}/?role=partner&tab=partner-view&partnerId=${encodeURIComponent(String(partner.id))}&pin=${encodeURIComponent(pin)}`;
+    return `https://haveusclean.vercel.app/?role=partner&tab=partner-view&partnerId=${encodeURIComponent(String(partner.id))}&pin=${encodeURIComponent(pin)}`;
   };
 
   const buildSalesInvite = (rep) => {
@@ -8994,7 +8995,52 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   };
 
   const copyText = async (value) => {
-    try { await navigator.clipboard?.writeText(value); } catch {}
+    const text = String(value || "");
+    if (!text) return false;
+
+    try {
+      if (navigator?.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch {}
+
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.setAttribute("readonly", "");
+      ta.style.position = "fixed";
+      ta.style.top = "-1000px";
+      ta.style.left = "-1000px";
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand("copy");
+      document.body.removeChild(ta);
+      return Boolean(ok);
+    } catch {
+      return false;
+    }
+  };
+
+  const persistPartnerPin = async (partner, newPin) => {
+    if (!partner?.id || !newPin) return;
+    const pid = encodeURIComponent(String(partner.id));
+    try {
+      await sbFetch(`huc_partners?id=eq.${pid}`, {
+        method: "PATCH",
+        body: JSON.stringify({
+          data: { ...partner, pin: newPin },
+          updated_at: new Date().toISOString(),
+        }),
+      });
+    } catch {}
+    try {
+      await sbFetch(`partners?id=eq.${pid}`, {
+        method: "PATCH",
+        body: JSON.stringify({ pin: newPin }),
+      });
+    } catch {}
   };
 
   const handleAdd = () => {
@@ -9106,17 +9152,39 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                   <div style={{ fontSize: 13, color: C.text, marginTop: 6 }}>PIN: <strong>{pin}</strong></div>
                   <div style={{ fontSize: 11, color: C.muted, marginTop: 4, wordBreak: "break-all" }}>{inviteLink}</div>
                   <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                    <button style={styles.btn("ghost")} onClick={() => copyText(inviteLink)}>Copy Invite Link</button>
+                    <button
+                      style={styles.btn("ghost")}
+                      onClick={async (e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        const ok = await copyText(inviteLink);
+                        if (ok) {
+                          setCopiedInviteByPartnerId((prev) => ({ ...prev, [p.id]: true }));
+                          window.setTimeout(() => {
+                            setCopiedInviteByPartnerId((prev) => ({ ...prev, [p.id]: false }));
+                          }, 2000);
+                        }
+                      }}
+                    >
+                      {copiedInviteByPartnerId[p.id] ? "Copied!" : "Copy Invite Link"}
+                    </button>
                     {isAdmin && (
                       <button
                         style={styles.btn("ghost")}
-                        onClick={() => {
-                          const takenPins = new Set([
-                            ...partners.filter(x => x.id !== p.id).map(x => String(x.pin || getDefaultPartnerPin(x))),
-                            ...salesReps.map(rep => String(rep.pin || "")),
-                          ]);
-                          const nextPin = generateUniquePin(takenPins);
-                          setPartners(prev => prev.map(item => item.id === p.id ? { ...item, pin: nextPin } : item));
+                        onClick={async (e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          const newPin = Math.floor(1000 + Math.random() * 9000).toString();
+                          let updatedPartner = null;
+                          setPartners((prev) => {
+                            const next = prev.map((item) => {
+                              if (item.id !== p.id) return item;
+                              updatedPartner = { ...item, pin: newPin };
+                              return updatedPartner;
+                            });
+                            return next;
+                          });
+                          await persistPartnerPin(updatedPartner || p, newPin);
                         }}
                       >Regenerate PIN</button>
                     )}
