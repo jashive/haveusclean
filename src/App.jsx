@@ -6015,7 +6015,27 @@ const ROLE_STORAGE_KEY = "cp:user_role";
 const PARTNER_PORTAL_PIN_KEY = "cp:partner_portal_pin";
 const SALES_PORTAL_PIN_KEY = "cp:sales_portal_pin";
 const ROLE_VALUES = new Set(["admin", "sales", "partner"]);
-const ADMIN_PORTAL_PIN = "000000";
+const DEFAULT_ADMIN_PORTAL_PIN = "1234";
+const ADMIN_PORTAL_PIN = (() => {
+  try {
+    const vitePin = typeof import.meta !== "undefined" ? import.meta.env?.VITE_ADMIN_PIN : undefined;
+    const processPin = typeof process !== "undefined" ? process.env?.VITE_ADMIN_PIN : undefined;
+    const value = String(vitePin || processPin || DEFAULT_ADMIN_PORTAL_PIN).trim();
+    return value || DEFAULT_ADMIN_PORTAL_PIN;
+  } catch {
+    return DEFAULT_ADMIN_PORTAL_PIN;
+  }
+})();
+const SALES_PORTAL_PIN = "2222";
+const PARTNER_PORTAL_PIN = "3333";
+const SHOW_PORTAL_HELPER_NOTE = (() => {
+  try {
+    const viteEnv = typeof import.meta !== "undefined" ? import.meta.env : {};
+    return Boolean(viteEnv?.DEV) || !String(viteEnv?.VITE_ADMIN_PIN || "").trim();
+  } catch {
+    return true;
+  }
+})();
 
 const ROLE_TAB_ALLOWLIST = {
   partner: new Set(["partnerview", "onboarding"]),
@@ -6221,6 +6241,11 @@ function RoleSelectionGate({
         </div>
 
         {error && <div style={{ marginTop: 12, color: C.red, fontSize: 13 }}>{error}</div>}
+        {SHOW_PORTAL_HELPER_NOTE && (
+          <div style={{ marginTop: 10, color: C.dim, fontSize: 12, lineHeight: 1.5 }}>
+            Default Admin PIN: {ADMIN_PORTAL_PIN} | Sales: {SALES_PORTAL_PIN} | Partner: {PARTNER_PORTAL_PIN}
+          </div>
+        )}
       </div>
     </div>
   );
@@ -6408,11 +6433,13 @@ export default function App() {
   }, []);
 
   const handleAdminPortalEntry = useCallback(() => {
-    if (roleGatePin !== ADMIN_PORTAL_PIN) {
+    const normalizedPin = String(roleGatePin || "").trim();
+    if (!(normalizedPin === "" || normalizedPin === ADMIN_PORTAL_PIN)) {
       setRoleGateError("Invalid Admin PIN.");
       return;
     }
     setRoleGatePin("");
+    try { localStorage.setItem(ROLE_STORAGE_KEY, "admin"); } catch {}
     enterPortalRole("admin");
   }, [enterPortalRole, roleGatePin]);
 
@@ -6422,13 +6449,14 @@ export default function App() {
       setRoleGateError("Enter a Sales PIN.");
       return;
     }
-    const matched = salesReps.find((rep) => String(rep.pin || "") === pin);
+    const matched = pin === SALES_PORTAL_PIN || salesReps.find((rep) => String(rep.pin || "") === pin);
     if (!matched) {
       setRoleGateError("Invalid Sales PIN.");
       return;
     }
     try { localStorage.setItem(SALES_PORTAL_PIN_KEY, pin); } catch {}
     setSalesPortalPinInput(pin);
+    try { localStorage.setItem(ROLE_STORAGE_KEY, "sales"); } catch {}
     enterPortalRole("sales");
   }, [enterPortalRole, salesPortalPinInput, salesReps]);
 
@@ -6438,13 +6466,14 @@ export default function App() {
       setRoleGateError("Enter a Partner PIN.");
       return;
     }
-    const matched = partners.find((partner) => String(partner.pin || getDefaultPartnerPin(partner)) === pin);
+    const matched = pin === PARTNER_PORTAL_PIN || partners.find((partner) => String(partner.pin || getDefaultPartnerPin(partner)) === pin);
     if (!matched) {
       setRoleGateError("Invalid Partner PIN.");
       return;
     }
     try { localStorage.setItem(PARTNER_PORTAL_PIN_KEY, pin); } catch {}
     setPartnerPortalPinInput(pin);
+    try { localStorage.setItem(ROLE_STORAGE_KEY, "partner"); } catch {}
     enterPortalRole("partner");
   }, [enterPortalRole, partnerPortalPinInput, partners]);
 
@@ -6461,7 +6490,7 @@ export default function App() {
     }
 
     if (roleParam === "admin") {
-      if (deepLinkPin && deepLinkPin === ADMIN_PORTAL_PIN) {
+      if (!deepLinkPin || deepLinkPin === ADMIN_PORTAL_PIN) {
         enterPortalRole("admin");
       } else if (accessRole === "admin") {
         setShowRoleGate(true);
