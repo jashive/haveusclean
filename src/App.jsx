@@ -4979,12 +4979,13 @@ function ClientView({ jobs, resLeads, region, setTab, invoices }) {
 
 // ─── PARTNER VIEW ─────────────────────────────────────────────────────────────
 // What partners see — their schedule, jobs to complete, check-in actions
-function PartnerView({ jobs, partners, region }) {
+function PartnerView({ jobs, partners, region, setJobs, onboardingProgress = {}, onExitRole, setTab, allowAdminMode = false }) {
   const [pinInput, setPinInput] = useState("");
   const [authedPartner, setAuthedPartner] = useState(null); // logged-in partner
   const [pinError, setPinError] = useState("");
   const [selectedPartner, setSelectedPartner] = useState(null); // admin selection
   const [isAdminMode, setIsAdminMode] = useState(false);
+  const [noteDrafts, setNoteDrafts] = useState({});
   const today = new Date().toISOString().split("T")[0];
   const cur = region?.currencySymbol || "$";
 
@@ -4992,7 +4993,7 @@ function PartnerView({ jobs, partners, region }) {
   const ADMIN_PIN = "000000";
 
   const handlePinSubmit = () => {
-    if (pinInput === ADMIN_PIN) {
+    if (allowAdminMode && pinInput === ADMIN_PIN) {
       setIsAdminMode(true);
       setAuthedPartner(null);
       setPinError("");
@@ -5011,6 +5012,48 @@ function PartnerView({ jobs, partners, region }) {
       setPinError("Incorrect PIN. Try the last 4 digits of your phone number.");
       setPinInput("");
     }
+  };
+
+  const updateJobFields = useCallback((jobId, patch) => {
+    if (typeof setJobs !== "function") return;
+    setJobs(prev => prev.map(j => String(j.id) === String(jobId) ? { ...j, ...patch } : j));
+  }, [setJobs]);
+
+  const readAsDataUrl = (file) => new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (ev) => resolve(ev.target?.result || "");
+    reader.onerror = () => reject(new Error("Failed to read photo."));
+    reader.readAsDataURL(file);
+  });
+
+  const uploadPartnerPhoto = async (job, kind, fileList) => {
+    const file = Array.from(fileList || [])[0];
+    if (!file || !job) return;
+    try {
+      const dataUrl = await readAsDataUrl(file);
+      if (!dataUrl) return;
+      if (kind === "before") {
+        updateJobFields(job.id, {
+          beforePics: [...(job.beforePics || []), dataUrl],
+          before_photo_url: dataUrl,
+        });
+      } else {
+        updateJobFields(job.id, {
+          afterPics: [...(job.afterPics || []), dataUrl],
+          after_photo_url: dataUrl,
+        });
+      }
+    } catch {
+      alert("Photo upload failed. Please try again.");
+    }
+  };
+
+  const commitJobNotes = (job) => {
+    if (!job) return;
+    const draft = Object.prototype.hasOwnProperty.call(noteDrafts, job.id)
+      ? noteDrafts[job.id]
+      : (job.jobNotes ?? job.summary ?? "");
+    updateJobFields(job.id, { jobNotes: draft, summary: draft });
   };
 
   // Not logged in — show PIN screen
@@ -5040,8 +5083,8 @@ function PartnerView({ jobs, partners, region }) {
             Sign In →
           </button>
           <div style={{ marginTop:14, fontSize:12, color:C.dim, textAlign:"center", lineHeight:1.6 }}>
-            Default PIN: last 4 digits of your phone number<br/>
-            Admin PIN: 000000 (change in Partners tab)
+            Default PIN: last 4 digits of your phone number
+            {allowAdminMode && (<><br/>Admin PIN: 000000 (change in Partners tab)</>)}
           </div>
         </div>
       </div>
@@ -5049,7 +5092,7 @@ function PartnerView({ jobs, partners, region }) {
   }
 
   // ── ADMIN MODE: show all partners ──
-  if (isAdminMode && !selectedPartner) {
+  if (allowAdminMode && isAdminMode && !selectedPartner) {
     return (
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
@@ -5087,7 +5130,7 @@ function PartnerView({ jobs, partners, region }) {
   }
 
   // ── PARTNER or ADMIN viewing a specific partner ──
-  const viewingId = isAdminMode ? selectedPartner : authedPartner?.id;
+  const viewingId = (allowAdminMode && isAdminMode) ? selectedPartner : authedPartner?.id;
   const partner = partners.find(p => p.id === viewingId);
   if (!partner) return null;
 
@@ -5097,13 +5140,159 @@ function PartnerView({ jobs, partners, region }) {
   const completedJobs = myJobs.filter(j => j.status === "completed");
   const totalEarned = completedJobs.reduce((a,b) => a + (b.partnerPay||0), 0);
   const pendingPay = myJobs.filter(j => ["scheduled","in-progress"].includes(j.status)).reduce((a,b) => a + (b.partnerPay||0), 0);
+  const completedModules = Array.isArray(onboardingProgress[String(partner.id)]) ? onboardingProgress[String(partner.id)] : [];
+  const onboardingPercent = TRAINING_MODULES.length > 0
+    ? Math.min(100, Math.round((completedModules.length / TRAINING_MODULES.length) * 100))
+    : 0;
+
+  const renderPartnerJobCard = (job, showInteractiveActions = true) => {
+    const statusColor = job.status==="in-progress" ? C.gold : job.status==="completed" ? C.accent : C.blue;
+    const checklist = {
+      "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
+      "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
+      "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
+      "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
+      "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
+    }[job.type] || ["Full clean as per package"];
+    const noteValue = Object.prototype.hasOwnProperty.call(noteDrafts, job.id)
+      ? noteDrafts[job.id]
+      : (job.jobNotes ?? job.summary ?? "");
+
+    return (
+      <div key={job.id} style={{ paddingBottom:18, marginBottom:18, borderBottom:`1px solid ${C.border}` }}>
+
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
+          <div>
+            <div style={{ fontWeight:800, fontSize:17 }}>{job.client}</div>
+            <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
+            <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h estimated</div>
+            {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
+            {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
+          </div>
+          <div style={{ textAlign:"right" }}>
+            <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
+            <div style={{ fontWeight:800, fontSize:20, color:C.blue, marginTop:6 }}>{cur}{job.partnerPayEach || job.partnerPay || 0}</div>
+            <div style={{ fontSize:11, color:C.dim }}>your pay{job.teamSize > 1 ? ` (1 of ${job.teamSize})` : ""}</div>
+          </div>
+        </div>
+
+        <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
+          🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
+        </div>
+
+        <div style={{ marginBottom:12 }}>
+          <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
+          {checklist.map((task, i) => (
+            <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center" }}>
+              <span style={{ color:C.muted }}>☐</span><span>{task}</span>
+            </div>
+          ))}
+          {job.upsells?.length > 0 && (job.upsells||[]).map((addon, i) => (
+            <div key={`addon-${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center", border:`1px solid #FFB80033` }}>
+              <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
+            </div>
+          ))}
+        </div>
+
+        <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
+          <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
+            target="_blank" rel="noopener noreferrer"
+            style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none" }}>
+            🗺 Directions
+          </a>
+
+          {showInteractiveActions && job.status === "scheduled" && (
+            <button
+              style={S.btn("sm")}
+              onClick={() => updateJobFields(job.id, { status: "in-progress" })}
+            >
+              ▶ Start Job
+            </button>
+          )}
+
+          {showInteractiveActions && job.status === "in-progress" && (
+            <button
+              style={{ ...S.btn("sm"), background: C.gold, color: "#0A0F1E" }}
+              onClick={() => updateJobFields(job.id, { status: "completed" })}
+            >
+              ✅ Complete Job
+            </button>
+          )}
+
+          <label style={{ ...S.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+            📷 Before Photo
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display:"none" }}
+              onChange={e => uploadPartnerPhoto(job, "before", e.target.files)}
+            />
+          </label>
+
+          <label style={{ ...S.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
+            ✨ After Photo
+            <input
+              type="file"
+              accept="image/*"
+              capture="environment"
+              style={{ display:"none" }}
+              onChange={e => uploadPartnerPhoto(job, "after", e.target.files)}
+            />
+          </label>
+        </div>
+
+        {((job.beforePics||[]).filter(p=>p?.startsWith("data:")).length > 0 ||
+          (job.afterPics||[]).filter(p=>p?.startsWith("data:")).length > 0) && (
+          <div style={{ marginBottom:10 }}>
+            <div style={{ fontSize:11, color:C.muted, marginBottom:6, fontWeight:700 }}>UPLOADED PHOTOS</div>
+            <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
+              {(job.beforePics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
+                <div key={`b${i}`} style={{ position:"relative" }}>
+                  <img src={p} alt="before" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.border}` }} />
+                  <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:"#aaa" }}>BEFORE</div>
+                </div>
+              ))}
+              {(job.afterPics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
+                <div key={`a${i}`} style={{ position:"relative" }}>
+                  <img src={p} alt="after" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.accent}` }} />
+                  <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:C.accent }}>AFTER</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        <form onSubmit={(e) => { e.preventDefault(); commitJobNotes(job); }}>
+          <div style={{ fontSize:11, color:C.muted, fontWeight:700, marginBottom:4 }}>JOB NOTES</div>
+          <textarea
+            style={{ ...S.input, minHeight:60, fontSize:13, resize:"vertical" }}
+            placeholder="End-of-job summary, client feedback, any issues..."
+            value={noteValue}
+            onChange={e => {
+              const value = e.target.value;
+              setNoteDrafts(prev => ({ ...prev, [job.id]: value }));
+            }}
+            onBlur={() => commitJobNotes(job)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                commitJobNotes(job);
+              }
+            }}
+          />
+        </form>
+
+      </div>
+    );
+  };
 
     return (
       <div>
         <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:18 }}>
           {isAdminMode
             ? <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => setSelectedPartner(null)}>← All Partners</button>
-            : <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setAuthedPartner(null); setPinInput(""); }}>🔒 Sign Out</button>
+            : <button style={{ ...S.btn("ghost"), fontSize:13 }} onClick={() => { setAuthedPartner(null); setPinInput(""); onExitRole?.(); }}>🔒 Sign Out</button>
           }
           {isAdminMode && <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={() => { setIsAdminMode(false); setSelectedPartner(null); setPinInput(""); }}>🔒 Exit Admin</button>}
         </div>
@@ -5136,6 +5325,11 @@ function PartnerView({ jobs, partners, region }) {
               <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>JOBS DONE</div>
               <div style={{ fontSize:24, fontWeight:800, color:C.accent }}>{completedJobs.length}</div>
             </div>
+            <div style={{ background:C.surface, borderRadius:10, padding:"10px 14px", textAlign:"center" }}>
+              <div style={{ fontSize:11, color:C.muted, fontWeight:700 }}>ONBOARDING</div>
+              <div style={{ fontSize:24, fontWeight:800, color:C.gold }}>{onboardingPercent}%</div>
+              <div style={{ fontSize:11, color:C.dim, marginTop:6 }}>{completedModules.length}/{TRAINING_MODULES.length} modules complete</div>
+            </div>
           </div>
         </div>
 
@@ -5143,122 +5337,7 @@ function PartnerView({ jobs, partners, region }) {
         {todayJobs.length > 0 && (
           <div style={{ ...S.card, marginBottom:18, borderLeft:`4px solid ${C.gold}` }}>
             <div style={{ fontWeight:800, fontSize:16, color:C.gold, marginBottom:14 }}>📅 Today's Jobs</div>
-            {todayJobs.map(job => {
-              const statusColor = job.status==="in-progress" ? C.gold : job.status==="completed" ? C.accent : C.blue;
-              const checklist = {
-                "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
-                "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
-                "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
-                "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
-                "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
-              }[job.type] || ["Full clean as per package"];
-
-              return (
-                <div key={job.id} style={{ paddingBottom:18, marginBottom:18, borderBottom:`1px solid ${C.border}` }}>
-
-                  {/* Job header */}
-                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", flexWrap:"wrap", gap:8, marginBottom:12 }}>
-                    <div>
-                      <div style={{ fontWeight:800, fontSize:17 }}>{job.client}</div>
-                      <div style={{ fontSize:13, color:C.muted, marginTop:2 }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>⏰ {job.time} · {job.type} · {job.hours}h estimated</div>
-                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
-                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
-                      <div style={{ fontWeight:800, fontSize:20, color:C.blue, marginTop:6 }}>{cur}{job.partnerPayEach || job.partnerPay || 0}</div>
-                      <div style={{ fontSize:11, color:C.dim }}>your pay{job.teamSize > 1 ? ` (1 of ${job.teamSize})` : ""}</div>
-                    </div>
-                  </div>
-
-                  {/* RAG reminder */}
-                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
-                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
-                  </div>
-
-                  {/* Checklist */}
-                  <div style={{ marginBottom:12 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
-                    {checklist.map((task, i) => (
-                      <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center" }}>
-                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
-                      </div>
-                    ))}
-                    {job.upsells?.length > 0 && (job.upsells||[]).map((addon, i) => (
-                      <div key={`addon-${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, alignItems:"center", border:`1px solid #FFB80033` }}>
-                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Action buttons */}
-                  <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
-                    <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
-                      target="_blank" rel="noopener noreferrer"
-                      style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none" }}>
-                      🗺 Directions
-                    </a>
-                    <label style={{ ...S.btn("ghost"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
-                      📷 Before Photo
-                      <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
-                        onChange={e => {
-                          const file = e.target.files[0]; if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = ev => setJobs(prev => prev.map(j => j.id === job.id
-                            ? { ...j, beforePics:[...(j.beforePics||[]), ev.target.result] } : j));
-                          reader.readAsDataURL(file);
-                        }} />
-                    </label>
-                    <label style={{ ...S.btn("primary"), fontSize:12, cursor:"pointer", display:"inline-flex", alignItems:"center", gap:4 }}>
-                      ✨ After Photo
-                      <input type="file" accept="image/*" capture="environment" style={{ display:"none" }}
-                        onChange={e => {
-                          const file = e.target.files[0]; if (!file) return;
-                          const reader = new FileReader();
-                          reader.onload = ev => setJobs(prev => prev.map(j => j.id === job.id
-                            ? { ...j, afterPics:[...(j.afterPics||[]), ev.target.result] } : j));
-                          reader.readAsDataURL(file);
-                        }} />
-                    </label>
-                  </div>
-
-                  {/* Uploaded photos */}
-                  {((job.beforePics||[]).filter(p=>p?.startsWith("data:")).length > 0 ||
-                    (job.afterPics||[]).filter(p=>p?.startsWith("data:")).length > 0) && (
-                    <div style={{ marginBottom:10 }}>
-                      <div style={{ fontSize:11, color:C.muted, marginBottom:6, fontWeight:700 }}>UPLOADED PHOTOS</div>
-                      <div style={{ display:"flex", gap:6, flexWrap:"wrap" }}>
-                        {(job.beforePics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
-                          <div key={`b${i}`} style={{ position:"relative" }}>
-                            <img src={p} alt="before" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.border}` }} />
-                            <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:"#aaa" }}>BEFORE</div>
-                          </div>
-                        ))}
-                        {(job.afterPics||[]).filter(p=>p?.startsWith("data:")).map((p,i) => (
-                          <div key={`a${i}`} style={{ position:"relative" }}>
-                            <img src={p} alt="after" style={{ width:64, height:64, borderRadius:8, objectFit:"cover", border:`2px solid ${C.accent}` }} />
-                            <div style={{ position:"absolute", bottom:2, left:2, background:"rgba(0,0,0,0.7)", borderRadius:4, fontSize:9, padding:"1px 4px", color:C.accent }}>AFTER</div>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Job notes */}
-                  <div>
-                    <div style={{ fontSize:11, color:C.muted, fontWeight:700, marginBottom:4 }}>JOB NOTES</div>
-                    <textarea
-                      style={{ ...S.input, minHeight:60, fontSize:13, resize:"vertical" }}
-                      placeholder="End-of-job summary, client feedback, any issues..."
-                      value={job.summary || ""}
-                      onChange={e => setJobs(prev => prev.map(j => j.id === job.id ? { ...j, summary: e.target.value } : j))}
-                    />
-                  </div>
-
-                </div>
-              );
-            })}
+            {todayJobs.map(job => renderPartnerJobCard(job, true))}
           </div>
         )}
         {todayJobs.length === 0 && (
@@ -5273,62 +5352,7 @@ function PartnerView({ jobs, partners, region }) {
         {upcomingJobs.filter(j => j.date !== today).length > 0 && (
           <div style={S.card}>
             <div style={{ fontWeight:800, fontSize:16, marginBottom:14 }}>📆 Upcoming Jobs</div>
-            {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => {
-              const checklist = {
-                "Refresh Clean":["Kitchen: surfaces, sink, appliance exteriors","Bathroom: toilet, sink, mirror, floor","Living areas: dust and vacuum","Floors: vacuum then mop"],
-                "Full Home Clean":["Kitchen: deep counters, sink, stovetop, appliances","All bathrooms: full clean incl. shower/tub","All rooms: dust, wipe, vacuum","Floors throughout: vacuum then mop"],
-                "Deep Clean":["Kitchen: inside microwave, stovetop detail, cabinets exterior","All bathrooms: grout scrub, fixtures polish","Baseboards throughout","All surfaces: detailed wipe-down","Floors: vacuum and mop"],
-                "Move-In / Move-Out":["Full empty-unit clean","Inside all cabinets and drawers","Inside appliances","All surfaces, fixtures, floors","Check and clean inside closets"],
-                "Kitchen & Bathroom Refresh":["Kitchen: counters, sink, cabinet exteriors, appliance wipe-down","Bathroom: full clean incl. toilet, sink, shower/tub, mirror","Both room floors"],
-              }[job.type] || ["Full clean as per package"];
-
-              return (
-                <div key={job.id} style={{ paddingBottom:18, marginBottom:18, borderBottom:`1px solid ${C.border}` }}>
-                  {/* Job header */}
-                  <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:8, marginBottom:12 }}>
-                    <div>
-                      <div style={{ fontWeight:800, fontSize:16 }}>{job.client}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>📅 {job.date} at {job.time}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>📍 {job.address}</div>
-                      <div style={{ fontSize:13, color:C.muted }}>🧹 {job.type} · {job.hours}h</div>
-                      {job.upsells?.length > 0 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>★ Add-ons: {job.upsells.join(", ")}</div>}
-                      {job.notes && <div style={{ fontSize:12, color:"#FFA502", marginTop:4 }}>⚠️ {job.notes}</div>}
-                    </div>
-                    <div style={{ textAlign:"right" }}>
-                      <div style={{ fontWeight:800, fontSize:20, color:C.blue }}>{cur}{job.partnerPay||0}</div>
-                      <div style={{ fontSize:11, color:C.dim }}>your pay</div>
-                    </div>
-                  </div>
-
-                  {/* RAG */}
-                  <div style={{ background:C.surface, borderRadius:8, padding:"8px 12px", fontSize:12, fontWeight:700, marginBottom:10 }}>
-                    🎨 RAG: <span style={{ color:"#FF4757" }}>🔴 Toilets ONLY</span> · <span style={{ color:"#FFA502" }}>🟡 Sinks/Mirrors</span> · <span style={{ color:"#2ED573" }}>🟢 Kitchen</span> · <span style={{ color:"#1E90FF" }}>🔵 General/Glass</span>
-                  </div>
-
-                  {/* Checklist */}
-                  <div style={{ marginBottom:12 }}>
-                    <div style={{ fontSize:12, fontWeight:700, color:C.muted, marginBottom:6 }}>✅ CHECKLIST</div>
-                    {checklist.map((task, i) => (
-                      <div key={i} style={{ fontSize:13, padding:"6px 10px", background:C.surface, borderRadius:6, marginBottom:4, display:"flex", gap:8 }}>
-                        <span style={{ color:C.muted }}>☐</span><span>{task}</span>
-                      </div>
-                    ))}
-                    {job.upsells?.map((addon,i) => (
-                      <div key={`u${i}`} style={{ fontSize:13, padding:"6px 10px", background:"#FFB80011", borderRadius:6, marginBottom:4, display:"flex", gap:8, border:`1px solid #FFB80033` }}>
-                        <span style={{ color:C.gold }}>★</span><span style={{ color:C.gold }}>{addon} (add-on)</span>
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* Directions */}
-                  <a href={`https://maps.google.com/?q=${encodeURIComponent(job.address)}`}
-                    target="_blank" rel="noopener noreferrer"
-                    style={{ ...S.btn("ghost"), fontSize:12, textDecoration:"none", display:"inline-block" }}>
-                    🗺 Get Directions
-                  </a>
-                </div>
-              );
-            })}
+            {upcomingJobs.filter(j => j.date !== today).slice(0,5).map(job => renderPartnerJobCard(job, false))}
           </div>
         )}
       </div>
@@ -5574,9 +5598,83 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
   );
 }
 
+const ROLE_TAB_ALLOWLIST = {
+  partner: new Set(["partnerview"]),
+  sales: new Set(["salesview", "cold", "res", "com", "jobs", "partners", "ai"]),
+};
+
+function canAccessTab(role, tabId) {
+  if (role === "admin") return true;
+  const allowlist = ROLE_TAB_ALLOWLIST[role];
+  return Boolean(allowlist && allowlist.has(tabId));
+}
+
+function filterNavGroupsByRole(navGroups, role) {
+  if (role === "admin") return navGroups;
+  const allowlist = ROLE_TAB_ALLOWLIST[role];
+  if (!allowlist) return [];
+  return navGroups
+    .map(group => ({ ...group, tabs: group.tabs.filter(tab => allowlist.has(tab.id)) }))
+    .filter(group => group.tabs.length > 0);
+}
+
+function SalesView({ activeRole, onEnterSales, onExitSales, setTab }) {
+  const isSales = activeRole === "sales";
+
+  if (!isSales) {
+    return (
+      <div style={{ maxWidth: 520, margin: "40px auto" }}>
+        <div style={S.card}>
+          <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 10 }}>📈 Sales View</div>
+          <div style={{ fontSize: 14, color: C.muted, marginBottom: 16 }}>
+            Enable Sales role to access cold outreach, quote creation, scheduling support, and partner assignment visibility.
+          </div>
+          <button style={{ ...S.btn("primary"), width: "100%" }} onClick={onEnterSales}>Enable Sales View</button>
+        </div>
+      </div>
+    );
+  }
+
+  const quickActions = [
+    { id: "cold", title: "Cold Outreach Pipeline", desc: "View, edit, and move leads to booked jobs.", icon: "🎯" },
+    { id: "res", title: "Quotes / Estimator", desc: "Create and send residential estimates.", icon: "💬" },
+    { id: "jobs", title: "Schedule / Operations", desc: "Book jobs into open slots and manage timing.", icon: "📋" },
+    { id: "partners", title: "Team List", desc: "View assigned partners and availability.", icon: "👥" },
+  ];
+
+  return (
+    <div>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+        <div style={S.h2}>📈 Sales Workspace</div>
+        <button style={S.btn("ghost")} onClick={onExitSales}>Exit Sales View</button>
+      </div>
+      <div style={{ ...S.card, marginBottom: 18, borderLeft: `4px solid ${C.gold}` }}>
+        <div style={{ fontSize: 14, fontWeight: 700, marginBottom: 6 }}>Role Access</div>
+        <div style={{ fontSize: 13, color: C.muted }}>
+          Revenue totals, profit margins, and business/system settings are hidden in Sales role.
+        </div>
+      </div>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(220px,1fr))", gap: 12 }}>
+        {quickActions.map(action => (
+          <button
+            key={action.id}
+            onClick={() => setTab(action.id)}
+            style={{ ...S.card, textAlign: "left", cursor: "pointer", border: `1px solid ${C.border}` }}
+          >
+            <div style={{ fontSize: 24, marginBottom: 8 }}>{action.icon}</div>
+            <div style={{ fontWeight: 800, fontSize: 15, marginBottom: 6 }}>{action.title}</div>
+            <div style={{ fontSize: 13, color: C.muted }}>{action.desc}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
   const [tab, setTab] = useState("dashboard");
+  const [accessRole, setAccessRole] = useState("admin");
   const isMobile                        = useMobileNav();
   const [showRegionBanner, setShowRegionBanner] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -5623,6 +5721,31 @@ export default function App() {
   const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [activityLog, setActivityLog] = useState([]);
   const saveTimer = useRef(null);
+
+  const setTabGuarded = useCallback((nextTab) => {
+    if (nextTab === "partnerview") {
+      setAccessRole("partner");
+      setTab("partnerview");
+      return;
+    }
+    if (nextTab === "salesview") {
+      setAccessRole("sales");
+      setTab("salesview");
+      return;
+    }
+    if (!canAccessTab(accessRole, nextTab)) {
+      if (accessRole === "partner") setTab("partnerview");
+      if (accessRole === "sales") setTab("salesview");
+      return;
+    }
+    setTab(nextTab);
+  }, [accessRole]);
+
+  useEffect(() => {
+    if (canAccessTab(accessRole, tab)) return;
+    if (accessRole === "partner") setTab("partnerview");
+    if (accessRole === "sales") setTab("salesview");
+  }, [accessRole, tab]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -6330,6 +6453,7 @@ export default function App() {
     { id:"team",     label:"👥 Team", color: C.gold, tabs:[
       { id:"partners",    label:"👥 Partners",       desc:"Partner profiles & availability" },
       { id:"partnerview", label:"📋 Partner View",   desc:"What your partners see" },
+      { id:"salesview",   label:"📈 Sales View",     desc:"Sales role access and workspace" },
       { id:"onboarding",  label:"🎓 Onboarding",     desc:"Training & certification" },
       { id:"ai",          label:"🗓️ AI Scheduling",  desc:"AI-powered schedule optimizer" },
     ]},
@@ -6344,8 +6468,8 @@ export default function App() {
     ]},
   ];
 
-  const activeGroup = NAV_GROUPS.find(g => g.tabs.some(t => t.id === tab)) || NAV_GROUPS[0];
-  const allTabs = NAV_GROUPS.flatMap(g => g.tabs);
+  const visibleNavGroups = filterNavGroupsByRole(NAV_GROUPS, accessRole);
+  const activeGroup = visibleNavGroups.find(g => g.tabs.some(t => t.id === tab)) || visibleNavGroups[0] || NAV_GROUPS[0];
 
   if (currentPath === "/book") {
     if (bookingConfirmation) {
@@ -6446,7 +6570,7 @@ export default function App() {
   if (currentPath === "/portal") {
     return (
       <div style={{ ...S.app, padding: 24 }}>
-        <ClientPortal jobs={regionJobs} resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTab} setJobs={setJobsDB} />
+        <ClientPortal jobs={regionJobs} resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTabGuarded} setJobs={setJobsDB} />
       </div>
     );
   }
@@ -6495,7 +6619,7 @@ export default function App() {
           {/* DB sync pill */}
           <div
             title={lastSaved ? `Last saved: ${lastSaved}` : dbStatus === "local" ? "Running in local mode — data in memory only" : "Click to manage data"}
-            onClick={() => setTab("db")}
+            onClick={() => setTabGuarded("db")}
             style={{ display:"flex", alignItems:"center", gap:5, padding:"4px 10px", borderRadius:20, background: dbStatus==="synced"?C.accentDim:dbStatus==="saving"?C.goldDim:dbStatus==="local"?C.blueDim:C.redDim, cursor:"pointer", border:`1px solid ${dbStatus==="synced"?C.accent+"44":dbStatus==="saving"?C.gold+"44":dbStatus==="local"?C.blue+"44":C.red+"44"}` }}
           >
             <div style={{ width:6, height:6, borderRadius:"50%", background: dbStatus==="synced"?C.accent:dbStatus==="saving"?C.gold:dbStatus==="local"?C.blue:C.red, animation: dbStatus==="saving"?"dbpulse 1s infinite":"none" }} />
@@ -6507,13 +6631,14 @@ export default function App() {
       </header>
 
       {/* ── NAV ROW 1: Category pills ── */}
+      {accessRole !== "partner" && (
       <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0 }}>
-        {NAV_GROUPS.map(g => {
+        {visibleNavGroups.map(g => {
           const isActive = g.id === activeGroup.id;
           return (
             <button
               key={g.id}
-              onClick={() => setTab(g.tabs[0].id)}
+              onClick={() => setTabGuarded(g.tabs[0].id)}
               style={{
                 padding: "10px 16px",
                 background: "none",
@@ -6533,15 +6658,17 @@ export default function App() {
           );
         })}
       </div>
+      )}
 
       {/* ── NAV ROW 2: Active group's tabs ── */}
+      {accessRole !== "partner" && (
       <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "6px 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0, alignItems:"center" }}>
         {activeGroup.tabs.map(t => {
           const isActive = tab === t.id;
           return (
             <button
               key={t.id}
-              onClick={() => setTab(t.id)}
+              onClick={() => setTabGuarded(t.id)}
               style={{
                 padding: "6px 14px",
                 background: isActive ? `${activeGroup.color}22` : "transparent",
@@ -6566,21 +6693,22 @@ export default function App() {
           {activeGroup.label} › {activeGroup.tabs.find(t=>t.id===tab)?.label || ""}
         </div>
       </div>
+      )}
 
       <style>{`@keyframes dbpulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
-      {isMobile && <MobileBottomNav activeTab={tab} onTabChange={setTab} />}
+      {isMobile && accessRole === "admin" && <MobileBottomNav activeTab={tab} onTabChange={setTabGuarded} />}
 
       <main style={{ ...S.main, paddingBottom: isMobile ? MOBILE_NAV_HEIGHT + 16 : undefined }}>
-        {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTab} />}
-        {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTab} />}
+        {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTabGuarded} />}
+        {tab==="ops_mgr"        && <OperationsManager jobs={regionJobs}    partners={regionPartners} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="jobs"           && <Jobs              jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="recurring"      && <RecurringJobs     jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
-        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTab} />}
+        {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTabGuarded} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
         {tab==="cold"           && <ColdOutreach      region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
-        {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTab} />}
+        {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
         {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
@@ -6591,12 +6719,13 @@ export default function App() {
         {tab==="pay"            && <Pay               partners={regionPartners} jobs={regionJobs} />}
         {tab==="stripe"         && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
         {tab==="qb"             && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
-        {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTab} setJobs={setJobsDB} />}
-        {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTab} invoices={invoices} />}
+        {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTabGuarded} setJobs={setJobsDB} />}
+        {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTabGuarded} invoices={invoices} />}
         {tab==="sms"            && <SMSReminders      jobs={regionJobs} />}
         {tab==="marketing"      && <MarketingHub      region={activeRegion} />}
         {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} />}
-        {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
+        {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} setJobs={setJobsDB} onboardingProgress={onboardingProgress} onExitRole={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
+        {tab==="salesview"      && <SalesView         activeRole={accessRole} onEnterSales={() => setAccessRole("sales")} onExitSales={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="tax"            && <TaxCompliance     region={activeRegion} />}
