@@ -8975,9 +8975,23 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   const [newP, setNewP] = useState({ name: "", phone: "", email: "", payRate: 22, availability: [] });
   const [newSalesRep, setNewSalesRep] = useState({ name: "", phone: "", email: "", commissionRate: 8, territory: "Ontario" });
   const [copiedInviteByPartnerId, setCopiedInviteByPartnerId] = useState({});
+  const [toast, setToast] = useState(null);
+  const toastTimerRef = useRef(null);
 
   const isAdmin = accessRole === "admin";
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
+
+  const showToast = useCallback((message, tone = "ok") => {
+    setToast({ message, tone });
+    if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2200);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (toastTimerRef.current) window.clearTimeout(toastTimerRef.current);
+    };
+  }, []);
 
   const partnerJobs = (id) => jobs.filter(j => j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id)));
   const pendingPay = (id) => jobs
@@ -9024,23 +9038,28 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   };
 
   const persistPartnerPin = async (partner, newPin) => {
-    if (!partner?.id || !newPin) return;
+    if (!partner?.id || !newPin) return false;
     const pid = encodeURIComponent(String(partner.id));
+    let persisted = false;
     try {
-      await sbFetch(`huc_partners?id=eq.${pid}`, {
+      const r = await sbFetch(`huc_partners?id=eq.${pid}`, {
         method: "PATCH",
         body: JSON.stringify({
           data: { ...partner, pin: newPin },
           updated_at: new Date().toISOString(),
         }),
       });
+      if (r?.ok) persisted = true;
     } catch {}
+    if (persisted) return true;
     try {
-      await sbFetch(`partners?id=eq.${pid}`, {
+      const r2 = await sbFetch(`partners?id=eq.${pid}`, {
         method: "PATCH",
         body: JSON.stringify({ pin: newPin }),
       });
+      if (r2?.ok) persisted = true;
     } catch {}
+    return persisted;
   };
 
   const handleAdd = () => {
@@ -9163,6 +9182,9 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                           window.setTimeout(() => {
                             setCopiedInviteByPartnerId((prev) => ({ ...prev, [p.id]: false }));
                           }, 2000);
+                          showToast("Invite link copied.", "ok");
+                        } else {
+                          showToast("Copy failed. Please copy manually.", "err");
                         }
                       }}
                     >
@@ -9184,7 +9206,9 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                             });
                             return next;
                           });
-                          await persistPartnerPin(updatedPartner || p, newPin);
+                          const ok = await persistPartnerPin(updatedPartner || p, newPin);
+                          if (ok) showToast("PIN regenerated and synced.", "ok");
+                          else showToast("PIN changed locally. Supabase sync failed.", "err");
                         }}
                       >Regenerate PIN</button>
                     )}
@@ -9240,7 +9264,16 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
                 </div>
                 <div style={{ fontSize: 11, color: C.muted, marginTop: 8, wordBreak: "break-all" }}>{inviteLink}</div>
                 <div style={{ display: "flex", gap: 8, marginTop: 8, flexWrap: "wrap" }}>
-                  <button style={styles.btn("ghost")} onClick={() => copyText(inviteLink)}>Copy Invite Link</button>
+                  <button
+                    style={styles.btn("ghost")}
+                    onClick={async (e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      const ok = await copyText(inviteLink);
+                      if (ok) showToast("Sales invite link copied.", "ok");
+                      else showToast("Copy failed. Please copy manually.", "err");
+                    }}
+                  >Copy Invite Link</button>
                   {isAdmin && (
                     <button
                       style={styles.btn("ghost")}
@@ -9305,6 +9338,27 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
             <button style={{ ...styles.btn("primary"), width: "100%" }} onClick={handleAddSalesRep} disabled={!newSalesRep.name || !newSalesRep.email}>Create Sales Profile</button>
           </div>
         </Modal>
+      )}
+
+      {toast && (
+        <div
+          style={{
+            position: "fixed",
+            right: 16,
+            bottom: 16,
+            zIndex: 9999,
+            background: toast.tone === "err" ? "#3a1a1d" : "#113627",
+            color: toast.tone === "err" ? "#ffb4bb" : "#b9f6d8",
+            border: `1px solid ${toast.tone === "err" ? "#ff475755" : "#00D4AA55"}`,
+            borderRadius: 10,
+            padding: "10px 14px",
+            fontSize: 13,
+            fontWeight: 700,
+            boxShadow: "0 8px 22px rgba(0,0,0,0.28)",
+          }}
+        >
+          {toast.message}
+        </div>
       )}
     </div>
   );
