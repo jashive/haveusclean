@@ -1830,16 +1830,34 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     priority_score:3, notes:""
   });
 
+  const loadCachedColdLeads = async () => {
+    try {
+      const raw = localStorage.getItem("cp:cold_leads");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          return parsed;
+        }
+      }
+    } catch {}
+
+    try {
+      const r = await sbFetch("huc_leads_cold?select=*");
+      if (!r || !r.ok) return [];
+      const rows = await r.json();
+      if (!Array.isArray(rows) || rows.length === 0) return [];
+      return rows
+        .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
+        .filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+
   const refreshFromSupabase = async () => {
     try {
       setRefreshingLeadSync(true);
-      const r = await sbFetch("huc_leads_cold?select=*");
-      if (!r || !r.ok) return false;
-      const rows = await r.json();
-      if (!Array.isArray(rows) || rows.length === 0) return false;
-      const incoming = rows
-        .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
-        .filter(Boolean);
+      const incoming = await loadCachedColdLeads();
       if (incoming.length === 0) return false;
       setLeads(prev => {
         const next = mergeLeadLists(prev, incoming);
@@ -1854,39 +1872,47 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
     }
   };
 
-  // Pull live leads from Google Sheet via Vercel proxy
+  // Pull live leads from Google Sheet via the server-side proxy and fall back to cached leads if needed
   const syncSheet = async () => {
     setLoadingSheet(true);
     setSyncError("");
     setSyncProgress({ loaded: 0, total: 0, stage: "Fetching leads..." });
+
     try {
-      const PAGE_SIZE = 2500;
-      let offset = 0;
-      const rawLeads = [];
-      let totalCount = 0;
-
-      while (true) {
-        const res = await fetch(`/api/sheet?start=${offset}&limit=${PAGE_SIZE}`);
-        const data = await res.json();
-        if (data.error) {
-          setSyncError(data.error + (data.help ? " — " + data.help : ""));
-          setLoadingSheet(false);
-          return;
-        }
-
-        const pageLeads = Array.isArray(data.leads) ? data.leads : [];
-        if (pageLeads.length > 0) rawLeads.push(...pageLeads);
-        totalCount = data.total_count || data.raw_count || data.count || totalCount;
-        setSyncProgress({ loaded: rawLeads.length, total: totalCount || rawLeads.length, stage: `Fetching leads... ${rawLeads.length.toLocaleString()} / ${Math.max(totalCount || rawLeads.length, rawLeads.length).toLocaleString()}` });
-
-        if (!pageLeads.length || pageLeads.length < PAGE_SIZE || !data.has_more) break;
-        offset += PAGE_SIZE;
+      const res = await fetch("/api/leads/sync?start=0&limit=5000");
+      let data = {};
+      try {
+        data = await res.json();
+      } catch {
+        data = {};
       }
 
+      const fallbackToCachedLeads = async (reason = "") => {
+        const cachedLeads = await loadCachedColdLeads();
+        if (cachedLeads.length > 0) {
+          const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
+          setColdLeads(mergedCached);
+          try { localStorage.setItem("cp:cold_leads", JSON.stringify(mergedCached)); } catch {}
+          setSyncError(reason || "The live sheet sync is unavailable right now. Showing your cached leads instead.");
+          setLastSynced(`Cached ${mergedCached.length} leads`);
+          setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
+          setSyncProgress({ loaded: mergedCached.length, total: mergedCached.length, stage: "Using cached leads" });
+          return true;
+        }
+        setSyncError(reason || "The live sheet sync is unavailable right now and no cached leads were found.");
+        setSyncStats({ fetched: 0, valid: 0, invalid: 0, skipped: 0, saved: 0 });
+        setSyncProgress({ loaded: 0, total: 0, stage: "No leads available" });
+        return false;
+      };
+
+      if (!res.ok || data?.error || data?.fallback === "missing_env") {
+        await fallbackToCachedLeads(data?.message || data?.error || "The live sheet sync is unavailable right now.");
+        return;
+      }
+
+      const rawLeads = Array.isArray(data.leads) ? data.leads : [];
       if (rawLeads.length === 0) {
-        setSyncError("Sheet returned 0 leads. Make sure your n8n has run and the sheet has data.");
-        setSyncStats({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
-        setLoadingSheet(false);
+        await fallbackToCachedLeads(data?.message || "The sheet returned no leads right now.");
         return;
       }
 
@@ -1894,6 +1920,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       const invalidLeads = [];
       let skipped = 0;
       const seenLeadIds = new Set();
+      const totalCount = data.total_count || data.raw_count || data.count || rawLeads.length;
 
       for (const lead of rawLeads) {
         const lid = String(lead?.lead_id || lead?.id || "").trim();
@@ -1937,9 +1964,7 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       }
 
       if (validLeads.length === 0) {
-        setSyncError(`Sheet returned ${rawLeads.length} rows but none passed validation${invalidLeads.length ? ` (${invalidLeads[0].reason})` : ""}.`);
-        setSyncStats({ fetched: rawLeads.length, valid: 0, invalid: invalidLeads.length, skipped, saved: 0 });
-        setLoadingSheet(false);
+        await fallbackToCachedLeads(`Sheet returned ${rawLeads.length} rows but none passed validation${invalidLeads.length ? ` (${invalidLeads[0].reason})` : ""}.`);
         return;
       }
 
@@ -2027,9 +2052,21 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + supabaseSkipped, saved: written });
       setSyncProgress({ loaded: rawLeads.length, total: totalCount || rawLeads.length, stage: "Sync complete" });
     } catch (err) {
-      setSyncError("Network error: " + err.message);
+      const cachedLeads = await loadCachedColdLeads();
+      if (cachedLeads.length > 0) {
+        const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
+        setColdLeads(mergedCached);
+        try { localStorage.setItem("cp:cold_leads", JSON.stringify(mergedCached)); } catch {}
+        setSyncError("The live sheet sync hit an unexpected error, so your cached leads are being shown instead.");
+        setLastSynced(`Cached ${mergedCached.length} leads`);
+        setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
+        setSyncProgress({ loaded: mergedCached.length, total: mergedCached.length, stage: "Using cached leads" });
+      } else {
+        setSyncError("The live sheet sync hit an unexpected error. No cached leads were available.");
+      }
+    } finally {
+      setLoadingSheet(false);
     }
-    setLoadingSheet(false);
   };
 
   const deleteLead = async (id) => {
