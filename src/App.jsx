@@ -5179,19 +5179,19 @@ function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
 
 export default function App() {
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
-
-  // Dedicated Standalone Route for /book
-  if (currentPath === "/book") {
-    return (
-      <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
-        <BookingWidget onBookingSubmit={() => alert("🎉 Booking submitted successfully!")} />
-      </div>
-    );
-  }
-
   const [tab, setTab] = useState("dashboard");
   const isMobile                        = useMobileNav();
-  const [jobs, setJobs] = useState(initJobs);
+  const [jobs, setJobs] = useState(() => {
+    if (typeof window === "undefined") return initJobs;
+    try {
+      const savedJobs = localStorage.getItem("cp:jobs");
+      if (savedJobs) {
+        const parsed = JSON.parse(savedJobs);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    } catch {}
+    return initJobs;
+  });
   const [partners, setPartners] = useState(initPartners);
   const [activeRegion, setActiveRegion] = useState(REGIONS["ON"]);
   const [resLeads, setResLeads] = useState([]);
@@ -5205,6 +5205,63 @@ export default function App() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   }); // tracks permanently deleted leads
+
+  // Dedicated Standalone Route for /book
+  if (currentPath === "/book") {
+    return (
+      <div className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center">
+        <div className="text-center mb-8">
+          <h1 className="text-3xl font-extrabold text-white">Book Your Cleaning Service</h1>
+          <p className="text-slate-400 text-sm mt-2">Instant estimates & secure booking in under 60 seconds.</p>
+        </div>
+        <BookingWidget onBookingSubmit={(bookingData) => {
+          const fullName = bookingData.fullName || bookingData.name || "New Client";
+          const totalPrice = Number(bookingData?.priceSummary?.finalTotal ?? bookingData?.totalPrice ?? 201.5);
+          const selectedAddons = bookingData?.selectedAddons || bookingData?.selectedAddOns || [];
+          const serviceType = bookingData?.serviceType || bookingData?.frequency || "Full Home Clean";
+          const bookingDate = bookingData?.selectedDate || bookingData?.date || new Date().toISOString().split("T")[0];
+          const bookingTime = bookingData?.selectedTimeSlot || bookingData?.timeSlot || "9:00 AM";
+
+          const newJob = {
+            id: Date.now(),
+            client: fullName,
+            email: bookingData.email,
+            phone: bookingData.phone,
+            address: bookingData.address || "Pending Address",
+            type: serviceType,
+            date: bookingDate,
+            time: bookingTime,
+            status: "scheduled",
+            clientPrice: totalPrice,
+            partnerPay: Math.round(totalPrice * 0.65),
+            profit: Math.round(totalPrice * 0.35),
+            upsells: selectedAddons,
+          };
+
+          setJobs((prevJobs) => {
+            const nextJobs = [newJob, ...prevJobs];
+
+            try {
+              localStorage.setItem("cp:jobs", JSON.stringify(nextJobs));
+            } catch {}
+
+            void (async () => {
+              try {
+                await sbFetch("jobs", {
+                  method: "POST",
+                  body: JSON.stringify(newJob),
+                });
+              } catch {}
+            })();
+
+            return nextJobs;
+          });
+
+          alert(`🎉 Thank you ${fullName}! Your booking is confirmed for $${totalPrice.toFixed(2)}.`);
+        }} />
+      </div>
+    );
+  }
 
   // Persist deletedLeadIds to localStorage whenever it changes
   useEffect(() => {
