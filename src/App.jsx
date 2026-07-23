@@ -5579,6 +5579,12 @@ export default function App() {
       return saved ? new Set(JSON.parse(saved)) : new Set();
     } catch { return new Set(); }
   }); // tracks permanently deleted leads
+  const [dbStatus, setDbStatus] = useState("loading");
+  const [lastSaved, setLastSaved] = useState(null);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isCloudConnected, setIsCloudConnected] = useState(false);
+  const [activityLog, setActivityLog] = useState([]);
+  const saveTimer = useRef(null);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -5623,12 +5629,6 @@ export default function App() {
   const [onboardingProgress, setOnboardingProgress] = useState({}); // { partnerId: [moduleIds] }
 
   // ── DB state ──
-  const [dbStatus, setDbStatus] = useState("loading");
-  const [lastSaved, setLastSaved] = useState(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isCloudConnected, setIsCloudConnected] = useState(false);
-  const [activityLog, setActivityLog] = useState([]);
-  const saveTimer = useRef(null);
 
   // ── Boot: load saved data, with 2s timeout so it never hangs ──
   useEffect(() => {
