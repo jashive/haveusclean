@@ -8,6 +8,7 @@ import StatusBadge from "./components/StatusBadge";
 import { getSmartViewCounts, getAllSmartViews } from "./features/views/smartViews";
 import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
+import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -1340,7 +1341,7 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 }
 
 // ─── WHITE LABEL / LICENSE SETTINGS ──────────────────────────────────────────
-function WhiteLabel() {
+function WhiteLabel({ isCloudConnected, dbStatus }) {
   const [config, setConfig] = useState({ ...BRAND, primaryColor:"#00D4AA", plan:"growth", licenseKey:"CP-XXXX-XXXX-XXXX-XXXX", seats:10 });
   const [saved, setSaved] = useState(false);
   const [showLicense, setShowLicense] = useState(false);
@@ -1448,9 +1449,9 @@ function WhiteLabel() {
         <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))", gap:12 }}>
           {[
             { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
-            { icon:"☁️", label:"Cloud Database", status:"Active (Supabase)", color:"#22c55e", note:"Firebase / Supabase" },
+            { icon:"☁️", label:"Cloud Database", status:getCloudStatusLabel(isCloudConnected, dbStatus), color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Supabase writes are active" : "Falling back to local storage" },
             { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
-            { icon:"🔄", label:"Real-Time Sync", status:"Active (Supabase)", color:"#22c55e", note:"Live updates across devices" },
+            { icon:"🔄", label:"Real-Time Sync", status:isCloudConnected ? "Active" : "Offline", color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Live updates across devices" : "Local-only sync" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>
               <div style={{ fontSize:28, marginBottom:6 }}>{item.icon}</div>
@@ -4110,6 +4111,7 @@ function TaxCompliance({ region }) {
 // Uses window.storage (artifact persistent key-value store).
 // Keys: cp:jobs, cp:partners, cp:leads_res, cp:leads_com, cp:region, cp:settings
 // All reads/writes are async; UI shows sync status in the header.
+const SUPABASE_CONFIG = getSupabaseConfig(typeof import.meta !== "undefined" ? import.meta.env : {});
 
 // ─── STORAGE LAYER ───────────────────────────────────────────────────────────
 // Works in 3 environments:
@@ -4130,13 +4132,13 @@ const DB_KEYS = {
 };
 
 // ─── SUPABASE CLIENT ──────────────────────────────────────────────────────────
-const SUPABASE_URL  = "https://opazwghrohmfykzxxsjk.supabase.co";
-const SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
+const SUPABASE_URL = SUPABASE_CONFIG.url;
+const SUPABASE_ANON = SUPABASE_CONFIG.anon;
 
 const sbH = {
-  "apikey":        SUPABASE_ANON,
-  "Authorization": `Bearer ${SUPABASE_ANON}`,
-  "Content-Type":  "application/json",
+  apikey: SUPABASE_ANON,
+  Authorization: `Bearer ${SUPABASE_ANON}`,
+  "Content-Type": "application/json",
 };
 
 // Safe string ID — converts any ID to a stable string
@@ -4238,9 +4240,10 @@ async function sbSet(key, value) {
   try {
     // Region setting
     if (key === "cp:region") {
-      await sbFetch(`${cfg.table}`, {
+      await sbFetch(`${cfg.table}?on_conflict=key`, {
         method: "POST",
         body: JSON.stringify({ key:"region", value }),
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
       });
       return true;
     }
@@ -4290,7 +4293,11 @@ async function sbSet(key, value) {
     // Batch in groups of 50 to avoid Supabase request size limits
     const BATCH = 50;
     for (let i = 0; i < rows.length; i += BATCH) {
-      await sbFetch(`${cfg.table}`, { method:"POST", body:JSON.stringify(rows.slice(i, i+BATCH)) });
+      await sbFetch(`${cfg.table}?on_conflict=${cfg.pk}`, {
+        method:"POST",
+        body:JSON.stringify(rows.slice(i, i+BATCH)),
+        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+      });
     }
     return true;
   } catch { return false; }
@@ -5455,14 +5462,7 @@ export default function App() {
                 localStorage.setItem("cp:jobs", JSON.stringify(nextJobs));
               } catch {}
 
-              void (async () => {
-                try {
-                  await sbFetch("jobs", {
-                    method: "POST",
-                    body: JSON.stringify(newJob),
-                  });
-                } catch {}
-              })();
+              void dbSet(DB_KEYS.jobs, nextJobs);
 
               return nextJobs;
             });
@@ -5489,6 +5489,7 @@ export default function App() {
   const [dbStatus, setDbStatus] = useState("loading");
   const [lastSaved, setLastSaved] = useState(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [isCloudConnected, setIsCloudConnected] = useState(false);
   const [activityLog, setActivityLog] = useState([]);
   const saveTimer = useRef(null);
 
@@ -5500,13 +5501,13 @@ export default function App() {
     const timeout = setTimeout(() => {
       if (!cancelled) {
         setIsLoading(false);
-        setDbStatus("supabase");
+        setDbStatus("local");
       }
     }, 2000);
 
     async function loadAll() {
       try {
-        const [savedJobs, savedPartners, savedRegion, log, savedResLeads, savedColdLeads, savedProgress] = await Promise.all([
+        const [savedJobs, savedPartners, savedRegion, log, savedResLeads, savedColdLeads, savedProgress, connected] = await Promise.all([
           dbGet(DB_KEYS.jobs),
           dbGet(DB_KEYS.partners),
           dbGet(DB_KEYS.region),
@@ -5514,9 +5515,18 @@ export default function App() {
           dbGet(DB_KEYS.leadsRes),
           dbGet(DB_KEYS.coldLeads),
           dbGet(DB_KEYS.onboardingProgress),
+          (async () => {
+            try {
+              const r = await sbFetch("huc_jobs?select=id&limit=1");
+              return Boolean(r && r.ok);
+            } catch {
+              return false;
+            }
+          })(),
         ]);
 
         if (cancelled) return;
+        setIsCloudConnected(Boolean(connected));
         if (savedJobs)      setJobs(savedJobs);
         if (savedPartners)  setPartners(savedPartners);
         if (savedRegion && REGIONS[savedRegion]) setActiveRegion(REGIONS[savedRegion]);
@@ -5587,9 +5597,12 @@ export default function App() {
           );
           setPartners(prev => prev.map(p => completedIds.has(String(p.id)) ? { ...p, onboarded: true, status: "available" } : p));
         }
-        setDbStatus("supabase");
+        setDbStatus(Boolean(connected) ? "synced" : "local");
       } catch {
-        if (!cancelled) setDbStatus("local");
+        if (!cancelled) {
+          setIsCloudConnected(false);
+          setDbStatus("local");
+        }
       } finally {
         clearTimeout(timeout);
         if (!cancelled) setIsLoading(false);
@@ -5607,16 +5620,20 @@ export default function App() {
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(async () => {
       const ok = await dbSet(DB_KEYS.jobs, jobs);
-      setDbStatus(ok ? "synced" : "error");
+      setDbStatus(ok ? (isCloudConnected ? "synced" : "local") : "error");
       if (ok) setLastSaved(new Date().toLocaleTimeString());
     }, 600);
-  }, [jobs, isLoading]);
+  }, [jobs, isLoading, isCloudConnected]);
 
   // ── Auto-save partners ──
   useEffect(() => {
     if (isLoading) return;
-    dbSet(DB_KEYS.partners, partners);
-  }, [partners, isLoading]);
+    const syncPartners = async () => {
+      const ok = await dbSet(DB_KEYS.partners, partners);
+      if (ok) setDbStatus(isCloudConnected ? "synced" : "local");
+    };
+    syncPartners();
+  }, [partners, isLoading, isCloudConnected]);
 
   // ── Auto-save resLeads — with write-time validator ──
   // Filters junk before every write so dirty data never enters Supabase
@@ -6016,7 +6033,9 @@ export default function App() {
       if (removed.length) logActivity("JOB_DELETED",  removed.map(j => j.client).join(", "));
       if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} → ${j.status}`).join(", "));
       // Write to Supabase immediately so changes persist across refreshes
-      dbSet(DB_KEYS.jobs, next).catch(() => {});
+      dbSet(DB_KEYS.jobs, next).then(() => {
+        setDbStatus(isCloudConnected ? "synced" : "local");
+      }).catch(() => {});
       return next;
     });
   }, []);
@@ -6026,9 +6045,12 @@ export default function App() {
       const next = typeof updater === "function" ? updater(prev) : updater;
       const added = next.filter(n => !prev.find(p => p.id === n.id));
       if (added.length) logActivity("PARTNER_ADDED", added.map(p => p.name).join(", "));
+      void dbSet(DB_KEYS.partners, next).then(() => {
+        setDbStatus(isCloudConnected ? "synced" : "local");
+      }).catch(() => {});
       return next;
     });
-  }, []);
+  }, [isCloudConnected]);
 
   // Refresh activity log from storage
   const refreshLog = useCallback(async () => {
@@ -6290,7 +6312,7 @@ export default function App() {
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="tax"            && <TaxCompliance     region={activeRegion} />}
         {tab==="db"             && <DataManager       onReset={handleReset} onExport={handleExport}   activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
-        {tab==="whitelabel"     && <WhiteLabel />}
+        {tab==="whitelabel"     && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
         {tab==="pricing"        && <PricingStrategy />}
         {tab==="swot"           && <SWOTAnalysis />}
         {tab==="schedule"       && <MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} />}
