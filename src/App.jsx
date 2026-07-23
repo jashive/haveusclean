@@ -1672,6 +1672,43 @@ const mergeLeadLists = (prevLeads, incomingLeads) => {
   return Array.from(merged.values()).sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
 };
 
+const COLD_SYNC_AT_KEY = "cp:last_synced_at:cold_leads";
+
+const normalizeLeadPhone = (value = "") => String(value || "").replace(/\D/g, "");
+
+const getLeadIdentityTokens = (lead = {}) => {
+  const tokens = [];
+  const leadId = String(lead.lead_id || lead.id || "").trim().toLowerCase();
+  const email = String(lead.email || lead.contact_email || "").trim().toLowerCase();
+  const phone = normalizeLeadPhone(lead.phone || lead.contact_phone || "");
+  const company = String(lead.company || "").trim().toLowerCase();
+  const city = String(lead.city || "").trim().toLowerCase();
+
+  if (leadId) tokens.push(`id:${leadId}`);
+  if (email) tokens.push(`email:${email}`);
+  if (phone.length >= 10) tokens.push(`phone:${phone}`);
+  if (email && phone.length >= 10) tokens.push(`email_phone:${email}|${phone}`);
+  if (!leadId && !email && phone.length < 10 && company && city) tokens.push(`company_city:${company}|${city}`);
+
+  return tokens;
+};
+
+const ensureUniqueLeadId = (baseId, usedIds) => {
+  const cleanBase = String(baseId || "").trim() || `LD-${Date.now()}`;
+  if (!usedIds.has(cleanBase)) {
+    usedIds.add(cleanBase);
+    return cleanBase;
+  }
+  let i = 2;
+  let candidate = `${cleanBase}-${i}`;
+  while (usedIds.has(candidate)) {
+    i += 1;
+    candidate = `${cleanBase}-${i}`;
+  }
+  usedIds.add(candidate);
+  return candidate;
+};
+
 const persistLeadToSupabase = async (lead) => {
   const lid = String(lead?.lead_id || lead?.id || "").trim();
   if (!lid) return null;
@@ -1820,6 +1857,9 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
   const [loadingSheet, setLoadingSheet] = useState(false);
   const [syncError, setSyncError]       = useState("");
   const [lastSynced, setLastSynced]     = useState(null);
+  const [lastSyncedAt, setLastSyncedAt] = useState(() => {
+    try { return localStorage.getItem(COLD_SYNC_AT_KEY) || null; } catch { return null; }
+  });
   const [syncStats, setSyncStats]       = useState({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
   const [syncProgress, setSyncProgress] = useState({ loaded:0, total:0, stage:"Idle" });
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
@@ -1870,6 +1910,31 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
       return false;
     } finally {
       setRefreshingLeadSync(false);
+    }
+  };
+
+  const loadCloudLeadIndex = async () => {
+    try {
+      const r = await sbFetch("huc_leads_cold?select=lead_id,data,updated_at");
+      if (!r || !r.ok) return { leads: [], tokens: new Set(), ids: new Set() };
+      const rows = await r.json();
+      if (!Array.isArray(rows) || rows.length === 0) return { leads: [], tokens: new Set(), ids: new Set() };
+
+      const leads = rows
+        .map(row => normalizeLeadRecord(row?.data || {}, { lead_id: row?.lead_id, updated_at: row?.updated_at }))
+        .filter(Boolean);
+
+      const tokens = new Set();
+      const ids = new Set();
+      leads.forEach((lead) => {
+        const lid = String(lead.lead_id || lead.id || "").trim();
+        if (lid) ids.add(lid);
+        getLeadIdentityTokens(lead).forEach(token => tokens.add(token));
+      });
+
+      return { leads, tokens, ids };
+    } catch {
+      return { leads: [], tokens: new Set(), ids: new Set() };
     }
   };
 
@@ -1969,89 +2034,87 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
         return;
       }
 
-      const prevLeads = coldLeads || [];
-      const prevMap = Object.fromEntries(prevLeads.map(l => [l.lead_id, l]));
-      const merged = validLeads.map(sheetLead => ({
-        ...sheetLead,
-        status:          prevMap[sheetLead.lead_id]?.status          || sheetLead.status || "New",
-        notes:           prevMap[sheetLead.lead_id]?.notes           || sheetLead.notes  || "",
-        cold_email:      prevMap[sheetLead.lead_id]?.cold_email      || sheetLead.cold_email || "",
-        follow_up_email: prevMap[sheetLead.lead_id]?.follow_up_email || sheetLead.follow_up_email || "",
-        linkedin_note:   prevMap[sheetLead.lead_id]?.linkedin_note   || sheetLead.linkedin_note || "",
-        call_opener:     prevMap[sheetLead.lead_id]?.call_opener     || sheetLead.call_opener || "",
-      }));
-      const sheetIds = new Set(validLeads.map(l => l.lead_id));
-      const manualLeads = prevLeads.filter(l => l.source === "manual" && !sheetIds.has(l.lead_id));
-      const combined = [...manualLeads, ...merged];
+      setSyncProgress({ loaded: validLeads.length, total: totalCount || validLeads.length, stage: "Checking existing leads..." });
 
-      const leadMap = new Map();
-      for (const lead of combined) {
-        const key = String(lead.lead_id || lead.id || "").trim();
-        if (!key) continue;
-        const existing = leadMap.get(key);
-        if (!existing) {
-          leadMap.set(key, lead);
-        } else {
-          const score = (l) => (l.cold_email||"").length + (l.notes||"").length + (l.status !== "New" ? 100 : 0);
-          if (score(lead) > score(existing)) leadMap.set(key, lead);
+      const prevLeads = coldLeads || [];
+      const cloudIndex = await loadCloudLeadIndex();
+      const existingTokens = new Set(cloudIndex.tokens);
+      const usedLeadIds = new Set(cloudIndex.ids);
+      prevLeads.forEach((lead) => {
+        const lid = String(lead?.lead_id || lead?.id || "").trim();
+        if (lid) usedLeadIds.add(lid);
+        getLeadIdentityTokens(lead).forEach(token => existingTokens.add(token));
+      });
+
+      const newLeads = [];
+      let existingSkipped = 0;
+      for (const sheetLead of validLeads) {
+        const tokens = getLeadIdentityTokens(sheetLead);
+        const exists = tokens.some(token => existingTokens.has(token));
+        if (exists) {
+          existingSkipped += 1;
+          continue;
         }
+        const nextLeadId = ensureUniqueLeadId(sheetLead.lead_id || sheetLead.id, usedLeadIds);
+        const nextLead = {
+          ...sheetLead,
+          lead_id: nextLeadId,
+          id: nextLeadId,
+          status: sheetLead.status || "New",
+          notes: sheetLead.notes || "",
+          source_lane: sheetLead.source_lane || "n8n",
+          updated_at: new Date().toISOString(),
+        };
+        newLeads.push(nextLead);
+        getLeadIdentityTokens(nextLead).forEach(token => existingTokens.add(token));
       }
-      const final = Array.from(leadMap.values());
+
+      const baseMerged = mergeLeadLists(prevLeads, cloudIndex.leads);
+      const final = mergeLeadLists(baseMerged, newLeads);
 
       setColdLeads(final);
       try { localStorage.setItem("cp:cold_leads", JSON.stringify(final)); } catch {}
-      setSyncProgress({ loaded: final.length, total: totalCount || final.length, stage: "Saving to pipeline..." });
-      const summary = `v5.39 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · final ${final.length}`;
-      setLastSynced(summary);
-      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped, saved: 0 });
+      setSyncProgress({ loaded: newLeads.length, total: validLeads.length, stage: "Saving new leads to cloud..." });
+      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + existingSkipped, saved: 0 });
 
       const BATCH = 100;
-      const PARALLEL = 2;
       let written = 0;
       let lastError = "";
-      const leadIdMap = new Map();
-      let supabaseSkipped = 0;
-      for (const lead of final) {
-        const lid = String(lead.lead_id || lead.id || "").trim();
-        if (!lid || /^LD-17\d{11}/.test(lid)) { supabaseSkipped++; continue; }
-        if (!leadIdMap.has(lid)) leadIdMap.set(lid, { lead, lid });
-      }
-      const uniqueFinal = Array.from(leadIdMap.values());
 
-      const batches = [];
-      for (let i = 0; i < uniqueFinal.length; i += BATCH) batches.push(uniqueFinal.slice(i, i + BATCH));
+      for (let i = 0; i < newLeads.length; i += BATCH) {
+        const batch = newLeads.slice(i, i + BATCH);
+        if (batch.length === 0) continue;
+        const rows = batch.map((lead) => ({
+          lead_id: String(lead.lead_id || lead.id || "").trim(),
+          data: lead,
+          updated_at: new Date().toISOString(),
+        }));
 
-      for (let i = 0; i < batches.length; i += PARALLEL) {
-        const chunk = batches.slice(i, i + PARALLEL);
-        setLastSynced(`v5.39 · writing ${i+1}-${Math.min(i+PARALLEL, batches.length)} of ${batches.length} · ${written} saved`);
-        const promises = chunk.map(batch => {
-          const rows = batch.map(({ lead, lid }) => ({ lead_id: lid, data: lead, updated_at: new Date().toISOString() }));
-          return sbFetch("huc_leads_cold?on_conflict=lead_id", {
-            method: "POST",
-            body: JSON.stringify(rows),
-            headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-          }).then(async r => {
-            if (r && r.ok) {
-              written += batch.length;
-            } else if (r) {
-              const txt = await r.text().catch(() => "no body");
-              lastError = `HTTP ${r.status}: ${txt.slice(0, 120)}`;
-            }
-            return r;
-          }).catch(e => { lastError = "exception: " + (e.message || e); return null; });
-        });
-        await Promise.all(promises);
-        if (i + PARALLEL < batches.length) await new Promise(res => setTimeout(res, 200));
+        const r = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
+          method: "POST",
+          body: JSON.stringify(rows),
+          headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+        }).catch(() => null);
+
+        if (r && r.ok) {
+          written += batch.length;
+        } else if (r) {
+          const txt = await r.text().catch(() => "no body");
+          lastError = `HTTP ${r.status}: ${txt.slice(0, 120)}`;
+        } else {
+          lastError = "no response";
+        }
       }
 
-      const finalMsg = written === uniqueFinal.length
-        ? `v5.39 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} ✅`
-        : written > 0
-        ? `v5.39 · partial: fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved ${written}/${uniqueFinal.length} · ${lastError}`
-        : `v5.39 · FAILED · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · skipped ${skipped} · saved 0/${uniqueFinal.length} · ${lastError || "no response"}`;
+      const nowIso = new Date().toISOString();
+      try { localStorage.setItem(COLD_SYNC_AT_KEY, nowIso); } catch {}
+      setLastSyncedAt(nowIso);
+
+      const finalMsg = `v5.40 · ${new Date().toLocaleTimeString()} · fetched ${rawLeads.length} · valid ${validLeads.length} · invalid ${invalidLeads.length} · existing ${existingSkipped} · new ${newLeads.length} · saved ${written}`;
       setLastSynced(finalMsg);
-      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + supabaseSkipped, saved: written });
+      setSyncStats({ fetched: rawLeads.length, valid: validLeads.length, invalid: invalidLeads.length, skipped: skipped + existingSkipped, saved: written });
       setSyncProgress({ loaded: rawLeads.length, total: totalCount || rawLeads.length, stage: "Sync complete" });
+      if (lastError) setSyncError(`Lead sync completed with warnings: ${lastError}`);
     } catch (err) {
       const cachedLeads = await loadCachedColdLeads();
       if (cachedLeads.length > 0) {
@@ -2643,7 +2706,8 @@ function ColdOutreach({ region, coldLeads, setColdLeads, page = 0, setPage = () 
                       {lead.company || "⚠️ No company name"}
                     </div>
                     <div style={{ fontSize:12, color:C.muted, marginTop:2 }}>
-                      {lead.city || "—"} · {lead.segment || "—"}
+                        🔄 Live Google Sheet Connection{lastSynced ? ` · Last synced ${lastSynced}` : " · Not yet synced"}
+                        {lastSyncedAt ? ` · last_synced_at ${new Date(lastSyncedAt).toLocaleString()}` : ""}
                     </div>
                     <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
                       <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status||"New"}</span>
