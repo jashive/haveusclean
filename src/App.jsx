@@ -1375,6 +1375,61 @@ function AIScheduling({ jobs, setJobs, partners }) {
   const [suggestions, setSuggestions] = useState([]);
   const [applied, setApplied] = useState([]);
 
+  const getDayShort = useCallback((value) => {
+    if (!value) return "";
+    const parsed = new Date(value);
+    if (!Number.isFinite(parsed.getTime())) return "";
+    return ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][parsed.getDay()] || "";
+  }, []);
+
+  const inferRegionFromAddress = useCallback((job) => {
+    const text = `${job?.address || ""} ${job?.city || ""}`.toLowerCase();
+    if (/\b(on|ontario|toronto|mississauga|brampton|vaughan|oakville|burlington|hamilton)\b/.test(text)) return "ON";
+    if (/\b(az|arizona|phoenix|scottsdale|mesa|tempe|chandler|glendale)\b/.test(text)) return "AZ";
+    return String(job?.region || "").toUpperCase() || "";
+  }, []);
+
+  const recommendPartnerForJob = useCallback((job) => {
+    const targetDay = getDayShort(job?.date);
+    const targetRegion = inferRegionFromAddress(job);
+    const onboarded = partners.filter((p) => p?.onboarded);
+    if (onboarded.length === 0) return null;
+
+    let best = null;
+    for (const partner of onboarded) {
+      const availability = Array.isArray(partner?.availability) ? partner.availability : [];
+      const isAvailable = targetDay ? availability.includes(targetDay) : false;
+      const workload = jobs.filter((j) => j.status === "scheduled" && (j.partnerId === partner.id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(partner.id)))).length;
+      const regionBoost = targetRegion && String(partner.region || "").toUpperCase() === targetRegion ? 14 : 0;
+      const statusBoost = partner.status === "active" ? 10 : partner.status === "available" ? 7 : 1;
+      const ratingBoost = toFiniteNumber(partner.rating, 0) * 9;
+      const availabilityBoost = isAvailable ? 40 : -30;
+      const workloadPenalty = workload * 8;
+      const score = clampPct(45 + availabilityBoost + regionBoost + statusBoost + ratingBoost - workloadPenalty);
+
+      const reason = [
+        isAvailable ? `${targetDay} availability match` : `limited ${targetDay || "date"} availability`,
+        regionBoost > 0 ? "local market match" : "cross-market dispatch",
+        `rating ${toFiniteNumber(partner.rating, 0).toFixed(1)}`,
+      ].join(" · ");
+
+      if (!best || score > best.score) {
+        best = { partner, score, reason, targetDay };
+      }
+    }
+    return best;
+  }, [getDayShort, inferRegionFromAddress, jobs, partners]);
+
+  const autoDispatchRows = useMemo(() => {
+    return jobs
+      .filter((job) => job.status === "scheduled")
+      .map((job) => ({
+        job,
+        recommendation: recommendPartnerForJob(job),
+      }))
+      .filter((row) => row.recommendation);
+  }, [jobs, recommendPartnerForJob]);
+
   const runAI = async () => {
     setLoading(true);
     setSuggestions([]);
@@ -1416,6 +1471,24 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
     setApplied(a=>[...a,s.jobId]);
   };
 
+  const assignRecommendedPartner = (job, recommendation) => {
+    if (!job || !recommendation?.partner) return;
+    setJobs((prev) => prev.map((row) => {
+      if (row.id !== job.id) return row;
+      const existingPartnerIds = Array.isArray(row.partnerIds) ? row.partnerIds.filter(Boolean) : [];
+      const nextPartnerIds = existingPartnerIds.length > 0
+        ? Array.from(new Set([recommendation.partner.id, ...existingPartnerIds.filter(id => id !== recommendation.partner.id)]))
+        : [recommendation.partner.id];
+      return {
+        ...row,
+        partnerId: recommendation.partner.id,
+        partnerIds: nextPartnerIds,
+        aiRecommendedPartnerId: recommendation.partner.id,
+        aiDispatchScore: recommendation.score,
+      };
+    }));
+  };
+
   return (
     <div>
       <div style={S.h2}>🤖 AI Scheduling Assistant</div>
@@ -1440,6 +1513,44 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
             <div style={{ height:4, background:`linear-gradient(90deg,${C.accent},#0088FF)`, borderRadius:2, animation:"progress 1.5s ease-in-out infinite", width:"60%" }} />
           </div>
           <style>{`@keyframes progress{0%{width:10%}50%{width:80%}100%{width:10%}}`}</style>
+        </div>
+      )}
+
+      {!loading && autoDispatchRows.length > 0 && (
+        <div style={{ marginBottom: 20 }}>
+          <div style={S.h3}>🧠 Auto-Dispatch Recommendations</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {autoDispatchRows.map(({ job, recommendation }) => {
+              const currentPartner = partners.find((p) => p.id === job.partnerId);
+              const recommendedName = recommendation?.partner?.name || "Unassigned";
+              const isMatch = currentPartner?.id === recommendation?.partner?.id;
+              return (
+                <div key={job.id} style={{ ...S.cardSm, border: `1px solid ${C.border}`, borderLeft: `4px solid ${isMatch ? C.accent : C.gold}` }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: 14 }}>{job.client}</div>
+                      <div style={{ fontSize: 12, color: C.muted }}>{job.date} {job.time ? `· ${job.time}` : ""} · {job.address || "Address pending"}</div>
+                      <div style={{ fontSize: 12, color: C.muted, marginTop: 4 }}>
+                        Current: <strong style={{ color: C.text }}>{currentPartner?.name || "None"}</strong>
+                      </div>
+                      <div style={{ fontSize: 12, marginTop: 4, color: C.gold }}>
+                        AI Recommended Partner: <strong>{recommendedName}</strong>
+                      </div>
+                      <div style={{ fontSize: 11, color: C.dim, marginTop: 2 }}>{recommendation.reason}</div>
+                    </div>
+                    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 8 }}>
+                      <span style={{ ...S.badge(isMatch ? "green" : "gold") }}>AI Score {recommendation.score}%</span>
+                      {!isMatch ? (
+                        <button style={S.btn("sm")} onClick={() => assignRecommendedPartner(job, recommendation)}>Assign Recommended</button>
+                      ) : (
+                        <span style={{ fontSize: 12, color: C.accent, fontWeight: 700 }}>✅ Assigned</span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 
@@ -1700,6 +1811,53 @@ const JOB_ROW_HEIGHT = 256;
 
 const normalizeLeadPhone = (value = "") => String(value || "").replace(/\D/g, "");
 
+const clampPct = (value) => Math.max(0, Math.min(100, Math.round(toFiniteNumber(value, 0))));
+
+function getColdLeadAiScore(lead = {}) {
+  const completenessFields = [
+    "company",
+    "city",
+    "segment",
+    "buyer_title",
+    "pain_point",
+    "first_offer",
+    "cold_email",
+    "follow_up_email",
+  ];
+  const completeCount = completenessFields.filter((field) => String(lead?.[field] || "").trim().length > 0).length;
+  const completenessPct = safeDivide(completeCount, completenessFields.length, 0);
+  const completenessScore = completenessPct * 70;
+
+  const statusWeights = {
+    New: 6,
+    Contacted: 14,
+    "Follow Up": 18,
+    "Meeting Booked": 26,
+    Won: 30,
+    Lost: 3,
+  };
+  const statusScore = toFiniteNumber(statusWeights[lead?.status] ?? 8, 8);
+  const outreachSignal = ["cold_email", "follow_up_email", "linkedin_note", "call_opener"]
+    .filter((field) => String(lead?.[field] || "").trim().length > 0).length;
+  const outreachScore = Math.min(8, outreachSignal * 2);
+  const notesScore = String(lead?.notes || "").trim().length > 24 ? 6 : 0;
+
+  let recencyScore = 0;
+  if (lead?.last_contacted_at) {
+    const days = Math.floor((Date.now() - new Date(lead.last_contacted_at).getTime()) / 86400000);
+    if (Number.isFinite(days)) {
+      if (days <= 3) recencyScore = 6;
+      else if (days <= 10) recencyScore = 4;
+      else recencyScore = 2;
+    }
+  }
+
+  const score = clampPct(completenessScore + statusScore + outreachScore + notesScore + recencyScore);
+  if (score >= 80) return { score, label: "Hot", emoji: "🔥", color: C.red };
+  if (score >= 60) return { score, label: "Warm", emoji: "🌤", color: C.gold };
+  return { score, label: "Cool", emoji: "🧊", color: C.blue };
+}
+
 const getLeadIdentityTokens = (lead = {}) => {
   const tokens = [];
   const leadId = String(lead.lead_id || lead.id || "").trim().toLowerCase();
@@ -1886,6 +2044,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
   });
   const [syncStats, setSyncStats]       = useState({ fetched:0, valid:0, invalid:0, skipped:0, saved:0 });
   const [syncProgress, setSyncProgress] = useState({ loaded:0, total:0, stage:"Idle" });
+  const [sortByAiPriority, setSortByAiPriority] = useState(false);
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
   const persistQueueRef = useRef(new Map());
   const persistQueueTimerRef = useRef(null);
@@ -2276,7 +2435,11 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     return results;
   }, [normalizedLeads]);
 
-  const filtered = useMemo(() => filterLeadRows(filterStatus, filterMkt, filterSeg), [filterLeadRows, filterStatus, filterMkt, filterSeg]);
+  const filtered = useMemo(() => {
+    const base = filterLeadRows(filterStatus, filterMkt, filterSeg);
+    if (!sortByAiPriority) return base;
+    return [...base].sort((a, b) => getColdLeadAiScore(b).score - getColdLeadAiScore(a).score);
+  }, [filterLeadRows, filterStatus, filterMkt, filterSeg, sortByAiPriority]);
   const statusCounts = useMemo(() => {
     const counts = new Map();
     counts.set("All", filterLeadRows("All", filterMkt, filterSeg).length);
@@ -2326,7 +2489,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
   // Stats based on the active filtered lead array
   const total     = leads.length;
-  const hot       = filtered.filter(l => l.priority_score >= 4).length;
+  const hot       = filtered.filter(l => getColdLeadAiScore(l).score >= 80).length;
   const booked    = filtered.filter(l => l.status === "Meeting Booked").length;
   const won       = filtered.filter(l => l.status === "Won").length;
   const contacted = filtered.filter(l => l.status !== "New").length;
@@ -2460,6 +2623,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     const hasOutreach = viewLead.cold_email || upgradedContent;
     const outreach = upgradedContent || viewLead;
     const statusColor = COLD_STATUS_COLOR[viewLead.status] || C.muted;
+    const aiScore = getColdLeadAiScore(viewLead);
 
     return (
       <div>
@@ -2498,6 +2662,9 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
             </div>
             <div style={{ display:"flex", flexDirection:"column", gap:8, alignItems:"flex-end" }}>
               <PriorityBadge score={viewLead.priority_score} />
+              <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${aiScore.color}22`, color:aiScore.color }}>
+                {aiScore.emoji} {aiScore.label} - {aiScore.score}%
+              </span>
               <span style={{ padding:"4px 12px", borderRadius:20, fontSize:12, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{viewLead.status}</span>
               <div style={{ fontSize:11, color:C.dim }}>{viewLead.lead_id}</div>
             </div>
@@ -2666,6 +2833,18 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
           </div>
         </div>
         <div style={{ display:"flex", gap:8 }}>
+          <button
+            style={{
+              ...S.btn("ghost"),
+              background: sortByAiPriority ? C.accentDim : undefined,
+              color: sortByAiPriority ? C.accent : undefined,
+              borderColor: sortByAiPriority ? `${C.accent}66` : undefined,
+            }}
+            onClick={() => { setSortByAiPriority(v => !v); setPage(0); }}
+            title="Rank visible leads by AI score"
+          >
+            {sortByAiPriority ? "🤖 AI Priority On" : "🤖 Sort by AI Priority"}
+          </button>
           <button style={S.btn("ghost")} onClick={syncSheet} disabled={loadingSheet} title="Pull latest leads from Google Sheet">
             {loadingSheet ? "🔄 Syncing..." : `🔄 Sync Sheet${lastSynced ? ` · ${lastSynced}` : ""}`}
           </button>
@@ -2794,6 +2973,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
           const lid = lead.lead_id || lead.id || `${lead.company||""}-${lead.city||""}-${lead.segment||""}`;
           const realId = lead.lead_id || lead.id; // true DB id for delete — never use compound fallback
           const seg = SEGMENT_META[lead.segment] || SEGMENT_META["Office"];
+          const aiScore = getColdLeadAiScore(lead);
           const statusColor = COLD_STATUS_COLOR[lead.status] || C.muted;
           const hasOutreach = !!(lead.cold_email || lead.follow_up_email);
           const isDeleting = confirmDelete === lid;
@@ -2816,6 +2996,9 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
                         {lastSyncedAt ? ` · last_synced_at ${new Date(lastSyncedAt).toLocaleString()}` : ""}
                     </div>
                     <div style={{ display:"flex", gap:4, marginTop:5, flexWrap:"wrap" }}>
+                      <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:800, background:`${aiScore.color}22`, color:aiScore.color }}>
+                        {aiScore.emoji} {aiScore.label} - {aiScore.score}%
+                      </span>
                       <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{lead.status||"New"}</span>
                       {lead.status === "Contacted" && lead.last_contacted_at && (
                         <span style={{ padding:"2px 7px", borderRadius:20, fontSize:10, fontWeight:700, background:C.goldDim, color:C.gold }}>
@@ -3348,6 +3531,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const [showEmail, setShowEmail] = useState(null);
   const [filterStatus, setFilterStatus] = useState("All");
   const [searchQuery, setSearchQuery] = useState("");
+  const [aiQuotePreview, setAiQuotePreview] = useState(null);
 
   // Stable delete handler — lives outside the render loop so no stale closures
   const handleDeleteRes = async (id) => {
@@ -3495,6 +3679,25 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const toggleAddon = (id) => setForm(f=>({...f,addons:(f.addons||[]).includes(id)?(f.addons||[]).filter(x=>x!==id):[...f.addons,id]}));
+
+  const runAiQuoteCalculation = () => {
+    try {
+      const q = calcResQuote({
+        ...form,
+        dwellingType: form.dwellingType || "Apartment / Condo",
+        dwellingSize: form.dwellingSize || "2 Bed",
+        serviceType: form.serviceType || "Refresh Clean",
+        frequency: form.frequency || "One-Time",
+        beds: toFiniteNumber(form.beds, 2),
+        baths: toFiniteNumber(form.baths, 1),
+        sqft: toFiniteNumber(form.sqft, 900),
+        addons: Array.isArray(form.addons) ? form.addons : [],
+      }, region);
+      setAiQuotePreview(q);
+    } catch {
+      setAiQuotePreview({ error: true });
+    }
+  };
 
   const dwellingOptions = Object.keys(HUC_PRICING_GRID);
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
@@ -3696,6 +3899,40 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
                 ))}
               </div>
             </div>
+
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button style={{ ...S.btn("primary"), background:C.purple }} onClick={runAiQuoteCalculation}>
+                🤖 AI Calculate Price
+              </button>
+              {aiQuotePreview && !aiQuotePreview.error && (
+                <button style={S.btn("ghost")} onClick={() => setAiQuotePreview(null)}>
+                  Clear AI Result
+                </button>
+              )}
+            </div>
+
+            {aiQuotePreview?.error && (
+              <div style={{ ...S.cardSm, borderLeft:`3px solid ${C.red}` }}>
+                <div style={{ fontSize:13, color:C.red, fontWeight:700 }}>Unable to calculate AI quote. Check the property inputs.</div>
+              </div>
+            )}
+
+            {aiQuotePreview && !aiQuotePreview.error && (
+              <div style={{ ...S.cardSm, borderLeft:`3px solid ${C.purple}` }}>
+                <div style={{ fontWeight:800, fontSize:14, color:C.purple, marginBottom:8 }}>🤖 AI Quote Result</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,160px),1fr))", gap:10 }}>
+                  <div><div style={S.label}>Estimated Labor Hours</div><div style={{ fontSize:18, fontWeight:800, color:C.accent }}>{toFiniteNumber(aiQuotePreview.jobHours, 0).toFixed(1)}h</div></div>
+                  <div><div style={S.label}>Team Size</div><div style={{ fontSize:18, fontWeight:800, color:C.blue }}>{toFiniteNumber(aiQuotePreview.teamSize, 1)} partner(s)</div></div>
+                  <div><div style={S.label}>Pre-Tax</div><div style={{ fontSize:18, fontWeight:800 }}>{fmt(aiQuotePreview.preTaxTotal, region)}</div></div>
+                  <div><div style={S.label}>{aiQuotePreview.taxName || "Tax"}</div><div style={{ fontSize:18, fontWeight:800 }}>{fmt(aiQuotePreview.taxAmount, region)}</div></div>
+                  <div><div style={S.label}>Partner Share</div><div style={{ fontSize:18, fontWeight:800, color:C.blue }}>{fmt(aiQuotePreview.partnerPay, region)}</div></div>
+                  <div><div style={S.label}>Company Share</div><div style={{ fontSize:18, fontWeight:800, color:C.gold }}>{fmt(aiQuotePreview.profit, region)}</div></div>
+                </div>
+                <div style={{ marginTop:10, fontSize:13, color:C.muted }}>
+                  Total Estimate: <strong style={{ color:C.accent }}>{fmt(aiQuotePreview.total, region)}</strong>
+                </div>
+              </div>
+            )}
 
             {form.name && (() => { try { const q=calcResQuote({...form, dwellingType:form.dwellingType||"Apartment / Condo", dwellingSize:form.dwellingSize||"2 Bed", serviceType:form.serviceType||"Refresh Clean", frequency:form.frequency||"One-Time", beds:form.beds||2, baths:form.baths||1, sqft:form.sqft||900, addons:form.addons||[]},region); return <QuoteBox q={q} type="res" />; } catch(e) { return null; } })()}
 
@@ -7334,7 +7571,7 @@ export default function App() {
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTabGuarded} />}
         {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
-        {tab==="cold"           && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading cold outreach...</div>}><ColdOutreachView region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} /></Suspense>}
+        {tab==="cold"           && <ColdOutreachLegacy region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
         {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
