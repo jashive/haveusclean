@@ -394,13 +394,28 @@ const REGIONS = {
 // Active region — consumers of this context use useRegion() hook pattern via App state
 let ACTIVE_REGION = REGIONS["ON"]; // default, overridden by App state
 
+const toFiniteNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const roundMoney = (value) => Math.round(toFiniteNumber(value, 0));
+
+const safeDivide = (numerator, denominator, fallback = 0) => {
+  const n = toFiniteNumber(numerator, 0);
+  const d = toFiniteNumber(denominator, 0);
+  if (d === 0) return fallback;
+  const q = n / d;
+  return Number.isFinite(q) ? q : fallback;
+};
+
 // Helper: format currency for active region
 const fmt = (amount, region = ACTIVE_REGION) =>
-  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:2, maximumFractionDigits:2 }).format(amount);
+  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:2, maximumFractionDigits:2 }).format(toFiniteNumber(amount, 0));
 
 // Helper: format currency compact (no decimals for large numbers)
 const fmtC = (amount, region = ACTIVE_REGION) =>
-  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:0, maximumFractionDigits:0 }).format(amount);
+  new Intl.NumberFormat(region.locale, { style:"currency", currency:region.currency, minimumFractionDigits:0, maximumFractionDigits:0 }).format(toFiniteNumber(amount, 0));
 
 // ─── COLOR SYSTEM ────────────────────────────────────────────────────────────
 const C = {
@@ -429,9 +444,9 @@ const PARTNER_SHARE = 0.60;
 const COMPANY_SHARE = 0.40;
 const PROFIT_MARGIN = 0.40;
 
-const partnerPayFromPrice  = (clientPrice) => Math.round(clientPrice * PARTNER_SHARE);
-const companyProfitFromPrice = (clientPrice) => Math.round(clientPrice * COMPANY_SHARE);
-const markupFactor = (cost) => Math.ceil(cost / (1 - PROFIT_MARGIN));
+const partnerPayFromPrice  = (clientPrice) => roundMoney(toFiniteNumber(clientPrice, 0) * PARTNER_SHARE);
+const companyProfitFromPrice = (clientPrice) => roundMoney(toFiniteNumber(clientPrice, 0) * COMPANY_SHARE);
+const markupFactor = (cost) => Math.ceil(toFiniteNumber(cost, 0) / Math.max(0.0001, (1 - PROFIT_MARGIN)));
 
 // ─── TEAM SIZE BY SQFT ───────────────────────────────────────────────────────
 // 1 partner  → up to 1,000 sqft
@@ -633,14 +648,17 @@ function calcResQuote(f, region = ACTIVE_REGION) {
   const isAZ       = region.id === "AZ";
   const hourlyRate = isAZ ? PARTNER_HOURLY_AZ : PARTNER_HOURLY_ON;
   const azUplift   = isAZ ? 1.12 : 1.0; // AZ market 12% higher than Ontario
+  const inputSqft = toFiniteNumber(f?.sqft, 0);
+  const inputBeds = toFiniteNumber(f?.beds, 2);
+  const inputBaths = toFiniteNumber(f?.baths, 1);
 
   // ── Step 1: Determine sqft (estimate from beds/baths if not provided) ──
-  const estimatedSqft = f.sqft && f.sqft > 0
-    ? f.sqft
+  const estimatedSqft = inputSqft > 0
+    ? inputSqft
     : Math.max(400,
         400
-        + (f.beds  || 2) * 180
-        + (f.baths || 1) * 80
+        + inputBeds * 180
+        + inputBaths * 80
       );
 
   // ── Step 2: Team size and hours ──
@@ -648,61 +666,61 @@ function calcResQuote(f, region = ACTIVE_REGION) {
   const jobHours  = getJobHours(estimatedSqft);
 
   // ── Step 3: Labor cost (team total) ──
-  const laborCost = teamSize * hourlyRate * jobHours;
+  const laborCost = toFiniteNumber(teamSize, 1) * toFiniteNumber(hourlyRate, 0) * toFiniteNumber(jobHours, 0);
 
   // ── Step 4: Base price from labor (35% margin) ──
-  const laborBasePrice = Math.ceil(laborCost / PARTNER_SHARE);
+  const laborBasePrice = Math.ceil(safeDivide(laborCost, PARTNER_SHARE, 0));
 
   // ── Step 5: Apply package multiplier ──
-  const pkgMult = RES_SERVICE_MULT[f.serviceType] || 1.0;
-  const formulaPrice = Math.round(laborBasePrice * pkgMult * azUplift);
+  const pkgMult = toFiniteNumber(RES_SERVICE_MULT[f?.serviceType], 1.0);
+  const formulaPrice = roundMoney(laborBasePrice * pkgMult * azUplift);
 
   // ── Step 6: Floor price (never go below market minimum) ──
   const regionKey = isAZ ? "AZ" : "ON";
-  const floorGroup = FLOOR_PRICES[regionKey]?.[f.dwellingType];
-  const floorBase  = floorGroup?.[f.dwellingSize] || 140;
-  const floorPrice = Math.round(floorBase * pkgMult * azUplift);
+  const floorGroup = FLOOR_PRICES[regionKey]?.[f?.dwellingType];
+  const floorBase  = toFiniteNumber(floorGroup?.[f?.dwellingSize], 140);
+  const floorPrice = roundMoney(floorBase * pkgMult * azUplift);
 
   // ── Step 7: Take the higher of formula or floor ──
   const baseClientPrice = Math.max(formulaPrice, floorPrice);
 
   // ── Step 8: Condition adjustment ──
-  const condMult = CONDITION_MULT[f.condition || ""] || 1.0;
-  const conditionedPrice = Math.round(baseClientPrice * condMult);
+  const condMult = toFiniteNumber(CONDITION_MULT[f?.condition || ""], 1.0);
+  const conditionedPrice = roundMoney(baseClientPrice * condMult);
 
   // ── Step 9: Addons ──
-  const addonClientTotal = (f.addons || []).reduce((a, id) => {
+  const addonClientTotal = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
     const ao = RES_ADDONS.find(x => x.id === id);
-    return a + (ao?.clientPrice || 0);
+    return a + toFiniteNumber(ao?.clientPrice, 0);
   }, 0);
-  const addonCostTotal = (f.addons || []).reduce((a, id) => {
+  const addonCostTotal = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
     const ao = RES_ADDONS.find(x => x.id === id);
-    return a + (ao?.costToUs || 0);
+    return a + toFiniteNumber(ao?.costToUs, 0);
   }, 0);
 
   const clientSubtotal = conditionedPrice + addonClientTotal;
 
   // ── Step 10: Frequency discount ──
-  const discPct    = FREQ_DISCOUNTS[f.frequency] || 0;
-  const discountAmt = Math.round(clientSubtotal * discPct);
+  const discPct    = toFiniteNumber(FREQ_DISCOUNTS[f?.frequency], 0);
+  const discountAmt = roundMoney(clientSubtotal * discPct);
   const preTaxTotal = clientSubtotal - discountAmt;
 
   // ── Step 11: Tax (ON = 13% HST, AZ = 0%) ──
-  const taxRate   = region.id === "ON" ? region.tax.rate : 0;
-  const taxAmount = Math.round(preTaxTotal * taxRate);
+  const taxRate   = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
+  const taxAmount = roundMoney(preTaxTotal * taxRate);
   const finalTotal = preTaxTotal + taxAmount;
 
   // ── Step 12: Pay split ──
   const partnerPayTotal = partnerPayFromPrice(preTaxTotal); // 65% of pre-tax
-  const partnerPayEach  = teamSize > 1 ? Math.round(partnerPayTotal / teamSize) : partnerPayTotal;
+  const partnerPayEach  = teamSize > 1 ? roundMoney(safeDivide(partnerPayTotal, teamSize, 0)) : partnerPayTotal;
   const profit          = companyProfitFromPrice(preTaxTotal); // 35%
-  const margin          = preTaxTotal > 0 ? ((profit / preTaxTotal) * 100).toFixed(1) : "0";
+  const margin          = preTaxTotal > 0 ? (safeDivide(profit, preTaxTotal, 0) * 100).toFixed(1) : "0";
 
   // ── Frequency pricing variants (for quote display) ──
   const freq_prices = {};
   Object.keys(FREQ_DISCOUNTS).forEach(freq => {
     const d = FREQ_DISCOUNTS[freq] || 0;
-    freq_prices[freq] = Math.round(conditionedPrice * (1 - d));
+    freq_prices[freq] = roundMoney(conditionedPrice * (1 - toFiniteNumber(d, 0)));
   });
 
   // ── Breakdown lines ──
@@ -712,7 +730,7 @@ function calcResQuote(f, region = ACTIVE_REGION) {
       cost: laborCost,
       price: conditionedPrice,
     },
-    ...(f.addons||[]).map(id => {
+    ...(Array.isArray(f?.addons) ? f.addons : []).map(id => {
       const ao = RES_ADDONS.find(x => x.id === id);
       return ao ? { label: ao.label, cost: ao.costToUs, price: ao.clientPrice } : null;
     }).filter(Boolean),
@@ -747,29 +765,31 @@ function calcResQuote(f, region = ACTIVE_REGION) {
 }
 
 function calcComQuote(f, region = ACTIVE_REGION) {
-  const costPerSqft = COM_SERVICE_COST_PER_SQFT[f.serviceType] || 0.07;
-  const minCost = COM_MIN_COST[f.serviceType] || 120;
+  const costPerSqft = toFiniteNumber(COM_SERVICE_COST_PER_SQFT[f?.serviceType], 0.07);
+  const minCost = toFiniteNumber(COM_MIN_COST[f?.serviceType], 120);
   // Scale costs slightly by region (ON is higher market)
   const regionMult = region.id === "ON" ? 1.15 : 1.0;
-  const baseCost = Math.max(minCost, (f.sqft||2000) * costPerSqft) * regionMult;
-  const floorAdj = 1 + ((f.floors||1) - 1) * 0.10;
-  const addonCost = (f.addons||[]).reduce((a,id) => { const ao=COM_ADDONS.find(x=>x.id===id); return a+(ao?.costToUs||0); }, 0) * regionMult;
+  const sqft = Math.max(0, toFiniteNumber(f?.sqft, 2000));
+  const floors = Math.max(1, toFiniteNumber(f?.floors, 1));
+  const baseCost = Math.max(minCost, sqft * costPerSqft) * regionMult;
+  const floorAdj = 1 + (floors - 1) * 0.10;
+  const addonCost = (Array.isArray(f?.addons) ? f.addons : []).reduce((a,id) => { const ao=COM_ADDONS.find(x=>x.id===id); return a + toFiniteNumber(ao?.costToUs, 0); }, 0) * regionMult;
   const totalCost = baseCost * floorAdj + addonCost;
   const clientSubtotal = markupFactor(totalCost);
-  const discPct = COM_FREQ_DISCOUNTS[f.frequency] || 0;
+  const discPct = toFiniteNumber(COM_FREQ_DISCOUNTS[f?.frequency], 0);
   const discountAmt = clientSubtotal * discPct;
   const preTaxTotal = Math.max(0, clientSubtotal - discountAmt);
 
   // Tax: ON = 13% HST on commercial cleaning; AZ = 0% (services exempt)
-  const taxRate = region.id === "ON" ? region.tax.rate : 0;
+  const taxRate = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
   const taxAmount = preTaxTotal * taxRate;
   const finalTotal = preTaxTotal + taxAmount;
 
   const profit = companyProfitFromPrice(preTaxTotal);
-  const margin = preTaxTotal > 0 ? ((profit/preTaxTotal)*100).toFixed(1) : "0";
-  const visitsPerMonth = f.frequency==="Daily"?22:f.frequency==="Weekly"?4:f.frequency==="Bi-Weekly"?2:1;
+  const margin = preTaxTotal > 0 ? (safeDivide(profit, preTaxTotal, 0) * 100).toFixed(1) : "0";
+  const visitsPerMonth = f?.frequency==="Daily"?22:f?.frequency==="Weekly"?4:f?.frequency==="Bi-Weekly"?2:1;
   const monthly = finalTotal * visitsPerMonth;
-  const contract = monthly * (f.contractMonths||1);
+  const contract = monthly * Math.max(1, toFiniteNumber(f?.contractMonths, 1));
   return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:partnerPayFromPrice(preTaxTotal), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
 }
 
@@ -5826,7 +5846,9 @@ function filterNavGroupsByRole(navGroups, role) {
   if (role === "admin") return navGroups;
   const allowlist = ROLE_TAB_ALLOWLIST[role];
   if (!allowlist) return [];
+  const blockedGroups = new Set(["finance", "biz"]);
   return navGroups
+    .filter(group => !blockedGroups.has(group.id))
     .map(group => ({ ...group, tabs: group.tabs.filter(tab => allowlist.has(tab.id)) }))
     .filter(group => group.tabs.length > 0);
 }
@@ -6140,15 +6162,12 @@ export default function App() {
     setAccessRole(role);
     setShowRoleGate(false);
     setRoleGateError("");
-    if (role === "partner") {
-      setTab("partnerview");
-      return;
-    }
-    if (role === "sales") {
-      setTab("salesview");
-      return;
-    }
-    setTab("dashboard");
+    setTab((prev) => {
+      const current = normalizeTabId(prev);
+      if (role === "admin") return current || "dashboard";
+      if (canAccessTab(role, current)) return current;
+      return role === "partner" ? "partnerview" : "salesview";
+    });
   }, []);
 
   const handleAdminPortalEntry = useCallback(() => {
@@ -6253,7 +6272,8 @@ export default function App() {
         setShowRoleGate(true);
       } else {
         setShowRoleGate(false);
-        setTab("salesview");
+        const nextTab = normalizeTabId(tab);
+        if (!canAccessTab("sales", nextTab)) setTab("salesview");
       }
       return;
     }
@@ -6265,7 +6285,8 @@ export default function App() {
         setShowRoleGate(true);
       } else {
         setShowRoleGate(false);
-        setTab("partnerview");
+        const nextTab = normalizeTabId(tab);
+        if (!canAccessTab("partner", nextTab)) setTab("partnerview");
       }
       return;
     }
@@ -6273,7 +6294,7 @@ export default function App() {
     if (accessRole === "admin") {
       setShowRoleGate(true);
     }
-  }, [accessRole, currentPath, isLoading, partners, salesReps]);
+  }, [accessRole, currentPath, isLoading, partners, salesReps, tab]);
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -6333,7 +6354,24 @@ export default function App() {
 
     async function loadAll() {
       try {
-        const [savedJobs, savedPartners, savedSalesReps, savedRegion, log, savedResLeads, savedColdLeads, savedProgress, savedClients, savedInvoices, connected] = await Promise.all([
+        const [cloudJobs, cloudPartners, cloudResLeads, cloudColdLeads, cloudConnectedProbe] = await Promise.all([
+          sbGet(DB_KEYS.jobs),
+          sbGet(DB_KEYS.partners),
+          sbGet(DB_KEYS.leadsRes),
+          sbGet(DB_KEYS.coldLeads),
+          (async () => {
+            try {
+              const r = await sbFetch("huc_jobs?select=id&limit=1");
+              return Boolean(r && r.ok);
+            } catch {
+              return false;
+            }
+          })(),
+        ]);
+
+        const connected = cloudConnectedProbe || Array.isArray(cloudJobs) || Array.isArray(cloudPartners) || Array.isArray(cloudResLeads) || Array.isArray(cloudColdLeads);
+
+        const [localJobs, localPartners, savedSalesReps, savedRegion, log, localResLeads, localColdLeads, savedProgress, savedClients, savedInvoices] = await Promise.all([
           dbGet(DB_KEYS.jobs),
           dbGet(DB_KEYS.partners),
           dbGet(DB_KEYS.salesReps),
@@ -6344,15 +6382,12 @@ export default function App() {
           dbGet(DB_KEYS.onboardingProgress),
           dbGet(DB_KEYS.clients),
           dbGet(DB_KEYS.invoices),
-          (async () => {
-            try {
-              const r = await sbFetch("huc_jobs?select=id&limit=1");
-              return Boolean(r && r.ok);
-            } catch {
-              return false;
-            }
-          })(),
         ]);
+
+        const savedJobs = Array.isArray(cloudJobs) && cloudJobs.length > 0 ? cloudJobs : localJobs;
+        const savedPartners = Array.isArray(cloudPartners) && cloudPartners.length > 0 ? cloudPartners : localPartners;
+        const savedResLeads = Array.isArray(cloudResLeads) && cloudResLeads.length > 0 ? cloudResLeads : localResLeads;
+        const savedColdLeads = Array.isArray(cloudColdLeads) && cloudColdLeads.length > 0 ? cloudColdLeads : localColdLeads;
 
         if (cancelled) return;
         setIsCloudConnected(Boolean(connected));
@@ -6853,42 +6888,47 @@ export default function App() {
   const setJobsDB = useCallback((updater) => {
     setJobs(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      const added   = next.filter(n => !prev.find(p => p.id === n.id));
-      const removed = prev.filter(p => !next.find(n => n.id === p.id));
-      const changed = next.filter(n => {
-        const old = prev.find(p => p.id === n.id);
+      const nextList = Array.isArray(next) ? next : [];
+      const prevList = Array.isArray(prev) ? prev : [];
+      const added   = nextList.filter(n => !prevList.find(p => p.id === n.id));
+      const removed = prevList.filter(p => !nextList.find(n => n.id === p.id));
+      const changed = nextList.filter(n => {
+        const old = prevList.find(p => p.id === n.id);
         return old && JSON.stringify(old) !== JSON.stringify(n);
       });
       if (added.length)   logActivity("JOB_ADDED",   added.map(j => j.client).join(", "));
       if (removed.length) logActivity("JOB_DELETED",  removed.map(j => j.client).join(", "));
       if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} → ${j.status}`).join(", "));
       // Write to Supabase immediately so changes persist across refreshes
-      dbSet(DB_KEYS.jobs, next).then(() => {
+      dbSet(DB_KEYS.jobs, nextList).then(() => {
         setDbStatus(isCloudConnected ? "synced" : "local");
       }).catch(() => {});
-      return next;
+      return nextList;
     });
-  }, []);
+  }, [isCloudConnected]);
 
   const setPartnersDB = useCallback((updater) => {
     setPartners(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      const added = next.filter(n => !prev.find(p => p.id === n.id));
+      const nextList = Array.isArray(next) ? next : [];
+      const prevList = Array.isArray(prev) ? prev : [];
+      const added = nextList.filter(n => !prevList.find(p => p.id === n.id));
       if (added.length) logActivity("PARTNER_ADDED", added.map(p => p.name).join(", "));
-      void dbSet(DB_KEYS.partners, next).then(() => {
+      void dbSet(DB_KEYS.partners, nextList).then(() => {
         setDbStatus(isCloudConnected ? "synced" : "local");
       }).catch(() => {});
-      return next;
+      return nextList;
     });
   }, [isCloudConnected]);
 
   const setSalesRepsDB = useCallback((updater) => {
     setSalesReps(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
-      void dbSet(DB_KEYS.salesReps, next).then(() => {
+      const nextList = Array.isArray(next) ? next : [];
+      void dbSet(DB_KEYS.salesReps, nextList).then(() => {
         setDbStatus(isCloudConnected ? "synced" : "local");
       }).catch(() => {});
-      return next;
+      return nextList;
     });
   }, [isCloudConnected]);
 
@@ -6952,8 +6992,23 @@ export default function App() {
   // Keep global ACTIVE_REGION in sync for quote engines
   ACTIVE_REGION = activeRegion;
 
+  const isRestrictedRole = accessRole === "partner" || accessRole === "sales";
+  const roleScopedJobs = useMemo(() => {
+    if (!isRestrictedRole) return jobs;
+    // Strip financial fields from the rendered state for restricted roles.
+    return jobs.map((job) => ({
+      ...job,
+      clientPrice: 0,
+      partnerPay: 0,
+      partnerPayEach: 0,
+      profit: 0,
+      pay: 0,
+      margin: 0,
+    }));
+  }, [isRestrictedRole, jobs]);
+
   // Filter data by active region
-  const regionJobs     = jobs.filter(j => !j.region || j.region === activeRegion.id);
+  const regionJobs     = roleScopedJobs.filter(j => !j.region || j.region === activeRegion.id);
   const regionPartners = partners.filter(p => !p.region || p.region === activeRegion.id);
 
   const NAV_GROUPS = [
@@ -7288,9 +7343,9 @@ export default function App() {
         {tab==="agent_social"   && <AgentPanel agent="Social_Content_Agent" />}
         {tab==="agent_dm"       && <AgentPanel agent="DM_Conversion_Agent" />}
         {tab==="agent_ops"      && <AgentPanel agent="Operations_Manager_Agent" />}
-        {tab==="pay"            && <Pay               partners={regionPartners} jobs={regionJobs} />}
-        {tab==="stripe"         && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
-        {tab==="qb"             && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
+        {tab==="pay"            && accessRole === "admin" && <Pay               partners={regionPartners} jobs={regionJobs} />}
+        {tab==="stripe"         && accessRole === "admin" && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
+        {tab==="qb"             && accessRole === "admin" && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
         {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTabGuarded} setJobs={setJobsDB} />}
         {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTabGuarded} invoices={invoices} />}
         {tab==="sms"            && <SMSReminders      jobs={regionJobs} />}
@@ -7300,13 +7355,13 @@ export default function App() {
         {tab==="salesview"      && <SalesView         activeRole={accessRole} onEnterSales={() => setAccessRole("sales")} onExitSales={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
-        {tab==="tax"            && <TaxCompliance     region={activeRegion} />}
-        {tab==="db"             && <DataManager       onReset={handleReset} onExport={handleExport}   activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
-        {tab==="whitelabel"     && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
-        {tab==="pricing"        && <PricingStrategy />}
-        {tab==="swot"           && <SWOTAnalysis />}
+        {tab==="tax"            && accessRole === "admin" && <TaxCompliance     region={activeRegion} />}
+        {tab==="db"             && accessRole === "admin" && <DataManager       onReset={handleReset} onExport={handleExport}   activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
+        {tab==="whitelabel"     && accessRole === "admin" && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
+        {tab==="pricing"        && accessRole === "admin" && <PricingStrategy />}
+        {tab==="swot"           && accessRole === "admin" && <SWOTAnalysis />}
         {tab==="schedule"       && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading schedule...</div>}><MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} /></Suspense>}
-        {tab==="diagnostic"     && <SystemDiagnostic jobs={jobs} partners={partners} resLeads={resLeads} coldLeads={coldLeads} region={activeRegion} />}
+        {tab==="diagnostic"     && accessRole === "admin" && <SystemDiagnostic jobs={jobs} partners={partners} resLeads={resLeads} coldLeads={coldLeads} region={activeRegion} />}
       </main>
     </div>
   );
@@ -8085,9 +8140,9 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
   const today = new Date().toISOString().split("T")[0];
   const todayJobs = jobs.filter(j=>j.date===today);
   const completed = jobs.filter(j=>j.status==="completed");
-  const totalRevenue = completed.reduce((a,b)=>a+(b.clientPrice||0),0);
-  const totalProfit  = completed.reduce((a,b)=>a+(b.profit||0),0);
-  const avgMargin    = totalRevenue>0?((totalProfit/totalRevenue)*100).toFixed(1):"0";
+  const totalRevenue = completed.reduce((a,b)=>a + toFiniteNumber(b?.clientPrice, 0),0);
+  const totalProfit  = completed.reduce((a,b)=>a + toFiniteNumber(b?.profit, 0),0);
+  const avgMargin    = totalRevenue > 0 ? (safeDivide(totalProfit, totalRevenue, 0) * 100).toFixed(1) : "0";
   const f = (n) => fmtC(n, region);
 
   return (
@@ -8119,8 +8174,8 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
                   </div>
                   {partner && <div style={{ display:"flex", alignItems:"center", gap:6 }}><div style={S.avatar(avatarColors[partner.id%4])}>{partner.avatar}</div><span style={{ fontSize:12, color:C.muted }}>{partner.name.split(" ")[0]}</span></div>}
                   <div style={{ textAlign:"right" }}>
-                    <div style={{ fontWeight:800, color:C.accent }}>${job.clientPrice}</div>
-                    <div style={{ fontSize:11, color:C.gold }}>+${job.profit} profit</div>
+                    <div style={{ fontWeight:800, color:C.accent }}>{f(job.clientPrice)}</div>
+                    <div style={{ fontSize:11, color:C.gold }}>+{f(job.profit)} profit</div>
                   </div>
                 </div>
               );
@@ -8130,12 +8185,12 @@ function DashboardV2({ jobs, partners, region = ACTIVE_REGION, setTab = ()=>{} }
         <div>
           <div style={S.h3}>Profit by Job (All Time)</div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {jobs.filter(j=>j.clientPrice>0).map(job=>{
-              const margin = job.clientPrice>0?((job.profit/job.clientPrice)*100).toFixed(1):0;
+            {jobs.filter(j => toFiniteNumber(j?.clientPrice, 0) > 0).map(job=>{
+              const margin = toFiniteNumber(job?.clientPrice, 0) > 0 ? (safeDivide(toFiniteNumber(job?.profit, 0), toFiniteNumber(job?.clientPrice, 0), 0) * 100).toFixed(1) : 0;
               return (
                 <div key={job.id} style={{ display:"flex", alignItems:"center", gap:10 }}>
                   <div style={{ flex:1, fontSize:13, fontWeight:600, minWidth:0, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{job.client}</div>
-                  <div style={{ fontSize:12, color:C.gold, fontWeight:700, flexShrink:0 }}>${job.profit}</div>
+                  <div style={{ fontSize:12, color:C.gold, fontWeight:700, flexShrink:0 }}>{f(job.profit)}</div>
                   <ProfitBadge margin={parseFloat(margin)} />
                 </div>
               );
@@ -8169,9 +8224,10 @@ function JobsLegacy({ jobs, setJobs, partners }) {
   const handleAdd = () => {
     const partnerIds = newJob.partnerIds?.filter(Boolean) || (newJob.partnerId ? [parseInt(newJob.partnerId)] : []);
     const teamSize = partnerIds.length || 1;
-    const clientPrice = Math.round((teamSize * PARTNER_COST_PER_HOUR * newJob.hours) / PARTNER_SHARE);
-    const partnerPayTotal = Math.round(clientPrice * PARTNER_SHARE);
-    const partnerPayEach = Math.round(partnerPayTotal / teamSize);
+    const hours = Math.max(1, toFiniteNumber(newJob.hours, 2));
+    const clientPrice = roundMoney(safeDivide(teamSize * PARTNER_COST_PER_HOUR * hours, PARTNER_SHARE, 0));
+    const partnerPayTotal = partnerPayFromPrice(clientPrice);
+    const partnerPayEach = roundMoney(safeDivide(partnerPayTotal, teamSize, 0));
     setJobs([...jobs, {
       ...newJob,
       id: Date.now(),
@@ -8181,7 +8237,7 @@ function JobsLegacy({ jobs, setJobs, partners }) {
       clientPrice,
       partnerPay: partnerPayTotal,
       partnerPayEach,
-      profit: Math.round(clientPrice * COMPANY_SHARE),
+      profit: companyProfitFromPrice(clientPrice),
       pay: partnerPayEach,
     }]);
     setShowModal(false);
@@ -8376,11 +8432,11 @@ function JobsLegacy({ jobs, setJobs, partners }) {
                   const each = Math.round(partnerTotal / teamSize);
                   return (
                     <div>
-                      <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>${clientPrice} client price</div>
+                      <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>{fmt(clientPrice)} client price</div>
                       <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>
-                        Partner total: ${partnerTotal} · Each: ${each} · Company: ${Math.round(clientPrice * COMPANY_SHARE)}
+                        Partner total: {fmt(partnerTotal)} · Each: {fmt(each)} · Company: {fmt(companyProfitFromPrice(clientPrice))}
                       </div>
-                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × ${each} each</div>}
+                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × {fmt(each)} each</div>}
                     </div>
                   );
                 })()}
@@ -8528,11 +8584,11 @@ function JobsLegacy({ jobs, setJobs, partners }) {
             <div style={{ background:C.surface, borderRadius:10, padding:14, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Partner Pay (65%)</div>
-                <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>${selectedJob.pay?.toFixed(2) || "—"}</div>
+                <div style={{ fontSize:22, fontWeight:800, color:C.accent }}>{fmt(selectedJob?.pay)}</div>
               </div>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Client Price</div>
-                <div style={{ fontSize:22, fontWeight:800 }}>${selectedJob.clientPrice?.toFixed(2) || "—"}</div>
+                <div style={{ fontSize:22, fontWeight:800 }}>{fmt(selectedJob?.clientPrice)}</div>
               </div>
               <div>
                 <div style={{ fontSize:12, color:C.muted }}>Hours</div>
@@ -8561,7 +8617,9 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   const baseUrl = typeof window !== "undefined" ? window.location.origin : "";
 
   const partnerJobs = (id) => jobs.filter(j => j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id)));
-  const pendingPay = (id) => jobs.filter(j => (j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id))) && j.status !== "completed").reduce((a, b) => a + (b.pay || 0), 0);
+  const pendingPay = (id) => jobs
+    .filter(j => (j.partnerId === id || (Array.isArray(j.partnerIds) && j.partnerIds.includes(id))) && j.status !== "completed")
+    .reduce((a, b) => a + toFiniteNumber(b?.pay, 0), 0);
 
   const buildPartnerInvite = (partner) => {
     const pin = String(partner.pin || getDefaultPartnerPin(partner));
@@ -8797,14 +8855,16 @@ function Pay({ partners, jobs }) {
 
   // Always calculate partnerPay as 65% of clientPrice if not already set correctly
   const getPartnerPay = (job) => {
-    if (job.partnerPay && job.clientPrice && Math.abs(job.partnerPay - job.clientPrice * 0.65) < 5) return job.partnerPay;
-    return partnerPayFromPrice(job.clientPrice || 0);
+    const partnerPay = toFiniteNumber(job?.partnerPay, 0);
+    const clientPrice = toFiniteNumber(job?.clientPrice, 0);
+    if (partnerPay > 0 && clientPrice > 0 && Math.abs(partnerPay - clientPrice * PARTNER_SHARE) < 5) return roundMoney(partnerPay);
+    return partnerPayFromPrice(clientPrice);
   };
 
   const totalEarned  = completedJobs.reduce((a, b) => a + getPartnerPay(b), 0);
   const totalPending = allActiveJobs.reduce((a, b) => a + getPartnerPay(b), 0);
-  const totalRevenue = jobs.reduce((a, b) => a + (b.clientPrice || 0), 0);
-  const companyTotal = jobs.reduce((a, b) => a + companyProfitFromPrice(b.clientPrice || 0), 0);
+  const totalRevenue = jobs.reduce((a, b) => a + toFiniteNumber(b?.clientPrice, 0), 0);
+  const companyTotal = jobs.reduce((a, b) => a + companyProfitFromPrice(toFiniteNumber(b?.clientPrice, 0)), 0);
 
   return (
     <div>
@@ -8830,7 +8890,7 @@ function Pay({ partners, jobs }) {
           const pPending   = pJobs.filter(j => j.status === "scheduled" || j.status === "in-progress");
           const earned     = pCompleted.reduce((a, b) => a + getPartnerPay(b), 0);
           const pending    = pPending.reduce((a, b) => a + getPartnerPay(b), 0);
-          const totalRev   = pJobs.reduce((a, b) => a + (b.clientPrice || 0), 0);
+          const totalRev   = pJobs.reduce((a, b) => a + toFiniteNumber(b?.clientPrice, 0), 0);
 
           return (
             <div key={p.id} style={S.card}>
@@ -8863,8 +8923,8 @@ function Pay({ partners, jobs }) {
                         <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                           <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:`${statusColor}22`, color:statusColor }}>{job.status}</span>
                           <div style={{ textAlign:"right" }}>
-                            <div style={{ fontWeight:800, color:C.blue }}>${pay}</div>
-                            <div style={{ fontSize:10, color:C.dim }}>of ${job.clientPrice||0}</div>
+                            <div style={{ fontWeight:800, color:C.blue }}>{fmt(pay)}</div>
+                            <div style={{ fontSize:10, color:C.dim }}>of {fmt(toFiniteNumber(job?.clientPrice, 0))}</div>
                           </div>
                         </div>
                       </div>
