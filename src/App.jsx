@@ -5773,240 +5773,582 @@ function PartnerView({ jobs, partners, region, setJobs, onboardingProgress = {},
 }
 
 // ─── MAIN APP ─────────────────────────────────────────────────────────────────
-// ─── System Diagnostic Component ─────────────────────────────────────────────
-function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region }) {
-  const [results, setResults] = useState([]);
-  const [running, setRunning] = useState(false);
-  const [summary, setSummary] = useState(null);
-  const [suggestions, setSuggestions] = useState([]);
+const ARCHITECT_ROUTE_AUDIT_TABS = [
+  { id: "dashboard", label: "Operations Dashboard" },
+  { id: "ops_mgr", label: "Operations Manager" },
+  { id: "jobs", label: "Jobs" },
+  { id: "recurring", label: "Recurring Jobs" },
+  { id: "gps", label: "GPS Tracking" },
+  { id: "geo", label: "Geofencing" },
+  { id: "res", label: "Residential Clients" },
+  { id: "com", label: "Commercial Clients" },
+  { id: "cold", label: "Cold Outreach" },
+  { id: "intake", label: "Form Intake" },
+  { id: "agent_quote", label: "Quote Agent" },
+  { id: "agent_bidspec", label: "Bid Spec Agent" },
+  { id: "agent_workorder", label: "Work Order Agent" },
+  { id: "agent_social", label: "Social Content Agent" },
+  { id: "agent_dm", label: "DM Conversion Agent" },
+  { id: "agent_ops", label: "Operations Manager Agent" },
+  { id: "pay", label: "Partner Pay" },
+  { id: "stripe", label: "Stripe Payments" },
+  { id: "qb", label: "QuickBooks Sync" },
+  { id: "portal", label: "Client Portal" },
+  { id: "clientview", label: "Client View" },
+  { id: "followup", label: "Follow-Up" },
+  { id: "sms", label: "SMS" },
+  { id: "marketing", label: "Marketing" },
+  { id: "partners", label: "Team / Partners" },
+  { id: "onboarding", label: "Onboarding" },
+  { id: "ai", label: "AI Scheduling" },
+  { id: "tax", label: "Tax" },
+  { id: "db", label: "Database" },
+  { id: "whitelabel", label: "App Store" },
+  { id: "pricing", label: "Pricing" },
+  { id: "swot", label: "SWOT" },
+  { id: "schedule", label: "My Schedule" },
+  { id: "partnerview", label: "Partner View" },
+  { id: "salesview", label: "Sales View" },
+];
 
-  const SB_URL = "https://opazwghrohmfykzxxsjk.supabase.co";
+const ARCHITECT_FINANCIAL_KEY_RE = /(price|tax|pay|rate|amount|total|subtotal|profit|fee|cost|hours|margin|invoice|discount|balance|charge|wage|salary)/i;
+
+function getReactProps(node) {
+  if (!node) return null;
+  const key = Object.keys(node).find((prop) => prop.startsWith("__reactProps$"));
+  return key ? node[key] : null;
+}
+
+async function copyTextToClipboard(text) {
+  const value = String(text || "");
+  if (!value) return false;
+
+  try {
+    if (navigator?.clipboard?.writeText) {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch {}
+
+  try {
+    const textArea = document.createElement("textarea");
+    textArea.value = value;
+    textArea.setAttribute("readonly", "");
+    textArea.style.position = "fixed";
+    textArea.style.top = "-9999px";
+    textArea.style.left = "-9999px";
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(textArea);
+    return Boolean(ok);
+  } catch {
+    return false;
+  }
+}
+
+function summarizeFinanceAnomalies(collection, collectionName) {
+  const seen = new Set();
+  const findings = [];
+
+  const visit = (value, path, depth = 0) => {
+    if (findings.length >= 8 || seen.has(value)) return;
+    if (value && typeof value === "object") seen.add(value);
+
+    if (value == null) {
+      if (ARCHITECT_FINANCIAL_KEY_RE.test(path)) {
+        findings.push({ path, value, reason: value === null ? "null" : "undefined" });
+      }
+      return;
+    }
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value)) findings.push({ path, value, reason: "non-finite number" });
+      return;
+    }
+
+    if (typeof value === "string") {
+      if (ARCHITECT_FINANCIAL_KEY_RE.test(path) && value.trim() === "") {
+        findings.push({ path, value, reason: "empty string" });
+      }
+      return;
+    }
+
+    if (typeof value !== "object" || depth >= 3) return;
+
+    if (Array.isArray(value)) {
+      value.slice(0, 50).forEach((item, index) => visit(item, `${path}[${index}]`, depth + 1));
+      return;
+    }
+
+    Object.entries(value).slice(0, 60).forEach(([key, entryValue]) => {
+      visit(entryValue, path ? `${path}.${key}` : key, depth + 1);
+    });
+  };
+
+  (Array.isArray(collection) ? collection : []).slice(0, 120).forEach((row, index) => visit(row, `${collectionName}[${index}]`));
+  return findings;
+}
+
+function buildCopilotPrompt(finding) {
+  return [
+    "You are patching the Have Us Clean app in src/App.jsx.",
+    `Issue: ${finding.title}`,
+    `Category: ${finding.category}`,
+    `Evidence: ${finding.message}`,
+    `Fix target: ${finding.repairTarget}`,
+    "Make the smallest safe code change that removes the defect and keeps existing behavior intact.",
+    finding.repairHint ? `Repair hint: ${finding.repairHint}` : "",
+    finding.fixSnippet ? `Relevant code snippet: ${finding.fixSnippet}` : "",
+  ].filter(Boolean).join("\n");
+}
+
+function makeArchitectFinding({ id, category, severity, title, message, repairTarget, repairHint, fixSnippet }) {
+  const finding = { id, category, severity, title, message, repairTarget, repairHint, fixSnippet };
+  finding.copilotPrompt = buildCopilotPrompt(finding);
+  return finding;
+}
+
+function buildArchitectReport(findings = []) {
+  const critical = findings.filter((item) => item.category === "Critical").length;
+  const performance = findings.filter((item) => item.category === "Performance & Latency").length;
+  const upgrades = findings.filter((item) => item.category === "Industry Leader Upgrades").length;
+  const score = Math.max(0, Math.min(100, Math.round(100 - (critical * 22) - (performance * 8))));
+  return {
+    score,
+    totals: { critical, performance, upgrades },
+    findings,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
+// ─── System Diagnostic Component ─────────────────────────────────────────────
+function SystemDiagnostic({ jobs, partners, resLeads, coldLeads, region, currentTab, setTab, onReportChange }) {
+  const [running, setRunning] = useState(false);
+  const [report, setReport] = useState(null);
+  const [expandedFindingId, setExpandedFindingId] = useState(null);
+  const [copiedPromptId, setCopiedPromptId] = useState(null);
+
+  const SB_URL = SUPABASE_CONFIG.url;
   const SB_KEY = SUPABASE_ANON;
   const SB_H = { apikey: SB_KEY, Authorization: `Bearer ${SB_KEY}`, "Content-Type": "application/json" };
 
-  const runAll = async () => {
-    setResults([]); setSummary(null); setSuggestions([]);
-    setRunning(true);
-    const res = [];
-    const sugg = [];
-    let passed = 0, failed = 0, warned = 0;
+  useEffect(() => {
+    onReportChange?.(report);
+  }, [report, onReportChange]);
 
-    const add = (category, name, status, message, fix = "") => {
-      res.push({ category, name, status, message, fix, time: new Date().toLocaleTimeString() });
-      if (status === "ok") passed++;
-      else if (status === "err") failed++;
-      else warned++;
-      setResults([...res]);
+  useEffect(() => () => onReportChange?.(null), [onReportChange]);
+
+  const sleep = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+  const nextPaint = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
+  const runRouteAudit = async (pushFinding) => {
+    if (!setTab) {
+      pushFinding(makeArchitectFinding({
+        id: "route-audit-missing-settab",
+        category: "Critical",
+        severity: "critical",
+        title: "Route audit could not run",
+        message: "The diagnostic component was not given a tab setter, so it cannot exercise route switching.",
+        repairTarget: "Pass setTab/currentTab into SystemDiagnostic from App",
+        repairHint: "Wire the current tab state and guarded tab setter into the diagnostic modal so the agent can validate each route end to end.",
+      }));
+      return;
+    }
+
+    const capturedErrors = [];
+    const captureError = (event) => {
+      const message = event?.message || event?.reason?.message || String(event?.reason || event);
+      capturedErrors.push(message);
     };
 
-    // ── INFRASTRUCTURE ──────────────────────────────────────────────────────
-    try {
-      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id&limit=1`, { headers: SB_H });
-      add("Infrastructure", "Supabase Connection", r.ok ? "ok" : "err", `HTTP ${r.status}`);
-    } catch(e) { add("Infrastructure", "Supabase Connection", "err", e.message, "Check internet connection"); }
+    window.addEventListener("error", captureError);
+    window.addEventListener("unhandledrejection", captureError);
+
+    const originalTab = currentTab || "dashboard";
+    const routeTargets = ARCHITECT_ROUTE_AUDIT_TABS.filter((item) => item.id !== originalTab);
 
     try {
-      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id`, { headers: { ...SB_H, "Prefer": "count=exact" } });
-      const total = (r.headers.get("Content-Range") || "").split("/")[1] || "?";
-      add("Infrastructure", "Supabase Lead Count", "ok", `${total} rows in huc_leads_cold`);
-    } catch(e) { add("Infrastructure", "Supabase Lead Count", "err", e.message); }
+      for (const target of routeTargets) {
+        const started = performance.now();
+        setTab(target.id);
+        await nextPaint();
+        await sleep(120);
 
-    try {
-      const tid = "DIAG-" + Date.now();
-      const r = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?on_conflict=lead_id`, {
-        method: "POST", headers: { ...SB_H, "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify([{ lead_id: tid, data: { company: "Test" }, updated_at: new Date().toISOString() }])
-      });
-      if (r.ok) {
-        await fetch(`${SB_URL}/rest/v1/huc_leads_cold?lead_id=eq.${tid}`, { method: "DELETE", headers: SB_H });
-        add("Infrastructure", "Supabase Write/Delete", "ok", "Write + cleanup ✅");
-      } else { add("Infrastructure", "Supabase Write/Delete", "err", `HTTP ${r.status}`, "Check RLS policies allow INSERT/DELETE for anon"); }
-    } catch(e) { add("Infrastructure", "Supabase Write/Delete", "err", e.message); }
+        const main = document.querySelector("main");
+        const text = String(main?.innerText || "").trim();
+        const elapsed = Math.round(performance.now() - started);
+        const hasBlankState = text.length < 4;
+        const hasErrorCopy = /error|failed|something went wrong|blank/i.test(text);
 
-    try {
-      const r = await fetch("/api/sheet"); const d = await r.json();
-      if (d.error) { add("Infrastructure", "Google Sheet API", "err", d.error, "Check SHEET_ID and Google API key in Vercel env vars"); }
-      else {
-        const total = (d.leads || []).length;
-        add("Infrastructure", "Google Sheet API", total > 0 ? "ok" : "warn", `${total} leads returned`);
-        if (total === 0) sugg.push({ icon: "📋", text: "Google Sheet has no leads — run your n8n workflow to populate it" });
+        if (hasBlankState || hasErrorCopy) {
+          pushFinding(makeArchitectFinding({
+            id: `route-${target.id}`,
+            category: "Critical",
+            severity: "critical",
+            title: `${target.label} route rendered a blank or failed state`,
+            message: `Switching to ${target.id} left the main content blank or error-like after ${elapsed}ms.`,
+            repairTarget: `src/App.jsx tab renderer for ${target.id}`,
+            repairHint: `Keep ${target.label} mounted with a non-blank loading or fallback state and guard the branch against runtime exceptions.`,
+            fixSnippet: `tab === "${target.id}"`,
+          }));
+        } else if (elapsed > 650) {
+          pushFinding(makeArchitectFinding({
+            id: `perf-${target.id}`,
+            category: "Performance & Latency",
+            severity: "warning",
+            title: `${target.label} route switch is slow`,
+            message: `The route settled in ${elapsed}ms and did not expose a dedicated loading spinner.`,
+            repairTarget: `src/App.jsx route loading path for ${target.id}`,
+            repairHint: "Add a targeted loading skeleton or spinner for the tab branch and defer expensive list rendering until data is ready.",
+            fixSnippet: `tab === "${target.id}"`,
+          }));
+        }
       }
-    } catch(e) { add("Infrastructure", "Google Sheet API", "err", e.message, "Vercel /api/sheet function may be failing"); }
 
-    try {
-      const r = await fetch("/api/intake"); const d = await r.json();
-      const count = (d.leads || []).length;
-      add("Infrastructure", "Form Intake API", "ok", `${count} form submissions`);
-      if (count === 0) sugg.push({ icon: "📝", text: "No form submissions yet — share your Google Form with clients to start collecting leads" });
-    } catch(e) { add("Infrastructure", "Form Intake API", "err", e.message); }
-
-    if ("geolocation" in navigator) {
-      add("Infrastructure", "GPS/Geolocation", "ok", "Browser geolocation available ✅");
-    } else {
-      add("Infrastructure", "GPS/Geolocation", "err", "Not available", "GPS check-in won't work on this device");
+      if (capturedErrors.length > 0) {
+        pushFinding(makeArchitectFinding({
+          id: "route-errors",
+          category: "Critical",
+          severity: "critical",
+          title: "Runtime errors were raised during tab switching",
+          message: capturedErrors.slice(0, 3).join(" | "),
+          repairTarget: "src/App.jsx tab route branches",
+          repairHint: "Inspect the tab branches that mounted during the audit and fix the thrown exception or unsafe state access.",
+        }));
+      }
+    } finally {
+      setTab(originalTab);
+      await nextPaint();
+      window.removeEventListener("error", captureError);
+      window.removeEventListener("unhandledrejection", captureError);
     }
-
-    // ── COLD OUTREACH ────────────────────────────────────────────────────────
-    add("Cold Outreach", "Leads loaded", coldLeads.length > 0 ? "ok" : "warn",
-      `${coldLeads.length} leads in memory`,
-      coldLeads.length === 0 ? "Open Cold Outreach tab to trigger auto-sync" : "");
-
-    const onLeads = coldLeads.filter(l => (l.market||"").toLowerCase().includes("ontario"));
-    const azLeads = coldLeads.filter(l => (l.market||"").toLowerCase().includes("arizona"));
-    add("Cold Outreach", "Ontario leads", onLeads.length > 0 ? "ok" : "warn", `${onLeads.length} Ontario leads`);
-    add("Cold Outreach", "Arizona leads", azLeads.length > 0 ? "ok" : "warn", `${azLeads.length} Arizona leads`);
-
-    const contacted = coldLeads.filter(l => l.status !== "New").length;
-    add("Cold Outreach", "Leads with activity", contacted > 0 ? "ok" : "warn",
-      `${contacted}/${coldLeads.length} leads have been contacted or updated`);
-    if (contacted === 0 && coldLeads.length > 0) sugg.push({ icon: "🎯", text: "Start contacting cold leads — open a lead, send the cold email, update status to Contacted" });
-
-    // ── RESIDENTIAL LEADS ────────────────────────────────────────────────────
-    add("Residential", "Leads in app", resLeads.length >= 0 ? "ok" : "warn", `${resLeads.length} residential leads`);
-    if (resLeads.length === 0) sugg.push({ icon: "🏠", text: "No residential leads yet — add your first lead from the Residential tab" });
-
-    const quoted = resLeads.filter(l => l.status === "Quoted").length;
-    const booked = resLeads.filter(l => l.status === "Booked").length;
-    const completed = resLeads.filter(l => l.status === "Completed").length;
-    add("Residential", "Lead pipeline", "ok",
-      `New: ${resLeads.filter(l=>l.status==="New").length} · Quoted: ${quoted} · Booked: ${booked} · Completed: ${completed}`);
-
-    if (quoted > 0 && booked === 0) sugg.push({ icon: "📋", text: `${quoted} quoted leads not yet booked — follow up or click Book Job to schedule them` });
-
-    // ── JOBS ─────────────────────────────────────────────────────────────────
-    add("Jobs", "Total jobs", "ok", `${jobs.length} jobs in system`);
-    if (jobs.length === 0) sugg.push({ icon: "📋", text: "No jobs yet — book a residential lead to create the first job" });
-
-    const scheduled = jobs.filter(j => j.status === "scheduled").length;
-    const inProgress = jobs.filter(j => j.status === "in_progress").length;
-    const completedJobs = jobs.filter(j => j.status === "completed").length;
-    add("Jobs", "Job status breakdown", "ok",
-      `Scheduled: ${scheduled} · In Progress: ${inProgress} · Completed: ${completedJobs}`);
-
-    const unassigned = jobs.filter(j => !j.partnerId && !(j.partnerIds||[]).length).length;
-    if (unassigned > 0) {
-      add("Jobs", "Unassigned jobs", "warn", `${unassigned} jobs have no partner assigned`, "Go to Jobs tab and assign partners");
-      sugg.push({ icon: "👥", text: `${unassigned} jobs have no partner assigned — assign partners so they show up in Partner View` });
-    } else { add("Jobs", "Unassigned jobs", "ok", "All jobs have partners assigned ✅"); }
-
-    // ── PARTNERS ─────────────────────────────────────────────────────────────
-    add("Partners", "Partners registered", partners.length > 0 ? "ok" : "warn",
-      `${partners.length} partners in system`, partners.length === 0 ? "Add partners in the Partners tab" : "");
-    if (partners.length === 0) sugg.push({ icon: "👥", text: "No partners added yet — go to Partners tab and add your team members" });
-
-    const onboarded = partners.filter(p => p.onboarded).length;
-    if (partners.length > 0) {
-      add("Partners", "Onboarding status", onboarded === partners.length ? "ok" : "warn",
-        `${onboarded}/${partners.length} partners fully onboarded`);
-      if (onboarded < partners.length) sugg.push({ icon: "🎓", text: `${partners.length - onboarded} partners not fully onboarded — complete training in the Onboarding tab` });
-    }
-
-    // ── PAYMENTS ─────────────────────────────────────────────────────────────
-    const paid = jobs.filter(j => j.paymentConfirmed).length;
-    const unpaid = completedJobs - paid;
-    add("Payments", "Payment status", unpaid > 0 ? "warn" : "ok",
-      `${paid} jobs paid · ${unpaid} completed but unpaid`);
-    if (unpaid > 0) sugg.push({ icon: "💳", text: `${unpaid} completed jobs awaiting payment — confirm payment in the Jobs tab` });
-
-    // ── REGION ───────────────────────────────────────────────────────────────
-    add("Config", "Active region", "ok",
-      `${region?.name || "Unknown"} (${region?.id || "?"}) — ${region?.currencySymbol || "?"}${region?.currencyCode || ""}`);
-
-    try {
-      localStorage.setItem("diag-test", "1"); localStorage.removeItem("diag-test");
-      add("Config", "localStorage", "ok", "Working ✅");
-    } catch(e) { add("Config", "localStorage", "err", e.message); }
-
-    const deletedIds = (() => { try { return JSON.parse(localStorage.getItem("cp:deletedLeadIds") || "[]"); } catch { return []; } })();
-    add("Config", "Deleted leads tracking", "ok", `${deletedIds.length} leads permanently deleted and tracked`);
-
-    // ── FEATURE SUGGESTIONS ───────────────────────────────────────────────────
-    if (!jobs.some(j => j.recurring)) sugg.push({ icon: "🔄", text: "No recurring jobs set up — add recurring schedules in the Recurring tab to automate weekly/bi-weekly bookings" });
-    if (partners.length > 0 && !partners.some(p => p.phone)) sugg.push({ icon: "📱", text: "Partner phone numbers missing — add them in Partners tab to enable SMS reminders" });
-    if (completedJobs > 0 && unpaid === 0) sugg.push({ icon: "💰", text: "All completed jobs are paid — great job! Consider setting up Stripe for automatic online payment collection" });
-    if (coldLeads.length > 0 && azLeads.length === 0) sugg.push({ icon: "🇺🇸", text: "No Arizona leads loaded — run your n8n workflow with Arizona search jobs to populate AZ pipeline" });
-    if (coldLeads.length > 500) sugg.push({ icon: "🎯", text: `You have ${coldLeads.length} cold leads — consider assigning a sales team member to work through them systematically` });
-
-    setSuggestions(sugg);
-    setSummary({ passed, failed, warned });
-    setRunning(false);
   };
 
-  const categoryColors = {
-    "Infrastructure": "#3B82F6",
-    "Cold Outreach": "#00D4AA",
-    "Residential": "#FF6B6B",
-    "Jobs": "#f59e0b",
-    "Partners": "#8B5CF6",
-    "Payments": "#10B981",
-    "Config": "#6B7280",
+  const runArchitectDiagnostics = async () => {
+    setRunning(true);
+    setCopiedPromptId(null);
+    const findings = [];
+
+    const pushFinding = (finding) => {
+      if (findings.some((item) => item.id === finding.id)) return;
+      findings.push(finding);
+      setReport(buildArchitectReport(findings.slice()));
+    };
+
+    const detectFinanceIssues = (items, name) => {
+      const anomalies = summarizeFinanceAnomalies(items, name);
+      if (anomalies.length === 0) return;
+      pushFinding(makeArchitectFinding({
+        id: `calc-${name}`,
+        category: "Critical",
+        severity: "critical",
+        title: `${name} contains invalid financial values`,
+        message: `${name} has ${anomalies.length} invalid finance field${anomalies.length === 1 ? "" : "s"}. Example: ${anomalies.slice(0, 3).map((item) => `${item.path}=${String(item.value)}`).join("; ")}`,
+        repairTarget: `src/App.jsx and downstream data writers for ${name}`,
+        repairHint: "Normalize every financial field through a finite-number helper before rendering or persisting so NaN/null/undefined never reaches totals or pay calculations.",
+        fixSnippet: anomalies[0]?.path || name,
+      }));
+    };
+
+    try {
+      setReport(buildArchitectReport([]));
+
+      await runRouteAudit(pushFinding);
+      detectFinanceIssues(jobs, "jobs");
+      detectFinanceIssues(partners, "partners");
+      detectFinanceIssues(resLeads, "resLeads");
+      detectFinanceIssues(coldLeads, "coldLeads");
+
+      try {
+        const supabaseResponse = await fetch(`${SB_URL}/rest/v1/huc_leads_cold?select=lead_id&limit=1`, { headers: SB_H });
+        if (!supabaseResponse.ok) {
+          pushFinding(makeArchitectFinding({
+            id: "db-supabase-connection",
+            category: "Critical",
+            severity: "critical",
+            title: "Supabase database connectivity is failing",
+            message: `Supabase returned HTTP ${supabaseResponse.status} for the connectivity probe.`,
+            repairTarget: "Supabase config and RLS setup",
+            repairHint: "Verify the anon key, project URL, and row-level security policies for the diagnostics query endpoint.",
+          }));
+        }
+      } catch (error) {
+        pushFinding(makeArchitectFinding({
+          id: "db-supabase-connection-exception",
+          category: "Critical",
+          severity: "critical",
+          title: "Supabase database connectivity threw an exception",
+          message: error?.message || String(error),
+          repairTarget: "Supabase fetch path in SystemDiagnostic",
+          repairHint: "Keep the request wrapped in a resilient fetch helper and fail gracefully when the network or CORS layer is unavailable.",
+        }));
+      }
+
+      try {
+        const role = localStorage.getItem("cp:user_role");
+        const auth = localStorage.getItem("cp:is_authenticated");
+        const roleValid = ["admin", "sales", "partner", null, ""].includes(role) || role === null;
+        const authValid = ["true", "false", null].includes(auth);
+
+        if (!roleValid) {
+          pushFinding(makeArchitectFinding({
+            id: "storage-role-invalid",
+            category: "Critical",
+            severity: "critical",
+            title: "localStorage role key is invalid",
+            message: `cp:user_role contains "${role}" instead of admin, sales, partner, or an empty state.`,
+            repairTarget: "Role persistence helpers in src/App.jsx",
+            repairHint: "Coerce unknown roles back to admin and sanitize any persistence path that writes cp:user_role.",
+            fixSnippet: "cp:user_role",
+          }));
+        }
+
+        if (!authValid) {
+          pushFinding(makeArchitectFinding({
+            id: "storage-auth-invalid",
+            category: "Critical",
+            severity: "critical",
+            title: "localStorage auth key is invalid",
+            message: `cp:is_authenticated contains "${auth}" instead of "true" or "false".`,
+            repairTarget: "Auth persistence helpers in src/App.jsx",
+            repairHint: "Write a strict boolean string for auth state and clear invalid stored values during startup.",
+            fixSnippet: "cp:is_authenticated",
+          }));
+        }
+      } catch (error) {
+        pushFinding(makeArchitectFinding({
+          id: "storage-check-exception",
+          category: "Critical",
+          severity: "critical",
+          title: "localStorage validation threw an exception",
+          message: error?.message || String(error),
+          repairTarget: "localStorage validation block in SystemDiagnostic",
+          repairHint: "Wrap storage reads in try/catch and keep the diagnostics resilient to browser storage failures.",
+        }));
+      }
+
+      try {
+        const clipboardProbe = await copyTextToClipboard("Have Us Clean architect diagnostic clipboard probe");
+        if (!clipboardProbe) {
+          pushFinding(makeArchitectFinding({
+            id: "clipboard-failure",
+            category: "Critical",
+            severity: "critical",
+            title: "Clipboard write probe failed",
+            message: "navigator.clipboard.writeText could not complete in this environment.",
+            repairTarget: "Clipboard-backed action buttons in src/App.jsx",
+            repairHint: "Keep the existing clipboard fallback path and surface a user-visible error when copy operations fail.",
+          }));
+        }
+      } catch (error) {
+        pushFinding(makeArchitectFinding({
+          id: "clipboard-exception",
+          category: "Critical",
+          severity: "critical",
+          title: "Clipboard self-test threw an exception",
+          message: error?.message || String(error),
+          repairTarget: "Clipboard action handlers in src/App.jsx",
+          repairHint: "Guard all copy actions with a fallback text-area implementation and catch permission errors explicitly.",
+        }));
+      }
+
+      const interactiveNodes = Array.from(document.querySelectorAll("button, a, [role='button']"));
+      const orphanedActions = [];
+      interactiveNodes.forEach((node) => {
+        const props = getReactProps(node);
+        const label = String(node.innerText || node.textContent || node.getAttribute("aria-label") || node.getAttribute("title") || node.tagName).trim();
+        const tag = node.tagName.toLowerCase();
+        const isDisabled = node.disabled || node.getAttribute("aria-disabled") === "true";
+        const hasClick = Boolean(props?.onClick || props?.onPointerDown || props?.onMouseDown);
+        const formHandler = node.closest("form") ? Boolean(getReactProps(node.closest("form"))?.onSubmit) : false;
+        const isLink = tag === "a" && Boolean(node.getAttribute("href") || props?.href);
+
+        if (!isDisabled && !hasClick && !formHandler && !isLink) orphanedActions.push(label);
+      });
+
+      if (orphanedActions.length > 0) {
+        pushFinding(makeArchitectFinding({
+          id: "orphaned-actions",
+          category: "Critical",
+          severity: "critical",
+          title: "Potentially unwired buttons were found",
+          message: `${orphanedActions.slice(0, 5).join(", ")}${orphanedActions.length > 5 ? "…" : ""}`,
+          repairTarget: "Interactive controls in src/App.jsx",
+          repairHint: "Wire each control to an explicit handler or convert it to a semantic anchor if it is navigation-only.",
+        }));
+      }
+
+      const totalItems = jobs.length + partners.length + resLeads.length + coldLeads.length;
+      if (totalItems >= 1000) {
+        pushFinding(makeArchitectFinding({
+          id: "perf-large-dataset",
+          category: "Performance & Latency",
+          severity: "warning",
+          title: "Large datasets are rendering without virtualization",
+          message: `${totalItems} total records are flowing through the app state without a virtualized list boundary.`,
+          repairTarget: "High-volume list components",
+          repairHint: "Introduce react-window or a similar virtualized renderer for long job, lead, or partner lists so tab switches stay responsive.",
+        }));
+      }
+
+      const activeLoads = Array.from(document.querySelectorAll("[aria-busy='true'], [data-loading='true']")).length;
+      if (activeLoads === 0 && totalItems >= 250) {
+        pushFinding(makeArchitectFinding({
+          id: "perf-loading-feedback",
+          category: "Performance & Latency",
+          severity: "warning",
+          title: "No explicit loading spinner was detected for heavy views",
+          message: "The app is rendering large state sets, but no visible busy indicator was detected during the audit.",
+          repairTarget: "Tab-level loading states",
+          repairHint: "Add a lightweight skeleton or spinner when expensive tab branches load data so the UI never appears frozen.",
+        }));
+      }
+
+      if (!navigator.serviceWorker) {
+        pushFinding(makeArchitectFinding({
+          id: "upgrade-pwa",
+          category: "Industry Leader Upgrades",
+          severity: "upgrade",
+          title: "Enable PWA offline caching",
+          message: "This build has no service worker path for offline-first caching or app-shell resilience.",
+          repairTarget: "PWA bootstrap and caching layer",
+          repairHint: "Register a service worker and cache the shell plus the highest-value read views so field staff can keep working offline.",
+        }));
+      }
+
+      if (jobs.some((job) => job.paymentConfirmed) && !jobs.some((job) => job.stripeInvoiceId || job.invoiceId || job.autoInvoiceId)) {
+        pushFinding(makeArchitectFinding({
+          id: "upgrade-stripe-invoicing",
+          category: "Industry Leader Upgrades",
+          severity: "upgrade",
+          title: "Add Stripe auto-invoicing",
+          message: "Paid jobs are present, but there is no evidence of automatic invoice creation tied to payment confirmation.",
+          repairTarget: "Stripe payments workflow",
+          repairHint: "Create invoices automatically when a job is marked paid so finance can reconcile without manual follow-up.",
+        }));
+      }
+
+      if (coldLeads.length > 0 || jobs.length > 0) {
+        pushFinding(makeArchitectFinding({
+          id: "upgrade-ai-qa",
+          category: "Industry Leader Upgrades",
+          severity: "upgrade",
+          title: "Add AI-guided QA smoke checks",
+          message: "The app already has rich operational data that can drive automated smoke tests and exception summaries.",
+          repairTarget: "Diagnostic automation roadmap",
+          repairHint: "Turn the diagnostics report into a scheduled smoke test that writes results to an admin log or Slack alert.",
+        }));
+      }
+    } finally {
+      setReport(buildArchitectReport(findings));
+      setRunning(false);
+    }
   };
 
-  const grouped = results.reduce((acc, r) => {
-    if (!acc[r.category]) acc[r.category] = [];
-    acc[r.category].push(r);
+  const copyPrompt = async (finding) => {
+    const ok = await copyTextToClipboard(finding.copilotPrompt);
+    setCopiedPromptId(ok ? finding.id : null);
+    if (ok) {
+      window.setTimeout(() => {
+        setCopiedPromptId((current) => current === finding.id ? null : current);
+      }, 1500);
+    }
+  };
+
+  const grouped = (report?.findings || []).reduce((acc, item) => {
+    if (!acc[item.category]) acc[item.category] = [];
+    acc[item.category].push(item);
     return acc;
   }, {});
 
+  const healthScore = report?.score ?? 100;
+  const criticalCount = report?.totals?.critical || 0;
+  const performanceCount = report?.totals?.performance || 0;
+  const upgradeCount = report?.totals?.upgrades || 0;
+
   return (
-    <div style={{ padding: 20, maxWidth: 700, margin: "0 auto" }}>
-      <div style={{ marginBottom: 20 }}>
-        <h2 style={{ color: C.accent, fontSize: 22, marginBottom: 4 }}>🔬 System Diagnostic</h2>
-        <p style={{ color: C.muted, fontSize: 13 }}>Full health check of every feature — runs live against your real data</p>
+    <div style={{ padding: 20, maxWidth: 980, margin: "0 auto" }}>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 18 }}>
+        <div>
+          <h2 style={{ color: C.accent, fontSize: 22, marginBottom: 4 }}>🧭 Systems Architect & QA Lead</h2>
+          <p style={{ color: C.muted, fontSize: 13, maxWidth: 720 }}>
+            Run an automated inspection across routes, calculations, persistence, and action handlers. The report also produces copyable Copilot fix prompts for every defect it finds.
+          </p>
+        </div>
+        <div style={{ minWidth: 220, textAlign: "right" }}>
+          <div style={{ fontSize: 13, color: C.muted, fontWeight: 700, marginBottom: 4 }}>System Health</div>
+          <div style={{ fontSize: 34, fontWeight: 900, color: healthScore >= 90 ? C.accent : healthScore >= 70 ? C.gold : C.red }}>{healthScore}%</div>
+          <div style={{ display: "flex", gap: 6, justifyContent: "flex-end", flexWrap: "wrap", marginTop: 8 }}>
+            <span style={S.badge(criticalCount > 0 ? "red" : "green")}>{criticalCount} critical</span>
+            <span style={S.badge("gold")}>{performanceCount} performance</span>
+            <span style={S.badge("blue")}>{upgradeCount} upgrades</span>
+          </div>
+        </div>
       </div>
 
-      <button onClick={runAll} disabled={running} style={{ ...S.btn("primary"), marginBottom: 16, opacity: running ? 0.6 : 1 }}>
-        {running ? "⏳ Running all checks..." : "▶ Run Full Diagnostic"}
+      <button onClick={runArchitectDiagnostics} disabled={running} style={{ ...S.btn("primary"), marginBottom: 16, opacity: running ? 0.7 : 1 }}>
+        {running ? "⏳ Running architect diagnostics..." : "▶ Run Architect Diagnostics"}
       </button>
 
-      {summary && (
-        <div style={{ padding: 14, borderRadius: 10, marginBottom: 16,
-          background: summary.failed > 0 ? "#FF475715" : summary.warned > 0 ? "#f59e0b15" : "#00D4AA15",
-          border: `1px solid ${summary.failed > 0 ? "#FF475744" : summary.warned > 0 ? "#f59e0b44" : "#00D4AA44"}`,
-          color: summary.failed > 0 ? "#FF4757" : summary.warned > 0 ? "#f59e0b" : "#00D4AA",
-          fontWeight: 700, fontSize: 15, textAlign: "center" }}>
-          ✅ {summary.passed} passed · ❌ {summary.failed} failed · ⚠️ {summary.warned} warnings
+      {report && (
+        <div style={{ padding: 14, borderRadius: 12, marginBottom: 16, background: criticalCount > 0 ? "#FF475715" : performanceCount > 0 ? "#f59e0b15" : "#00D4AA15", border: `1px solid ${criticalCount > 0 ? "#FF475744" : performanceCount > 0 ? "#f59e0b44" : "#00D4AA44"}` }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+            <div style={{ fontWeight: 800, color: criticalCount > 0 ? C.red : performanceCount > 0 ? C.gold : C.accent }}>
+              {criticalCount > 0 ? `Critical issues detected (${criticalCount})` : "No critical issues detected"}
+            </div>
+            <div style={{ color: C.muted, fontSize: 12 }}>Last run {report.updatedAt ? new Date(report.updatedAt).toLocaleString() : "just now"}</div>
+          </div>
         </div>
       )}
 
-      {Object.entries(grouped).map(([category, items]) => (
-        <div key={category} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
-          <div style={{ padding: "10px 14px", background: `${categoryColors[category] || "#666"}22`, borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: categoryColors[category] || C.accent }}>{category}</span>
-          </div>
-          {items.map((r, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 10, padding: "10px 14px", borderBottom: i < items.length - 1 ? `1px solid ${C.border}20` : "none" }}>
-              <div style={{ fontSize: 16, minWidth: 20 }}>{r.status === "ok" ? "✅" : r.status === "err" ? "❌" : "⚠️"}</div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: "#fff" }}>{r.name}</div>
-                <div style={{ fontSize: 12, color: r.status === "ok" ? "#00D4AA" : r.status === "err" ? "#FF4757" : "#f59e0b", marginTop: 2 }}>{r.message}</div>
-                {r.fix && <div style={{ fontSize: 11, color: C.muted, marginTop: 3, fontStyle: "italic" }}>→ {r.fix}</div>}
-              </div>
-              <div style={{ fontSize: 10, color: C.muted, whiteSpace: "nowrap" }}>{r.time}</div>
-            </div>
-          ))}
-        </div>
-      ))}
-
-      {suggestions.length > 0 && (
-        <div style={{ background: C.card, border: `1px solid #3B82F644`, borderRadius: 10, overflow: "hidden" }}>
-          <div style={{ padding: "10px 14px", background: "#3B82F622", borderBottom: `1px solid ${C.border}` }}>
-            <span style={{ fontSize: 13, fontWeight: 700, color: "#60A5FA" }}>💡 Suggestions & Next Steps</span>
-          </div>
-          {suggestions.map((s, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, padding: "10px 14px", borderBottom: i < suggestions.length - 1 ? `1px solid ${C.border}20` : "none" }}>
-              <div style={{ fontSize: 16 }}>{s.icon}</div>
-              <div style={{ fontSize: 13, color: "#aaa", flex: 1 }}>{s.text}</div>
-            </div>
-          ))}
-        </div>
-      )}
-
-      {results.length === 0 && !running && (
+      {Object.keys(grouped).length === 0 && !running && (
         <div style={{ textAlign: "center", color: C.muted, padding: 60, fontSize: 14 }}>
-          Click "Run Full Diagnostic" to test every system and get personalized suggestions
+          Click "Run Architect Diagnostics" to run the self-tester and generate actionable fix prompts.
         </div>
       )}
+
+      {Object.entries(grouped).map(([category, items]) => {
+        const headerColor = category === "Critical" ? C.red : category === "Performance & Latency" ? C.gold : C.blue;
+        return (
+          <div key={category} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, marginBottom: 12, overflow: "hidden" }}>
+            <div style={{ padding: "10px 14px", background: `${headerColor}22`, borderBottom: `1px solid ${C.border}` }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: headerColor }}>{category}</span>
+            </div>
+            {items.map((item) => {
+              const isExpanded = expandedFindingId === item.id;
+              return (
+                <div key={item.id} style={{ display: "flex", gap: 12, padding: "12px 14px", borderBottom: "1px solid rgba(255,255,255,0.06)", alignItems: "flex-start" }}>
+                  <div style={{ fontSize: 18, minWidth: 24 }}>{item.category === "Critical" ? "🔴" : item.category === "Performance & Latency" ? "🟡" : "🟢"}</div>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#fff" }}>{item.title}</div>
+                        <div style={{ fontSize: 12, color: item.category === "Critical" ? C.red : item.category === "Performance & Latency" ? C.gold : C.blue, marginTop: 4 }}>{item.message}</div>
+                      </div>
+                      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                        {item.category !== "Industry Leader Upgrades" && (
+                          <button style={{ ...S.btn("ghost"), fontSize: 11, padding: "6px 10px" }} onClick={() => setExpandedFindingId(isExpanded ? null : item.id)}>
+                            {isExpanded ? "Hide prompt" : "Show prompt"}
+                          </button>
+                        )}
+                        <button style={{ ...S.btn("primary"), fontSize: 11, padding: "6px 10px" }} onClick={() => copyPrompt(item)}>
+                          {copiedPromptId === item.id ? "Copied" : "Copy Copilot prompt"}
+                        </button>
+                      </div>
+                    </div>
+                    {isExpanded && item.category !== "Industry Leader Upgrades" && (
+                      <pre style={{ whiteSpace: "pre-wrap", marginTop: 10, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 10, padding: 12, color: C.text, fontSize: 11, lineHeight: 1.55 }}>{item.copilotPrompt}</pre>
+                    )}
+                    {item.fixSnippet && <div style={{ fontSize: 11, color: C.muted, marginTop: 6 }}>Anchor: {item.fixSnippet}</div>}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -6317,6 +6659,8 @@ export default function App() {
   const [tab, setTab] = useState(() => getInitialTab());
   const [accessRole, setAccessRole] = useState(() => getInitialRole());
   const [isAuthenticated, setIsAuthenticated] = useState(() => getInitialAuthState());
+  const [showArchitectModal, setShowArchitectModal] = useState(false);
+  const [architectReport, setArchitectReport] = useState(null);
   const [adminUsers, setAdminUsers] = useState(() => getInitialAdminUsers());
   const [showRoleGate, setShowRoleGate] = useState(() => !getInitialAuthState());
   const [roleGatePin, setRoleGatePin] = useState("");
@@ -7397,6 +7741,8 @@ export default function App() {
 
   const visibleNavGroups = filterNavGroupsByRole(NAV_GROUPS, accessRole);
   const activeGroup = visibleNavGroups.find(g => g.tabs.some(t => t.id === tab)) || visibleNavGroups[0] || NAV_GROUPS[0];
+  const architectCriticalCount = architectReport?.totals?.critical || 0;
+  const architectScore = architectReport?.score;
 
   if (currentPath === "/book") {
     if (bookingConfirmation) {
@@ -7587,6 +7933,18 @@ export default function App() {
               Manage Admins
             </button>
           )}
+          {accessRole === "admin" && (
+            <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+              <button
+                style={{ ...S.btn(architectCriticalCount > 0 ? "primary" : "ghost"), fontSize: 12, padding: "6px 10px" }}
+                onClick={() => setShowArchitectModal(true)}
+                title={architectScore == null ? "Open the Systems Architect diagnostics" : `Latest health score: ${architectScore}%`}
+              >
+                🧭 Architect Diagnostics{architectScore == null ? "" : ` · ${architectScore}%`}
+              </button>
+              {architectCriticalCount > 0 && <span style={S.badge("red")}>{architectCriticalCount} critical</span>}
+            </div>
+          )}
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
           {/* DB sync pill */}
           <div
@@ -7723,8 +8081,37 @@ export default function App() {
         {tab==="pricing"        && accessRole === "admin" && <PricingStrategy />}
         {tab==="swot"           && accessRole === "admin" && <SWOTAnalysis />}
         {tab==="schedule"       && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading schedule...</div>}><MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} /></Suspense>}
-        {tab==="diagnostic"     && accessRole === "admin" && <SystemDiagnostic jobs={jobs} partners={partners} resLeads={resLeads} coldLeads={coldLeads} region={activeRegion} />}
+          {tab==="diagnostic"     && accessRole === "admin" && (
+            <div style={{ maxWidth: 760, margin: "0 auto", padding: 20 }}>
+              <div style={{ ...S.card, border: `1px solid ${C.border}` }}>
+                <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>🧭 Systems Architect & QA Lead</div>
+                <div style={{ color: C.muted, fontSize: 13, lineHeight: 1.6, marginBottom: 16 }}>
+                  Open the diagnostic modal to run the automated self-test across routes, calculations, persistence, and action handlers.
+                </div>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 16 }}>
+                  <span style={S.badge(architectCriticalCount > 0 ? "red" : "green")}>{architectCriticalCount > 0 ? `${architectCriticalCount} critical issues` : "No critical issues yet"}</span>
+                  {architectScore != null && <span style={S.badge("gold")}>{architectScore}% health</span>}
+                </div>
+                <button style={S.btn("primary")} onClick={() => setShowArchitectModal(true)}>Run Architect Diagnostics</button>
+              </div>
+            </div>
+          )}
       </main>
+
+        {showArchitectModal && accessRole === "admin" && (
+          <Modal title="🧭 Systems Architect & QA Lead" onClose={() => setShowArchitectModal(false)} wide>
+            <SystemDiagnostic
+              jobs={jobs}
+              partners={partners}
+              resLeads={resLeads}
+              coldLeads={coldLeads}
+              region={activeRegion}
+              currentTab={tab}
+              setTab={setTabGuarded}
+              onReportChange={setArchitectReport}
+            />
+          </Modal>
+        )}
     </div>
   );
 }
