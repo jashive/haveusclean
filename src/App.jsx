@@ -4883,7 +4883,7 @@ async function sbSet(key, value) {
       return true;
     }
     // Array tables (jobs, partners, leads)
-    if (!Array.isArray(value) || value.length === 0) return true;
+    if (!Array.isArray(value)) return true;
     const rows = value
       .filter(item => item) // skip nulls
       .map(item => {
@@ -4901,6 +4901,37 @@ async function sbSet(key, value) {
           ...(key !== "cp:cold_leads" ? { region: item.region || "ON" } : {}),
         };
       });
+
+    if (rows.length === 0) {
+      const existing = await sbGet(key);
+      if (Array.isArray(existing) && existing.length > 0) {
+        const existingIds = existing
+          .map((item) => {
+            if (key === "cp:cold_leads") return toStrId(item?.lead_id || item?.id);
+            return toStrId(item?.id || item?.lead_id);
+          })
+          .filter(Boolean);
+        for (const id of existingIds) {
+          await sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+        }
+      }
+      return true;
+    }
+
+    const nextIds = new Set(rows.map((row) => String(row[cfg.pk] || "")).filter(Boolean));
+    const existing = await sbGet(key);
+    if (Array.isArray(existing) && existing.length > 0) {
+      const missingIds = existing
+        .map((item) => {
+          if (key === "cp:cold_leads") return toStrId(item?.lead_id || item?.id);
+          return toStrId(item?.id || item?.lead_id);
+        })
+        .filter((id) => id && !nextIds.has(String(id)));
+      for (const id of missingIds) {
+        await sbFetch(`${cfg.table}?${cfg.pk}=eq.${encodeURIComponent(id)}`, { method: "DELETE" });
+      }
+    }
+
     if (rows.length === 0) return true;
     // Batch in groups of 50 to avoid Supabase request size limits
     const BATCH = 50;
@@ -7184,6 +7215,112 @@ export default function App() {
     };
     syncSales();
   }, [salesReps, isLoading, isCloudConnected]);
+
+  // ── Supabase Realtime — live partner and sales team updates ──
+  useEffect(() => {
+    if (isLoading) return;
+
+    const normalizeArrayRecord = (record) => record?.data || record || null;
+    const upsertById = (setter, record) => {
+      const next = normalizeArrayRecord(record);
+      if (!next) return;
+      setter((prev) => {
+        const id = String(next.id || next.partner_id || next.rep_id || "");
+        if (!id) return prev;
+        const exists = prev.some((item) => String(item.id) === id);
+        if (exists) {
+          return prev.map((item) => String(item.id) === id ? { ...item, ...next } : item);
+        }
+        return [next, ...prev];
+      });
+    };
+
+    const removeById = (setter, record) => {
+      const next = normalizeArrayRecord(record);
+      const id = String(next?.id || next?.partner_id || next?.rep_id || next?.data?.id || "");
+      if (!id) return;
+      setter((prev) => prev.filter((item) => String(item.id) !== id));
+    };
+
+    let ws = null;
+    let fallbackTimer = null;
+
+    try {
+      const realtimeUrl = SUPABASE_URL.replace("https://", "wss://") + "/realtime/v1/websocket?apikey=" + SUPABASE_ANON + "&vsn=1.0.0";
+      ws = new WebSocket(realtimeUrl);
+
+      ws.onopen = () => {
+        const subscribe = (topic, ref) => {
+          ws.send(JSON.stringify({
+            topic,
+            event: "phx_join",
+            payload: {
+              config: {
+                broadcast: { self: false },
+                postgres_changes: [
+                  { event: "INSERT", schema: "public", table: topic.split(":").pop() },
+                  { event: "UPDATE", schema: "public", table: topic.split(":").pop() },
+                  { event: "DELETE", schema: "public", table: topic.split(":").pop() },
+                ],
+              },
+            },
+            ref,
+          }));
+        };
+
+        subscribe("realtime:public:huc_partners", "partners1");
+        subscribe("realtime:public:huc_sales_reps", "sales1");
+
+        ws._heartbeat = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "team-hb" }));
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (e) => {
+        try {
+          const msg = JSON.parse(e.data);
+          const topic = String(msg?.topic || "");
+          const event = msg?.payload?.data?.type;
+          const record = msg?.payload?.data?.record || msg?.payload?.data?.old_record || msg?.payload?.data;
+
+          if (topic.includes("huc_partners")) {
+            if (event === "DELETE") removeById(setPartners, record);
+            if (event === "INSERT" || event === "UPDATE") upsertById(setPartners, record);
+          }
+
+          if (topic.includes("huc_sales_reps")) {
+            if (event === "DELETE") removeById(setSalesReps, record);
+            if (event === "INSERT" || event === "UPDATE") upsertById(setSalesReps, record);
+          }
+        } catch {
+          // Ignore malformed realtime packets and let the existing autosave keep working.
+        }
+      };
+
+      ws.onerror = () => {
+        fallbackTimer = setInterval(async () => {
+          const [freshPartners, freshSales] = await Promise.all([
+            sbGet(DB_KEYS.partners),
+            sbGet(DB_KEYS.salesReps),
+          ]);
+          if (Array.isArray(freshPartners)) setPartners(freshPartners);
+          if (Array.isArray(freshSales)) setSalesReps(freshSales);
+        }, 30000);
+      };
+    } catch {
+      // If realtime construction fails, rely on the existing save/load path.
+    }
+
+    return () => {
+      if (fallbackTimer) clearInterval(fallbackTimer);
+      if (ws) {
+        if (ws._heartbeat) clearInterval(ws._heartbeat);
+        try { ws.close(); } catch {}
+      }
+    };
+  }, [isLoading]);
 
   // ── Auto-save resLeads — with write-time validator ──
   // Filters junk before every write so dirty data never enters Supabase
