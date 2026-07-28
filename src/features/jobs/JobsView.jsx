@@ -1,5 +1,6 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { List as VirtualList } from "react-window";
+import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "../../lib/statusEngine";
 
 const JOB_VIRTUALIZE_THRESHOLD = 75;
 const JOB_ROW_HEIGHT = 256;
@@ -8,6 +9,7 @@ const COMPANY_SHARE = 0.40;
 const PARTNER_COST_PER_HOUR = 30;
 const JOB_TYPES = ["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Move-Out","Kitchen & Bathroom Refresh","Post-Construction"];
 const UPSELL_OPTIONS = ["Inside Fridge","Inside Oven","Inside Cabinets","Interior Windows","Baseboards / Detail","Carpet Cleaning","Pet Hair / Heavy Detail"];
+const JOB_STATUSES = getDomainStatusOptions("job");
 
 const C = {
   bg: "#0B1020",
@@ -81,9 +83,9 @@ export default function JobsView({ jobs, setJobs, partners }) {
   const [summaryDrawerOpen, setSummaryDrawerOpen] = useState(false);
   const [pendingCompleteId, setPendingCompleteId] = useState(null);
   const [summaryText, setSummaryText] = useState("");
-  const [newJob, setNewJob] = useState({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", partnerIds: [], sqft: 0, hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: "scheduled", pay: 0 });
+  const [newJob, setNewJob] = useState({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", partnerIds: [], sqft: 0, hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: toDomainStatus(CANONICAL_STATUS.SCHEDULED, "job"), pay: 0 });
 
-  const filtered = useMemo(() => (filter === "all" ? jobs : jobs.filter(j => j.status === filter)), [filter, jobs]);
+  const filtered = useMemo(() => (filter === "all" ? jobs : jobs.filter(j => statusMatches(j.status, filter, "job"))), [filter, jobs]);
 
   const handleAdd = () => {
     const partnerIds = newJob.partnerIds?.filter(Boolean) || (newJob.partnerId ? [parseInt(newJob.partnerId)] : []);
@@ -104,10 +106,10 @@ export default function JobsView({ jobs, setJobs, partners }) {
       pay: partnerPayEach,
     }]);
     setShowModal(false);
-    setNewJob({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", partnerIds: [], sqft: 0, hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: "scheduled", pay: 0 });
+    setNewJob({ client: "", address: "", type: "Standard Clean", date: "", time: "", partnerId: "", partnerIds: [], sqft: 0, hours: 2, upsells: [], beforePics: [], afterPics: [], summary: "", status: toDomainStatus(CANONICAL_STATUS.SCHEDULED, "job"), pay: 0 });
   };
 
-  const updateStatus = (id, status) => setJobs(jobs.map(j => j.id === id ? { ...j, status } : j));
+  const updateStatus = (id, status) => setJobs(jobs.map(j => j.id === id ? { ...j, status: toDomainStatus(status, "job") } : j));
   const updateSummary = (id, summary) => setJobs(jobs.map(j => j.id === id ? { ...j, summary } : j));
   const toggleUpsell = (upsell) => {
     const nextUpsells = newJob.upsells.includes(upsell) ? newJob.upsells.filter(x => x !== upsell) : [...newJob.upsells, upsell];
@@ -126,7 +128,7 @@ export default function JobsView({ jobs, setJobs, partners }) {
             {jobPartners.length > 0 && <div style={{ fontSize: 13, marginTop: 4 }}>👷 <strong>{jobPartners.map(p => p.name).join(" + ")}</strong></div>}
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
-            <div style={styles.badge(job.status === "completed" ? "green" : job.status === "in-progress" ? "gold" : "blue")}>{job.status}</div>
+            <div style={styles.badge(statusMatches(job.status, "completed", "job") ? "green" : statusMatches(job.status, "in-progress", "job") ? "gold" : "blue")}>{job.status}</div>
             <div style={{ fontWeight: 800, fontSize: 18, color: C.accent }}>${job.pay}</div>
             <div style={{ fontSize: 12, color: C.muted }}>{job.hours}h · {(job.upsells || []).length} upsells</div>
           </div>
@@ -141,7 +143,7 @@ export default function JobsView({ jobs, setJobs, partners }) {
           </div>
         )}
 
-        {job.status === "completed" && job.summary && (
+        {statusMatches(job.status, "completed", "job") && job.summary && (
           <div style={{ marginTop: 12, background: C.surface, borderRadius: 10, padding: "10px 14px" }}>
             <div style={styles.label}>End-of-Job Summary</div>
             <div style={{ fontSize: 13, color: C.muted, lineHeight: 1.6, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical" }}>{job.summary}</div>
@@ -149,8 +151,8 @@ export default function JobsView({ jobs, setJobs, partners }) {
         )}
 
         <div style={{ marginTop: 16, display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {job.status === "scheduled" && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, "in-progress")}>▶ Start Job</button>}
-          {job.status === "in-progress" && (
+          {statusMatches(job.status, "scheduled", "job") && <button style={styles.btn("sm")} onClick={() => updateStatus(job.id, CANONICAL_STATUS.IN_PROGRESS)}>▶ Start Job</button>}
+          {statusMatches(job.status, "in-progress", "job") && (
             <button style={{ ...styles.btn("sm"), background: C.gold, color: "#0A0F1E", minHeight: 44 }} onClick={() => {
               setPendingCompleteId(job.id);
               setSummaryText("");
@@ -177,7 +179,7 @@ export default function JobsView({ jobs, setJobs, partners }) {
       </div>
 
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
-        {["all","scheduled","in-progress","completed"].map(f => (
+        {["all", ...JOB_STATUSES.filter((s) => s !== "cancelled")].map(f => (
           <button key={f} style={styles.navBtn(filter === f)} onClick={() => setFilter(f)}>
             {f === "all" ? "All Jobs" : f.charAt(0).toUpperCase() + f.slice(1)}
           </button>
@@ -209,7 +211,7 @@ export default function JobsView({ jobs, setJobs, partners }) {
               <button style={{ padding:14, borderRadius:10, border:"none", background:C.gold, color:"#0A0F1E", fontSize:15, fontWeight:800, cursor:"pointer", minHeight:44 }} onClick={() => {
                 if (pendingCompleteId) {
                   if (summaryText.trim()) updateSummary(pendingCompleteId, summaryText.trim());
-                  updateStatus(pendingCompleteId, "completed");
+                  updateStatus(pendingCompleteId, CANONICAL_STATUS.COMPLETED);
                 }
                 setSummaryDrawerOpen(false);
                 setPendingCompleteId(null);

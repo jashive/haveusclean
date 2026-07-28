@@ -4,6 +4,7 @@ import { fmt } from "../../lib/formatters";
 import { RES_ADDONS } from "../../lib/pricing";
 import StatusBadge from "../../components/StatusBadge";
 import { getLeadKey } from "./leadUtils";
+import { statusMatches } from "../../lib/statusEngine";
 
 /**
  * LeadCard
@@ -178,25 +179,25 @@ export default function LeadCard({
 
       {/* ── Workflow action buttons ── */}
       <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-        {(!lead.status || lead.status === "New") && (
+        {(!lead.status || statusMatches(lead.status, "New", "residential")) && (
           <button style={S.btn("primary")} onClick={() => onQuote(lead)}>📤 Quote</button>
         )}
-        {lead.status === "Quoted" && (
+        {statusMatches(lead.status, "Quoted", "residential") && (
           <button style={{ ...S.btn("sm"), background: C.gold, color: "#0A0F1E" }} onClick={() => onBook(lead)}>
             ✅ Book
           </button>
         )}
-        {lead.status === "Follow Up" && (
+        {statusMatches(lead.status, "Follow Up", "residential") && (
           <button style={{ ...S.btn("sm"), background: "#FF6B6B", color: "#fff" }} onClick={() => onQuote(lead)}>
             📤 Re-Quote
           </button>
         )}
-        {lead.status === "Booked" && (
+        {statusMatches(lead.status, "Booked", "residential") && (
           <button style={{ ...S.btn("sm"), background: C.purple, color: "#0A0F1E" }} onClick={() => onPay(lead)}>
             💳 Pay
           </button>
         )}
-        {lead.status === "Completed" && (
+        {statusMatches(lead.status, "Completed", "residential") && (
           <span style={{ fontSize: 13, color: C.accent, fontWeight: 700 }}>🎉 Done</span>
         )}
       </div>

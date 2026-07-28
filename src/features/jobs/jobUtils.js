@@ -1,3 +1,5 @@
+import { getDomainStatusOptions, statusMatches } from "../../lib/statusEngine";
+
 /**
  * jobUtils.js
  * Pure utility functions for job filtering and display helpers.
@@ -12,7 +14,7 @@
  */
 export function filterJobs(jobs, filter) {
   if (!Array.isArray(jobs)) return [];
-  return filter === "all" ? jobs : jobs.filter(j => j.status === filter);
+  return filter === "all" ? jobs : jobs.filter(j => statusMatches(j.status, filter, "job"));
 }
 
 /**
@@ -38,4 +40,4 @@ export function filterLabel(filter) {
 }
 
 /** All valid job status filters */
-export const JOB_FILTERS = ["all", "scheduled", "in-progress", "completed"];
+export const JOB_FILTERS = ["all", ...getDomainStatusOptions("job").filter((s) => s !== "cancelled")];

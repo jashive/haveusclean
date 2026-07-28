@@ -1,3 +1,5 @@
+import { getDomainStatusOptions } from "./statusEngine";
+
 export const BRAND = {
   name: "Have Us Clean",
   tagline: "Mid-Market Cleaning · Toronto & GTA",
@@ -31,14 +33,7 @@ export const C = {
   dim: "#445566",
 };
 
-export const HUC_STATUSES = [
-  "New",
-  "Quoted",
-  "Follow Up",
-  "Booked",
-  "Completed",
-  "Lost",
-];
+export const HUC_STATUSES = getDomainStatusOptions("residential");
 
 export const HUC_STATUS_COLOR = {
   New: C.blue,

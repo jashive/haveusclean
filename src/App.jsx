@@ -6,6 +6,8 @@ import { filterLeads } from "./features/leads/leadUtils";
 import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
+import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "./lib/statusEngine";
+import { calculateQuote as calculateQuoteGateway } from "./lib/quoteEngine";
 
 const ConfirmDrawer = lazy(() => import("./components/ConfirmDrawer"));
 const BookingWidget = lazy(() => import("./components/BookingWidget"));
@@ -272,7 +274,7 @@ const HUC_ADDONS = [
 ];
 
 // ─── HUC LEAD STATUSES (from operating system) ────────────────────────────────
-const HUC_STATUSES = ["New", "Quoted", "Follow Up", "Booked", "Completed", "Lost"];
+const HUC_STATUSES = getDomainStatusOptions("residential");
 // Colors resolved after C is defined — see HUC_STATUS_COLOR below
 
 // ─── MULTI-REGION CONFIG ─────────────────────────────────────────────────────
@@ -793,6 +795,46 @@ function calcComQuote(f, region = ACTIVE_REGION) {
   return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:partnerPayFromPrice(preTaxTotal), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
 }
 
+function getResidentialQuoteInput(input = {}) {
+  return {
+    ...input,
+    dwellingType: input.dwellingType || "Apartment / Condo",
+    dwellingSize: input.dwellingSize || "2 Bed",
+    serviceType: input.serviceType || "Refresh Clean",
+    frequency: input.frequency || "One-Time",
+    beds: toFiniteNumber(input.beds, 2),
+    baths: toFiniteNumber(input.baths, 1),
+    sqft: toFiniteNumber(input.sqft, 900),
+    addons: Array.isArray(input.addons) ? input.addons : [],
+  };
+}
+
+function getCommercialQuoteInput(input = {}) {
+  return {
+    ...input,
+    serviceType: input.serviceType || "Office Clean",
+    frequency: input.frequency || "Weekly",
+    sqft: toFiniteNumber(input.sqft, 2000),
+    floors: Math.max(1, toFiniteNumber(input.floors, 1)),
+    contractMonths: Math.max(1, toFiniteNumber(input.contractMonths, 1)),
+    addons: Array.isArray(input.addons) ? input.addons : [],
+  };
+}
+
+function calculateQuote({ type = "residential", data = {}, region = ACTIVE_REGION }) {
+  const normalizedInput = type === "commercial"
+    ? getCommercialQuoteInput(data)
+    : getResidentialQuoteInput(data);
+
+  return calculateQuoteGateway({
+    type,
+    data: normalizedInput,
+    region,
+    residentialCalculator: calcResQuote,
+    commercialCalculator: calcComQuote,
+  });
+}
+
 function ProfitBadge({ margin }) {
   const color = margin >= 30 ? C.accent : margin >= 20 ? C.gold : C.red;
   return <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:800, background:`${color}22`, color, border:`1px solid ${color}44` }}>📊 {margin}% margin</span>;
@@ -801,6 +843,7 @@ function ProfitBadge({ margin }) {
 function QuoteBox({ q, type = "res" }) {
   const R = q.region || ACTIVE_REGION;
   const f = (n) => fmt(n, R);
+  const confidenceTone = q.confidence === "High" ? C.accent : q.confidence === "Medium" ? C.gold : C.red;
   return (
     <div style={{ background:C.surface, borderRadius:13, border:`1px solid ${C.border}`, padding:16, marginTop:4 }}>
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:6 }}>
@@ -811,13 +854,27 @@ function QuoteBox({ q, type = "res" }) {
           {q.taxRate === 0 && <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>Tax Exempt</span>}
         </div>
       </div>
+      <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,140px),1fr))", gap:8, marginBottom:10 }}>
+        <div style={{ background:C.bg, borderRadius:8, padding:"7px 10px" }}>
+          <div style={{ fontSize:10, color:C.muted, fontWeight:700 }}>RECOMMENDED</div>
+          <div style={{ fontSize:15, fontWeight:800, color:C.accent }}>{f(q.recommendedPrice ?? q.total)}</div>
+        </div>
+        <div style={{ background:C.bg, borderRadius:8, padding:"7px 10px" }}>
+          <div style={{ fontSize:10, color:C.muted, fontWeight:700 }}>RANGE</div>
+          <div style={{ fontSize:13, fontWeight:800 }}>{f(q.minimumPrice ?? q.preTaxTotal)} - {f(q.maximumPrice ?? q.total)}</div>
+        </div>
+        <div style={{ background:C.bg, borderRadius:8, padding:"7px 10px" }}>
+          <div style={{ fontSize:10, color:C.muted, fontWeight:700 }}>CONFIDENCE</div>
+          <div style={{ fontSize:13, fontWeight:800, color:confidenceTone }}>{q.confidence || "Needs Review"}</div>
+        </div>
+      </div>
       {/* Team and hours summary */}
       <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:10 }}>
         <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.blueDim, color:C.blue }}>
-          👥 {q.teamSize} partner{q.teamSize>1?"s":""}
+          👥 {q.crewSize || q.teamSize} partner{(q.crewSize || q.teamSize)>1?"s":""}
         </span>
         <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.surface, color:C.muted }}>
-          ⏱ {q.jobHours}h estimated
+          ⏱ {q.estimatedHours || q.jobHours}h estimated
         </span>
         {q.teamSize > 1 && (
           <span style={{ padding:"3px 10px", borderRadius:20, fontSize:11, fontWeight:700, background:C.accentDim, color:C.accent }}>
@@ -1725,7 +1782,7 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
 // market, segment, buyer_title, pain_point, first_offer, priority_score,
 // cold_email, follow_up_email, linkedin_note, call_opener, status, notes
 
-const COLD_STATUSES = ["New","Contacted","Follow Up","Meeting Booked","Won","Lost"];
+const COLD_STATUSES = getDomainStatusOptions("coldOutreach");
 const COLD_STATUS_COLOR = {
   "New":            C.blue,
   "Contacted":      C.gold,
@@ -2533,7 +2590,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     return leads.map((lead) => ({
       lead,
       market: normalizeLeadMarket(lead),
-      status: lead?.status || "New",
+      status: toDomainStatus(lead?.status || "New", "coldOutreach"),
       segment: lead?.segment || "",
       companyKey: `${normalizeCompany(lead?.company || "")}|${String(lead?.city || "").trim().toLowerCase()}`,
     }));
@@ -2613,8 +2670,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
   // Stats based on the active filtered lead array
   const total     = leads.length;
   const hot       = filtered.filter(l => getColdLeadAiScore(l).score >= 80).length;
-  const booked    = filtered.filter(l => l.status === "Meeting Booked").length;
-  const won       = filtered.filter(l => l.status === "Won").length;
+  const booked    = filtered.filter(l => statusMatches(l.status, "Meeting Booked", "coldOutreach")).length;
+  const won       = filtered.filter(l => statusMatches(l.status, "Won", "coldOutreach")).length;
   const contacted = filtered.filter(l => l.status !== "New").length;
   const convRate  = total > 0 ? Math.round((won / total) * 100) : 0;
 
@@ -2628,7 +2685,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
   const updateStatus = async (id, status, extra = {}) => {
     let updatedLead = null;
-    const statusTimestamp = status === "Contacted"
+    const normalizedStatus = toDomainStatus(status, "coldOutreach");
+    const statusTimestamp = statusMatches(normalizedStatus, "Contacted", "coldOutreach")
       ? (extra.last_contacted_at || new Date().toISOString())
       : (extra.last_contacted_at || null);
     setLeads(ls => {
@@ -2637,10 +2695,10 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
         if (!match) return l;
         const nextLead = {
           ...l,
-          status,
+          status: normalizedStatus,
           ...extra,
           updated_at: new Date().toISOString(),
-          ...(status === "Contacted" ? {
+          ...(statusMatches(normalizedStatus, "Contacted", "coldOutreach") ? {
             last_contacted_at: statusTimestamp,
             assigned_rep: extra.assigned_rep || l.assigned_rep || "Current Rep",
           } : {}),
@@ -2656,14 +2714,14 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     });
     if (updatedLead) {
       queueLeadPersist(updatedLead, {
-        status,
+        status: normalizedStatus,
         last_contacted_at: statusTimestamp,
         updated_at: updatedLead.updated_at,
       });
       const leadName = updatedLead.company || updatedLead.name || String(id);
-      showStatusToast(status === "Contacted"
+      showStatusToast(statusMatches(normalizedStatus, "Contacted", "coldOutreach")
         ? `✅ Recorded as Contacted - ${leadName}`
-        : `✅ Status updated to ${status} - ${leadName}`);
+        : `✅ Status updated to ${normalizedStatus} - ${leadName}`);
     }
   };
 
@@ -3493,7 +3551,11 @@ function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
 
   // Calculate follow-up urgency for each lead
   const getFollowUpStatus = (lead) => {
-    if (["Booked","Completed","Lost"].includes(lead.status)) return null;
+    if (
+      statusMatches(lead.status, "Booked", "residential") ||
+      statusMatches(lead.status, "Completed", "residential") ||
+      statusMatches(lead.status, "Lost", "residential")
+    ) return null;
     const daysSinceQuoted = lead.quotedDate
       ? Math.floor((todayDate - new Date(lead.quotedDate)) / 86400000)
       : null;
@@ -3501,11 +3563,11 @@ function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
     const followUpDue = followUpDate ? followUpDate <= todayDate : false;
     const followUpOverdue = followUpDate ? followUpDate < todayDate : false;
 
-    if (lead.status === "New" && (!lead.quotedDate)) return { level:"action", label:"Send Quote", color:C.blue, days:null };
-    if (lead.status === "Quoted" && daysSinceQuoted !== null && daysSinceQuoted >= 3 && daysSinceQuoted < 7) return { level:"reminder", label:`Follow up (${daysSinceQuoted}d since quote)`, color:C.gold, days:daysSinceQuoted };
-    if (lead.status === "Quoted" && daysSinceQuoted !== null && daysSinceQuoted >= 7) return { level:"urgent", label:`Overdue follow-up (${daysSinceQuoted}d!)`, color:C.red, days:daysSinceQuoted };
-    if (lead.status === "Follow Up" && followUpOverdue) return { level:"urgent", label:"Follow-up date passed!", color:C.red, days:null };
-    if (lead.status === "Follow Up" && followUpDue) return { level:"reminder", label:"Follow up today", color:C.gold, days:null };
+    if (statusMatches(lead.status, "New", "residential") && (!lead.quotedDate)) return { level:"action", label:"Send Quote", color:C.blue, days:null };
+    if (statusMatches(lead.status, "Quoted", "residential") && daysSinceQuoted !== null && daysSinceQuoted >= 3 && daysSinceQuoted < 7) return { level:"reminder", label:`Follow up (${daysSinceQuoted}d since quote)`, color:C.gold, days:daysSinceQuoted };
+    if (statusMatches(lead.status, "Quoted", "residential") && daysSinceQuoted !== null && daysSinceQuoted >= 7) return { level:"urgent", label:`Overdue follow-up (${daysSinceQuoted}d!)`, color:C.red, days:daysSinceQuoted };
+    if (statusMatches(lead.status, "Follow Up", "residential") && followUpOverdue) return { level:"urgent", label:"Follow-up date passed!", color:C.red, days:null };
+    if (statusMatches(lead.status, "Follow Up", "residential") && followUpDue) return { level:"reminder", label:"Follow up today", color:C.gold, days:null };
     return null;
   };
 
@@ -3525,7 +3587,7 @@ function FollowUpReminders({ resLeads, setResLeads, jobs, region }) {
   // Generate follow-up email
   const generateFollowUp = async (lead, setLoading, setResult) => {
     setLoading(true);
-    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region || ACTIVE_REGION); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
+    const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region: region || ACTIVE_REGION }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
     const prompt = `Write a short, warm follow-up email for a residential cleaning lead.
 
 Company: Have Us Clean
@@ -3568,7 +3630,7 @@ Rules:
 
     const markFollowedUp = () => {
       setResLeads(ls => ls.map(l => l.id === lead.id
-        ? { ...l, status:"Follow Up", followUpDate: new Date(Date.now() + 3*86400000).toISOString().split("T")[0] }
+        ? { ...l, status: toDomainStatus(CANONICAL_STATUS.NEEDS_INFORMATION, "residential"), followUpDate: new Date(Date.now() + 3*86400000).toISOString().split("T")[0] }
         : l
       ));
     };
@@ -3711,7 +3773,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     // 3. Delete from Supabase — awaited, tries both id columns so row is truly gone
     try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(deleteId)}`, { method: "DELETE" }); } catch {}
   };
-  const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status:"New", assignedTo:"", followUpDate:"", jobNotes:"" };
+  const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status: toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential"), assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
 
   // Build the full quote email
@@ -3776,16 +3838,16 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const sendQuote = (lead) => {
-    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
+    const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
     const email = buildEmail(lead, q);
     // Mark as Quoted
-    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Quoted", quotedDate:new Date().toLocaleDateString() } : l));
-    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Quoted" }));
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status: toDomainStatus(CANONICAL_STATUS.QUOTE_SENT, "residential"), quotedDate:new Date().toLocaleDateString() } : l));
+    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status: toDomainStatus(CANONICAL_STATUS.QUOTE_SENT, "residential") }));
     setShowEmail({ lead, q, ...email });
   };
 
   const bookLead = (lead) => {
-    const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
+    const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
     const assignedPartner = partners.find(p => p.onboarded) || partners[0] || { id: 1, name: 'Unassigned' };
     const jobId = Date.now();
     const newJob = {
@@ -3815,24 +3877,25 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       workOrder: generateWorkOrder({ id:jobId, client:lead.name, address:lead.address, type:lead.serviceType, date:lead.preferredDate||"TBD", time:lead.preferredTime||"9:00 AM", hours:Math.ceil(q.serviceHours), upsells:[] }, lead, assignedPartner),
     };
     setJobs(js => [...js, newJob]);
-    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"Booked", workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
-    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"Booked" }));
+    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status: toDomainStatus(CANONICAL_STATUS.BOOKED, "residential"), workOrder:newJob.id, bookedDate:new Date().toLocaleDateString() } : l));
+    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status: toDomainStatus(CANONICAL_STATUS.BOOKED, "residential") }));
     if (typeof setTab === "function") setTab("jobs");
     alert(`✅ Job booked!\n\nClient: ${newJob.client}\nDate: ${newJob.date} at ${newJob.time}\nTeam: ${(newJob.partnerIds||[newJob.partnerId]).map(id=>partners.find(p=>p.id===id)?.name).filter(Boolean).join(" + ") || "Unassigned"}\nPartner Pay: ${region.currencySymbol}${newJob.partnerPay} total\n\nOpening Jobs tab now.`);
   };
 
   const confirmPayment = (lead) => {
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"Completed",paymentConfirmed:true}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"Completed",paymentConfirmed:true});
+    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:toDomainStatus(CANONICAL_STATUS.COMPLETED, "residential"),paymentConfirmed:true}:l));
+    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:toDomainStatus(CANONICAL_STATUS.COMPLETED, "residential"),paymentConfirmed:true});
   };
 
   const updateLeadField = (id, field, val) => {
-    setLeads(ls=>ls.map(l=>l.id===id?{...l,[field]:val}:l));
-    if(viewLead?.id===id) setViewLead(v=>({...v,[field]:val}));
+    const nextValue = field === "status" ? toDomainStatus(val, "residential") : val;
+    setLeads(ls=>ls.map(l=>l.id===id?{...l,[field]:nextValue}:l));
+    if(viewLead?.id===id) setViewLead(v=>({...v,[field]:nextValue}));
   };
 
   const submitForm = () => {
-    const newLead = { ...form, id:Date.now(), status:"New", workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:new Date().toISOString() };
+    const newLead = { ...form, id:Date.now(), status:toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential"), workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:new Date().toISOString() };
     setLeads(ls => [newLead, ...ls]);
     setFilterStatus("All");
     setSearchQuery(""); // clear search so new lead is visible
@@ -3844,17 +3907,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const runAiQuoteCalculation = () => {
     try {
-      const q = calcResQuote({
-        ...form,
-        dwellingType: form.dwellingType || "Apartment / Condo",
-        dwellingSize: form.dwellingSize || "2 Bed",
-        serviceType: form.serviceType || "Refresh Clean",
-        frequency: form.frequency || "One-Time",
-        beds: toFiniteNumber(form.beds, 2),
-        baths: toFiniteNumber(form.baths, 1),
-        sqft: toFiniteNumber(form.sqft, 900),
-        addons: Array.isArray(form.addons) ? form.addons : [],
-      }, region);
+      const q = calculateQuote({ type:"residential", data: form, region });
       setAiQuotePreview(q);
     } catch {
       setAiQuotePreview({ error: true });
@@ -3866,7 +3919,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const filteredLeads = (() => {
     try {
-      const base = filterStatus === "All" ? leads : leads.filter(l => l?.status === filterStatus);
+      const base = filterStatus === "All" ? leads : leads.filter(l => statusMatches(l?.status, filterStatus, "residential"));
       const sq = searchQuery.trim().toLowerCase();
       return base
         .filter(l => {
@@ -3888,7 +3941,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
     }
   })();
 
-  const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>l?.status===s).length }), {});
+  const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>statusMatches(l?.status, s, "residential")).length }), {});
 
   return (
     <div>
@@ -3927,17 +3980,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
           if (!lead || (!lead.id && !lead.name && !lead.email)) return null;
           let q;
           try {
-            q = calcResQuote({
-              ...lead,
-              dwellingType: lead.dwellingType || "Apartment / Condo",
-              dwellingSize: lead.dwellingSize || "2 Bed",
-              serviceType:  lead.serviceType  || "Refresh Clean",
-              frequency:    lead.frequency    || "One-Time",
-              beds:   lead.beds  || 2,
-              baths:  lead.baths || 1,
-              sqft:   lead.sqft  || 900,
-              addons: lead.addons || [],
-            }, region);
+            q = calculateQuote({ type:"residential", data: lead, region });
           } catch(e) {
             q = { total:0, profit:0, margin:0, teamSize:1, currency: region?.currencySymbol || "CA$" };
           }
@@ -3988,11 +4031,11 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
                 </div>
               )}
               <div style={{ marginTop:8, display:"flex", gap:8, flexWrap:"wrap" }}>
-                {(!lead.status || lead.status==="New") && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
-                {lead.status==="Quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
-                {lead.status==="Follow Up" && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
-                {lead.status==="Booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Pay</button>}
-                {lead.status==="Completed" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Done</span>}
+                {(!lead.status || statusMatches(lead.status,"New","residential")) && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
+                {statusMatches(lead.status,"Quoted","residential") && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
+                {statusMatches(lead.status,"Follow Up","residential") && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
+                {statusMatches(lead.status,"Booked","residential") && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Pay</button>}
+                {statusMatches(lead.status,"Completed","residential") && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Done</span>}
               </div>
             </div>
           );
@@ -4096,7 +4139,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               </div>
             )}
 
-            {form.name && (() => { try { const q=calcResQuote({...form, dwellingType:form.dwellingType||"Apartment / Condo", dwellingSize:form.dwellingSize||"2 Bed", serviceType:form.serviceType||"Refresh Clean", frequency:form.frequency||"One-Time", beds:form.beds||2, baths:form.baths||1, sqft:form.sqft||900, addons:form.addons||[]},region); return <QuoteBox q={q} type="res" />; } catch(e) { return null; } })()}
+            {form.name && (() => { try { const q=calculateQuote({ type:"residential", data: form, region }); return <QuoteBox q={q} type="res" />; } catch(e) { return null; } })()}
 
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
@@ -4121,8 +4164,8 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             ))}
             <div style={{ marginBottom:10 }}>
               <div style={S.label}>Status</div>
-              <select style={S.input} value={editLead.status||"New"} onChange={e=>setEditLead(v=>({...v,status:e.target.value}))}>
-                {["New","Quoted","Follow Up","Booked","Completed","Lost"].map(s=><option key={s}>{s}</option>)}
+              <select style={S.input} value={editLead.status||toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential")} onChange={e=>setEditLead(v=>({...v,status:toDomainStatus(e.target.value, "residential")}))}>
+                {HUC_STATUSES.map(s=><option key={s}>{s}</option>)}
               </select>
             </div>
             <div style={{ marginBottom:10 }}>
@@ -4176,18 +4219,18 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               <div style={{ fontSize:14, color:C.muted }}>{HUC_PACKAGES[viewLead.serviceType]?.icon} {viewLead.serviceType} · {viewLead.frequency}</div>
               {viewLead.notes && <div style={{ fontSize:13, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px", marginTop:8 }}>💬 {viewLead.notes}</div>}
             </div>
-            {(() => { try { return <QuoteBox q={calcResQuote({...viewLead, dwellingType:viewLead.dwellingType||"Apartment / Condo", dwellingSize:viewLead.dwellingSize||"2 Bed", serviceType:viewLead.serviceType||"Refresh Clean", frequency:viewLead.frequency||"One-Time", beds:viewLead.beds||2, baths:viewLead.baths||1, sqft:viewLead.sqft||900, addons:viewLead.addons||[]},region)} type="res" />; } catch(e) { return <div style={{color:C.muted,fontSize:13,padding:12}}>Quote preview unavailable — fill in property details</div>; } })()}
+            {(() => { try { return <QuoteBox q={calculateQuote({ type:"residential", data: viewLead, region })} type="res" />; } catch(e) { return <div style={{color:C.muted,fontSize:13,padding:12}}>Quote preview unavailable — fill in property details</div>; } })()}
             {/* Editable job notes + follow-up */}
             <div style={{ marginTop:14, display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10 }}>
               <div><div style={S.label}>Job Notes</div><textarea style={{...S.input,minHeight:50,resize:"vertical"}} value={viewLead.jobNotes||""} onChange={e=>updateLeadField(viewLead.id,"jobNotes",e.target.value)} placeholder="Notes for VA / team..." /></div>
               <div><div style={S.label}>Follow-Up Date</div><input style={S.input} type="date" value={viewLead.followUpDate||""} onChange={e=>updateLeadField(viewLead.id,"followUpDate",e.target.value)} /></div>
             </div>
             <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
-              {viewLead.status==="New" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>📤 Send Quote to {viewLead.email}</button>}
-              {viewLead.status==="Quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>✅ Book + Create Work Order</button>}
-              {viewLead.status==="Follow Up" && <button style={{ ...S.btn("primary"), width:"100%", background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(viewLead)}>📤 Re-Send Quote</button>}
-              {viewLead.status==="Booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>💳 Confirm Payment</button>}
-              {viewLead.status==="Completed" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>🎉 Job complete and paid!</div>}
+              {statusMatches(viewLead.status,"New","residential") && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>📤 Send Quote to {viewLead.email}</button>}
+              {statusMatches(viewLead.status,"Quoted","residential") && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>✅ Book + Create Work Order</button>}
+              {statusMatches(viewLead.status,"Follow Up","residential") && <button style={{ ...S.btn("primary"), width:"100%", background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(viewLead)}>📤 Re-Send Quote</button>}
+              {statusMatches(viewLead.status,"Booked","residential") && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>💳 Confirm Payment</button>}
+              {statusMatches(viewLead.status,"Completed","residential") && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>🎉 Job complete and paid!</div>}
             </div>
           </div>
         </Modal>
@@ -4303,7 +4346,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
   const [form, setForm] = useState({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
 
   const sendQuote = (lead) => {
-    const q = calcComQuote(lead, region);
+    const q = calculateQuote({ type:"commercial", data: lead, region });
     const pkg = lead.serviceType;
     const addonList = lead.addons?.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
     const cur = region.id === "ON" ? "CA$" : "$";
@@ -4343,7 +4386,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
     setShowEmail({ lead, q, subject, body, isCommercial: true });
   };
   const bookLead = (lead) => {
-    const q = calcComQuote(lead, region);
+    const q = calculateQuote({ type:"commercial", data: lead, region });
     const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, partnerIds:[partners[0]?.id||1], status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons?.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
     setJobs(js=>[...js,newJob]);
     setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"booked",workOrder:newJob.id}:l));
@@ -4369,13 +4412,13 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       </div>
       <div style={S.grid3}>
         <StatCard label="Commercial Leads" value={leads.length} icon="🏢" color={C.blue} />
-        <StatCard label="Monthly Value" value={`$${leads.filter(l=>l.status!=="new").reduce((a,b)=>a+calcComQuote(b, region).monthly,0).toFixed(0)}`} icon="📈" color={C.gold} />
+        <StatCard label="Monthly Value" value={`$${leads.filter(l=>l.status!=="new").reduce((a,b)=>a+calculateQuote({ type:"commercial", data: b, region }).monthly,0).toFixed(0)}`} icon="📈" color={C.gold} />
         <StatCard label="Active Contracts" value={leads.filter(l=>["booked","paid"].includes(l.status)).length} icon="📑" color={C.accent} />
       </div>
       <div style={S.divider} />
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {leads.map(lead=>{
-          const q = calcComQuote(lead, region);
+          const q = calculateQuote({ type:"commercial", data: lead, region });
           return (
             <div key={lead.id} style={S.card}>
               <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
@@ -4425,7 +4468,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
             </div>
             <div><div style={S.label}>Frequency</div><select style={S.select} value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>{Object.keys(COM_FREQ_DISCOUNTS).map(f=><option key={f}>{f}</option>)}</select></div>
             <div><div style={S.label}>Add-Ons</div><div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>{COM_ADDONS.map(ao=>(<button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:(form.addons||[]).includes(ao.id)?C.blueDim:C.surface, color:(form.addons||[]).includes(ao.id)?C.blue:C.muted, border:`1px solid ${(form.addons||[]).includes(ao.id)?C.blue:C.border}` }}>{ao.label} +${markupFactor(ao.costToUs)}</button>))}</div></div>
-            {form.bizName && (() => { const q=calcComQuote(form, region); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
+            {form.bizName && (() => { const q=calculateQuote({ type:"commercial", data: form, region }); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
               <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
               <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
@@ -4496,7 +4539,7 @@ function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
       </Suspense>
       {viewLead && (
         <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
-          {(() => { const q=calcComQuote(viewLead, region); return (
+          {(() => { const q=calculateQuote({ type:"commercial", data: viewLead, region }); return (
             <div>
               <div style={{ marginBottom:14 }}>
                 <div style={{ fontSize:14, color:C.muted }}>👤 {viewLead.contactName} · {viewLead.email}</div>
@@ -5505,7 +5548,7 @@ function ClientView({ jobs, resLeads, region, setTab, invoices }) {
             <div style={{ marginTop:14, padding:"12px 16px", background:C.surface, borderRadius:10, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
               <span style={{ fontSize:13, color:C.muted }}>Quote Total</span>
               <span style={{ fontSize:22, fontWeight:800, color:C.gold }}>
-                {cur}{(() => { try { return Math.round(calcResQuote({...activeQuote, dwellingType:activeQuote.dwellingType||"Apartment / Condo", dwellingSize:activeQuote.dwellingSize||"2 Bed", serviceType:activeQuote.serviceType||"Refresh Clean", frequency:activeQuote.frequency||"One-Time", beds:activeQuote.beds||2, baths:activeQuote.baths||1, sqft:activeQuote.sqft||900, addons:activeQuote.addons||[]}, region||ACTIVE_REGION).total).toLocaleString(); } catch(e) { return "—"; } })()}
+                {cur}{(() => { try { return Math.round(calculateQuote({ type:"residential", data: activeQuote, region: region||ACTIVE_REGION }).total).toLocaleString(); } catch(e) { return "—"; } })()}
               </span>
             </div>
             <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
@@ -11957,7 +12000,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab, s
               <button style={S.btn("sm")} onClick={() => setTab("res")}>+ New Quote</button>
             </div>
             {quotedLeads.map(lead => {
-              const q = (() => { try { return calcResQuote({...lead, dwellingType:lead.dwellingType||"Apartment / Condo", dwellingSize:lead.dwellingSize||"2 Bed", serviceType:lead.serviceType||"Refresh Clean", frequency:lead.frequency||"One-Time", beds:lead.beds||2, baths:lead.baths||1, sqft:lead.sqft||900, addons:lead.addons||[]}, region || ACTIVE_REGION); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0}; } })();
+              const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region: region || ACTIVE_REGION }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
               const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
               return (
                 <div key={lead.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
