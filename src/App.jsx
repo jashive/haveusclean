@@ -7,7 +7,7 @@ import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "./lib/statusEngine";
-import { calcResQuote, calcComQuote, getJobCompensationBreakdown, getJobHours, getResidentialQuoteFallback, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
+import { calcResQuote, calcComQuote, FREQ_DISCOUNTS, getJobCompensationBreakdown, getJobHours, getResidentialQuoteFallback, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
 import { calculateQuote as calculateQuoteGateway } from "./lib/quoteEngine";
 import { buildCommercialLeadsRuntime } from "./core/pricing/commercialLeadsRuntime";
 import { ALL_TAB_IDS, canAccessTab, filterNavGroupsByRole, getTabQueryValue, normalizeTabId, ROLE_TAB_ALLOWLIST } from "./core/permissions/navigation";
@@ -3467,7 +3467,7 @@ const SAMPLE_RES_LEADS = [
 
 function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, resLeads, setResLeads, setTab = () => {} }) {
   // Use lifted state; seed with sample data if empty
-  const leads = resLeads;
+  const leads = safeArray(resLeads);
   const setLeads = (updater) => {
     setResLeads((prev) => {
       const base = safeArray(prev);
@@ -6720,7 +6720,9 @@ export default function App() {
 
         const savedJobs = Array.isArray(cloudJobs) && cloudJobs.length > 0 ? cloudJobs : localJobs;
         const savedPartners = Array.isArray(cloudPartners) && cloudPartners.length > 0 ? cloudPartners : localPartners;
-        const savedResLeads = Array.isArray(cloudResLeads) && cloudResLeads.length > 0 ? cloudResLeads : localResLeads;
+        const savedResLeads = Array.isArray(cloudResLeads) && cloudResLeads.length > 0
+          ? cloudResLeads
+          : (Array.isArray(localResLeads) ? localResLeads : []);
         const savedColdLeads = Array.isArray(cloudColdLeads) && cloudColdLeads.length > 0 ? cloudColdLeads : localColdLeads;
 
         if (cancelled) return;
@@ -6732,7 +6734,7 @@ export default function App() {
         if (log)            setActivityLog(log);
         if (savedClients)   setClients(savedClients);
         if (savedInvoices)  setInvoices(savedInvoices);
-        if (savedResLeads) {
+        if (Array.isArray(savedResLeads)) {
           try {
             // 1. Filter permanently deleted IDs
             const deleted = new Set(JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]"));
@@ -6777,8 +6779,8 @@ export default function App() {
               if (na.length > 3) seenNA.add(na);
               return true;
             });
-            setResLeads(afterAll);
-          } catch { setResLeads(savedResLeads); }
+            setResLeads(safeArray(afterAll));
+          } catch { setResLeads(safeArray(savedResLeads)); }
         }
         if (savedColdLeads && savedColdLeads.length > 0) {
           // Strip out the hardcoded sample lead IDs that were stored in previous sessions
@@ -7107,9 +7109,10 @@ export default function App() {
             const lead = record.data || record;
             if (!isValidRes(lead)) return;
             setResLeads(prev => {
+              const base = safeArray(prev);
               const lid = String(lead.id || "");
-              if (prev.find(l => String(l.id) === lid)) return prev; // already exists
-              return [lead, ...prev];
+              if (base.find(l => String(l.id) === lid)) return base; // already exists
+              return [lead, ...base];
             });
           }
 
@@ -7118,20 +7121,21 @@ export default function App() {
             const lead = record.data || record;
             if (!isValidRes(lead)) return;
             setResLeads(prev => {
+              const base = safeArray(prev);
               const lid = String(lead.id || "");
-              if (prev.find(l => String(l.id) === lid)) {
-                return prev.map(l => String(l.id) === lid
+              if (base.find(l => String(l.id) === lid)) {
+                return base.map(l => String(l.id) === lid
                   ? { ...lead, status: l.status || lead.status, notes: l.notes || lead.notes }
                   : l
                 );
               }
-              return [lead, ...prev];
+              return [lead, ...base];
             });
           }
 
           if (event === "DELETE") {
             const lid = String(old?.id || "");
-            if (lid) setResLeads(prev => prev.filter(l => String(l.id) !== lid));
+            if (lid) setResLeads(prev => safeArray(prev).filter(l => String(l.id) !== lid));
           }
         } catch { /* ignore malformed */ }
       };

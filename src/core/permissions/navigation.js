@@ -1,6 +1,6 @@
 export const ROLE_TAB_ALLOWLIST = {
   partner: new Set(["partnerview", "onboarding"]),
-  sales: new Set(["salesview", "cold", "res", "jobs", "schedule", "partners"]),
+  sales: new Set(["salesview", "cold", "res", "jobs", "schedule", "partners", "ai"]),
 };
 
 export const TAB_QUERY_ALIASES = {
