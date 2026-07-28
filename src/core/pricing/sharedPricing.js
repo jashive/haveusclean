@@ -113,6 +113,35 @@ export function getJobCompensationBreakdown({
   };
 }
 
+export function getResidentialQuoteFallback(region = { id: "ON", currencySymbol: "CA$", tax: { name: "HST", rate: 0.13 } }) {
+  return {
+    total: 0,
+    preTaxTotal: 0,
+    taxAmount: 0,
+    partnerPay: 0,
+    partnerPayEach: 0,
+    profit: 0,
+    margin: 0,
+    teamSize: 1,
+    jobHours: 1.5,
+    breakdown: [],
+    discountAmt: 0,
+    discPct: 0,
+    taxRate: 0,
+    taxName: "HST",
+    currency: region?.currencySymbol || "CA$",
+    region,
+    freq_prices: {},
+    baseClientPrice: 0,
+    recommendedPrice: 0,
+    minimumPrice: 0,
+    maximumPrice: 0,
+    crewSize: 1,
+    estimatedHours: 1.5,
+    confidence: "Needs Review",
+  };
+}
+
 export const COM_SERVICE_COST_PER_SQFT = {
   "Office Clean": 0.07,
   "Janitorial (Daily)": 0.05,

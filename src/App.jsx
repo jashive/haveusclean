@@ -7,7 +7,7 @@ import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "./lib/statusEngine";
-import { calcResQuote, calcComQuote, getJobCompensationBreakdown, getJobHours, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
+import { calcResQuote, calcComQuote, getJobCompensationBreakdown, getJobHours, getResidentialQuoteFallback, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
 import { calculateQuote as calculateQuoteGateway } from "./lib/quoteEngine";
 import { buildCommercialLeadsRuntime } from "./core/pricing/commercialLeadsRuntime";
 import { ALL_TAB_IDS, canAccessTab, filterNavGroupsByRole, getTabQueryValue, normalizeTabId, ROLE_TAB_ALLOWLIST } from "./core/permissions/navigation";
@@ -556,6 +556,14 @@ function calculateQuote({ type = "residential", data = {}, region = ACTIVE_REGIO
     residentialCalculator: calcResQuote,
     commercialCalculator: calcComQuote,
   });
+}
+
+function getResidentialQuoteOrFallback(lead, region = ACTIVE_REGION) {
+  try {
+    return calculateQuote({ type: "residential", data: lead, region });
+  } catch {
+    return getResidentialQuoteFallback(region || ACTIVE_REGION);
+  }
 }
 
 function ProfitBadge({ margin }) {
@@ -3406,7 +3414,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const sendQuote = (lead) => {
-    const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
+    const q = getResidentialQuoteOrFallback(lead, region);
     const email = buildEmail(lead, q);
     // Mark as Quoted
     setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status: toDomainStatus(CANONICAL_STATUS.QUOTE_SENT, "residential"), quotedDate:new Date().toLocaleDateString() } : l));
@@ -3415,7 +3423,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const bookLead = (lead) => {
-    const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
+    const q = getResidentialQuoteOrFallback(lead, region);
     const assignedPartner = partners.find(p => p.onboarded) || partners[0] || { id: 1, name: 'Unassigned' };
     const jobId = Date.now();
     const newJob = {
@@ -10836,7 +10844,7 @@ function ClientPortal({ jobs, resLeads, setResLeads, partners, region, setTab, s
               <button style={S.btn("sm")} onClick={() => setTab("res")}>+ New Quote</button>
             </div>
             {quotedLeads.map(lead => {
-              const q = (() => { try { return calculateQuote({ type:"residential", data: lead, region: region || ACTIVE_REGION }); } catch(e) { return {total:0,preTaxTotal:0,taxAmount:0,partnerPay:0,partnerPayEach:0,profit:0,margin:0,teamSize:1,jobHours:1.5,breakdown:[],discountAmt:0,discPct:0,taxRate:0,taxName:"HST",currency:"CA$",region:region||ACTIVE_REGION,freq_prices:{},baseClientPrice:0,recommendedPrice:0,minimumPrice:0,maximumPrice:0,crewSize:1,estimatedHours:1.5,confidence:"Needs Review"}; } })();
+              const q = getResidentialQuoteOrFallback(lead, region || ACTIVE_REGION);
               const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
               return (
                 <div key={lead.id} style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"12px 0", borderBottom:`1px solid ${C.border}`, flexWrap:"wrap", gap:8 }}>
