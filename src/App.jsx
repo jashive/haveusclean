@@ -1639,19 +1639,44 @@ const SEGMENT_EMAIL_CONTEXT = {
 // Generate upgraded industry-aware emails using Claude
 async function generateUpgradedOutreach(lead) {
   const seg = SEGMENT_EMAIL_CONTEXT[lead.segment] || SEGMENT_EMAIL_CONTEXT["Office"];
+  const businessName = String(lead.company || lead.business_name || "this property").trim();
+  const prospectRole = String(lead.title || lead.buyer_title || "Facilities Manager").trim();
+  const buildingType = String(lead.type || lead.segment || "Commercial").trim();
+  const firstOffer = String(lead.first_offer || "office cleaning").trim();
+  const leadNotes = String(lead.notes || lead.pain_point || "").trim();
+  const isPropertyManager = /property|residential|tenant|turnover/i.test(`${lead.segment || ""} ${buildingType}`);
+  const templateGuide = leadNotes
+    ? `Special request context: explicitly incorporate this note into the subject line and opening paragraph when natural: "${leadNotes}".`
+    : isPropertyManager
+      ? "Template focus: residential or property manager outreach. Emphasize fast turnovers, tenant satisfaction, bonded and insured crews, and safe reliable access to occupied or recently vacated units."
+      : "Template focus: commercial or office facilities outreach. Emphasize reliability, after-hours or night-shift scheduling, quality control, and zero disruption to the workspace.";
   const prompt = `You are writing cold outreach for Have Us Clean, a professional commercial cleaning company serving Ontario, Canada and Arizona, USA.
 
 Lead details:
-- Company: ${lead.company}
+- Company: ${businessName}
 - City: ${lead.city}, ${lead.market}
 - Segment: ${lead.segment}
-- Buyer Title: ${lead.buyer_title}
+- Prospect Role: ${prospectRole}
+- Building Type / Industry: ${buildingType}
 - Pain Point: ${lead.pain_point}
-- First Offer: ${lead.first_offer}
+- First Offer: ${firstOffer}
+- Notes: ${leadNotes || "None provided"}
 - Industry Angle: ${seg.angle}
 - Opening Hook: ${seg.hook}
 
-Write exactly these 4 sections with these exact labels. No JSON, no markdown:
+Offer guidance:
+- Use Have Us Clean as the sender.
+- Keep tone credible, direct, polished, and personalized.
+- Make the message feel written for the exact prospect, not generic cleaning spam.
+- ${templateGuide}
+
+Write exactly these 6 sections with these exact labels. No JSON, no markdown:
+
+SUBJECT_LINE:
+(Under 9 words. Compelling, specific, and personalized to ${businessName}, ${prospectRole}, ${buildingType}, ${firstOffer}, and the note/pain point when relevant.)
+
+EMAIL_BODY:
+(120-170 words. Personalized cold email for ${businessName}. Use ${prospectRole}, ${buildingType}, ${firstOffer}, and ${leadNotes || lead.pain_point || "the prospect's likely cleaning pain point"}. Must feel ready to paste into Outlook or Gmail. End with a clear CTA and sign as Danae Misener, Have Us Clean. Mention haveusclean.ca and 905-216-1397 naturally.)
 
 COLD_EMAIL:
 (Under 140 words. Professional, local, credible. ${seg.angle}. Mention ${seg.hook} naturally. Goal: book ${seg.cta}. Sign as Danae Misener, Have Us Clean. Include haveusclean.ca and 905-216-1397 naturally.)
@@ -1685,10 +1710,61 @@ function parseOutreachSections(text) {
     return m ? m[1].trim() : "";
   };
   return {
+    subject_line:    extract("SUBJECT_LINE"),
+    email_body:      extract("EMAIL_BODY"),
     cold_email:      extract("COLD_EMAIL"),
     follow_up_email: extract("FOLLOW_UP_EMAIL"),
     linkedin_note:   extract("LINKEDIN_NOTE"),
     call_opener:     extract("CALL_OPENER"),
+  };
+}
+
+function buildOutreachEmailDraft(lead, outreach = {}) {
+  const company = String(lead?.company || lead?.business_name || "your property").trim();
+  const role = String(lead?.title || lead?.buyer_title || "Facilities Manager").trim();
+  const buildingType = String(lead?.type || lead?.segment || "Commercial").trim();
+  const offer = String(lead?.first_offer || "professional cleaning support").trim();
+  const notes = String(lead?.notes || lead?.pain_point || "").trim();
+  const market = String(lead?.market || "").trim();
+  const city = String(lead?.city || "").trim();
+  const emailAddress = String(lead?.email || lead?.contact_email || "").trim();
+  const propertyManagerTrack = /property|residential|tenant|turnover/i.test(`${lead?.segment || ""} ${buildingType}`);
+
+  const subject = outreach.subject_line || (propertyManagerTrack
+    ? `${company}: faster unit turnover support`
+    : `${company}: reliable after-hours cleaning`);
+
+  const noteSentence = notes
+    ? (/requested|following up/i.test(notes)
+        ? `Following up regarding ${notes.charAt(0).toLowerCase()}${notes.slice(1)}.`
+        : `${notes.charAt(0).toUpperCase()}${notes.slice(1)}.`)
+    : propertyManagerTrack
+      ? `We help property managers keep turnovers tight, protect tenant satisfaction, and send bonded and insured crews that can work safely in occupied or recently vacated units.`
+      : `We help facilities teams keep standards high with dependable night-shift scheduling, quality control, and zero disruption to staff or tenants during business hours.`;
+
+  const body = outreach.email_body || [
+    `Hi ${role},`,
+    "",
+    `I am reaching out from Have Us Clean because ${company}${city ? ` in ${city}` : ""}${market ? `, ${market}` : ""} looks like a strong fit for ${offer}.`,
+    noteSentence,
+    propertyManagerTrack
+      ? "If you need a team that can handle quick turnarounds, protect tenant experience, and show up consistently with insured, detail-oriented crews, that is exactly where we help."
+      : "If you need a cleaning partner that can work reliably after hours, protect the workspace, and keep quality consistent without adding friction for your team, that is exactly where we help.",
+    "",
+    `If it helps, I can send over a simple quote or a recommended scope for ${offer}.`,
+    "",
+    "Best,",
+    "Danae Misener",
+    "Have Us Clean",
+    "haveusclean.ca",
+    "905-216-1397",
+  ].join("\n");
+
+  return {
+    subject,
+    body,
+    emailAddress,
+    combined: `Subject: ${subject}\n\n${body}`,
   };
 }
 
@@ -2329,6 +2405,14 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     setTimeout(() => setCopied(""), 2000);
   };
 
+  const copyEmailDraft = async (lead, outreach) => {
+    const draft = buildOutreachEmailDraft(lead, outreach);
+    const ok = await copyTextToClipboard(draft.combined);
+    setCopied(ok ? "email_draft" : "");
+    if (ok) setTimeout(() => setCopied(""), 2000);
+    else alert("Copy failed. Please copy manually.");
+  };
+
   // Upgrade outreach using Claude with industry-aware prompts
   const upgradeOutreach = async (lead) => {
     setUpgrading(true);
@@ -2399,6 +2483,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     const seg = SEGMENT_META[viewLead.segment] || SEGMENT_META["Office"];
     const hasOutreach = viewLead.cold_email || upgradedContent;
     const outreach = upgradedContent || viewLead;
+    const emailDraft = buildOutreachEmailDraft(viewLead, outreach);
     const statusColor = COLD_STATUS_COLOR[viewLead.status] || C.muted;
     const aiScore = getColdLeadAiScore(viewLead);
 
@@ -2563,6 +2648,41 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
             ✨ Outreach upgraded with AI — industry-aware messaging for {viewLead.segment}
           </div>
         )}
+
+        <div style={{ ...S.card, marginBottom:14 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
+            <div style={{ fontWeight:700, fontSize:14 }}>✉️ Cold Outreach Email</div>
+            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
+              <button
+                style={{ ...S.btn("sm"), background: copied === "email_draft" ? C.accentDim : C.surface, color: copied === "email_draft" ? C.accent : C.muted, fontSize:11 }}
+                onClick={() => copyEmailDraft(viewLead, outreach)}
+              >
+                {copied === "email_draft" ? "✅ Copied!" : "📋 Copy Email"}
+              </button>
+              <a
+                href={`mailto:${encodeURIComponent(emailDraft.emailAddress)}?subject=${encodeURIComponent(emailDraft.subject)}&body=${encodeURIComponent(emailDraft.body)}`}
+                style={{ ...S.btn("sm"), textDecoration:"none", fontSize:11, display:"flex", alignItems:"center" }}
+              >
+                📧 Open in Mail App
+              </a>
+            </div>
+          </div>
+
+          <div style={{ display:"grid", gridTemplateColumns:"1fr", gap:12 }}>
+            <div>
+              <div style={{ ...S.label, marginBottom:6 }}>Subject Line</div>
+              <div style={{ background:C.surface, borderRadius:10, padding:14, fontSize:13, color:C.text, lineHeight:1.6, whiteSpace:"pre-wrap", border:`1px solid ${C.border}` }}>
+                {emailDraft.subject}
+              </div>
+            </div>
+            <div>
+              <div style={{ ...S.label, marginBottom:6 }}>Email Body</div>
+              <div style={{ background:C.surface, borderRadius:10, padding:14, fontSize:13, color:C.muted, lineHeight:1.8, whiteSpace:"pre-wrap", maxHeight:280, overflowY:"auto", border:`1px solid ${C.border}` }}>
+                {emailDraft.body}
+              </div>
+            </div>
+          </div>
+        </div>
 
         {[
           { key:"cold_email",      label:"📧 Cold Email",       icon:"📋" },
