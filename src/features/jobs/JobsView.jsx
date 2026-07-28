@@ -1,12 +1,10 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { List as VirtualList } from "react-window";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "../../lib/statusEngine";
+import { COMPANY_SHARE, PARTNER_COST_PER_HOUR, PARTNER_SHARE, getJobHours, getTeamSize } from "../../lib/pricing";
 
 const JOB_VIRTUALIZE_THRESHOLD = 75;
 const JOB_ROW_HEIGHT = 256;
-const PARTNER_SHARE = 0.60;
-const COMPANY_SHARE = 0.40;
-const PARTNER_COST_PER_HOUR = 30;
 const JOB_TYPES = ["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Move-Out","Kitchen & Bathroom Refresh","Post-Construction"];
 const UPSELL_OPTIONS = ["Inside Fridge","Inside Oven","Inside Cabinets","Interior Windows","Baseboards / Detail","Carpet Cleaning","Pet Hair / Heavy Detail"];
 const JOB_STATUSES = getDomainStatusOptions("job");
@@ -62,18 +60,6 @@ function Modal({ title, children, onClose, wide }) {
       </div>
     </div>
   );
-}
-
-function getTeamSize(sqft = 0) {
-  if (sqft > 3000) return 3;
-  if (sqft > 1000) return 2;
-  return 1;
-}
-
-function getJobHours(sqft = 0) {
-  if (!sqft) return 2;
-  const hrs = Math.max(1.5, sqft / 1000);
-  return Math.round(hrs * 2) / 2;
 }
 
 export default function JobsView({ jobs, setJobs, partners }) {

@@ -1,6 +1,6 @@
-export const PARTNER_SHARE = 0.65;
-export const COMPANY_SHARE = 0.35;
-export const PROFIT_MARGIN = 0.35;
+export const PARTNER_SHARE = 0.60;
+export const COMPANY_SHARE = 0.40;
+export const PROFIT_MARGIN = 0.40;
 
 export const partnerPayFromPrice = (clientPrice) =>
   Math.round((clientPrice || 0) * PARTNER_SHARE);
@@ -123,3 +123,174 @@ export const COM_FREQ_DISCOUNTS = {
   "Bi-Weekly": 0.08,
   Monthly: 0.04,
 };
+
+const toFiniteNumber = (value, fallback = 0) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const safeDivide = (numerator, denominator, fallback = 0) => {
+  if (!Number.isFinite(numerator) || !Number.isFinite(denominator) || denominator === 0) return fallback;
+  return numerator / denominator;
+};
+
+const roundMoney = (value) => Math.round(Number(value || 0));
+
+export function getResidentialQuoteInput(input = {}) {
+  return {
+    ...input,
+    dwellingType: input.dwellingType || "Apartment / Condo",
+    dwellingSize: input.dwellingSize || "2 Bed",
+    serviceType: input.serviceType || "Refresh Clean",
+    frequency: input.frequency || "One-Time",
+    beds: toFiniteNumber(input.beds, 2),
+    baths: toFiniteNumber(input.baths, 1),
+    sqft: toFiniteNumber(input.sqft, 900),
+    addons: Array.isArray(input.addons) ? input.addons : [],
+  };
+}
+
+export function getCommercialQuoteInput(input = {}) {
+  return {
+    ...input,
+    serviceType: input.serviceType || "Office Clean",
+    frequency: input.frequency || "Weekly",
+    sqft: toFiniteNumber(input.sqft, 2000),
+    floors: Math.max(1, toFiniteNumber(input.floors, 1)),
+    contractMonths: Math.max(1, toFiniteNumber(input.contractMonths, 1)),
+    addons: Array.isArray(input.addons) ? input.addons : [],
+  };
+}
+
+export function calcResQuote(input, region = { id: "ON", currencySymbol: "CA$", tax: { name: "HST", rate: 0.13 } }) {
+  const f = getResidentialQuoteInput(input);
+  const isAZ = region.id === "AZ";
+  const hourlyRate = isAZ ? PARTNER_HOURLY_AZ : PARTNER_HOURLY_ON;
+  const azUplift = isAZ ? 1.12 : 1.0;
+  const inputSqft = toFiniteNumber(f?.sqft, 0);
+  const inputBeds = toFiniteNumber(f?.beds, 2);
+  const inputBaths = toFiniteNumber(f?.baths, 1);
+
+  const estimatedSqft = inputSqft > 0 ? inputSqft : Math.max(400, 400 + inputBeds * 180 + inputBaths * 80);
+  const teamSize = getTeamSize(estimatedSqft);
+  const jobHours = getJobHours(estimatedSqft);
+  const laborCost = toFiniteNumber(teamSize, 1) * toFiniteNumber(hourlyRate, 0) * toFiniteNumber(jobHours, 0);
+  const laborBasePrice = Math.ceil(safeDivide(laborCost, PARTNER_SHARE, 0));
+  const pkgMult = toFiniteNumber(RES_SERVICE_MULT[f?.serviceType], 1.0);
+  const formulaPrice = roundMoney(laborBasePrice * pkgMult * azUplift);
+
+  const regionKey = isAZ ? "AZ" : "ON";
+  const floorGroup = FLOOR_PRICES[regionKey]?.[f?.dwellingType];
+  const floorBase = toFiniteNumber(floorGroup?.[f?.dwellingSize], 140);
+  const floorPrice = roundMoney(floorBase * pkgMult * azUplift);
+  const baseClientPrice = Math.max(formulaPrice, floorPrice);
+  const condMult = toFiniteNumber(CONDITION_MULT[f?.condition || ""], 1.0);
+  const conditionedPrice = roundMoney(baseClientPrice * condMult);
+
+  const addonClientTotal = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
+    const ao = RES_ADDONS.find((x) => x.id === id);
+    return a + toFiniteNumber(ao?.clientPrice, 0);
+  }, 0);
+
+  const clientSubtotal = conditionedPrice + addonClientTotal;
+  const discPct = toFiniteNumber(FREQ_DISCOUNTS[f?.frequency], 0);
+  const discountAmt = roundMoney(clientSubtotal * discPct);
+  const preTaxTotal = clientSubtotal - discountAmt;
+  const taxRate = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
+  const taxAmount = roundMoney(preTaxTotal * taxRate);
+  const finalTotal = preTaxTotal + taxAmount;
+  const partnerPayTotal = partnerPayFromPrice(preTaxTotal);
+  const partnerPayEach = teamSize > 1 ? roundMoney(safeDivide(partnerPayTotal, teamSize, 0)) : partnerPayTotal;
+  const profit = companyProfitFromPrice(preTaxTotal);
+  const margin = preTaxTotal > 0 ? safeDivide(profit, preTaxTotal, 0) * 100 : 0;
+
+  const freq_prices = {};
+  Object.keys(FREQ_DISCOUNTS).forEach((freq) => {
+    const d = FREQ_DISCOUNTS[freq] || 0;
+    freq_prices[freq] = roundMoney(conditionedPrice * (1 - toFiniteNumber(d, 0)));
+  });
+
+  const breakdown = [
+    {
+      label: `Labor (${teamSize} partner${teamSize > 1 ? "s" : ""} × ${jobHours}h × ${region.currencySymbol}${hourlyRate}/hr)`,
+      cost: laborCost,
+      price: conditionedPrice,
+    },
+    ...(Array.isArray(f?.addons) ? f.addons : []).map((id) => {
+      const ao = RES_ADDONS.find((x) => x.id === id);
+      return ao ? { label: ao.label, cost: ao.costToUs, price: ao.clientPrice } : null;
+    }).filter(Boolean),
+  ];
+
+  return {
+    total: finalTotal,
+    preTaxTotal,
+    taxAmount,
+    taxRate,
+    taxName: region.tax.name,
+    discountAmt,
+    discPct,
+    partnerPay: partnerPayTotal,
+    partnerPayEach,
+    teamSize,
+    jobHours,
+    estimatedSqft,
+    profit,
+    margin,
+    breakdown,
+    serviceHours: jobHours,
+    sqftHours: jobHours,
+    currency: region.currencySymbol,
+    region,
+    freq_prices,
+    baseClientPrice: conditionedPrice,
+    formulaPrice,
+    floorPrice,
+    condMult,
+  };
+}
+
+export function calcComQuote(input, region = { id: "ON", currencySymbol: "CA$", tax: { name: "HST", rate: 0.13 } }) {
+  const f = getCommercialQuoteInput(input);
+  const costPerSqft = toFiniteNumber(COM_SERVICE_COST_PER_SQFT[f?.serviceType], 0.07);
+  const minCost = toFiniteNumber(COM_MIN_COST[f?.serviceType], 120);
+  const regionMult = region.id === "ON" ? 1.15 : 1.0;
+  const sqft = Math.max(0, toFiniteNumber(f?.sqft, 2000));
+  const floors = Math.max(1, toFiniteNumber(f?.floors, 1));
+  const baseCost = Math.max(minCost, sqft * costPerSqft) * regionMult;
+  const floorAdj = 1 + (floors - 1) * 0.10;
+  const addonCost = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
+    const ao = COM_ADDONS.find((x) => x.id === id);
+    return a + toFiniteNumber(ao?.costToUs, 0);
+  }, 0) * regionMult;
+  const totalCost = baseCost * floorAdj + addonCost;
+  const clientSubtotal = markupFactor(totalCost);
+  const discPct = toFiniteNumber(COM_FREQ_DISCOUNTS[f?.frequency], 0);
+  const discountAmt = clientSubtotal * discPct;
+  const preTaxTotal = Math.max(0, clientSubtotal - discountAmt);
+  const taxRate = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
+  const taxAmount = preTaxTotal * taxRate;
+  const finalTotal = preTaxTotal + taxAmount;
+  const profit = companyProfitFromPrice(preTaxTotal);
+  const margin = preTaxTotal > 0 ? safeDivide(profit, preTaxTotal, 0) * 100 : 0;
+  const visitsPerMonth = f?.frequency === "Daily" ? 22 : f?.frequency === "Weekly" ? 4 : f?.frequency === "Bi-Weekly" ? 2 : 1;
+  const monthly = finalTotal * visitsPerMonth;
+  const contract = monthly * Math.max(1, toFiniteNumber(f?.contractMonths, 1));
+  return {
+    total: finalTotal,
+    preTaxTotal,
+    taxAmount,
+    taxRate,
+    taxName: region.tax.name,
+    partnerPay: partnerPayFromPrice(preTaxTotal),
+    profit,
+    margin,
+    discountAmt,
+    discPct,
+    monthly,
+    contract,
+    totalCost,
+    currency: region.currencySymbol,
+    region,
+  };
+}

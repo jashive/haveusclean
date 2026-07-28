@@ -1,6 +1,8 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { List as VirtualList } from "react-window";
 import { validateLead } from "../../lib/leadValidation";
+import { ensureUniqueLeadId, getLeadIdentityTokens, mergeLeadLists, normalizeLeadMarket, normalizeLeadPhone, normalizeLeadRecord } from "../../core/businessRules/leads";
+import { deleteColdLeadEverywhere, fetchColdLeadIndexRows, fetchColdLeadRows, upsertColdLeadRows } from "../../core/repositories/coldLeadsRepository";
 
 const C = {
   bg: "#0B1020",
@@ -86,86 +88,6 @@ const LEAD_PAGE_SIZE = 100;
 const LEAD_VIRTUALIZE_THRESHOLD = 80;
 const LEAD_ROW_HEIGHT = 96;
 
-const normalizeLeadPhone = (value = "") => String(value || "").replace(/\D/g, "");
-const normalizeLeadMarket = (lead) => {
-  const m = (lead?.market || "").trim().toLowerCase();
-  if (m.includes("ontario")) return "Ontario";
-  if (m.includes("arizona")) return "Arizona";
-  const id = (lead?.lead_id || lead?.id || "").toUpperCase();
-  if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
-  if (id.startsWith("AZ-")) return "Arizona";
-  return "";
-};
-const normalizeLeadRecord = (lead, fallback = {}) => ({
-  ...fallback,
-  ...lead,
-  lead_id: String(lead?.lead_id || lead?.id || fallback?.lead_id || "").trim(),
-  id: lead?.id || lead?.lead_id || fallback?.id || undefined,
-  company: lead?.company || fallback?.company || "",
-  city: lead?.city || fallback?.city || "",
-  market: normalizeLeadMarket(lead) || lead?.market || fallback?.market || "Ontario",
-  segment: lead?.segment || fallback?.segment || "Office",
-  status: lead?.status || fallback?.status || "New",
-  notes: lead?.notes ?? fallback?.notes ?? "",
-  cold_email: lead?.cold_email ?? fallback?.cold_email ?? "",
-  follow_up_email: lead?.follow_up_email ?? fallback?.follow_up_email ?? "",
-  linkedin_note: lead?.linkedin_note ?? fallback?.linkedin_note ?? "",
-  call_opener: lead?.call_opener ?? fallback?.call_opener ?? "",
-  assigned_rep: lead?.assigned_rep ?? fallback?.assigned_rep ?? "",
-  last_contacted_at: lead?.last_contacted_at ?? fallback?.last_contacted_at ?? null,
-  updated_at: lead?.updated_at || fallback?.updated_at || new Date().toISOString(),
-  source_lane: lead?.source_lane || fallback?.source_lane || "n8n",
-});
-const mergeLeadLists = (prevLeads, incomingLeads) => {
-  const merged = new Map();
-  prevLeads.forEach((lead) => {
-    const key = String(lead?.lead_id || lead?.id || "").trim();
-    if (key) merged.set(key, normalizeLeadRecord(lead));
-  });
-  incomingLeads.forEach((lead) => {
-    const key = String(lead?.lead_id || lead?.id || "").trim();
-    if (!key) return;
-    const current = merged.get(key);
-    const incoming = normalizeLeadRecord(lead, current || {});
-    if (!current) {
-      merged.set(key, incoming);
-      return;
-    }
-    const currentTime = new Date(current.updated_at || 0).getTime();
-    const incomingTime = new Date(incoming.updated_at || 0).getTime();
-    merged.set(key, incomingTime > currentTime ? incoming : { ...current, ...incoming });
-  });
-  return Array.from(merged.values()).sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
-};
-const getLeadIdentityTokens = (lead = {}) => {
-  const tokens = [];
-  const leadId = String(lead.lead_id || lead.id || "").trim().toLowerCase();
-  const email = String(lead.email || lead.contact_email || "").trim().toLowerCase();
-  const phone = normalizeLeadPhone(lead.phone || lead.contact_phone || "");
-  const company = String(lead.company || "").trim().toLowerCase();
-  const city = String(lead.city || "").trim().toLowerCase();
-  if (leadId) tokens.push(`id:${leadId}`);
-  if (email) tokens.push(`email:${email}`);
-  if (phone.length >= 10) tokens.push(`phone:${phone}`);
-  if (email && phone.length >= 10) tokens.push(`email_phone:${email}|${phone}`);
-  if (!leadId && !email && phone.length < 10 && company && city) tokens.push(`company_city:${company}|${city}`);
-  return tokens;
-};
-const ensureUniqueLeadId = (baseId, usedIds) => {
-  const cleanBase = String(baseId || "").trim() || `LD-${Date.now()}`;
-  if (!usedIds.has(cleanBase)) {
-    usedIds.add(cleanBase);
-    return cleanBase;
-  }
-  let i = 2;
-  let candidate = `${cleanBase}-${i}`;
-  while (usedIds.has(candidate)) {
-    i += 1;
-    candidate = `${cleanBase}-${i}`;
-  }
-  usedIds.add(candidate);
-  return candidate;
-};
 const formatLeadContactBadge = (value) => {
   if (!value) return "";
   try {
@@ -188,22 +110,6 @@ const parseOutreachSections = (text) => {
     call_opener: extract("CALL_OPENER"),
   };
 };
-
-async function sbFetch(path, opts = {}) {
-  try {
-    const { getSupabaseConfig } = await import("../../lib/supabaseConfig");
-    const config = getSupabaseConfig(typeof import.meta !== "undefined" ? import.meta.env : {});
-    const headers = {
-      apikey: config.anon,
-      Authorization: `Bearer ${config.anon}`,
-      "Content-Type": "application/json",
-      ...(opts.headers || {}),
-    };
-    return fetch(`${config.url}/rest/v1/${path}`, { ...opts, headers });
-  } catch {
-    return null;
-  }
-}
 
 async function generateUpgradedOutreach(lead) {
   const prompt = `Write improved commercial cleaning outreach for ${lead.company} in ${lead.city}, ${lead.market}. Return sections COLD_EMAIL, FOLLOW_UP_EMAIL, LINKEDIN_NOTE, CALL_OPENER.`;
@@ -256,9 +162,7 @@ export default function ColdOutreachView({ region, coldLeads, setColdLeads, page
       const rows = Array.from(persistQueueRef.current.values());
       persistQueueRef.current.clear();
       if (!rows.length) return;
-      try {
-        await sbFetch("huc_leads_cold?on_conflict=lead_id", { method: "POST", body: JSON.stringify(rows), headers: { Prefer: "resolution=merge-duplicates,return=minimal" } });
-      } catch {}
+      await upsertColdLeadRows(rows);
     }, 300);
   }, []);
 
@@ -270,15 +174,9 @@ export default function ColdOutreachView({ region, coldLeads, setColdLeads, page
         if (Array.isArray(parsed) && parsed.length > 0) return parsed;
       }
     } catch {}
-    try {
-      const r = await sbFetch("huc_leads_cold?select=*");
-      if (!r || !r.ok) return [];
-      const rows = await r.json();
-      if (!Array.isArray(rows) || rows.length === 0) return [];
-      return rows.map(row => normalizeLeadRecord(row?.data || row, row?.data || row)).filter(Boolean).filter((lead) => validateLead(lead).valid);
-    } catch {
-      return [];
-    }
+    const rows = await fetchColdLeadRows();
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    return rows.map(row => normalizeLeadRecord(row?.data || row, row?.data || row)).filter(Boolean).filter((lead) => validateLead(lead).valid);
   }, []);
 
   const refreshFromSupabase = useCallback(async () => {
@@ -298,9 +196,7 @@ export default function ColdOutreachView({ region, coldLeads, setColdLeads, page
 
   const loadCloudLeadIndex = useCallback(async () => {
     try {
-      const r = await sbFetch("huc_leads_cold?select=lead_id,data,updated_at");
-      if (!r || !r.ok) return { leads: [], tokens: new Set(), ids: new Set() };
-      const rows = await r.json();
+      const rows = await fetchColdLeadIndexRows();
       if (!Array.isArray(rows) || rows.length === 0) return { leads: [], tokens: new Set(), ids: new Set() };
       const loadedLeads = rows.map(row => normalizeLeadRecord(row?.data || {}, { lead_id: row?.lead_id, updated_at: row?.updated_at })).filter(Boolean);
       const tokens = new Set();
@@ -393,7 +289,7 @@ export default function ColdOutreachView({ region, coldLeads, setColdLeads, page
       setColdLeads(final);
       persistLeadSnapshot(final);
       const rows = newLeads.map((lead) => ({ lead_id: String(lead.lead_id || lead.id || "").trim(), data: lead, updated_at: new Date().toISOString() }));
-      if (rows.length) await sbFetch("huc_leads_cold?on_conflict=lead_id", { method: "POST", body: JSON.stringify(rows), headers: { Prefer: "resolution=merge-duplicates,return=minimal" } }).catch(() => null);
+      if (rows.length) await upsertColdLeadRows(rows);
       const nowIso = new Date().toISOString();
       try { localStorage.setItem(COLD_SYNC_AT_KEY, nowIso); } catch {}
       setLastSyncedAt(nowIso);
@@ -558,7 +454,7 @@ export default function ColdOutreachView({ region, coldLeads, setColdLeads, page
     });
     if (viewLead?.lead_id === lid || viewLead?.id === lid) setViewLead(null);
     setDeletedLeadIds(prev => new Set([...prev, lid]));
-    try { await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" }); } catch {}
+    await deleteColdLeadEverywhere(lid);
   };
 
   const LeadRow = useCallback(({ index, style, ariaAttributes, leads: rowLeads, onOpen, onDelete, lastSyncedLabel, lastSyncAt }) => {

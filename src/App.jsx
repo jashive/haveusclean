@@ -7,13 +7,28 @@ import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "./lib/statusEngine";
+import { calcResQuote, calcComQuote, getJobHours, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
 import { calculateQuote as calculateQuoteGateway } from "./lib/quoteEngine";
+import { buildCommercialLeadsRuntime } from "./core/pricing/commercialLeadsRuntime";
+import { ALL_TAB_IDS, canAccessTab, filterNavGroupsByRole, getTabQueryValue, normalizeTabId, ROLE_TAB_ALLOWLIST } from "./core/permissions/navigation";
+import { canTransitionStatus, RESIDENTIAL_STATUS_TRANSITIONS } from "./core/status/statusTransitions";
+import { ensureUniqueLeadId, getLeadIdentityTokens, mergeLeadLists, normalizeLeadMarket, normalizeLeadPhone, normalizeLeadRecord } from "./core/businessRules/leads";
+import { deleteColdLeadEverywhere, fetchColdLeadIndexRows, fetchColdLeadRows, patchColdLeadByLeadId, upsertColdLeadRows } from "./core/repositories/coldLeadsRepository";
+import { patchLeadStatusByLeadId } from "./core/repositories/leadsRepository";
+import { deleteResidentialLeadById } from "./core/repositories/residentialLeadsRepository";
+import { patchPartnerPin } from "./core/repositories/partnersRepository";
+import { completePartnerModule } from "./core/repositories/onboardingRepository";
+import { deleteEditedLead, saveEditedLead } from "./features/leads/leadEditActions";
+import { deleteResidentialLeadWorkflow } from "./features/leads/residentialLeadDeleteActions";
+import { closeLeadEditModal, updateEditLeadFollowUpDate, updateEditLeadStatus } from "./features/leads/leadEditModalActions";
+import ResidentialLeadsToolbar from "./features/leads/ResidentialLeadsToolbar";
+import CommercialLeadsFeature from "./features/leads/CommercialLeads";
 
-const ConfirmDrawer = lazy(() => import("./components/ConfirmDrawer"));
 const BookingWidget = lazy(() => import("./components/BookingWidget"));
 const MySchedule = lazy(() => import("./pages/MySchedule"));
 const ColdOutreachView = lazy(() => import("./features/leads/ColdOutreachView"));
 const JobsView = lazy(() => import("./features/jobs/JobsView"));
+import LeadDeleteConfirmDrawer from "./features/leads/LeadDeleteConfirmDrawer";
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -442,122 +457,6 @@ const HUC_STATUS_COLOR = {
 // Have Us Clean pay structure:
 //   Partner earns 60% of the client price (pre-tax)
 //   Company keeps 40% of the client price (gross profit)
-const PARTNER_SHARE = 0.60;
-const COMPANY_SHARE = 0.40;
-const PROFIT_MARGIN = 0.40;
-
-const partnerPayFromPrice  = (clientPrice) => roundMoney(toFiniteNumber(clientPrice, 0) * PARTNER_SHARE);
-const companyProfitFromPrice = (clientPrice) => roundMoney(toFiniteNumber(clientPrice, 0) * COMPANY_SHARE);
-const markupFactor = (cost) => Math.ceil(toFiniteNumber(cost, 0) / Math.max(0.0001, (1 - PROFIT_MARGIN)));
-
-// ─── TEAM SIZE BY SQFT ───────────────────────────────────────────────────────
-// 1 partner  → up to 1,000 sqft
-// 2 partners → 1,001–3,000 sqft
-// 3 partners → 3,001+ sqft
-const getTeamSize = (sqft) => {
-  if (!sqft || sqft <= 1000) return 1;
-  if (sqft <= 3000) return 2;
-  return 3;
-};
-
-// ─── HOURS BY SQFT (per team — team works together) ─────────────────────────
-// Production rate: 1,000 sqft/hr per team regardless of team size
-// Minimum 1.5h, rounded to nearest 0.5h
-const getJobHours = (sqft) => {
-  const raw = Math.max(1.5, (sqft || 900) / 1000);
-  return Math.round(raw * 2) / 2; // round to nearest 0.5
-};
-
-// ─── PARTNER HOURLY RATE ─────────────────────────────────────────────────────
-const PARTNER_HOURLY_ON = 30; // CAD per partner per hour (Ontario)
-const PARTNER_HOURLY_AZ = 25; // USD per partner per hour (Arizona)
-
-// ─── FLOOR PRICES BY DWELLING (market minimum — never go below these) ────────
-const FLOOR_PRICES = {
-  ON: {
-    "Apartment / Condo": { "1 Bed":140, "2 Bed":165, "3 Bed":205 },
-    "Semi / Townhouse":  { "Small":165, "Medium":205, "Large":245 },
-    "Detached House":    { "Small":185, "Medium":230, "Large":310 },
-  },
-  AZ: {
-    "Apartment / Condo": { "1 Bed":155, "2 Bed":185, "3 Bed":230 },
-    "Semi / Townhouse":  { "Small":185, "Medium":230, "Large":275 },
-    "Detached House":    { "Small":205, "Medium":255, "Large":345 },
-  },
-};
-
-// ─── PACKAGE MULTIPLIERS ─────────────────────────────────────────────────────
-const RES_SERVICE_MULT = {
-  "Refresh Clean":             1.00,
-  "Full Home Clean":           1.25,
-  "Deep Clean":                1.65,
-  "Move-In / Move-Out":        1.80,
-  "Kitchen & Bathroom Refresh":0.65,
-  "Pre-Sale Clean":            1.50,
-  "Post-Renovation Clean":     1.70,
-  "Office / Commercial":       1.20,
-};
-
-// ─── CONDITION MULTIPLIERS ───────────────────────────────────────────────────
-const CONDITION_MULT = {
-  "Light":   0.90,
-  "Average": 1.00,
-  "Heavy":   1.20,
-  "":        1.00,
-};
-
-// ─── FREQUENCY DISCOUNTS ─────────────────────────────────────────────────────
-const FREQ_DISCOUNTS = {
-  "One-Time":  0,
-  "Weekly":    0.15,
-  "Bi-Weekly": 0.10,
-  "Monthly":   0.05,
-};
-
-// ─── ADDON PRICES (fixed, market-tested) ────────────────────────────────────
-const RES_ADDONS = [
-  { id:"fridge",    label:"Inside Fridge",         clientPrice:50,  costToUs:20 },
-  { id:"oven",      label:"Inside Oven",            clientPrice:55,  costToUs:22 },
-  { id:"cabinets",  label:"Inside Cabinets",        clientPrice:65,  costToUs:26 },
-  { id:"windows",   label:"Interior Windows",       clientPrice:60,  costToUs:24 },
-  { id:"baseboards",label:"Baseboards / Detail",    clientPrice:55,  costToUs:22 },
-  { id:"carpet",    label:"Carpet Cleaning",        clientPrice:95,  costToUs:38 },
-  { id:"pethair",   label:"Pet Hair / Heavy Detail",clientPrice:65,  costToUs:26 },
-];
-
-// Legacy sqft hours table (kept for GPS / scheduling estimates)
-const SQFT_HOURS = {
-  500:1.5, 750:2, 1000:2.5, 1250:3, 1500:3.5, 1750:4,
-  2000:4.5, 2500:5.5, 3000:6.5, 3500:7.5, 4000:9, 5000:11,
-};
-const getSqftHours = (sqft) => {
-  const tiers = Object.keys(SQFT_HOURS).map(Number).sort((a,b)=>a-b);
-  for (let t of tiers) if (sqft <= t) return SQFT_HOURS[t];
-  return SQFT_HOURS[5000] + (sqft - 5000) / 500;
-};
-const PARTNER_COST_PER_HOUR = 30; // updated — used in scheduling estimates
-
-// Commercial rates (cost per sqft → markup for 30% margin)
-const COM_SERVICE_COST_PER_SQFT = {
-  "Office Clean": 0.07, "Janitorial (Daily)": 0.05, "Post-Construction": 0.14,
-  "Medical/Lab Facility": 0.18, "Retail / Showroom": 0.065, "Warehouse / Industrial": 0.045,
-};
-const COM_MIN_COST = {
-  "Office Clean": 120, "Janitorial (Daily)": 100, "Post-Construction": 280,
-  "Medical/Lab Facility": 350, "Retail / Showroom": 110, "Warehouse / Industrial": 140,
-};
-const COM_ADDONS = [
-  { id:"restrooms",  label:"Deep Restroom Sanitization", costToUs: 60 },
-  { id:"windows_ext",label:"Exterior Window Wash",       costToUs: 85 },
-  { id:"carpet_com", label:"Commercial Carpet Steam",    costToUs: 105 },
-  { id:"floor_strip",label:"Floor Strip & Wax",         costToUs: 140 },
-  { id:"pressure",   label:"Pressure Washing (exterior)",costToUs: 120 },
-  { id:"supply",     label:"Restroom Supply Restocking", costToUs: 28 },
-  { id:"trash",      label:"After-Hours Trash Removal",  costToUs: 42 },
-  { id:"disinfect",  label:"Full Disinfection Service",  costToUs: 90 },
-];
-const COM_FREQ_DISCOUNTS = { "One-Time":0, "Daily":0.18, "Weekly":0.13, "Bi-Weekly":0.08, "Monthly":0.04 };
-
 const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const JOB_TYPES = ["Refresh Clean","Full Home Clean","Deep Clean","Move-In / Move-Out","Kitchen & Bathroom Refresh","Post-Construction"];
 const UPSELL_OPTIONS = ["Inside Fridge","Inside Oven","Inside Cabinets","Interior Windows","Baseboards / Detail","Carpet Cleaning","Pet Hair / Heavy Detail"];
@@ -613,6 +512,11 @@ const S = {
   row2: { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,220px),1fr))", gap:12 },
 };
 const styles = S;
+const LEAD_ACTIONS_ROW = { display:"flex", gap:8, flexWrap:"wrap" };
+const LEAD_PRIMARY_ACTIONS_ROW = { ...LEAD_ACTIONS_ROW, marginTop:12 };
+const LEAD_SECONDARY_ACTIONS_ROW = { ...LEAD_ACTIONS_ROW, marginTop:8 };
+const LEAD_MOBILE_ACTIONS_ROW = { ...LEAD_PRIMARY_ACTIONS_ROW, alignItems:"stretch" };
+const LEAD_MOBILE_ACTION_BTN = { minHeight:38, padding:"9px 12px", flex:"1 1 170px", textAlign:"center", whiteSpace:"nowrap" };
 
 // ─── SHARED COMPONENTS ────────────────────────────────────────────────────────
 function StatCard({ label, value, sub, color, icon }) {
@@ -643,192 +547,11 @@ function Modal({ title, children, onClose, wide }) {
 }
 
 // ─── PROFIT-AWARE + REGION-AWARE QUOTE ENGINE ────────────────────────────────
-// ─── HUC QUOTE ENGINE ────────────────────────────────────────────────────────
-// Uses real HUC pricing grid as primary source, cross-referenced with labor hours.
-// For ON: +13% HST. For AZ: no service tax.
-function calcResQuote(f, region = ACTIVE_REGION) {
-  const isAZ       = region.id === "AZ";
-  const hourlyRate = isAZ ? PARTNER_HOURLY_AZ : PARTNER_HOURLY_ON;
-  const azUplift   = isAZ ? 1.12 : 1.0; // AZ market 12% higher than Ontario
-  const inputSqft = toFiniteNumber(f?.sqft, 0);
-  const inputBeds = toFiniteNumber(f?.beds, 2);
-  const inputBaths = toFiniteNumber(f?.baths, 1);
-
-  // ── Step 1: Determine sqft (estimate from beds/baths if not provided) ──
-  const estimatedSqft = inputSqft > 0
-    ? inputSqft
-    : Math.max(400,
-        400
-        + inputBeds * 180
-        + inputBaths * 80
-      );
-
-  // ── Step 2: Team size and hours ──
-  const teamSize  = getTeamSize(estimatedSqft);
-  const jobHours  = getJobHours(estimatedSqft);
-
-  // ── Step 3: Labor cost (team total) ──
-  const laborCost = toFiniteNumber(teamSize, 1) * toFiniteNumber(hourlyRate, 0) * toFiniteNumber(jobHours, 0);
-
-  // ── Step 4: Base price from labor (35% margin) ──
-  const laborBasePrice = Math.ceil(safeDivide(laborCost, PARTNER_SHARE, 0));
-
-  // ── Step 5: Apply package multiplier ──
-  const pkgMult = toFiniteNumber(RES_SERVICE_MULT[f?.serviceType], 1.0);
-  const formulaPrice = roundMoney(laborBasePrice * pkgMult * azUplift);
-
-  // ── Step 6: Floor price (never go below market minimum) ──
-  const regionKey = isAZ ? "AZ" : "ON";
-  const floorGroup = FLOOR_PRICES[regionKey]?.[f?.dwellingType];
-  const floorBase  = toFiniteNumber(floorGroup?.[f?.dwellingSize], 140);
-  const floorPrice = roundMoney(floorBase * pkgMult * azUplift);
-
-  // ── Step 7: Take the higher of formula or floor ──
-  const baseClientPrice = Math.max(formulaPrice, floorPrice);
-
-  // ── Step 8: Condition adjustment ──
-  const condMult = toFiniteNumber(CONDITION_MULT[f?.condition || ""], 1.0);
-  const conditionedPrice = roundMoney(baseClientPrice * condMult);
-
-  // ── Step 9: Addons ──
-  const addonClientTotal = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
-    const ao = RES_ADDONS.find(x => x.id === id);
-    return a + toFiniteNumber(ao?.clientPrice, 0);
-  }, 0);
-  const addonCostTotal = (Array.isArray(f?.addons) ? f.addons : []).reduce((a, id) => {
-    const ao = RES_ADDONS.find(x => x.id === id);
-    return a + toFiniteNumber(ao?.costToUs, 0);
-  }, 0);
-
-  const clientSubtotal = conditionedPrice + addonClientTotal;
-
-  // ── Step 10: Frequency discount ──
-  const discPct    = toFiniteNumber(FREQ_DISCOUNTS[f?.frequency], 0);
-  const discountAmt = roundMoney(clientSubtotal * discPct);
-  const preTaxTotal = clientSubtotal - discountAmt;
-
-  // ── Step 11: Tax (ON = 13% HST, AZ = 0%) ──
-  const taxRate   = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
-  const taxAmount = roundMoney(preTaxTotal * taxRate);
-  const finalTotal = preTaxTotal + taxAmount;
-
-  // ── Step 12: Pay split ──
-  const partnerPayTotal = partnerPayFromPrice(preTaxTotal); // 65% of pre-tax
-  const partnerPayEach  = teamSize > 1 ? roundMoney(safeDivide(partnerPayTotal, teamSize, 0)) : partnerPayTotal;
-  const profit          = companyProfitFromPrice(preTaxTotal); // 35%
-  const margin          = preTaxTotal > 0 ? (safeDivide(profit, preTaxTotal, 0) * 100).toFixed(1) : "0";
-
-  // ── Frequency pricing variants (for quote display) ──
-  const freq_prices = {};
-  Object.keys(FREQ_DISCOUNTS).forEach(freq => {
-    const d = FREQ_DISCOUNTS[freq] || 0;
-    freq_prices[freq] = roundMoney(conditionedPrice * (1 - toFiniteNumber(d, 0)));
-  });
-
-  // ── Breakdown lines ──
-  const breakdown = [
-    {
-      label: `Labor (${teamSize} partner${teamSize>1?"s":""} × ${jobHours}h × ${region.currencySymbol}${hourlyRate}/hr)`,
-      cost: laborCost,
-      price: conditionedPrice,
-    },
-    ...(Array.isArray(f?.addons) ? f.addons : []).map(id => {
-      const ao = RES_ADDONS.find(x => x.id === id);
-      return ao ? { label: ao.label, cost: ao.costToUs, price: ao.clientPrice } : null;
-    }).filter(Boolean),
-  ];
-
-  return {
-    total: finalTotal,
-    preTaxTotal,
-    taxAmount,
-    taxRate,
-    taxName: region.tax.name,
-    discountAmt,
-    discPct,
-    partnerPay: partnerPayTotal,
-    partnerPayEach,
-    teamSize,
-    jobHours,
-    estimatedSqft,
-    profit,
-    margin: parseFloat(margin),
-    breakdown,
-    serviceHours: jobHours,
-    sqftHours: jobHours,
-    currency: region.currencySymbol,
-    region,
-    freq_prices,
-    baseClientPrice: conditionedPrice,
-    formulaPrice,
-    floorPrice,
-    condMult,
-  };
-}
-
-function calcComQuote(f, region = ACTIVE_REGION) {
-  const costPerSqft = toFiniteNumber(COM_SERVICE_COST_PER_SQFT[f?.serviceType], 0.07);
-  const minCost = toFiniteNumber(COM_MIN_COST[f?.serviceType], 120);
-  // Scale costs slightly by region (ON is higher market)
-  const regionMult = region.id === "ON" ? 1.15 : 1.0;
-  const sqft = Math.max(0, toFiniteNumber(f?.sqft, 2000));
-  const floors = Math.max(1, toFiniteNumber(f?.floors, 1));
-  const baseCost = Math.max(minCost, sqft * costPerSqft) * regionMult;
-  const floorAdj = 1 + (floors - 1) * 0.10;
-  const addonCost = (Array.isArray(f?.addons) ? f.addons : []).reduce((a,id) => { const ao=COM_ADDONS.find(x=>x.id===id); return a + toFiniteNumber(ao?.costToUs, 0); }, 0) * regionMult;
-  const totalCost = baseCost * floorAdj + addonCost;
-  const clientSubtotal = markupFactor(totalCost);
-  const discPct = toFiniteNumber(COM_FREQ_DISCOUNTS[f?.frequency], 0);
-  const discountAmt = clientSubtotal * discPct;
-  const preTaxTotal = Math.max(0, clientSubtotal - discountAmt);
-
-  // Tax: ON = 13% HST on commercial cleaning; AZ = 0% (services exempt)
-  const taxRate = region.id === "ON" ? toFiniteNumber(region?.tax?.rate, 0) : 0;
-  const taxAmount = preTaxTotal * taxRate;
-  const finalTotal = preTaxTotal + taxAmount;
-
-  const profit = companyProfitFromPrice(preTaxTotal);
-  const margin = preTaxTotal > 0 ? (safeDivide(profit, preTaxTotal, 0) * 100).toFixed(1) : "0";
-  const visitsPerMonth = f?.frequency==="Daily"?22:f?.frequency==="Weekly"?4:f?.frequency==="Bi-Weekly"?2:1;
-  const monthly = finalTotal * visitsPerMonth;
-  const contract = monthly * Math.max(1, toFiniteNumber(f?.contractMonths, 1));
-  return { total:finalTotal, preTaxTotal, taxAmount, taxRate, taxName:region.tax.name, partnerPay:partnerPayFromPrice(preTaxTotal), profit, margin:parseFloat(margin), discountAmt, discPct, monthly, contract, totalCost, currency:region.currencySymbol, region };
-}
-
-function getResidentialQuoteInput(input = {}) {
-  return {
-    ...input,
-    dwellingType: input.dwellingType || "Apartment / Condo",
-    dwellingSize: input.dwellingSize || "2 Bed",
-    serviceType: input.serviceType || "Refresh Clean",
-    frequency: input.frequency || "One-Time",
-    beds: toFiniteNumber(input.beds, 2),
-    baths: toFiniteNumber(input.baths, 1),
-    sqft: toFiniteNumber(input.sqft, 900),
-    addons: Array.isArray(input.addons) ? input.addons : [],
-  };
-}
-
-function getCommercialQuoteInput(input = {}) {
-  return {
-    ...input,
-    serviceType: input.serviceType || "Office Clean",
-    frequency: input.frequency || "Weekly",
-    sqft: toFiniteNumber(input.sqft, 2000),
-    floors: Math.max(1, toFiniteNumber(input.floors, 1)),
-    contractMonths: Math.max(1, toFiniteNumber(input.contractMonths, 1)),
-    addons: Array.isArray(input.addons) ? input.addons : [],
-  };
-}
-
+// Pricing formulas live in src/lib/pricing.js; this file only consumes them.
 function calculateQuote({ type = "residential", data = {}, region = ACTIVE_REGION }) {
-  const normalizedInput = type === "commercial"
-    ? getCommercialQuoteInput(data)
-    : getResidentialQuoteInput(data);
-
   return calculateQuoteGateway({
     type,
-    data: normalizedInput,
+    data,
     region,
     residentialCalculator: calcResQuote,
     commercialCalculator: calcComQuote,
@@ -1800,73 +1523,9 @@ const SEGMENT_META = {
   "Dental":            { icon:"🦷", color:"#06B6D4", tone:"dental practice / patient environment" },
 };
 
-const normalizeLeadMarket = (lead) => {
-  const m = (lead?.market || "").trim().toLowerCase();
-  if (m.includes("ontario")) return "Ontario";
-  if (m.includes("arizona")) return "Arizona";
-  const id = (lead?.lead_id || lead?.id || "").toUpperCase();
-  if (id.startsWith("ON-") || id.startsWith("ON-M")) return "Ontario";
-  if (id.startsWith("AZ-")) return "Arizona";
-  const city = (lead?.city || "").toLowerCase();
-  const ontarioCities = ["brampton","mississauga","vaughan","markham","richmond hill","oakville","burlington","toronto","hamilton","newmarket","aurora","north york","etobicoke","scarborough","pickering","ajax","whitby","oshawa","stouffville","barrie"];
-  const arizonaCities = ["phoenix","scottsdale","tempe","mesa","chandler","gilbert","glendale","peoria","surprise","goodyear","avondale","fountain hills","paradise valley"];
-  if (ontarioCities.some(c => city.includes(c))) return "Ontario";
-  if (arizonaCities.some(c => city.includes(c))) return "Arizona";
-  return "";
-};
-
-const normalizeLeadRecord = (lead, fallback = {}) => {
-  const normalizedMarket = normalizeLeadMarket(lead);
-  const normalized = {
-    ...fallback,
-    ...lead,
-    lead_id: String(lead?.lead_id || lead?.id || fallback?.lead_id || "").trim(),
-    id: lead?.id || lead?.lead_id || fallback?.id || undefined,
-    company: lead?.company || fallback?.company || "",
-    city: lead?.city || fallback?.city || "",
-    market: normalizedMarket || lead?.market || fallback?.market || "Ontario",
-    segment: lead?.segment || fallback?.segment || "Office",
-    status: lead?.status || fallback?.status || "New",
-    notes: lead?.notes ?? fallback?.notes ?? "",
-    cold_email: lead?.cold_email ?? fallback?.cold_email ?? "",
-    follow_up_email: lead?.follow_up_email ?? fallback?.follow_up_email ?? "",
-    linkedin_note: lead?.linkedin_note ?? fallback?.linkedin_note ?? "",
-    call_opener: lead?.call_opener ?? fallback?.call_opener ?? "",
-    assigned_rep: lead?.assigned_rep ?? fallback?.assigned_rep ?? "",
-    last_contacted_at: lead?.last_contacted_at ?? fallback?.last_contacted_at ?? null,
-    updated_at: lead?.updated_at || fallback?.updated_at || new Date().toISOString(),
-    source_lane: lead?.source_lane || fallback?.source_lane || "n8n",
-  };
-  return normalized;
-};
-
-const mergeLeadLists = (prevLeads, incomingLeads) => {
-  const merged = new Map();
-  prevLeads.forEach(lead => {
-    const key = String(lead?.lead_id || lead?.id || "").trim();
-    if (key) merged.set(key, normalizeLeadRecord(lead));
-  });
-  incomingLeads.forEach(lead => {
-    const key = String(lead?.lead_id || lead?.id || "").trim();
-    if (!key) return;
-    const current = merged.get(key);
-    const incoming = normalizeLeadRecord(lead, current || {});
-    if (!current) {
-      merged.set(key, incoming);
-      return;
-    }
-    const currentTime = new Date(current.updated_at || 0).getTime();
-    const incomingTime = new Date(incoming.updated_at || 0).getTime();
-    merged.set(key, incomingTime > currentTime ? incoming : { ...current, ...incoming, market: incoming.market || current.market, status: incoming.status || current.status });
-  });
-  return Array.from(merged.values()).sort((a, b) => String(b.updated_at || "").localeCompare(String(a.updated_at || "")));
-};
-
 const COLD_SYNC_AT_KEY = "cp:last_synced_at:cold_leads";
 const JOB_VIRTUALIZE_THRESHOLD = 75;
 const JOB_ROW_HEIGHT = 256;
-
-const normalizeLeadPhone = (value = "") => String(value || "").replace(/\D/g, "");
 
 const clampPct = (value) => Math.max(0, Math.min(100, Math.round(toFiniteNumber(value, 0))));
 
@@ -1915,39 +1574,6 @@ function getColdLeadAiScore(lead = {}) {
   return { score, label: "Cool", emoji: "🧊", color: C.blue };
 }
 
-const getLeadIdentityTokens = (lead = {}) => {
-  const tokens = [];
-  const leadId = String(lead.lead_id || lead.id || "").trim().toLowerCase();
-  const email = String(lead.email || lead.contact_email || "").trim().toLowerCase();
-  const phone = normalizeLeadPhone(lead.phone || lead.contact_phone || "");
-  const company = String(lead.company || "").trim().toLowerCase();
-  const city = String(lead.city || "").trim().toLowerCase();
-
-  if (leadId) tokens.push(`id:${leadId}`);
-  if (email) tokens.push(`email:${email}`);
-  if (phone.length >= 10) tokens.push(`phone:${phone}`);
-  if (email && phone.length >= 10) tokens.push(`email_phone:${email}|${phone}`);
-  if (!leadId && !email && phone.length < 10 && company && city) tokens.push(`company_city:${company}|${city}`);
-
-  return tokens;
-};
-
-const ensureUniqueLeadId = (baseId, usedIds) => {
-  const cleanBase = String(baseId || "").trim() || `LD-${Date.now()}`;
-  if (!usedIds.has(cleanBase)) {
-    usedIds.add(cleanBase);
-    return cleanBase;
-  }
-  let i = 2;
-  let candidate = `${cleanBase}-${i}`;
-  while (usedIds.has(candidate)) {
-    i += 1;
-    candidate = `${cleanBase}-${i}`;
-  }
-  usedIds.add(candidate);
-  return candidate;
-};
-
 const persistLeadToSupabase = async (lead) => {
   const lid = String(lead?.lead_id || lead?.id || "").trim();
   if (!lid) return null;
@@ -1957,21 +1583,9 @@ const persistLeadToSupabase = async (lead) => {
     data: normalized,
     updated_at: normalized.updated_at || new Date().toISOString(),
   };
-  try {
-    const patchRes = await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, {
-      method: "PATCH",
-      body: JSON.stringify({ data: normalized, updated_at: payload.updated_at }),
-      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    });
-    if (patchRes && patchRes.ok) return payload;
-  } catch {}
-  try {
-    await sbFetch("huc_leads_cold?on_conflict=lead_id", {
-      method: "POST",
-      body: JSON.stringify([payload]),
-      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    });
-  } catch {}
+  const patched = await patchColdLeadByLeadId(lid, { data: normalized, updated_at: payload.updated_at });
+  if (patched) return payload;
+  await upsertColdLeadRows([payload]);
   return payload;
 };
 
@@ -2158,13 +1772,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       updated_at: updatedAt,
     };
 
-    const cloudRes = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
-      method: "POST",
-      body: JSON.stringify([{ lead_id: lid, data: finalLead, updated_at: updatedAt }]),
-      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-    }).catch(() => null);
-
-    if (!cloudRes || !cloudRes.ok) return false;
+    const cloudRes = await upsertColdLeadRows([{ lead_id: lid, data: finalLead, updated_at: updatedAt }]);
+    if (!cloudRes) return false;
 
     if (!job.status) return true;
 
@@ -2173,21 +1782,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       last_contacted_at: contactedAt || null,
       updated_at: updatedAt,
     };
-    const byLeadId = await sbFetch(`leads?lead_id=eq.${encodeURIComponent(lid)}`, {
-      method: "PATCH",
-      body: JSON.stringify(statusPayload),
-      headers: { "Prefer": "return=minimal" },
-    }).catch(() => null);
-
-    if (byLeadId && byLeadId.ok) return true;
-
-    const byId = await sbFetch(`leads?id=eq.${encodeURIComponent(lid)}`, {
-      method: "PATCH",
-      body: JSON.stringify(statusPayload),
-      headers: { "Prefer": "return=minimal" },
-    }).catch(() => null);
-
-    return !!(byId && byId.ok);
+    return patchLeadStatusByLeadId(lid, statusPayload);
   }, []);
 
   const flushPersistQueue = useCallback(async () => {
@@ -2277,18 +1872,12 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       }
     } catch {}
 
-    try {
-      const r = await sbFetch("huc_leads_cold?select=*");
-      if (!r || !r.ok) return [];
-      const rows = await r.json();
-      if (!Array.isArray(rows) || rows.length === 0) return [];
-      return rows
-        .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
-        .filter(Boolean)
-        .filter((lead) => validateLead(lead).valid);
-    } catch {
-      return [];
-    }
+    const rows = await fetchColdLeadRows();
+    if (!Array.isArray(rows) || rows.length === 0) return [];
+    return rows
+      .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
+      .filter(Boolean)
+      .filter((lead) => validateLead(lead).valid);
   };
 
   const refreshFromSupabase = async () => {
@@ -2311,9 +1900,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
   const loadCloudLeadIndex = async () => {
     try {
-      const r = await sbFetch("huc_leads_cold?select=lead_id,data,updated_at");
-      if (!r || !r.ok) return { leads: [], tokens: new Set(), ids: new Set() };
-      const rows = await r.json();
+      const rows = await fetchColdLeadIndexRows();
       if (!Array.isArray(rows) || rows.length === 0) return { leads: [], tokens: new Set(), ids: new Set() };
 
       const leads = rows
@@ -2486,17 +2073,10 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
           updated_at: new Date().toISOString(),
         }));
 
-        const r = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
-          method: "POST",
-          body: JSON.stringify(rows),
-          headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-        }).catch(() => null);
+        const saved = await upsertColdLeadRows(rows);
 
-        if (r && r.ok) {
+        if (saved) {
           written += batch.length;
-        } else if (r) {
-          const txt = await r.text().catch(() => "no body");
-          lastError = `HTTP ${r.status}: ${txt.slice(0, 120)}`;
         } else {
           lastError = "no response";
         }
@@ -2542,12 +2122,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       return next;
     });
     // 3. Delete from Supabase — await so we know it succeeded
-    try {
-      await sbFetch(`huc_leads_cold?lead_id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" });
-    } catch {}
-    try {
-      await sbFetch(`huc_leads_cold?id=eq.${encodeURIComponent(lid)}`, { method: "DELETE" });
-    } catch {}
+    await deleteColdLeadEverywhere(lid);
   };
 
   // Auto-delete incomplete leads — only runs when leads array changes
@@ -3759,19 +3334,12 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   // Stable delete handler — lives outside the render loop so no stale closures
   const handleDeleteRes = async (id) => {
-    const deleteId = String(id);
     setConfirmDeleteRes(null);
-    // 1. Remove from local state immediately
-    setResLeads(prev => prev.filter(l => String(l.id) !== deleteId));
-    // 2. Persist to localStorage so deleted ID survives refresh on this device
-    try {
-      const existing = JSON.parse(localStorage.getItem("cp:leads_res_deleted") || "[]");
-      if (!existing.includes(deleteId)) {
-        localStorage.setItem("cp:leads_res_deleted", JSON.stringify([...existing, deleteId]));
-      }
-    } catch {}
-    // 3. Delete from Supabase — awaited, tries both id columns so row is truly gone
-    try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(deleteId)}`, { method: "DELETE" }); } catch {}
+    await deleteResidentialLeadWorkflow({
+      leadId: id,
+      setResLeads,
+      deleteRemote: deleteResidentialLeadById,
+    });
   };
   const emptyForm = { name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", addons:[], frequency:"One-Time", preferredDate:"", preferredTime:"", notes:"", status: toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential"), assignedTo:"", followUpDate:"", jobNotes:"" };
   const [form, setForm] = useState(emptyForm);
@@ -3890,8 +3458,17 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
   const updateLeadField = (id, field, val) => {
     const nextValue = field === "status" ? toDomainStatus(val, "residential") : val;
-    setLeads(ls=>ls.map(l=>l.id===id?{...l,[field]:nextValue}:l));
-    if(viewLead?.id===id) setViewLead(v=>({...v,[field]:nextValue}));
+    setLeads((leads) => leads.map((lead) => {
+      if (lead.id !== id) return lead;
+      if (field === "status" && !canTransitionStatus(lead.status, nextValue, RESIDENTIAL_STATUS_TRANSITIONS)) return lead;
+      return { ...lead, [field]: nextValue };
+    }));
+    if (viewLead?.id === id) {
+      setViewLead((lead) => {
+        if (field === "status" && !canTransitionStatus(lead?.status, nextValue, RESIDENTIAL_STATUS_TRANSITIONS)) return lead;
+        return { ...lead, [field]: nextValue };
+      });
+    }
   };
 
   const submitForm = () => {
@@ -3917,75 +3494,75 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   const dwellingOptions = Object.keys(HUC_PRICING_GRID);
   const sizeOptions = (dt) => Object.keys(HUC_PRICING_GRID[dt] || {});
 
-  const filteredLeads = (() => {
+  const filteredLeads = useMemo(() => {
     try {
-      const base = filterStatus === "All" ? leads : leads.filter(l => statusMatches(l?.status, filterStatus, "residential"));
+      const base = filterStatus === "All" ? leads : leads.filter((lead) => statusMatches(lead?.status, filterStatus, "residential"));
       const sq = searchQuery.trim().toLowerCase();
       return base
-        .filter(l => {
-          if (!l) return false;
-          if (!l.name && !l.email && !l.id) return false; // remove null/empty
+        .filter((lead) => {
+          if (!lead) return false;
+          if (!lead.name && !lead.email && !lead.id) return false; // remove null/empty
           if (!sq) return true;
-          return (l.name    || "").toLowerCase().includes(sq) ||
-                 (l.email   || "").toLowerCase().includes(sq) ||
-                 (l.address || "").toLowerCase().includes(sq) ||
-                 (l.phone   || "").toLowerCase().includes(sq);
+          return (lead.name || "").toLowerCase().includes(sq) ||
+                 (lead.email || "").toLowerCase().includes(sq) ||
+                 (lead.address || "").toLowerCase().includes(sq) ||
+                 (lead.phone || "").toLowerCase().includes(sq);
         })
         .sort((a, b) => {
           const da = a.createdAt || a.quotedDate || a.bookedDate || "";
           const db = b.createdAt || b.quotedDate || b.bookedDate || "";
           return db.localeCompare(da);
         });
-    } catch(e) {
-      return leads.filter(l => !!l);
+    } catch {
+      return leads.filter((lead) => !!lead);
     }
-  })();
+  }, [filterStatus, leads, searchQuery]);
 
-  const statusCounts = HUC_STATUSES.reduce((acc,s)=>({ ...acc, [s]: leads.filter(l=>statusMatches(l?.status, s, "residential")).length }), {});
+  const statusCounts = useMemo(
+    () => HUC_STATUSES.reduce((acc, status) => ({
+      ...acc,
+      [status]: leads.filter((lead) => statusMatches(lead?.status, status, "residential")).length,
+    }), {}),
+    [leads],
+  );
+
+  const leadQuotes = useMemo(() => {
+    const quotesByLead = new Map();
+    for (const lead of filteredLeads) {
+      const leadKey = lead?.id ? String(lead.id) : `${lead?.email || ""}|${lead?.name || ""}|${lead?.createdAt || ""}|${lead?.address || ""}`;
+      try {
+        quotesByLead.set(leadKey, calculateQuote({ type: "residential", data: lead, region }));
+      } catch {
+        quotesByLead.set(leadKey, { total: 0, profit: 0, margin: 0, teamSize: 1, currency: region?.currencySymbol || "CA$" });
+      }
+    }
+    return quotesByLead;
+  }, [filteredLeads, region]);
+
+  const closeEditLead = () => closeLeadEditModal(setShowEditForm, setEditLead);
 
   return (
     <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
-        <div>
-          <div style={S.h2}>🏠 Residential Leads</div>
-          <div style={{ fontSize:13, color:C.muted, marginTop:-14 }}>Have Us Clean — Toronto & GTA</div>
-        </div>
-        <button style={S.btn("primary")} onClick={()=>setShowForm(true)}>+ New Lead</button>
-      </div>
-
-      {/* Search */}
-      <input
-        style={{ ...S.input, marginBottom:12 }}
-        placeholder="🔍 Search by name, email, address or phone..."
-        value={searchQuery}
-        onChange={e => setSearchQuery(e.target.value)}
+      <ResidentialLeadsToolbar
+        C={C}
+        S={S}
+        statuses={HUC_STATUSES}
+        statusColorMap={HUC_STATUS_COLOR}
+        totalCount={leads.length}
+        statusCounts={statusCounts}
+        filterStatus={filterStatus}
+        onFilterStatus={setFilterStatus}
+        searchQuery={searchQuery}
+        onSearchQuery={setSearchQuery}
+        onNewLead={() => setShowForm(true)}
       />
-
-      {/* Status pipeline */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:18 }}>
-        {["All", ...HUC_STATUSES].map(s => {
-          const count = s === "All" ? leads.length : statusCounts[s] || 0;
-          const col = s === "All" ? C.muted : HUC_STATUS_COLOR[s];
-          const active = filterStatus === s;
-          return (
-            <button key={s} onClick={()=>setFilterStatus(s)} style={{ padding:"5px 14px", borderRadius:20, cursor:"pointer", fontSize:12, fontWeight:700, background:active?`${col}22`:C.surface, color:active?col:C.muted, border:`1px solid ${active?col:C.border}` }}>
-              {s} {count > 0 && <span style={{ marginLeft:4, background:`${col}33`, borderRadius:20, padding:"1px 7px", fontSize:11 }}>{count}</span>}
-            </button>
-          );
-        })}
-      </div>
 
       <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
         {filteredLeads.map(lead => {
           if (!lead || (!lead.id && !lead.name && !lead.email)) return null;
-          let q;
-          try {
-            q = calculateQuote({ type:"residential", data: lead, region });
-          } catch(e) {
-            q = { total:0, profit:0, margin:0, teamSize:1, currency: region?.currencySymbol || "CA$" };
-          }
           const statusColor = HUC_STATUS_COLOR[lead.status] || C.muted;
-          const key = lead.id ? String(lead.id) : `${lead.email||""}${lead.name||""}${lead.createdAt||Math.random()}`;
+          const key = lead.id ? String(lead.id) : `${lead.email || ""}|${lead.name || ""}|${lead.createdAt || ""}|${lead.address || ""}`;
+          const q = leadQuotes.get(key) || { total:0, profit:0, margin:0, teamSize:1, currency: region?.currencySymbol || "CA$" };
           return (
             <div key={key} style={{ ...S.card, borderLeft:`4px solid ${statusColor}` }}>
               <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
@@ -4016,7 +3593,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
               </div>
               {lead.notes && <div style={{ marginTop:8, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"6px 10px" }}>📝 {lead.notes}</div>}
               {lead.followUpDate && <div style={{ fontSize:12, color:"#FF6B6B", marginTop:4 }}>📅 Follow up: {lead.followUpDate}</div>}
-              <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
+              <div style={LEAD_PRIMARY_ACTIONS_ROW}>
                 <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View</button>
                 <button style={{...S.btn("ghost"), color:"#60A5FA"}} onClick={()=>{setEditLead({...lead});setShowEditForm(true);}}>✏️ Edit</button>
                 <button style={{...S.btn("ghost"), color:"#FF4757"}} onClick={async ()=>{
@@ -4030,7 +3607,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
                   <button style={{ background:"#1e2d45", border:"none", color:"#aaa", borderRadius:6, padding:"6px 14px", cursor:"pointer" }} onClick={()=>setConfirmDeleteRes(null)}>Cancel</button>
                 </div>
               )}
-              <div style={{ marginTop:8, display:"flex", gap:8, flexWrap:"wrap" }}>
+              <div style={LEAD_SECONDARY_ACTIONS_ROW}>
                 {(!lead.status || statusMatches(lead.status,"New","residential")) && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Quote</button>}
                 {statusMatches(lead.status,"Quoted","residential") && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Book</button>}
                 {statusMatches(lead.status,"Follow Up","residential") && <button style={{ ...S.btn("sm"), background:"#FF6B6B", color:"#fff" }} onClick={()=>sendQuote(lead)}>📤 Re-Quote</button>}
@@ -4153,7 +3730,7 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
 
       {/* View / Quote Modal */}
       {showEditForm && editLead && (
-        <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
+        <Modal onClose={closeEditLead}>
           <div style={{ padding:16 }}>
             <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
             {["name","email","phone","address","notes"].map(field => (
@@ -4164,20 +3741,20 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
             ))}
             <div style={{ marginBottom:10 }}>
               <div style={S.label}>Status</div>
-              <select style={S.input} value={editLead.status||toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential")} onChange={e=>setEditLead(v=>({...v,status:toDomainStatus(e.target.value, "residential")}))}>
+              <select style={S.input} value={editLead.status||toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential")} onChange={e=>updateEditLeadStatus(setEditLead, e.target.value, (value) => toDomainStatus(value, "residential"))}>
                 {HUC_STATUSES.map(s=><option key={s}>{s}</option>)}
               </select>
             </div>
             <div style={{ marginBottom:10 }}>
               <div style={S.label}>Follow-Up Date</div>
-              <input style={S.input} type="date" value={editLead.followUpDate||""} onChange={e=>setEditLead(v=>({...v,followUpDate:e.target.value}))} />
+              <input style={S.input} type="date" value={editLead.followUpDate||""} onChange={e=>updateEditLeadFollowUpDate(setEditLead, e.target.value)} />
             </div>
             <div style={{ display:"flex", gap:8, marginTop:16 }}>
               <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
-                setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
-                setShowEditForm(false);setEditLead(null);
+                saveEditedLead({ editLead, setResLeads, dbSet, dbKey: DB_KEYS.leadsRes });
+                closeEditLead();
               }}>💾 Save Changes</button>
-              <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
+              <button style={{...S.btn("ghost"), flex:1}} onClick={closeEditLead}>Cancel</button>
             </div>
             <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
               setConfirmDrawerOpen(true);
@@ -4187,29 +3764,21 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
       )}
 
       {/* ── ConfirmDrawer — replaces window.confirm for edit modal lead delete ── */}
-      <Suspense fallback={null}>
-        <ConfirmDrawer
-          open={confirmDrawerOpen}
-          title="Delete this lead?"
-          message="This cannot be undone. The lead will be permanently removed."
-          confirmLabel="Yes, Delete"
-          cancelLabel="Keep Lead"
-          variant="danger"
-          onConfirm={async () => {
-            const lid = String(editLead?.id || "");
-            setConfirmDrawerOpen(false);
-            setResLeads(ls => {
-              const next = ls.filter(l => l.id !== editLead?.id);
-              dbSet(DB_KEYS.leadsRes, next);
-              return next;
-            });
-            try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-            setShowEditForm(false);
-            setEditLead(null);
-          }}
-          onCancel={() => setConfirmDrawerOpen(false)}
-        />
-      </Suspense>
+      <LeadDeleteConfirmDrawer
+        open={confirmDrawerOpen}
+        onConfirm={async () => {
+          setConfirmDrawerOpen(false);
+          await deleteEditedLead({
+            editLead,
+            setResLeads,
+            dbSet,
+            dbKey: DB_KEYS.leadsRes,
+            deleteRemote: deleteResidentialLeadById,
+          });
+          closeEditLead();
+        }}
+        onCancel={() => setConfirmDrawerOpen(false)}
+      />
       {viewLead && (
         <Modal title={`📄 Quote — ${viewLead.name}`} onClose={()=>setViewLead(null)} wide>
           <div>
@@ -4332,276 +3901,6 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   );
 }
 
-function CommercialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION }) {
-  const [leads, setLeads] = useState([
-    { id:1, bizName:"Apex Financial Group", contactName:"Linda Torres", email:"ltorres@apexfin.com", phone:"555-8801", address:"1200 Commerce Blvd, Suite 400", serviceType:"Office Clean",        sqft:4500, floors:2, addons:["restrooms","supply"], frequency:"Weekly",    preferredDate:"2026-04-14", preferredTime:"6:00 AM", contractMonths:12, notes:"After-hours only.", status:"quoted", workOrder:null, paymentConfirmed:false },
-    { id:2, bizName:"FitZone Gym",          contactName:"Derek Nolan",  email:"derek@fitzone.com",  phone:"555-7720", address:"300 Athletic Way",                serviceType:"Retail / Showroom", sqft:8000, floors:1, addons:["disinfect","carpet_com"], frequency:"Daily", preferredDate:"2026-04-07", preferredTime:"5:00 AM", contractMonths:6,  notes:"High traffic. Locker rooms priority.", status:"new", workOrder:null, paymentConfirmed:false },
-  ]);
-  const [showForm, setShowForm] = useState(false);
-  const [viewLead, setViewLead] = useState(null);
-  const [editLead, setEditLead] = useState(null);
-  const [showEditForm, setShowEditForm] = useState(false);
-  const [confirmDrawerOpen, setConfirmDrawerOpen] = useState(false);
-  const [showEmail, setShowEmail] = useState(null);
-  const [form, setForm] = useState({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
-
-  const sendQuote = (lead) => {
-    const q = calculateQuote({ type:"commercial", data: lead, region });
-    const pkg = lead.serviceType;
-    const addonList = lead.addons?.map(id => COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean);
-    const cur = region.id === "ON" ? "CA$" : "$";
-    const f = (n) => `${cur}${Math.round(n).toLocaleString()}`;
-    const subject = `Commercial Cleaning Proposal — ${BRAND.businessName}`;
-    const body = [
-      `Hi ${lead.contactName || "there"},`,
-      ``,
-      `Thank you for considering Have Us Clean for your commercial cleaning needs. Here is your custom proposal:`,
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `PROPOSAL DETAILS`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `Business:   ${lead.bizName}`,
-      `Service:    ${pkg}`,
-      `Address:    ${lead.address}`,
-      `Size:       ${lead.sqft?.toLocaleString()} sqft · ${lead.floors} floor(s)`,
-      `Frequency:  ${lead.frequency}`,
-      addonList.length > 0 ? `Add-Ons:    ${addonList.join(", ")}` : "",
-      ``,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `PRICING`,
-      `━━━━━━━━━━━━━━━━━━━━━━━━━━━━`,
-      `Per Visit:      ${f(q.total)}${q.taxRate > 0 ? ` (incl. ${(q.taxRate*100).toFixed(0)}% HST)` : ""}`,
-      `Monthly Est.:   ${f(q.monthly)}`,
-      lead.contractMonths > 1 ? `Contract Value: ${f(q.contract)} (${lead.contractMonths} months)` : "",
-      ``,
-      `To move forward, please reply to this email or call us directly.`,
-      ``,
-      `Best regards,`,
-      `Have Us Clean`,
-      `📧 ${BRAND.supportEmail}`,
-    ].filter(l => l !== null && l !== undefined).join("\n");
-
-    setLeads(ls => ls.map(l => l.id === lead.id ? { ...l, status:"quoted" } : l));
-    if (viewLead?.id === lead.id) setViewLead(v => ({ ...v, status:"quoted" }));
-    setShowEmail({ lead, q, subject, body, isCommercial: true });
-  };
-  const bookLead = (lead) => {
-    const q = calculateQuote({ type:"commercial", data: lead, region });
-    const newJob = { id:Date.now(), client:lead.bizName, address:lead.address, type:lead.serviceType, date:lead.preferredDate, time:lead.preferredTime, partnerId:partners[0]?.id||1, partnerIds:[partners[0]?.id||1], status:"scheduled", hours:Math.max(3,Math.round(q.totalCost/PARTNER_COST_PER_HOUR)), upsells:lead.addons?.map(id=>COM_ADDONS.find(x=>x.id===id)?.label).filter(Boolean), beforePics:[], afterPics:[], summary:"", clientPrice:Math.round(q.total), partnerPay:q.partnerPay, profit:q.profit, checkIn:null, checkOut:null, checkInCoords:null, checkOutCoords:null, recurring:lead.frequency, nextDate:null };
-    setJobs(js=>[...js,newJob]);
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"booked",workOrder:newJob.id}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"booked"});
-    alert("✅ Commercial contract created! Work order added to Jobs.");
-  };
-  const confirmPayment = (lead) => {
-    setLeads(ls=>ls.map(l=>l.id===lead.id?{...l,status:"paid",paymentConfirmed:true}:l));
-    if(viewLead?.id===lead.id) setViewLead({...viewLead,status:"paid",paymentConfirmed:true});
-  };
-  const submitForm = () => {
-    setLeads(ls=>[...ls,{...form,id:Date.now(),status:"new",workOrder:null,paymentConfirmed:false}]);
-    setShowForm(false);
-    setForm({ bizName:"", contactName:"", email:"", phone:"", address:"", serviceType:"Office Clean", sqft:2000, floors:1, addons:[], frequency:"Weekly", preferredDate:"", preferredTime:"", contractMonths:12, notes:"" });
-  };
-  const toggleAddon = (id) => setForm(f=>({...f,addons:(f.addons||[]).includes(id)?(f.addons||[]).filter(x=>x!==id):[...f.addons,id]}));
-
-  return (
-    <div>
-      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:18, flexWrap:"wrap", gap:12 }}>
-        <div style={S.h2}>🏢 Commercial Leads</div>
-        <button style={S.btn("primary")} onClick={()=>setShowForm(true)}>+ New Lead</button>
-      </div>
-      <div style={S.grid3}>
-        <StatCard label="Commercial Leads" value={leads.length} icon="🏢" color={C.blue} />
-        <StatCard label="Monthly Value" value={`$${leads.filter(l=>l.status!=="new").reduce((a,b)=>a+calculateQuote({ type:"commercial", data: b, region }).monthly,0).toFixed(0)}`} icon="📈" color={C.gold} />
-        <StatCard label="Active Contracts" value={leads.filter(l=>["booked","paid"].includes(l.status)).length} icon="📑" color={C.accent} />
-      </div>
-      <div style={S.divider} />
-      <div style={{ display:"flex", flexDirection:"column", gap:14 }}>
-        {leads.map(lead=>{
-          const q = calculateQuote({ type:"commercial", data: lead, region });
-          return (
-            <div key={lead.id} style={S.card}>
-              <div style={{ display:"flex", justifyContent:"space-between", flexWrap:"wrap", gap:10 }}>
-                <div>
-                  <div style={{ fontWeight:800, fontSize:17 }}>{lead.bizName}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>👤 {lead.contactName} · 📧 {lead.email}</div>
-                  <div style={{ fontSize:13, color:C.muted }}>📐 {lead.sqft.toLocaleString()} sqft · {lead.floors} fl · {lead.serviceType} · {lead.frequency}</div>
-                </div>
-                <div style={{ textAlign:"right" }}>
-                  <span style={S.badge(lead.status==="paid"?"green":lead.status==="booked"?"green":lead.status==="quoted"?"gold":"blue")}>{lead.status}</span>
-                  <div style={{ fontWeight:800, fontSize:20, color:C.accent, marginTop:6 }}>${q.total.toFixed(2)}<span style={{ fontSize:12,color:C.muted }}>/visit</span></div>
-                  <div style={{ fontSize:12, color:C.gold }}>Profit: ${q.profit}/visit · {q.margin}% margin</div>
-                  <div style={{ fontSize:12, color:C.muted }}>${q.monthly.toFixed(0)}/mo · ${q.contract.toFixed(0)} contract</div>
-                </div>
-              </div>
-              {(lead.addons||[]).length>0 && <div style={{ marginTop:10, display:"flex", gap:6, flexWrap:"wrap" }}>{lead.addons?.map(id=>{ const ao=COM_ADDONS.find(x=>x.id===id); return ao?<span key={id} style={S.badge("blue")}>{ao.label}</span>:null; })}</div>}
-              {lead.notes && <div style={{ marginTop:10, fontSize:12, color:C.muted, background:C.surface, borderRadius:8, padding:"8px 12px" }}>💬 {lead.notes}</div>}
-              <div style={{ marginTop:12, display:"flex", gap:8, flexWrap:"wrap" }}>
-                <button style={S.btn("ghost")} onClick={()=>setViewLead(lead)}>👁 View Proposal</button>
-                {lead.status==="new" && <button style={S.btn("primary")} onClick={()=>sendQuote(lead)}>📤 Send Proposal</button>}
-                {lead.status==="quoted" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(lead)}>✅ Sign Contract</button>}
-                {lead.status==="booked" && <button style={{ ...S.btn("sm"), background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(lead)}>💳 Confirm Deposit</button>}
-                {lead.status==="paid" && <span style={{ fontSize:13, color:C.accent, fontWeight:700 }}>🎉 Contract Active!</span>}
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {showForm && (
-        <Modal title="🏢 New Commercial Lead" onClose={()=>setShowForm(false)} wide>
-          <div style={{ display:"flex", flexDirection:"column", gap:12 }}>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
-              <div><div style={S.label}>Business Name</div><input style={S.input} value={form.bizName} onChange={e=>setForm({...form,bizName:e.target.value})} placeholder="Acme Corp" /></div>
-              <div><div style={S.label}>Contact Name</div><input style={S.input} value={form.contactName} onChange={e=>setForm({...form,contactName:e.target.value})} placeholder="John Smith" /></div>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
-              <div><div style={S.label}>Email</div><input style={S.input} value={form.email} onChange={e=>setForm({...form,email:e.target.value})} /></div>
-              <div><div style={S.label}>Phone</div><input style={S.input} value={form.phone} onChange={e=>setForm({...form,phone:e.target.value})} /></div>
-            </div>
-            <div><div style={S.label}>Address</div><input style={S.input} value={form.address} onChange={e=>setForm({...form,address:e.target.value})} /></div>
-            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:10 }}>
-              <div><div style={S.label}>Sq Ft</div><input style={S.input} type="number" min={500} value={form.sqft} onChange={e=>setForm({...form,sqft:+e.target.value})} /></div>
-              <div><div style={S.label}>Floors</div><input style={S.input} type="number" min={1} max={50} value={form.floors} onChange={e=>setForm({...form,floors:+e.target.value})} /></div>
-              <div><div style={S.label}>Contract (mo)</div><input style={S.input} type="number" min={1} max={36} value={form.contractMonths} onChange={e=>setForm({...form,contractMonths:+e.target.value})} /></div>
-              <div><div style={S.label}>Service</div><select style={S.select} value={form.serviceType} onChange={e=>setForm({...form,serviceType:e.target.value})}>{Object.keys(COM_SERVICE_COST_PER_SQFT).map(t=><option key={t}>{t}</option>)}</select></div>
-            </div>
-            <div><div style={S.label}>Frequency</div><select style={S.select} value={form.frequency} onChange={e=>setForm({...form,frequency:e.target.value})}>{Object.keys(COM_FREQ_DISCOUNTS).map(f=><option key={f}>{f}</option>)}</select></div>
-            <div><div style={S.label}>Add-Ons</div><div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>{COM_ADDONS.map(ao=>(<button key={ao.id} onClick={()=>toggleAddon(ao.id)} style={{ padding:"5px 12px", borderRadius:20, fontSize:12, fontWeight:600, cursor:"pointer", background:(form.addons||[]).includes(ao.id)?C.blueDim:C.surface, color:(form.addons||[]).includes(ao.id)?C.blue:C.muted, border:`1px solid ${(form.addons||[]).includes(ao.id)?C.blue:C.border}` }}>{ao.label} +${markupFactor(ao.costToUs)}</button>))}</div></div>
-            {form.bizName && (() => { const q=calculateQuote({ type:"commercial", data: form, region }); return (<><QuoteBox q={q} type="com" /><div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:18,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div><div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{form.contractMonths}-MO CONTRACT</div><div style={{ fontSize:18,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div></div></>); })()}
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12 }}>
-              <div><div style={S.label}>Preferred Date</div><input style={S.input} type="date" value={form.preferredDate} onChange={e=>setForm({...form,preferredDate:e.target.value})} /></div>
-              <div><div style={S.label}>Preferred Time</div><input style={S.input} type="time" value={form.preferredTime} onChange={e=>setForm({...form,preferredTime:e.target.value})} /></div>
-            </div>
-            <div><div style={S.label}>Notes</div><textarea style={{...S.input,minHeight:60,resize:"vertical"}} value={form.notes} onChange={e=>setForm({...form,notes:e.target.value})} /></div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={submitForm} disabled={!form.bizName||!form.email}>💾 Save Lead & Generate Proposal</button>
-          </div>
-        </Modal>
-      )}
-
-      {showEditForm && editLead && (
-        <Modal onClose={()=>{setShowEditForm(false);setEditLead(null);}}>
-          <div style={{ padding:16 }}>
-            <h3 style={{ color:C.accent, marginBottom:16 }}>✏️ Edit Lead</h3>
-            {["name","email","phone","address","notes"].map(field => (
-              <div key={field} style={{ marginBottom:10 }}>
-                <div style={S.label}>{field.charAt(0).toUpperCase()+field.slice(1)}</div>
-                <input style={S.input} value={editLead[field]||""} onChange={e=>setEditLead(v=>({...v,[field]:e.target.value}))} />
-              </div>
-            ))}
-            <div style={{ marginBottom:10 }}>
-              <div style={S.label}>Status</div>
-              <select style={S.input} value={editLead.status||"New"} onChange={e=>setEditLead(v=>({...v,status:e.target.value}))}>
-                {["New","Quoted","Follow Up","Booked","Completed","Lost"].map(s=><option key={s}>{s}</option>)}
-              </select>
-            </div>
-            <div style={{ marginBottom:10 }}>
-              <div style={S.label}>Follow-Up Date</div>
-              <input style={S.input} type="date" value={editLead.followUpDate||""} onChange={e=>setEditLead(v=>({...v,followUpDate:e.target.value}))} />
-            </div>
-            <div style={{ display:"flex", gap:8, marginTop:16 }}>
-              <button style={{...S.btn("primary"), flex:1}} onClick={()=>{
-                setResLeads(ls=>{const next=ls.map(l=>l.id===editLead.id?editLead:l);dbSet(DB_KEYS.leadsRes,next);return next;});
-                setShowEditForm(false);setEditLead(null);
-              }}>💾 Save Changes</button>
-              <button style={{...S.btn("ghost"), flex:1}} onClick={()=>{setShowEditForm(false);setEditLead(null);}}>Cancel</button>
-            </div>
-            <button style={{...S.btn("ghost"), width:"100%", marginTop:8, color:"#FF4757", borderColor:"#FF4757"}} onClick={()=>{
-              setConfirmDrawerOpen(true);
-            }}>🗑 Delete Lead</button>
-          </div>
-        </Modal>
-      )}
-
-      {/* ── ConfirmDrawer — commercial edit modal lead delete ── */}
-      <Suspense fallback={null}>
-        <ConfirmDrawer
-          open={confirmDrawerOpen}
-          title="Delete this lead?"
-          message="This cannot be undone. The lead will be permanently removed."
-          confirmLabel="Yes, Delete"
-          cancelLabel="Keep Lead"
-          variant="danger"
-          onConfirm={async () => {
-            const lid = String(editLead?.id || "");
-            setConfirmDrawerOpen(false);
-            setResLeads(ls => {
-              const next = ls.filter(l => l.id !== editLead?.id);
-              dbSet(DB_KEYS.leadsRes, next);
-              return next;
-            });
-            try { await sbFetch(`huc_leads_res?id=eq.${encodeURIComponent(lid)}`, { method:"DELETE" }); } catch {}
-            setShowEditForm(false);
-            setEditLead(null);
-          }}
-          onCancel={() => setConfirmDrawerOpen(false)}
-        />
-      </Suspense>
-      {viewLead && (
-        <Modal title={`📑 Proposal — ${viewLead.bizName}`} onClose={()=>setViewLead(null)} wide>
-          {(() => { const q=calculateQuote({ type:"commercial", data: viewLead, region }); return (
-            <div>
-              <div style={{ marginBottom:14 }}>
-                <div style={{ fontSize:14, color:C.muted }}>👤 {viewLead.contactName} · {viewLead.email}</div>
-                <div style={{ fontSize:13, color:C.muted }}>📐 {viewLead.sqft.toLocaleString()} sqft · {viewLead.floors} floor(s) · {viewLead.serviceType} · {viewLead.frequency}</div>
-              </div>
-              <QuoteBox q={q} type="com" />
-              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:10, marginTop:10 }}>
-                <div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>MONTHLY</div><div style={{ fontSize:20,fontWeight:800,color:C.gold }}>${q.monthly.toFixed(0)}</div></div>
-                <div style={{ background:C.surface, borderRadius:9, padding:12, textAlign:"center" }}><div style={{ fontSize:11,color:C.muted }}>{viewLead.contractMonths}-MO CONTRACT</div><div style={{ fontSize:20,fontWeight:800,color:C.blue }}>${q.contract.toFixed(0)}</div></div>
-              </div>
-              <div style={{ marginTop:14, display:"flex", flexDirection:"column", gap:8 }}>
-                {viewLead.status==="new" && <button style={{ ...S.btn("primary"), width:"100%" }} onClick={()=>sendQuote(viewLead)}>📤 Send Proposal</button>}
-                {viewLead.status==="quoted" && <button style={{ ...S.btn("primary"), width:"100%", background:C.gold, color:"#0A0F1E" }} onClick={()=>bookLead(viewLead)}>✅ Sign Contract + Work Order</button>}
-                {viewLead.status==="booked" && <button style={{ ...S.btn("primary"), width:"100%", background:C.purple, color:"#0A0F1E" }} onClick={()=>confirmPayment(viewLead)}>💳 Confirm Deposit</button>}
-                {viewLead.status==="paid" && <div style={{ textAlign:"center", color:C.accent, fontWeight:800 }}>🎉 Contract Active!</div>}
-              </div>
-            </div>
-          ); })()}
-        </Modal>
-      )}
-      {/* Commercial Email Modal */}
-      {showEmail && (
-        <Modal title="📧 Send Commercial Proposal" onClose={()=>setShowEmail(null)} wide>
-          <div>
-            <div style={{ background:C.accentDim, border:`1px solid ${C.accent}44`, borderRadius:10, padding:"12px 16px", marginBottom:18, display:"flex", alignItems:"center", gap:10 }}>
-              <span style={{ fontSize:20 }}>✅</span>
-              <div>
-                <div style={{ fontWeight:700, color:C.accent, fontSize:14 }}>Lead marked as Quoted</div>
-                <div style={{ fontSize:12, color:C.muted }}>Send the proposal using one of the options below</div>
-              </div>
-            </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:12, marginBottom:14 }}>
-              <div><div style={S.label}>To</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:14, fontWeight:700 }}>{showEmail.lead.email}</div></div>
-              <div><div style={S.label}>Subject</div><div style={{ background:C.surface, borderRadius:8, padding:"10px 12px", fontSize:13, color:C.muted }}>{showEmail.subject}</div></div>
-            </div>
-            <div style={{ marginBottom:18 }}>
-              <div style={S.label}>Proposal Preview</div>
-              <div style={{ background:C.surface, borderRadius:10, padding:16, fontSize:13, color:C.muted, lineHeight:1.9, whiteSpace:"pre-line", maxHeight:260, overflowY:"auto", border:`1px solid ${C.border}` }}>{showEmail.body}</div>
-            </div>
-            <div style={{ display:"flex", flexDirection:"column", gap:10 }}>
-              <a href={`https://mail.google.com/mail/?view=cm&to=${encodeURIComponent(showEmail.lead.email||"")}&su=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`} target="_blank" rel="noopener noreferrer"
-                style={{ ...S.btn("primary"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
-                <span style={{ fontSize:20 }}>📨</span>
-                <div><div style={{ fontWeight:800 }}>Open in Gmail</div><div style={{ fontSize:11, opacity:0.8 }}>Pre-filled and ready to send</div></div>
-              </a>
-              <a href={`mailto:${showEmail.lead.email||""}?subject=${encodeURIComponent(showEmail.subject)}&body=${encodeURIComponent(showEmail.body)}`}
-                style={{ ...S.btn("ghost"), textDecoration:"none", display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}>
-                <span style={{ fontSize:20 }}>📱</span>
-                <div><div style={{ fontWeight:800 }}>Open in Mail App</div><div style={{ fontSize:11, color:C.dim }}>Opens your default email app</div></div>
-              </a>
-              <button style={{ ...S.btn("ghost"), display:"flex", alignItems:"center", justifyContent:"center", gap:10, padding:"14px 20px" }}
-                onClick={() => { navigator.clipboard?.writeText(showEmail.body); alert("✅ Proposal copied to clipboard!"); }}>
-                <span style={{ fontSize:20 }}>📋</span>
-                <div><div style={{ fontWeight:800 }}>Copy Proposal Body</div><div style={{ fontSize:11, color:C.dim }}>Paste into any email manually</div></div>
-              </button>
-            </div>
-          </div>
-        </Modal>
-      )}
-    </div>
-  );
-}
 function RegionSwitcher({ activeRegion, setActiveRegion }) {
   return (
     <div style={{ display:"flex", gap:4, alignItems:"center" }}>
@@ -6618,37 +5917,7 @@ const SHOW_PORTAL_HELPER_NOTE = (() => {
   }
 })();
 
-const ROLE_TAB_ALLOWLIST = {
-  partner: new Set(["partnerview", "onboarding"]),
-  sales: new Set(["salesview", "cold", "res", "jobs", "schedule", "partners"]),
-};
-
 const LAST_ACTIVE_TAB_KEY = "cp:last_active_tab";
-const TAB_QUERY_ALIASES = {
-  partnerview: "partner-view",
-};
-const QUERY_TAB_ALIASES = {
-  "partner-view": "partnerview",
-};
-const ALL_TAB_IDS = new Set([
-  "dashboard", "ops_mgr", "jobs", "recurring", "gps", "geo",
-  "res", "com", "cold", "intake",
-  "agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops",
-  "pay", "stripe", "qb",
-  "portal", "clientview", "followup", "sms", "marketing",
-  "partners", "partnerview", "salesview", "admins", "onboarding", "ai",
-  "tax", "db", "whitelabel", "pricing", "swot", "diagnostic", "schedule",
-]);
-
-function normalizeTabId(value) {
-  const raw = String(value || "").trim();
-  if (!raw) return "";
-  return QUERY_TAB_ALIASES[raw] || raw;
-}
-
-function getTabQueryValue(tabId) {
-  return TAB_QUERY_ALIASES[tabId] || tabId;
-}
 
 function getInitialRole() {
   if (typeof window === "undefined") return "admin";
@@ -6730,23 +5999,6 @@ function getInitialTab() {
     if (savedTab && ALL_TAB_IDS.has(savedTab)) return savedTab;
   } catch {}
   return "dashboard";
-}
-
-function canAccessTab(role, tabId) {
-  if (role === "admin") return true;
-  const allowlist = ROLE_TAB_ALLOWLIST[role];
-  return Boolean(allowlist && allowlist.has(tabId));
-}
-
-function filterNavGroupsByRole(navGroups, role) {
-  if (role === "admin") return navGroups;
-  const allowlist = ROLE_TAB_ALLOWLIST[role];
-  if (!allowlist) return [];
-  const blockedGroups = new Set(["finance", "biz"]);
-  return navGroups
-    .filter(group => !blockedGroups.has(group.id))
-    .map(group => ({ ...group, tabs: group.tabs.filter(tab => allowlist.has(tab.id)) }))
-    .filter(group => group.tabs.length > 0);
 }
 
 function SalesView({ activeRole, onEnterSales, onExitSales, setTab }) {
@@ -8027,6 +7279,18 @@ export default function App() {
   const regionJobs     = roleScopedJobs.filter(j => !j.region || j.region === activeRegion.id);
   const regionPartners = partners.filter(p => !p.region || p.region === activeRegion.id);
 
+  const commercialLeadsRuntime = useMemo(() => buildCommercialLeadsRuntime({
+    C,
+    S,
+    ModalComponent: Modal,
+    QuoteBoxComponent: QuoteBox,
+    calculateQuote,
+    brand: BRAND,
+    leadMobileActionsRow: LEAD_MOBILE_ACTIONS_ROW,
+    leadMobileActionBtn: LEAD_MOBILE_ACTION_BTN,
+    markupFactor,
+  }), [calculateQuote, markupFactor]);
+
   const NAV_GROUPS = [
     { id:"ops",      label:"⚙️ Operations", color: C.accent, tabs:[
       { id:"dashboard",  label:"📊 Dashboard",    desc:"Overview & today's jobs" },
@@ -8394,7 +7658,15 @@ export default function App() {
         {tab==="gps"            && <GPSTracking       jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
         {tab==="geo"            && <Geofencing        jobs={regionJobs}     partners={regionPartners} />}
         {tab==="res"            && <ResidentialLeads  jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} resLeads={resLeads} setResLeads={setResLeads} setTab={setTabGuarded} />}
-        {tab==="com"            && <CommercialLeads   jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} region={activeRegion} />}
+        {tab==="com"            && (
+          <CommercialLeadsFeature
+            jobs={regionJobs}
+            setJobs={setJobsDB}
+            partners={regionPartners}
+            region={activeRegion}
+            runtime={commercialLeadsRuntime}
+          />
+        )}
         {tab==="cold"           && <ColdOutreachLegacy region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
@@ -8458,409 +7730,7 @@ export default function App() {
   );
 }
 
-// ─── HUC AGENT SYSTEM PROMPTS ────────────────────────────────────────────────
-const HUC_AGENTS = {
-  VA_Quote_Agent: {
-    icon: "💬", color: C.accent,
-    title: "VA Quote Agent",
-    purpose: "Generate fast, consistent quotes using the exact HUC formula.",
-    system: `You are the Have Us Clean VA Quote Agent. Use this exact formula every time.
-
-TEAM SIZE BY SQFT:
-- 1 partner → up to 1,000 sqft
-- 2 partners → 1,001–3,000 sqft
-- 3 partners → 3,001+ sqft
-
-HOURS: sqft ÷ 1,000 (minimum 1.5h, round to nearest 0.5h)
-PARTNER RATE: $30/hr CAD (Ontario) · $25/hr USD (Arizona)
-
-STEP-BY-STEP FORMULA:
-1. Hours = MAX(1.5, sqft ÷ 1000), round to nearest 0.5
-2. Labor cost = team size × $30 × hours
-3. Labor price = labor cost ÷ 0.65
-4. Formula price = labor price × package multiplier
-5. Floor base = floor price for that dwelling type (see below)
-6. Floor price with package = floor base × package multiplier  ← CRITICAL: multiply floor by package too
-7. Final base = MAX(formula price, floor price with package)
-8. Condition adjust = final base × condition multiplier
-9. Add addons at fixed prices
-10. Apply frequency discount
-11. Ontario: add 13% HST. Arizona: no tax.
-
-PACKAGE MULTIPLIERS:
-Refresh Clean ×1.0 · Full Home Clean ×1.25 · Deep Clean ×1.65
-Move-In/Out ×1.80 · Kitchen & Bath Refresh ×0.65 · Pre-Sale ×1.50
-
-FLOOR BASE PRICES — Ontario CAD (multiply by package multiplier per step 6):
-Apartment/Condo: 1BR $140 · 2BR $165 · 3BR $205
-Semi/Townhouse: Small $165 · Medium $205 · Large $245
-Detached House: Small $185 · Medium $230 · Large $310
-Arizona: multiply Ontario floor by 1.12
-
-ADDONS: Fridge $50 · Oven $55 · Cabinets $65 · Windows $60 · Baseboards $55 · Carpet $95 · Pet Hair $65
-FREQUENCY DISCOUNTS: Weekly −15% · Bi-Weekly −10% · Monthly −5%
-TAX: Ontario +13% HST · Arizona 0%
-
-WORKED EXAMPLE — 2BR Condo, 900 sqft, Full Home Clean, average condition, one-time, Ontario:
-1. Hours = MAX(1.5, 900÷1000=0.9) → 1.5h
-2. Labor cost = 1 × $30 × 1.5 = $45
-3. Labor price = $45 ÷ 0.65 = $69
-4. Formula price = $69 × 1.25 = $86
-5. Floor base (2BR Condo Ontario) = $165
-6. Floor with package = $165 × 1.25 = $206  ← floor gets multiplied too
-7. Final base = MAX($86, $206) = $206  ← floor wins
-8. Condition average ×1.0 → $206
-9. No addons
-10. No discount (one-time)
-11. Pre-tax = $206 · HST = $27 · TOTAL = $233
-
-Partner pay = $206 × 0.65 = $134 · Company keeps = $206 × 0.35 = $72
-
-PAY SPLIT: Partner total = pre-tax × 65% · Company = pre-tax × 35%
-2 partners → each gets half · 3 partners → each gets a third
-
-Always show full breakdown: team, hours, formula price, floor check, final base, condition, addons, discount, pre-tax, HST, total, partner pay each, company margin.
-
-IMPORTANT: Never ask for more information. If details are missing, use these smart defaults:
-- Sqft missing → estimate from beds/baths or use 900 sqft for 2BR
-- Condition missing → assume Average
-- Frequency missing → assume One-Time
-- Region missing → assume Ontario
-- Package missing → assume Refresh Clean
-Always produce a complete quote. State your assumptions clearly at the top.`,
-    inputLabel: "Describe the job — be as brief or detailed as you want. I'll make smart assumptions for anything missing.",
-    inputPlaceholder: "e.g. 2BR condo North York, Full Home Clean\n— or —\n3BR detached Mississauga, Deep Clean, heavy condition, bi-weekly, add inside oven\n— or —\nSmall office Scottsdale AZ, weekly janitorial",
-    outputSections: ["Quote Breakdown", "Partner Pay", "Customer-Facing Message", "Warning Flag (if any)"],
-  },
-  BidSpec_Agent: {
-    icon: "📄", color: C.gold,
-    title: "Bid Spec Agent",
-    purpose: "Generate clean, customer-safe bid summaries from quote details.",
-    system: `You are the Have Us Clean Bid Spec Agent. Produce clean, customer-safe quote summaries.
-
-RULES: Do NOT expose internal notes, margin warnings, or crew-only details. Summaries must list: service name, frequency, property type, selected add-ons (with prices), total price, and a readable scope-of-work paragraph. Keep language reassuring, simple, and professional. Always include a call-to-action at the end. Sign off as "Have Us Clean" with email haveusclean@gmail.com.
-
-FORMAT your output as:
-1. Email-safe summary (for pasting into email)
-2. PDF-safe scope paragraph (for formal documents)`,
-    inputLabel: "Paste or describe the quote details — service, frequency, property, addons, and total price.",
-    inputPlaceholder: "e.g. Full Home Clean, bi-weekly, 2BR condo North York, addons: inside fridge ($50), total CA$213 + HST. Generate a bid spec.",
-    outputSections: ["Email-Safe Summary", "PDF-Safe Scope Paragraph", "Call to Action"],
-  },
-  WorkOrder_Agent: {
-    icon: "🔧", color: "#FF6B6B",
-    title: "Work Order Agent",
-    purpose: "Generate cleaner-facing operational work orders.",
-    system: `You are the Have Us Clean Work Order Agent. Produce operational, task-focused work orders for cleaning partners.
-
-INCLUDE: Customer name, address, date, arrival window, quoted hours, room counts, service package, selected add-ons, access notes, parking notes, and special instructions (pets, allergies, fragile items).
-
-COLOUR RAG SYSTEM REMINDER (always include):
-- 🔴 Red = Toilets/urinals only
-- 🟡 Yellow = Other bathroom surfaces (sinks, mirrors)
-- 🟢 Green = Kitchen/food prep surfaces
-- 🔵 Blue = General/glass/living areas
-
-FORMAT: Checklist-style. No marketing language. Clear task order (top to bottom, back to front). Flag any unusual requirements.`,
-    inputLabel: "Paste the job details — client name, address, date, time, package, addons, hours, and any access or special notes.",
-    inputPlaceholder: "e.g. Sarah M., 88 Maple Dr North York, April 14 at 9am, Full Home Clean 2BR condo, addon: inside fridge, ~3hrs, dog on premises (keep doors closed), access code #4521",
-    outputSections: ["Work Order Header", "Room-by-Room Checklist", "Add-On Tasks", "Special Instructions"],
-  },
-  Social_Content_Agent: {
-    icon: "📱", color: C.blue,
-    title: "Social Content Agent",
-    purpose: "Turn pricing and service offers into lead-generating content.",
-    system: `You are the Have Us Clean Social Content Agent. Create modern-startup style content for Instagram, Facebook, X, and LinkedIn.
-
-BRAND: Have Us Clean · Mid-market · Toronto & GTA · haveusclean@gmail.com
-
-CONTENT PILLARS:
-1. Transparent pricing (show real prices, build trust)
-2. Before/after proof (results-focused)
-3. Educational cleaning content (tips, RAG system, professionalism)
-4. Offers and direct CTAs (Kitchen & Bathroom Refresh is the entry offer)
-5. Testimonials and social proof
-
-ENTRY OFFER: Kitchen & Bathroom Refresh ($120–$200) — easiest yes for new clients.
-
-30-DAY WEEKLY PATTERN:
-- Monday: Pricing/trust post
-- Tuesday: Before/after
-- Wednesday: Offer (Kitchen & Bath Refresh)
-- Thursday: Educational
-- Friday: Social proof/testimonial
-- Saturday: Soft sell/reminder
-- Sunday: Story/repost
-
-Always include a clear CTA. Keep copy modern-startup, not corporate. Use emoji sparingly but effectively.`,
-    inputLabel: "Describe what you need — platform (Instagram/Facebook/X/LinkedIn), goal (awareness/offer/educational/proof), and any specific service or offer to highlight.",
-    inputPlaceholder: "e.g. Instagram post for Wednesday, highlight the Kitchen & Bathroom Refresh entry offer at $120–$200, goal is to get DMs from people in Toronto. Modern and clean tone.",
-    outputSections: ["Post Copy", "Carousel Slide Breakdown (if applicable)", "Hashtags", "CTA"],
-  },
-  DM_Conversion_Agent: {
-    icon: "💌", color: "#FF6B6B",
-    title: "DM Conversion Agent",
-    purpose: "Handle inbound DMs and move people into the quote funnel.",
-    system: `You are the Have Us Clean DM Conversion Agent. Your job is to respond to inbound DMs, qualify the lead, and move them toward a quote or booking.
-
-QUALIFICATION QUESTIONS (use as needed, not all at once):
-- What type of property? (condo, house, townhouse)
-- Approximate bedrooms/bathrooms?
-- Looking for one-time or recurring?
-- When are you hoping to get started?
-- Any specific areas of focus or add-ons?
-
-FLOW: Warm greeting → acknowledge their interest → 1–2 qualifying questions → offer a quote or direct to form → follow-up if no reply in 24h.
-
-TONE: Warm, efficient, easy to reply to. Never salesy. Always move the conversation forward. Close with a clear next step (quote, date, or link).
-
-ENTRY OFFER: If they seem hesitant on price, mention Kitchen & Bathroom Refresh starting at $120 as a low-commitment way to try the service.`,
-    inputLabel: "Paste the incoming DM message. Include any context you have (platform, what they saw, their property type if known).",
-    inputPlaceholder: `e.g. "Hey! I saw your post about cleaning prices, how much would it cost to clean my apartment?" — 2BR condo, found us on Instagram, first contact.`,
-    outputSections: ["Reply Message", "Qualification Questions to Ask", "Follow-Up Script (if no reply)", "Booking Nudge"],
-  },
-  Operations_Manager_Agent: {
-    icon: "📊", color: C.accent,
-    title: "Operations Manager Agent",
-    purpose: "Maintain pipeline hygiene and surface daily priority actions.",
-    system: `You are the Have Us Clean Operations Manager Agent. Track quote status, follow-up dates, booked dates, assigned crew, and outstanding actions. Keep cold Leads separate from active Quotes. Your daily focus is the Quotes pipeline: new quote requests, quoted jobs needing follow-up, booked jobs needing work orders, and completed jobs needing closeout. Surface only what matters for the day.
-
-FORMAT your response as:
-TODAY'S PRIORITY ACTIONS (numbered, most urgent first)
-PIPELINE STATUS (New / Quoted / Follow Up / Booked counts)
-FLAGS & EXCEPTIONS (anything that needs immediate attention)
-RECOMMENDED NEXT STEP
-
-Be direct and action-oriented. No fluff. Max 300 words.`,
-    inputLabel: "Paste your current pipeline data — lead statuses, follow-up dates, job counts, partner availability, or any specific situation you need prioritized.",
-    inputPlaceholder: `e.g. I have 3 New leads, 2 Quoted from last week with no follow-up, 1 Booked job tomorrow with no work order yet, and 4 active partners. What should I focus on today?`,
-    outputSections: ["Today's Priority Actions", "Pipeline Status", "Flags & Exceptions", "Recommended Next Step"],
-  },
-};
-
-// ─── AGENT PANEL COMPONENT ────────────────────────────────────────────────────
-function AgentPanel({ agent, setResLeads, region }) {
-  const cfg = HUC_AGENTS[agent];
-  const [input, setInput] = useState("");
-  const [output, setOutput] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [history, setHistory] = useState([]);
-  const [copied, setCopied] = useState(false);
-  const [savedLead, setSavedLead] = useState(false);
-
-  const run = async () => {
-    if (!input.trim()) return;
-    setLoading(true);
-    setOutput("");
-    setSavedLead(false);
-    const userMsg = input;
-    try {
-      const res = await fetch("/api/claude", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-20250514",
-          max_tokens: 1000,
-          system: cfg.system,
-          messages: [{ role: "user", content: userMsg }],
-        }),
-      });
-      const data = await res.json();
-      const text = data.content?.map(b => b.text || "").join("\n") || "No response received.";
-      setOutput(text);
-      setHistory(h => [{ input: userMsg, output: text, ts: new Date().toLocaleTimeString() }, ...h].slice(0, 10));
-    } catch (e) {
-      setOutput("⚠️ Error connecting to AI. Please try again.");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const copy = () => {
-    navigator.clipboard?.writeText(output);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  // Parse VA Quote output and save as a residential lead
-  const saveAsLead = () => {
-    if (!output || !setResLeads) return;
-
-    // Extract key details from the agent's text output
-    const txt = output.toLowerCase();
-    const raw = input;
-
-    // Parse numbers from output
-    const preTaxMatch = output.match(/pre[\s-]*tax[:\s]+\$?([\d,]+)/i) || output.match(/\$([\d,]+)\s*pre-tax/i);
-    const totalMatch  = output.match(/total[:\s]+[A-Z$]*([\d,]+)/i) || output.match(/\$([\d,]+)\s*(?:CAD|USD|total)/i);
-    const hoursMatch  = output.match(/([\d.]+)\s*h(?:ours?)?/i);
-    const teamMatch   = output.match(/(\d)\s*partner/i);
-
-    // Infer fields from input text
-    const bedsMatch   = raw.match(/(\d)\s*(?:br|bed)/i);
-    const sqftMatch   = raw.match(/([\d,]+)\s*sqft/i);
-    const isAZ = /arizona|scottsdale|phoenix|tempe|mesa|chandler|gilbert/i.test(raw);
-
-    const pkgMap = {
-      "refresh":    "Refresh Clean",
-      "full home":  "Full Home Clean",
-      "deep":       "Deep Clean",
-      "move":       "Move-In / Move-Out",
-      "kitchen":    "Kitchen & Bathroom Refresh",
-      "pre-sale":   "Pre-Sale Clean",
-      "post-reno":  "Post-Renovation Clean",
-    };
-    let serviceType = "Refresh Clean";
-    for (const [k, v] of Object.entries(pkgMap)) {
-      if (raw.toLowerCase().includes(k)) { serviceType = v; break; }
-    }
-
-    const freqMap = { "weekly": "Weekly", "bi-weekly": "Bi-Weekly", "monthly": "Monthly" };
-    let frequency = "One-Time";
-    for (const [k,v] of Object.entries(freqMap)) {
-      if (raw.toLowerCase().includes(k)) { frequency = v; break; }
-    }
-
-    const preTax    = preTaxMatch ? parseInt(preTaxMatch[1].replace(/,/g,'')) : 0;
-    const total     = totalMatch  ? parseInt(totalMatch[1].replace(/,/g,''))  : 0;
-    const teamSize  = teamMatch   ? parseInt(teamMatch[1]) : 1;
-    const hours     = hoursMatch  ? parseFloat(hoursMatch[1]) : 1.5;
-    const partnerPay = Math.round(preTax * 0.65);
-    const profit     = Math.round(preTax * 0.35);
-
-    const newLead = {
-      id:            Date.now(),
-      name:          "",
-      email:         "",
-      phone:         "",
-      address:       "",
-      region:        isAZ ? "AZ" : "ON",
-      dwellingType:  /condo|apartment/i.test(raw) ? "Apartment / Condo"
-                   : /semi|town/i.test(raw) ? "Semi / Townhouse"
-                   : "Detached House",
-      dwellingSize:  bedsMatch ? (bedsMatch[1]==="1"?"1 Bed":bedsMatch[1]==="2"?"2 Bed":"3 Bed") : "2 Bed",
-      beds:          bedsMatch ? parseInt(bedsMatch[1]) : 2,
-      baths:         1,
-      sqft:          sqftMatch ? parseInt(sqftMatch[1].replace(/,/g,'')) : 900,
-      serviceType,
-      frequency,
-      addons:        [],
-      notes:         `VA Quote Agent result:\n${output.slice(0, 500)}`,
-      status:        "Quoted",
-      source:        "VA Quote Agent",
-      quotedDate:    new Date().toLocaleDateString(),
-      quotedPrice:   preTax || total,
-      clientPrice:   total || preTax,
-      partnerPay,
-      profit,
-      teamSize,
-      hours,
-      condition:     /heavy/i.test(raw) ? "Heavy" : /light/i.test(raw) ? "Light" : "Average",
-      workOrder:     null,
-      paymentConfirmed: false,
-      bookedDate:    "",
-      createdAt:     new Date().toISOString(),
-    };
-
-    setResLeads(ls => [newLead, ...(ls||[])]);
-    setSavedLead(true);
-  };
-
-  return (
-    <div>
-      {/* Header */}
-      <div style={{ display:"flex", alignItems:"center", gap:14, marginBottom:20, flexWrap:"wrap" }}>
-        <div style={{ width:52, height:52, borderRadius:14, background:`${cfg.color}22`, border:`2px solid ${cfg.color}44`, display:"flex", alignItems:"center", justifyContent:"center", fontSize:26, flexShrink:0 }}>{cfg.icon}</div>
-        <div>
-          <div style={{ fontWeight:800, fontSize:20 }}>{cfg.title}</div>
-          <div style={{ fontSize:13, color:C.muted }}>{cfg.purpose}</div>
-        </div>
-        <div style={{ marginLeft:"auto", padding:"4px 12px", borderRadius:20, background:`${cfg.color}22`, color:cfg.color, fontSize:11, fontWeight:700, border:`1px solid ${cfg.color}44` }}>HUC AI Agent</div>
-      </div>
-
-      {/* Output sections */}
-      <div style={{ display:"flex", gap:8, flexWrap:"wrap", marginBottom:20 }}>
-        {cfg.outputSections.map(s => (
-          <span key={s} style={{ padding:"4px 12px", borderRadius:20, background:C.surface, color:C.muted, fontSize:11, fontWeight:600, border:`1px solid ${C.border}` }}>📤 {s}</span>
-        ))}
-      </div>
-
-      {/* Input */}
-      <div style={{ ...S.card, marginBottom:16 }}>
-        <div style={S.label}>{cfg.inputLabel}</div>
-        <textarea
-          style={{ ...S.input, minHeight:100, resize:"vertical", fontSize:13, lineHeight:1.6 }}
-          value={input}
-          onChange={e => setInput(e.target.value)}
-          placeholder={cfg.inputPlaceholder}
-        />
-        <div style={{ display:"flex", gap:10, marginTop:10 }}>
-          <button
-            style={{ ...S.btn("primary"), flex:1, background:loading?"#1A2235":cfg.color, color: loading?C.muted:"#0A0F1E" }}
-            onClick={run}
-            disabled={loading || !input.trim()}
-          >
-            {loading ? "⏳ Running..." : `${cfg.icon} Run ${cfg.title}`}
-          </button>
-          {input && <button style={S.btn("ghost")} onClick={() => setInput("")}>Clear</button>}
-        </div>
-      </div>
-
-      {/* Output */}
-      {(loading || output) && (
-        <div style={{ ...S.card, marginBottom:16, borderLeft:`4px solid ${cfg.color}` }}>
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
-            <div style={{ fontWeight:700, fontSize:14, color:cfg.color }}>{cfg.icon} Agent Response</div>
-            <div style={{ display:"flex", gap:8, flexWrap:"wrap" }}>
-              {output && (
-                <button style={S.btn("ghost")} onClick={copy}>
-                  {copied ? "✅ Copied!" : "📋 Copy"}
-                </button>
-              )}
-              {/* VA Quote Agent only — Save as Lead button */}
-              {output && agent === "VA_Quote_Agent" && setResLeads && (
-                <button
-                  style={{ ...S.btn(savedLead ? "ghost" : "primary"), fontSize:13 }}
-                  onClick={saveAsLead}
-                  disabled={savedLead}
-                >
-                  {savedLead ? "✅ Saved to Leads!" : "➕ Save as Lead"}
-                </button>
-              )}
-            </div>
-          </div>
-          {loading ? (
-            <div style={{ display:"flex", gap:8, alignItems:"center", color:C.muted, fontSize:13 }}>
-              <div style={{ width:8, height:8, borderRadius:"50%", background:cfg.color, animation:"pulse2 1s infinite" }} />
-              AI is thinking...
-              <style>{`@keyframes pulse2{0%,100%{opacity:1}50%{opacity:0.2}}`}</style>
-            </div>
-          ) : (
-            <div style={{ fontSize:13, color:C.text, lineHeight:1.8, whiteSpace:"pre-wrap" }}>{output}</div>
-          )}
-          {savedLead && (
-            <div style={{ marginTop:12, padding:"10px 14px", background:C.accentDim, borderRadius:9, fontSize:13, color:C.accent, fontWeight:600 }}>
-              ✅ Lead saved to 🏠 Residential Leads with "Quoted" status. Go there to add client name, email, and book the job.
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* History */}
-      {history.length > 0 && (
-        <div style={S.card}>
-          <div style={{ fontWeight:700, fontSize:13, marginBottom:10, color:C.muted }}>📋 Recent Runs (this session)</div>
-          {history.map((h, i) => (
-            <div key={i} style={{ borderBottom:`1px solid ${C.border}`, padding:"10px 0", cursor:"pointer" }} onClick={() => { setInput(h.input); setOutput(h.output); setSavedLead(false); }}>
-              <div style={{ fontSize:11, color:C.dim, marginBottom:4 }}>{h.ts}</div>
-              <div style={{ fontSize:12, color:C.muted, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{h.input}</div>
-            </div>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
+// Agent prompt/config UI disabled pending a dedicated cleanup pass.
 
 // ─── OPERATIONS MANAGER DASHBOARD ────────────────────────────────────────────
 function OperationsManager({ jobs, partners, region, setTab }) {
@@ -9767,28 +8637,7 @@ function Partners({ partners, setPartners, jobs, salesReps = [], setSalesReps = 
   };
 
   const persistPartnerPin = async (partner, newPin) => {
-    if (!partner?.id || !newPin) return false;
-    const pid = encodeURIComponent(String(partner.id));
-    let persisted = false;
-    try {
-      const r = await sbFetch(`huc_partners?id=eq.${pid}`, {
-        method: "PATCH",
-        body: JSON.stringify({
-          data: { ...partner, pin: newPin },
-          updated_at: new Date().toISOString(),
-        }),
-      });
-      if (r?.ok) persisted = true;
-    } catch {}
-    if (persisted) return true;
-    try {
-      const r2 = await sbFetch(`partners?id=eq.${pid}`, {
-        method: "PATCH",
-        body: JSON.stringify({ pin: newPin }),
-      });
-      if (r2?.ok) persisted = true;
-    } catch {}
-    return persisted;
+    return patchPartnerPin(partner, newPin);
   };
 
   const handleAdd = () => {
@@ -11238,17 +10087,7 @@ function Onboarding({ partners, setPartners, onboardingProgress, setOnboardingPr
       setPartners(prev => prev.map(p => p.id === partnerId ? { ...p, onboarded: true, status: "available" } : p));
     }
 
-    try {
-      await sbFetch("partner_progress?on_conflict=partner_id,module_id", {
-        method: "POST",
-        headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({
-          partner_id: String(partnerId),
-          module_id: String(moduleId),
-          completed_at: new Date().toISOString(),
-        }),
-      });
-    } catch {}
+    try { await completePartnerModule(partnerId, moduleId); } catch {}
 
     setActiveModule(null);
   };
