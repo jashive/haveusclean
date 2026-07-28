@@ -2046,9 +2046,14 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
   const [syncProgress, setSyncProgress] = useState({ loaded:0, total:0, stage:"Idle" });
   const [sortByAiPriority, setSortByAiPriority] = useState(false);
   const [refreshingLeadSync, setRefreshingLeadSync] = useState(false);
-  const persistQueueRef = useRef(new Map());
-  const persistQueueTimerRef = useRef(null);
+  const [statusToast, setStatusToast] = useState(null);
+  const persistQueueRef = useRef([]);
+  const persistFlushPromiseRef = useRef(null);
   const snapshotTimerRef = useRef(null);
+  const statusToastTimerRef = useRef(null);
+  const persistRetryTimerRef = useRef(null);
+  const persistRetryDelayMsRef = useRef(1000);
+  const COLD_LEAD_QUEUE_KEY = "cp:cold_lead_persist_queue";
   const PAGE_SIZE = 100;
   const [manualForm, setManualForm]     = useState({
     company:"", city:"", market:"Ontario", segment:"Office",
@@ -2063,28 +2068,146 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     }, 200);
   }, []);
 
-  const queueLeadPersist = useCallback((lead) => {
+  const persistLeadSnapshotNow = useCallback((nextLeads) => {
+    try { localStorage.setItem("cp:cold_leads", JSON.stringify(nextLeads)); } catch {}
+    persistLeadSnapshot(nextLeads);
+  }, [persistLeadSnapshot]);
+
+  const showStatusToast = useCallback((message) => {
+    setStatusToast(message);
+    if (statusToastTimerRef.current) window.clearTimeout(statusToastTimerRef.current);
+    statusToastTimerRef.current = window.setTimeout(() => setStatusToast(null), 1500);
+  }, []);
+
+  const savePersistQueue = useCallback((queue) => {
+    persistQueueRef.current = queue;
+    try {
+      if (queue.length > 0) localStorage.setItem(COLD_LEAD_QUEUE_KEY, JSON.stringify(queue));
+      else localStorage.removeItem(COLD_LEAD_QUEUE_KEY);
+    } catch {}
+  }, []);
+
+  const persistStatusToSupabase = useCallback(async (job) => {
+    const lid = String(job?.lead_id || "").trim();
+    if (!lid) return true;
+
+    const normalizedLead = normalizeLeadRecord(job.lead || {}, { lead_id: lid, id: lid });
+    const updatedAt = job.updated_at || new Date().toISOString();
+    const contactedAt = job.last_contacted_at || normalizedLead.last_contacted_at || null;
+    const finalLead = {
+      ...normalizedLead,
+      status: job.status || normalizedLead.status || "New",
+      ...(contactedAt ? { last_contacted_at: contactedAt } : {}),
+      updated_at: updatedAt,
+    };
+
+    const cloudRes = await sbFetch("huc_leads_cold?on_conflict=lead_id", {
+      method: "POST",
+      body: JSON.stringify([{ lead_id: lid, data: finalLead, updated_at: updatedAt }]),
+      headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
+    }).catch(() => null);
+
+    if (!cloudRes || !cloudRes.ok) return false;
+
+    if (!job.status) return true;
+
+    const statusPayload = {
+      status: job.status,
+      last_contacted_at: contactedAt || null,
+      updated_at: updatedAt,
+    };
+    const byLeadId = await sbFetch(`leads?lead_id=eq.${encodeURIComponent(lid)}`, {
+      method: "PATCH",
+      body: JSON.stringify(statusPayload),
+      headers: { "Prefer": "return=minimal" },
+    }).catch(() => null);
+
+    if (byLeadId && byLeadId.ok) return true;
+
+    const byId = await sbFetch(`leads?id=eq.${encodeURIComponent(lid)}`, {
+      method: "PATCH",
+      body: JSON.stringify(statusPayload),
+      headers: { "Prefer": "return=minimal" },
+    }).catch(() => null);
+
+    return !!(byId && byId.ok);
+  }, []);
+
+  const flushPersistQueue = useCallback(async () => {
+    if (persistFlushPromiseRef.current) return persistFlushPromiseRef.current;
+    if (typeof navigator !== "undefined" && !navigator.onLine) return false;
+
+    const runner = (async () => {
+      while (persistQueueRef.current.length > 0) {
+        const [nextJob, ...rest] = persistQueueRef.current;
+        const ok = await persistStatusToSupabase(nextJob);
+        if (!ok) return false;
+        savePersistQueue(rest);
+      }
+      return true;
+    })().finally(() => {
+      persistFlushPromiseRef.current = null;
+    });
+
+    persistFlushPromiseRef.current = runner;
+    return runner;
+  }, [persistStatusToSupabase, savePersistQueue]);
+
+  const flushPersistQueueWithRetry = useCallback(async () => {
+    const ok = await flushPersistQueue();
+    if (ok) {
+      persistRetryDelayMsRef.current = 1000;
+      if (persistRetryTimerRef.current) {
+        window.clearTimeout(persistRetryTimerRef.current);
+        persistRetryTimerRef.current = null;
+      }
+      return true;
+    }
+
+    if (persistQueueRef.current.length === 0) return false;
+    if (persistRetryTimerRef.current) return false;
+
+    const waitMs = persistRetryDelayMsRef.current;
+    persistRetryDelayMsRef.current = Math.min(waitMs * 2, 60000);
+    persistRetryTimerRef.current = window.setTimeout(() => {
+      persistRetryTimerRef.current = null;
+      void flushPersistQueueWithRetry();
+    }, waitMs);
+
+    return false;
+  }, [flushPersistQueue]);
+
+  const queueLeadPersist = useCallback((lead, opts = {}) => {
     const lid = String(lead?.lead_id || lead?.id || "").trim();
     if (!lid) return;
-    persistQueueRef.current.set(lid, {
+
+    const job = {
       lead_id: lid,
-      data: normalizeLeadRecord(lead),
-      updated_at: new Date().toISOString(),
-    });
-    if (persistQueueTimerRef.current) clearTimeout(persistQueueTimerRef.current);
-    persistQueueTimerRef.current = setTimeout(async () => {
-      const rows = Array.from(persistQueueRef.current.values());
-      persistQueueRef.current.clear();
-      if (rows.length === 0) return;
-      try {
-        await sbFetch("huc_leads_cold?on_conflict=lead_id", {
-          method: "POST",
-          body: JSON.stringify(rows),
-          headers: { "Prefer": "resolution=merge-duplicates,return=minimal" },
-        });
-      } catch {}
-    }, 300);
-  }, []);
+      lead: normalizeLeadRecord(lead, { lead_id: lid, id: lid }),
+      status: opts.status || lead?.status || null,
+      last_contacted_at: opts.last_contacted_at || lead?.last_contacted_at || null,
+      updated_at: opts.updated_at || lead?.updated_at || new Date().toISOString(),
+    };
+
+    const withoutCurrentLead = persistQueueRef.current.filter((row) => row.lead_id !== lid);
+    savePersistQueue([...withoutCurrentLead, job]);
+    void flushPersistQueueWithRetry();
+  }, [flushPersistQueueWithRetry, savePersistQueue]);
+
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(COLD_LEAD_QUEUE_KEY);
+      const parsed = raw ? JSON.parse(raw) : [];
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        persistQueueRef.current = parsed;
+      }
+    } catch {}
+    void flushPersistQueueWithRetry();
+
+    const onOnline = () => { void flushPersistQueueWithRetry(); };
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
+  }, [flushPersistQueueWithRetry]);
 
   const loadCachedColdLeads = async () => {
     try {
@@ -2497,13 +2620,17 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
   useEffect(() => {
     return () => {
-      if (persistQueueTimerRef.current) clearTimeout(persistQueueTimerRef.current);
       if (snapshotTimerRef.current) clearTimeout(snapshotTimerRef.current);
+      if (statusToastTimerRef.current) clearTimeout(statusToastTimerRef.current);
+      if (persistRetryTimerRef.current) clearTimeout(persistRetryTimerRef.current);
     };
   }, []);
 
   const updateStatus = async (id, status, extra = {}) => {
     let updatedLead = null;
+    const statusTimestamp = status === "Contacted"
+      ? (extra.last_contacted_at || new Date().toISOString())
+      : (extra.last_contacted_at || null);
     setLeads(ls => {
       const next = ls.map(l => {
         const match = l.id === id || l.lead_id === id;
@@ -2512,22 +2639,31 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
           ...l,
           status,
           ...extra,
+          updated_at: new Date().toISOString(),
           ...(status === "Contacted" ? {
-            last_contacted_at: extra.last_contacted_at || new Date().toISOString(),
+            last_contacted_at: statusTimestamp,
             assigned_rep: extra.assigned_rep || l.assigned_rep || "Current Rep",
           } : {}),
         };
         updatedLead = nextLead;
         return nextLead;
       });
-      persistLeadSnapshot(next);
+      persistLeadSnapshotNow(next);
       if (updatedLead && (viewLead?.lead_id === id || viewLead?.id === id)) {
         setViewLead(updatedLead);
       }
       return next;
     });
     if (updatedLead) {
-      queueLeadPersist(updatedLead);
+      queueLeadPersist(updatedLead, {
+        status,
+        last_contacted_at: statusTimestamp,
+        updated_at: updatedLead.updated_at,
+      });
+      const leadName = updatedLead.company || updatedLead.name || String(id);
+      showStatusToast(status === "Contacted"
+        ? `✅ Recorded as Contacted - ${leadName}`
+        : `✅ Status updated to ${status} - ${leadName}`);
     }
   };
 
@@ -3054,6 +3190,32 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
               setPage(safePage + 1);
               setTimeout(() => document.getElementById("cold-leads-list")?.scrollIntoView({behavior:"smooth", block:"start"}), 50);
             }}>Next →</button>
+        </div>
+      )}
+
+      {statusToast && (
+        <div
+          style={{
+            position:"fixed",
+            left:"50%",
+            bottom:18,
+            transform:"translateX(-50%)",
+            zIndex:3000,
+            background:"#113627",
+            color:"#b9f6d8",
+            border:"1px solid #00D4AA55",
+            borderRadius:999,
+            padding:"9px 16px",
+            fontSize:13,
+            fontWeight:700,
+            boxShadow:"0 10px 30px rgba(0,0,0,0.35)",
+            maxWidth:"calc(100vw - 24px)",
+            whiteSpace:"nowrap",
+            overflow:"hidden",
+            textOverflow:"ellipsis",
+          }}
+        >
+          {statusToast}
         </div>
       )}
 
