@@ -7,7 +7,7 @@ import { filterJobs, getJobPartners } from "./features/jobs/jobUtils";
 import { getSupabaseConfig, getCloudStatusLabel } from "./lib/supabaseConfig";
 import { validateLead } from "./lib/leadValidation";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "./lib/statusEngine";
-import { calcResQuote, calcComQuote, getJobHours, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
+import { calcResQuote, calcComQuote, getJobCompensationBreakdown, getJobHours, getSqftHours, getTeamSize, markupFactor, RES_ADDONS } from "./lib/pricing";
 import { calculateQuote as calculateQuoteGateway } from "./lib/quoteEngine";
 import { buildCommercialLeadsRuntime } from "./core/pricing/commercialLeadsRuntime";
 import { ALL_TAB_IDS, canAccessTab, filterNavGroupsByRole, getTabQueryValue, normalizeTabId, ROLE_TAB_ALLOWLIST } from "./core/permissions/navigation";
@@ -8184,11 +8184,8 @@ function JobsLegacy({ jobs, setJobs, partners }) {
 
   const handleAdd = () => {
     const partnerIds = newJob.partnerIds?.filter(Boolean) || (newJob.partnerId ? [parseInt(newJob.partnerId)] : []);
-    const teamSize = partnerIds.length || 1;
     const hours = Math.max(1, toFiniteNumber(newJob.hours, 2));
-    const clientPrice = roundMoney(safeDivide(teamSize * PARTNER_COST_PER_HOUR * hours, PARTNER_SHARE, 0));
-    const partnerPayTotal = partnerPayFromPrice(clientPrice);
-    const partnerPayEach = roundMoney(safeDivide(partnerPayTotal, teamSize, 0));
+    const { teamSize, clientPrice, partnerPayTotal, partnerPayEach, profit } = getJobCompensationBreakdown({ teamSize: partnerIds.length || 1, hours });
     setJobs([...jobs, {
       ...newJob,
       id: Date.now(),
@@ -8198,7 +8195,7 @@ function JobsLegacy({ jobs, setJobs, partners }) {
       clientPrice,
       partnerPay: partnerPayTotal,
       partnerPayEach,
-      profit: companyProfitFromPrice(clientPrice),
+      profit,
       pay: partnerPayEach,
     }]);
     setShowModal(false);
@@ -8387,17 +8384,17 @@ function JobsLegacy({ jobs, setJobs, partners }) {
                 <div style={styles.label}>Pay Summary</div>
                 {(() => {
                   const ids = (newJob.partnerIds||[]).filter(Boolean);
-                  const teamSize = ids.length;
-                  const clientPrice = Math.round((teamSize * PARTNER_COST_PER_HOUR * newJob.hours) / PARTNER_SHARE);
-                  const partnerTotal = Math.round(clientPrice * PARTNER_SHARE);
-                  const each = Math.round(partnerTotal / teamSize);
+                  const { teamSize, clientPrice, partnerPayTotal, partnerPayEach, profit } = getJobCompensationBreakdown({
+                    teamSize: ids.length,
+                    hours: newJob.hours,
+                  });
                   return (
                     <div>
                       <div style={{ fontSize:20, fontWeight:800, color:C.accent }}>{fmt(clientPrice)} client price</div>
                       <div style={{ fontSize:13, color:C.muted, marginTop:4 }}>
-                        Partner total: {fmt(partnerTotal)} · Each: {fmt(each)} · Company: {fmt(companyProfitFromPrice(clientPrice))}
+                        Partner total: {fmt(partnerPayTotal)} · Each: {fmt(partnerPayEach)} · Company: {fmt(profit)}
                       </div>
-                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × {fmt(each)} each</div>}
+                      {teamSize > 1 && <div style={{ fontSize:12, color:C.gold, marginTop:4 }}>👥 {teamSize} partners × {fmt(partnerPayEach)} each</div>}
                     </div>
                   );
                 })()}

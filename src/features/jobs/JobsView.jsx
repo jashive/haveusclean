@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo, useState } from "react";
 import { List as VirtualList } from "react-window";
 import { CANONICAL_STATUS, getDomainStatusOptions, statusMatches, toDomainStatus } from "../../lib/statusEngine";
-import { COMPANY_SHARE, PARTNER_COST_PER_HOUR, PARTNER_SHARE, getJobHours, getTeamSize } from "../../lib/pricing";
+import { getJobCompensationBreakdown, getJobHours, getTeamSize } from "../../lib/pricing";
 
 const JOB_VIRTUALIZE_THRESHOLD = 75;
 const JOB_ROW_HEIGHT = 256;
@@ -75,10 +75,10 @@ export default function JobsView({ jobs, setJobs, partners }) {
 
   const handleAdd = () => {
     const partnerIds = newJob.partnerIds?.filter(Boolean) || (newJob.partnerId ? [parseInt(newJob.partnerId)] : []);
-    const teamSize = partnerIds.length || 1;
-    const clientPrice = Math.round((teamSize * PARTNER_COST_PER_HOUR * newJob.hours) / PARTNER_SHARE);
-    const partnerPayTotal = Math.round(clientPrice * PARTNER_SHARE);
-    const partnerPayEach = Math.round(partnerPayTotal / teamSize);
+    const { teamSize, clientPrice, partnerPayTotal, partnerPayEach, profit } = getJobCompensationBreakdown({
+      teamSize: partnerIds.length || 1,
+      hours: newJob.hours,
+    });
     setJobs([...jobs, {
       ...newJob,
       id: Date.now(),
@@ -88,7 +88,7 @@ export default function JobsView({ jobs, setJobs, partners }) {
       clientPrice,
       partnerPay: partnerPayTotal,
       partnerPayEach,
-      profit: Math.round(clientPrice * COMPANY_SHARE),
+      profit,
       pay: partnerPayEach,
     }]);
     setShowModal(false);
