@@ -20,7 +20,7 @@ export default function MobileBottomNav({ activeTab, onTabChange }) {
     { id: "schedule",  label: "Schedule", icon: "📅" },
     { id: "res",       label: "Leads",    icon: "🏠" },
     { id: "jobs",      label: "Jobs",     icon: "📋" },
-    { id: "agent_quote", label: "Quotes", icon: "💬" },
+    { id: "ai",        label: "AI",       icon: "🤖" },
     { id: "more",      label: "More",     icon: "☰"  },
   ];
 
@@ -49,10 +49,10 @@ export default function MobileBottomNav({ activeTab, onTabChange }) {
     {
       heading: "AI Tools",
       items: [
-        { id: "agent_bidspec",    label: "Bid Spec",      icon: "📄" },
-        { id: "agent_workorder",  label: "Work Order",    icon: "🔧" },
-        { id: "agent_social",     label: "Social",        icon: "📱" },
-        { id: "agent_ops",        label: "Ops Manager",   icon: "🧠" },
+        { id: "ai",         label: "AI Scheduling", icon: "🗓️" },
+        { id: "ops_mgr",    label: "Ops Manager",   icon: "🧠" },
+        { id: "marketing",  label: "Marketing",     icon: "📣" },
+        { id: "followup",   label: "Follow-Up",     icon: "🔔" },
       ],
     },
     {

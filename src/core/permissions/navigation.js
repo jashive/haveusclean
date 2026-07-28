@@ -14,7 +14,6 @@ export const QUERY_TAB_ALIASES = {
 export const ALL_TAB_IDS = new Set([
   "dashboard", "ops_mgr", "jobs", "recurring", "gps", "geo",
   "res", "com", "cold", "intake",
-  "agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops",
   "pay", "stripe", "qb",
   "portal", "clientview", "followup", "sms", "marketing",
   "partners", "partnerview", "salesview", "admins", "onboarding", "ai",

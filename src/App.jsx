@@ -1719,6 +1719,8 @@ function parseOutreachSections(text) {
   };
 }
 
+const safeArray = (value) => (Array.isArray(value) ? value : []);
+
 function buildOutreachEmailDraft(lead, outreach = {}) {
   const company = String(lead?.company || lead?.business_name || "your property").trim();
   const role = String(lead?.title || lead?.buyer_title || "Facilities Manager").trim();
@@ -2448,27 +2450,33 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
   // Add manual lead
   const addManualLead = async () => {
-    if (!manualForm.company.trim()) return;
-    const prefix = manualForm.market === "Arizona" ? "AZ" : "ON";
-    const num = String(leads.length + 1).padStart(4, "0");
-    const newLead = normalizeLeadRecord({
-      ...manualForm,
-      lead_id: `${prefix}-M${num}`,
-      status: "New",
-      owner: "Jason",
-      cold_email: "", follow_up_email: "", linkedin_note: "", call_opener: "",
-      source_lane: "Manual Entry",
-      updated_at: new Date().toISOString(),
-    });
-    setLeads(ls => {
-      const next = [newLead, ...ls];
-      persistLeadSnapshot(next);
-      return next;
-    });
-    queueLeadPersist(newLead);
-    setShowManual(false);
-    setManualForm({ company:"", city:"", market:"Ontario", segment:"Office", buyer_title:"", pain_point:"", first_offer:"office cleaning", priority_score:3, notes:"" });
-    setViewLead(newLead);
+    try {
+      const company = String(manualForm?.company || "").trim();
+      if (!company) return;
+      const prefix = manualForm?.market === "Arizona" ? "AZ" : "ON";
+      const num = String(safeArray(leads).length + 1).padStart(4, "0");
+      const newLead = normalizeLeadRecord({
+        ...manualForm,
+        company,
+        lead_id: `${prefix}-M${num}`,
+        status: "New",
+        owner: "Jason",
+        cold_email: "", follow_up_email: "", linkedin_note: "", call_opener: "",
+        source_lane: "Manual Entry",
+        updated_at: new Date().toISOString(),
+      });
+      setLeads((ls) => {
+        const next = [newLead, ...safeArray(ls)];
+        persistLeadSnapshot(next);
+        return next;
+      });
+      queueLeadPersist(newLead);
+      setShowManual(false);
+      setManualForm({ company:"", city:"", market:"Ontario", segment:"Office", buyer_title:"", pain_point:"", first_offer:"office cleaning", priority_score:3, notes:"" });
+      setViewLead(newLead);
+    } catch {
+      alert("Could not add lead right now. Please try again.");
+    }
   };
 
   // Priority badge
@@ -3086,16 +3094,30 @@ function FormIntake({ resLeads, setResLeads, region, setTab }) {
     .slice(0,10);
 
   const addManual = () => {
-    if (!manualForm.name || !manualForm.email) return;
-    const newLead = {
-      ...manualForm, id:Date.now(), status:"New", workOrder:null,
-      paymentConfirmed:false, quotedDate:"", bookedDate:"",
-      createdAt: new Date().toISOString(), source:"Manual Entry"
-    };
-    setResLeads(ls => [newLead, ...ls]);
-    setShowManual(false);
-    setManualForm({ name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", frequency:"One-Time", addons:[], notes:"" });
-    setTab("res");
+    try {
+      const name = String(manualForm?.name || "").trim();
+      const email = String(manualForm?.email || "").trim();
+      if (!name || !email) return;
+      const newLead = {
+        ...manualForm,
+        name,
+        email,
+        id: Date.now(),
+        status: "New",
+        workOrder: null,
+        paymentConfirmed: false,
+        quotedDate: "",
+        bookedDate: "",
+        createdAt: new Date().toISOString(),
+        source: "Manual Entry",
+      };
+      setResLeads((ls) => [newLead, ...safeArray(ls)]);
+      setShowManual(false);
+      setManualForm({ name:"", email:"", phone:"", address:"", dwellingType:"Apartment / Condo", dwellingSize:"2 Bed", beds:2, baths:1, sqft:900, serviceType:"Refresh Clean", frequency:"One-Time", addons:[], notes:"" });
+      if (typeof setTab === "function") setTab("res");
+    } catch {
+      alert("Could not add lead right now. Please try again.");
+    }
   };
 
   return (
@@ -3447,7 +3469,10 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   // Use lifted state; seed with sample data if empty
   const leads = resLeads;
   const setLeads = (updater) => {
-    setResLeads(typeof updater === "function" ? updater(leads) : updater);
+    setResLeads((prev) => {
+      const base = safeArray(prev);
+      return typeof updater === "function" ? updater(base) : updater;
+    });
   };
   const [showForm, setShowForm] = useState(false);
   const [viewLead, setViewLead] = useState(null);
@@ -3600,12 +3625,30 @@ function ResidentialLeads({ jobs, setJobs, partners, region = ACTIVE_REGION, res
   };
 
   const submitForm = () => {
-    const newLead = { ...form, id:Date.now(), status:toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential"), workOrder:null, paymentConfirmed:false, quotedDate:"", bookedDate:"", createdAt:new Date().toISOString() };
-    setLeads(ls => [newLead, ...ls]);
-    setFilterStatus("All");
-    setSearchQuery(""); // clear search so new lead is visible
-    setShowForm(false);
-    setForm(emptyForm);
+    try {
+      const name = String(form?.name || "").trim();
+      const email = String(form?.email || "").trim();
+      if (!name || !email) return;
+      const newLead = {
+        ...form,
+        name,
+        email,
+        id: Date.now(),
+        status: toDomainStatus(CANONICAL_STATUS.NEW_LEAD, "residential"),
+        workOrder: null,
+        paymentConfirmed: false,
+        quotedDate: "",
+        bookedDate: "",
+        createdAt: new Date().toISOString(),
+      };
+      setLeads((ls) => [newLead, ...safeArray(ls)]);
+      setFilterStatus("All");
+      setSearchQuery(""); // clear search so new lead is visible
+      setShowForm(false);
+      setForm(emptyForm);
+    } catch {
+      alert("Could not save lead. Please try again.");
+    }
   };
 
   const toggleAddon = (id) => setForm(f=>({...f,addons:(f.addons||[]).includes(id)?(f.addons||[]).filter(x=>x!==id):[...f.addons,id]}));
@@ -5447,12 +5490,7 @@ const ARCHITECT_ROUTE_AUDIT_TABS = [
   { id: "com", label: "Commercial Clients" },
   { id: "cold", label: "Cold Outreach" },
   { id: "intake", label: "Form Intake" },
-  { id: "agent_quote", label: "Quote Agent" },
-  { id: "agent_bidspec", label: "Bid Spec Agent" },
-  { id: "agent_workorder", label: "Work Order Agent" },
-  { id: "agent_social", label: "Social Content Agent" },
-  { id: "agent_dm", label: "DM Conversion Agent" },
-  { id: "agent_ops", label: "Operations Manager Agent" },
+  { id: "ai", label: "AI Scheduling" },
   { id: "pay", label: "Partner Pay" },
   { id: "stripe", label: "Stripe Payments" },
   { id: "qb", label: "QuickBooks Sync" },
@@ -5463,7 +5501,6 @@ const ARCHITECT_ROUTE_AUDIT_TABS = [
   { id: "marketing", label: "Marketing" },
   { id: "partners", label: "Team / Partners" },
   { id: "onboarding", label: "Onboarding" },
-  { id: "ai", label: "AI Scheduling" },
   { id: "tax", label: "Tax" },
   { id: "db", label: "Database" },
   { id: "whitelabel", label: "App Store" },
@@ -6046,6 +6083,7 @@ const SHOW_PORTAL_HELPER_NOTE = (() => {
 })();
 
 const LAST_ACTIVE_TAB_KEY = "cp:last_active_tab";
+const LEGACY_AGENT_TABS = new Set(["agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops"]);
 
 function getInitialRole() {
   if (typeof window === "undefined") return "admin";
@@ -6122,8 +6160,10 @@ function getInitialTab() {
   try {
     const params = new URLSearchParams(window.location.search);
     const urlTab = normalizeTabId(params.get("tab"));
+    if (LEGACY_AGENT_TABS.has(urlTab)) return "ai";
     if (urlTab && ALL_TAB_IDS.has(urlTab)) return urlTab;
     const savedTab = normalizeTabId(localStorage.getItem(LAST_ACTIVE_TAB_KEY));
+    if (LEGACY_AGENT_TABS.has(savedTab)) return "ai";
     if (savedTab && ALL_TAB_IDS.has(savedTab)) return savedTab;
   } catch {}
   return "dashboard";
@@ -6385,6 +6425,10 @@ export default function App() {
   const setTabGuarded = useCallback((nextTab) => {
     const normalizedTab = normalizeTabId(nextTab);
     if (!normalizedTab) return;
+    if (LEGACY_AGENT_TABS.has(normalizedTab)) {
+      setTab("ai");
+      return;
+    }
     if (normalizedTab === "partnerview") {
       setAccessRole("partner");
       setTab("partnerview");
@@ -7434,14 +7478,6 @@ export default function App() {
       { id:"cold",       label:"🎯 Cold Outreach",  desc:"AI-generated cold leads pipeline" },
       { id:"intake",     label:"📋 Form Intake",    desc:"Google Form → New leads auto-flow" },
     ]},
-    { id:"agents",   label:"🤖 AI Agents", color: "#A78BFA", tabs:[
-      { id:"agent_quote",    label:"💬 VA Quote",      desc:"Generate quotes with AI" },
-      { id:"agent_bidspec",  label:"📄 Bid Spec",      desc:"Customer-facing summaries" },
-      { id:"agent_workorder",label:"🔧 Work Order",    desc:"Cleaner-facing checklists" },
-      { id:"agent_social",   label:"📱 Social Content",desc:"Lead-gen content generator" },
-      { id:"agent_dm",       label:"💌 DM Conversion", desc:"Inbox lead qualification" },
-      { id:"agent_ops",      label:"📊 Ops Manager",   desc:"Daily pipeline briefing" },
-    ]},
     { id:"finance",  label:"💰 Finance", color: "#FF6B6B", tabs:[
       { id:"pay",        label:"💰 Partner Pay",   desc:"Pay tracking & history" },
       { id:"stripe",     label:"💳 Payments",      desc:"Client payments (Stripe)" },
@@ -7798,12 +7834,6 @@ export default function App() {
         {tab==="cold"           && <ColdOutreachLegacy region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
-        {tab==="agent_quote"    && <AgentPanel agent="VA_Quote_Agent" setResLeads={setResLeads} region={activeRegion} />}
-        {tab==="agent_bidspec"  && <AgentPanel agent="BidSpec_Agent" />}
-        {tab==="agent_workorder"&& <AgentPanel agent="WorkOrder_Agent" />}
-        {tab==="agent_social"   && <AgentPanel agent="Social_Content_Agent" />}
-        {tab==="agent_dm"       && <AgentPanel agent="DM_Conversion_Agent" />}
-        {tab==="agent_ops"      && <AgentPanel agent="Operations_Manager_Agent" />}
         {tab==="pay"            && accessRole === "admin" && <Pay               partners={regionPartners} jobs={regionJobs} />}
         {tab==="stripe"         && accessRole === "admin" && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
         {tab==="qb"             && accessRole === "admin" && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
@@ -7859,6 +7889,116 @@ export default function App() {
 }
 
 // Agent prompt/config UI disabled pending a dedicated cleanup pass.
+
+const HUC_AGENTS = {
+  VA_Quote_Agent: {
+    label: "VA Quote Agent",
+    system: "You are the Have Us Clean VA Quote Agent. Ask clarifying questions only when essential, then provide pricing-ready quote guidance with concise next actions.",
+  },
+  BidSpec_Agent: {
+    label: "BidSpec Agent",
+    system: "You are the Have Us Clean BidSpec Agent. Produce clear commercial bid scope language, exclusions, assumptions, and deliverables.",
+  },
+  WorkOrder_Agent: {
+    label: "Work Order Agent",
+    system: "You are the Have Us Clean WorkOrder Agent. Convert booked job details into an actionable crew-ready work order checklist.",
+  },
+  Social_Content_Agent: {
+    label: "Social Content Agent",
+    system: "You are the Have Us Clean Social Content Agent. Write practical, local-service marketing copy with strong CTA and clear offer positioning.",
+  },
+  DM_Conversion_Agent: {
+    label: "DM Conversion Agent",
+    system: "You are the Have Us Clean DM Conversion Agent. Draft concise outreach and follow-up messages that move leads to booked calls or quotes.",
+  },
+  Operations_Manager_Agent: {
+    label: "Operations Manager Agent",
+    system: "You are the Have Us Clean Operations Manager Agent. Prioritize immediate actions, blockers, and scheduling risks in plain language.",
+  },
+};
+
+function AgentPanel({ agent, setResLeads, region }) {
+  const config = HUC_AGENTS[agent] || {
+    label: "Agent",
+    system: "You are a helpful assistant for Have Us Clean operations.",
+  };
+  const [prompt, setPrompt] = useState("");
+  const [output, setOutput] = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const defaultPrompt = useMemo(() => {
+    if (agent === "VA_Quote_Agent") {
+      return `Generate a quote conversation script for a new ${region?.label || "local"} residential lead. Include qualification questions, pricing framing, and a close.`;
+    }
+    if (agent === "WorkOrder_Agent") {
+      return "Create a clean, step-by-step work order template for a booked residential cleaning job with QA checkpoints.";
+    }
+    if (agent === "Social_Content_Agent") {
+      return "Write 3 short social posts for Have Us Clean this week with a CTA to request a quote.";
+    }
+    return `Run ${config.label} and return practical next actions for today's pipeline.`;
+  }, [agent, config.label, region?.label]);
+
+  const runAgent = async () => {
+    setLoading(true);
+    setOutput("");
+    try {
+      const res = await fetch("/api/claude", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          model: "claude-sonnet-4-20250514",
+          max_tokens: 1200,
+          system: config.system,
+          messages: [{ role: "user", content: String(prompt || defaultPrompt).trim() }],
+        }),
+      });
+      const data = await res.json();
+      const text = data?.content?.map((b) => b?.text || "").join("\n") || "No response.";
+      setOutput(text);
+
+      if (agent === "VA_Quote_Agent" && typeof setResLeads === "function" && /new lead|quote ready|intake/i.test(text)) {
+        // Keep this as a non-destructive helper signal until structured parsing is added.
+        setResLeads((ls) => safeArray(ls));
+      }
+    } catch {
+      setOutput("Could not connect to AI right now. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div>
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"space-between", flexWrap:"wrap", gap:12, marginBottom:16 }}>
+        <div>
+          <div style={S.h2}>🤖 {config.label}</div>
+          <div style={{ fontSize:13, color:C.muted, marginTop:-12 }}>Run focused AI support for this workflow tab.</div>
+        </div>
+        <button style={{ ...S.btn("primary"), background: loading ? C.surface : C.accent, color:"#0A0F1E" }} onClick={runAgent} disabled={loading}>
+          {loading ? "⏳ Running..." : "▶ Run Agent"}
+        </button>
+      </div>
+
+      <div style={{ ...S.card, marginBottom:14 }}>
+        <div style={S.label}>Prompt</div>
+        <textarea
+          style={{ ...S.input, minHeight: 110, resize: "vertical" }}
+          value={prompt}
+          onChange={(event) => setPrompt(event.target.value)}
+          placeholder={defaultPrompt}
+        />
+      </div>
+
+      <div style={{ ...S.card, borderLeft:`4px solid ${C.accent}` }}>
+        <div style={{ ...S.h3, marginBottom: 8 }}>Agent Output</div>
+        <div style={{ fontSize:13, color: output ? C.text : C.muted, lineHeight:1.8, whiteSpace:"pre-wrap", minHeight: 80 }}>
+          {output || "Run the agent to generate recommendations."}
+        </div>
+      </div>
+    </div>
+  );
+}
 
 // ─── OPERATIONS MANAGER DASHBOARD ────────────────────────────────────────────
 function OperationsManager({ jobs, partners, region, setTab }) {
@@ -8006,8 +8146,8 @@ ${overdueJobs.length > 0 ? `OVERDUE JOBS: ${overdueJobs.map(j=>`${j.client} was 
         <div style={{ display:"flex", gap:10, flexWrap:"wrap" }}>
           <button style={S.btn("primary")} onClick={() => setTab("res")}>🏠 Open Leads</button>
           <button style={S.btn("ghost")}   onClick={() => setTab("jobs")}>📋 Open Jobs</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("agent_quote")}>💬 Run VA Quote Agent</button>
-          <button style={S.btn("ghost")}   onClick={() => setTab("agent_workorder")}>🔧 Generate Work Order</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("ai")}>🗓 Open AI Scheduling</button>
+          <button style={S.btn("ghost")}   onClick={() => setTab("jobs")}>🔧 Open Work Orders</button>
           <button style={S.btn("ghost")}   onClick={() => setTab("partners")}>👥 Manage Partners</button>
         </div>
       </div>
