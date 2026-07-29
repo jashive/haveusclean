@@ -2313,6 +2313,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     }
   }, [leads, persistLeadSnapshot, setLeads]);
 
+  const coldLeadsWithOverrides = useMemo(() => applyLeadStatusOverridesToList(leads), [leads]);
+
   const normalizedLeads = useMemo(() => {
     const normalizeCompany = (name) => {
       let n = (name || "").trim();
@@ -2329,14 +2331,14 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
         .trim();
     };
 
-    return leads.map((lead) => ({
+    return coldLeadsWithOverrides.map((lead) => ({
       lead,
       market: normalizeLeadMarket(lead),
-      status: toDomainStatus(applyLeadStatusOverrides(lead)?.status || lead?.status || "New", "coldOutreach"),
+      status: toDomainStatus(lead?.status || "New", "coldOutreach"),
       segment: lead?.segment || "",
       companyKey: `${normalizeCompany(lead?.company || "")}|${String(lead?.city || "").trim().toLowerCase()}`,
     }));
-  }, [leads]);
+  }, [coldLeadsWithOverrides]);
 
   const filterLeadRows = useCallback((status, market, segment) => {
     const seenCompanies = new Set();
@@ -2429,8 +2431,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     let updatedLead = null;
     const normalizedStatus = toDomainStatus(status, "coldOutreach");
     const statusTimestamp = new Date().toISOString();
-    setLeads(ls => {
-      const next = ls.map(l => {
+    setColdLeads(prev => {
+      const next = prev.map(l => {
         const match = l.id === id || l.lead_id === id;
         if (!match) return l;
         const nextLead = {
