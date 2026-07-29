@@ -1579,7 +1579,7 @@ const applyLeadStatusOverrides = (lead, overrides = readLeadOverrides()) => {
     }
   }
   if (!matched) return lead;
-  const timestamp = matched.timestamp || matched.last_contacted_at || lead.last_contacted_at || new Date().toISOString();
+  const timestamp = matched.updated_at || matched.timestamp || matched.last_contacted_at || lead.updated_at || lead.last_contacted_at || new Date().toISOString();
   return {
     ...lead,
     status: matched.status,
@@ -1601,8 +1601,7 @@ const saveLeadStatusOverride = (lead, status, timestamp) => {
   const next = readLeadOverrides();
   const record = {
     status,
-    timestamp,
-    last_contacted_at: timestamp,
+    updated_at: timestamp,
     lead_id: lid || null,
     company: company || null,
   };
@@ -2333,7 +2332,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     return leads.map((lead) => ({
       lead,
       market: normalizeLeadMarket(lead),
-      status: toDomainStatus(lead?.status || "New", "coldOutreach"),
+      status: toDomainStatus(applyLeadStatusOverrides(lead)?.status || lead?.status || "New", "coldOutreach"),
       segment: lead?.segment || "",
       companyKey: `${normalizeCompany(lead?.company || "")}|${String(lead?.city || "").trim().toLowerCase()}`,
     }));
@@ -2461,7 +2460,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
         updated_at: updatedLead.updated_at,
       });
       const leadName = updatedLead.company || updatedLead.name || String(id);
-      showStatusToast(`✅ Status updated to '${normalizedStatus}' for ${leadName}`);
+      showStatusToast(`✅ Lead moved to ${normalizedStatus}`);
     }
   };
 
