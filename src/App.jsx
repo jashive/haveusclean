@@ -2010,6 +2010,17 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     void flushPersistQueueWithRetry();
   }, [flushPersistQueueWithRetry, savePersistQueue]);
 
+  const patchLeadStatusNow = useCallback(async (lead, status, timestamp) => {
+    const lid = String(lead?.lead_id || lead?.id || "").trim();
+    if (!lid) return false;
+    const ok = await patchLeadStatusByLeadId(lid, {
+      id: lead?.id || lid,
+      status,
+      last_contacted_at: timestamp,
+    });
+    return Boolean(ok);
+  }, []);
+
   useEffect(() => {
     try {
       const raw = localStorage.getItem(COLD_LEAD_QUEUE_KEY);
@@ -2024,6 +2035,118 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     window.addEventListener("online", onOnline);
     return () => window.removeEventListener("online", onOnline);
   }, [flushPersistQueueWithRetry]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!SUPABASE_URL || !SUPABASE_ANON) return;
+
+    let ws = null;
+    let heartbeat = null;
+
+    const applyRealtimeLeadStatus = (record = {}) => {
+      const incomingStatus = toDomainStatus(record?.status || "", "coldOutreach");
+      if (!incomingStatus) return;
+
+      const incomingTimestamp = record?.last_contacted_at || record?.updated_at || new Date().toISOString();
+      const incomingLeadId = String(record?.lead_id || "").trim();
+      const incomingId = String(record?.id || "").trim();
+      const incomingCompanyKey = normalizeLeadOverrideKey(record?.company || "");
+      let mergedLead = null;
+
+      setLeads((prev) => {
+        let changed = false;
+        const next = prev.map((lead) => {
+          const lid = String(lead?.lead_id || lead?.id || "").trim();
+          const id = String(lead?.id || "").trim();
+          const companyKey = normalizeLeadOverrideKey(lead?.company || lead?.name || "");
+          const idMatch = (incomingLeadId && lid === incomingLeadId)
+            || (incomingId && (incomingId === id || incomingId === lid));
+          const companyMatch = incomingCompanyKey && companyKey && incomingCompanyKey === companyKey;
+          if (!idMatch && !companyMatch) return lead;
+
+          changed = true;
+          mergedLead = {
+            ...lead,
+            status: incomingStatus,
+            last_contacted_at: incomingTimestamp,
+            updated_at: incomingTimestamp,
+          };
+          return mergedLead;
+        });
+
+        if (!changed) return prev;
+        persistLeadSnapshotNow(next);
+        return next;
+      });
+
+      if (mergedLead) {
+        saveLeadStatusOverride(mergedLead, incomingStatus, incomingTimestamp);
+        setViewLead((prev) => {
+          if (!prev) return prev;
+          const prevLeadId = String(prev?.lead_id || prev?.id || "").trim();
+          const sameLead = (incomingLeadId && prevLeadId === incomingLeadId)
+            || (incomingId && (prevLeadId === incomingId || String(prev?.id || "").trim() === incomingId));
+          if (!sameLead) return prev;
+          return {
+            ...prev,
+            status: incomingStatus,
+            last_contacted_at: incomingTimestamp,
+            updated_at: incomingTimestamp,
+          };
+        });
+      }
+    };
+
+    try {
+      const realtimeUrl = SUPABASE_URL.replace("https://", "wss://") + `/realtime/v1/websocket?apikey=${SUPABASE_ANON}&vsn=1.0.0`;
+      ws = new WebSocket(realtimeUrl);
+
+      ws.onopen = () => {
+        ws.send(JSON.stringify({
+          topic: "realtime:public:leads",
+          event: "phx_join",
+          payload: {
+            config: {
+              broadcast: { self: false },
+              postgres_changes: [
+                { event: "UPDATE", schema: "public", table: "leads" },
+              ],
+            },
+          },
+          ref: "leads-status-1",
+        }));
+
+        heartbeat = window.setInterval(() => {
+          if (ws && ws.readyState === WebSocket.OPEN) {
+            ws.send(JSON.stringify({ topic: "phoenix", event: "heartbeat", payload: {}, ref: "hb-leads-status" }));
+          }
+        }, 25000);
+      };
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data);
+          const data = msg?.payload?.data || msg?.payload || {};
+          const eventType = data?.type || msg?.event;
+          if (eventType !== "UPDATE") return;
+          const record = data?.record || data?.new || null;
+          if (!record) return;
+          applyRealtimeLeadStatus(record);
+        } catch {
+          // Ignore malformed realtime packets.
+        }
+      };
+    } catch {
+      // If realtime channel setup fails, queued persistence still syncs status eventually.
+    }
+
+    return () => {
+      if (heartbeat) window.clearInterval(heartbeat);
+      if (ws) {
+        try { ws.close(); } catch {}
+      }
+    };
+  }, [persistLeadSnapshotNow, setLeads]);
 
   const loadCachedColdLeads = async () => {
     try {
@@ -2456,6 +2579,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     });
     if (updatedLead) {
       saveLeadStatusOverride(updatedLead, normalizedStatus, statusTimestamp);
+      void patchLeadStatusNow(updatedLead, normalizedStatus, statusTimestamp);
       queueLeadPersist(updatedLead, {
         status: normalizedStatus,
         last_contacted_at: statusTimestamp,
