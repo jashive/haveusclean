@@ -1532,10 +1532,91 @@ const SEGMENT_META = {
 };
 
 const COLD_SYNC_AT_KEY = "cp:last_synced_at:cold_leads";
+const COLD_LEAD_OVERRIDES_KEY = "cp:lead_overrides";
 const JOB_VIRTUALIZE_THRESHOLD = 75;
 const JOB_ROW_HEIGHT = 256;
 
 const clampPct = (value) => Math.max(0, Math.min(100, Math.round(toFiniteNumber(value, 0))));
+
+const normalizeLeadOverrideKey = (value) => String(value || "").trim().replace(/\s+/g, " ").toLowerCase();
+
+const readLeadOverrides = () => {
+  try {
+    const raw = localStorage.getItem(COLD_LEAD_OVERRIDES_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+};
+
+const getLeadOverrideKeys = (lead = {}) => {
+  const keys = new Set();
+  const leadId = String(lead?.lead_id || lead?.id || "").trim();
+  const company = String(lead?.company || lead?.name || "").trim();
+  if (leadId) keys.add(leadId);
+  if (company) {
+    keys.add(company);
+    keys.add(normalizeLeadOverrideKey(company));
+  }
+  return [...keys];
+};
+
+const applyLeadStatusOverrides = (lead, overrides = readLeadOverrides()) => {
+  if (!lead) return lead;
+  let matched = null;
+  for (const key of getLeadOverrideKeys(lead)) {
+    const override = overrides?.[key];
+    if (!override || !override.status) continue;
+    if (!matched) {
+      matched = override;
+      continue;
+    }
+    const currentTs = new Date(matched.timestamp || 0).getTime();
+    const nextTs = new Date(override.timestamp || 0).getTime();
+    if (Number.isFinite(nextTs) && (!Number.isFinite(currentTs) || nextTs >= currentTs)) {
+      matched = override;
+    }
+  }
+  if (!matched) return lead;
+  const timestamp = matched.timestamp || matched.last_contacted_at || lead.last_contacted_at || new Date().toISOString();
+  return {
+    ...lead,
+    status: matched.status,
+    last_contacted_at: timestamp,
+    updated_at: timestamp,
+  };
+};
+
+const applyLeadStatusOverridesToList = (leads = []) => {
+  const overrides = readLeadOverrides();
+  return Array.isArray(leads) ? leads.map((lead) => applyLeadStatusOverrides(lead, overrides)) : [];
+};
+
+const saveLeadStatusOverride = (lead, status, timestamp) => {
+  const lid = String(lead?.lead_id || lead?.id || "").trim();
+  const company = String(lead?.company || lead?.name || "").trim();
+  if (!lid && !company) return;
+
+  const next = readLeadOverrides();
+  const record = {
+    status,
+    timestamp,
+    last_contacted_at: timestamp,
+    lead_id: lid || null,
+    company: company || null,
+  };
+
+  if (lid) next[lid] = record;
+  if (company) {
+    next[company] = record;
+    next[normalizeLeadOverrideKey(company)] = record;
+  }
+
+  try {
+    localStorage.setItem(COLD_LEAD_OVERRIDES_KEY, JSON.stringify(next));
+  } catch {}
+};
 
 function getColdLeadAiScore(lead = {}) {
   const completenessFields = [
@@ -1951,7 +2032,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          return parsed;
+          return applyLeadStatusOverridesToList(parsed);
         }
       }
     } catch {}
@@ -1961,7 +2042,8 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
     return rows
       .map(row => normalizeLeadRecord(row?.data || row, row?.data || row))
       .filter(Boolean)
-      .filter((lead) => validateLead(lead).valid);
+      .filter((lead) => validateLead(lead).valid)
+      .map((lead) => applyLeadStatusOverrides(lead));
   };
 
   const refreshFromSupabase = async () => {
@@ -1970,7 +2052,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       const incoming = await loadCachedColdLeads();
       if (incoming.length === 0) return false;
       setLeads(prev => {
-        const next = mergeLeadLists(prev, incoming);
+        const next = applyLeadStatusOverridesToList(mergeLeadLists(prev, incoming));
         persistLeadSnapshot(next);
         return next;
       });
@@ -2024,12 +2106,13 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
         const cachedLeads = await loadCachedColdLeads();
         if (cachedLeads.length > 0) {
           const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
-          setColdLeads(mergedCached);
-          persistLeadSnapshot(mergedCached);
+          const mergedWithOverrides = applyLeadStatusOverridesToList(mergedCached);
+          setColdLeads(mergedWithOverrides);
+          persistLeadSnapshot(mergedWithOverrides);
           setSyncError(reason || "The live sheet sync is unavailable right now. Showing your cached leads instead.");
-          setLastSynced(`Cached ${mergedCached.length} leads`);
-          setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
-          setSyncProgress({ loaded: mergedCached.length, total: mergedCached.length, stage: "Using cached leads" });
+          setLastSynced(`Cached ${mergedWithOverrides.length} leads`);
+          setSyncStats({ fetched: 0, valid: mergedWithOverrides.length, invalid: 0, skipped: 0, saved: 0 });
+          setSyncProgress({ loaded: mergedWithOverrides.length, total: mergedWithOverrides.length, stage: "Using cached leads" });
           return true;
         }
         setSyncError(reason || "The live sheet sync is unavailable right now and no cached leads were found.");
@@ -2137,7 +2220,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       }
 
       const baseMerged = mergeLeadLists(prevLeads, cloudIndex.leads);
-      const final = mergeLeadLists(baseMerged, newLeads);
+      const final = applyLeadStatusOverridesToList(mergeLeadLists(baseMerged, newLeads));
 
       setColdLeads(final);
       persistLeadSnapshot(final);
@@ -2179,12 +2262,13 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       const cachedLeads = await loadCachedColdLeads();
       if (cachedLeads.length > 0) {
         const mergedCached = mergeLeadLists(coldLeads || [], cachedLeads);
-        setColdLeads(mergedCached);
-        persistLeadSnapshot(mergedCached);
+        const mergedWithOverrides = applyLeadStatusOverridesToList(mergedCached);
+        setColdLeads(mergedWithOverrides);
+        persistLeadSnapshot(mergedWithOverrides);
         setSyncError("The live sheet sync hit an unexpected error, so your cached leads are being shown instead.");
-        setLastSynced(`Cached ${mergedCached.length} leads`);
-        setSyncStats({ fetched: 0, valid: mergedCached.length, invalid: 0, skipped: 0, saved: 0 });
-        setSyncProgress({ loaded: mergedCached.length, total: mergedCached.length, stage: "Using cached leads" });
+        setLastSynced(`Cached ${mergedWithOverrides.length} leads`);
+        setSyncStats({ fetched: 0, valid: mergedWithOverrides.length, invalid: 0, skipped: 0, saved: 0 });
+        setSyncProgress({ loaded: mergedWithOverrides.length, total: mergedWithOverrides.length, stage: "Using cached leads" });
       } else {
         setSyncError("The live sheet sync hit an unexpected error. No cached leads were available.");
       }
@@ -2370,6 +2454,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
       return next;
     });
     if (updatedLead) {
+      saveLeadStatusOverride(updatedLead, normalizedStatus, statusTimestamp);
       queueLeadPersist(updatedLead, {
         status: normalizedStatus,
         last_contacted_at: statusTimestamp,
@@ -6369,7 +6454,7 @@ export default function App() {
       const parsed = JSON.parse(saved);
       if (!Array.isArray(parsed)) return [];
       const SAMPLE_IDS = new Set(["ON-0101", "ON-0201", "AZ-0101", "AZ-0201", "ON-0301"]);
-      return parsed.filter(l => !SAMPLE_IDS.has(l?.lead_id));
+      return applyLeadStatusOverridesToList(parsed.filter(l => !SAMPLE_IDS.has(l?.lead_id)));
     } catch {}
     return [];
   });
