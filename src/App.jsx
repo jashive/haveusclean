@@ -1850,25 +1850,23 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
 
     const normalizedLead = normalizeLeadRecord(job.lead || {}, { lead_id: lid, id: lid });
     const updatedAt = job.updated_at || new Date().toISOString();
-    const contactedAt = job.last_contacted_at || normalizedLead.last_contacted_at || null;
+    const contactedAt = job.last_contacted_at || normalizedLead.last_contacted_at || new Date().toISOString();
     const finalLead = {
       ...normalizedLead,
       status: job.status || normalizedLead.status || "New",
-      ...(contactedAt ? { last_contacted_at: contactedAt } : {}),
+      last_contacted_at: contactedAt,
       updated_at: updatedAt,
     };
+
+    const statusOk = await patchLeadStatusByLeadId(lid, {
+      id: job.lead?.id || lid,
+      status: job.status || finalLead.status,
+      last_contacted_at: contactedAt,
+    });
+    if (!statusOk) return false;
 
     const cloudRes = await upsertColdLeadRows([{ lead_id: lid, data: finalLead, updated_at: updatedAt }]);
-    if (!cloudRes) return false;
-
-    if (!job.status) return true;
-
-    const statusPayload = {
-      status: job.status,
-      last_contacted_at: contactedAt || null,
-      updated_at: updatedAt,
-    };
-    return patchLeadStatusByLeadId(lid, statusPayload);
+    return Boolean(cloudRes);
   }, []);
 
   const flushPersistQueue = useCallback(async () => {
@@ -2347,20 +2345,18 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
   const updateStatus = async (id, status, extra = {}) => {
     let updatedLead = null;
     const normalizedStatus = toDomainStatus(status, "coldOutreach");
-    const statusTimestamp = statusMatches(normalizedStatus, "Contacted", "coldOutreach")
-      ? (extra.last_contacted_at || new Date().toISOString())
-      : (extra.last_contacted_at || null);
+    const statusTimestamp = new Date().toISOString();
     setLeads(ls => {
       const next = ls.map(l => {
         const match = l.id === id || l.lead_id === id;
         if (!match) return l;
         const nextLead = {
           ...l,
-          status: normalizedStatus,
           ...extra,
+          status: normalizedStatus,
+          last_contacted_at: statusTimestamp,
           updated_at: new Date().toISOString(),
           ...(statusMatches(normalizedStatus, "Contacted", "coldOutreach") ? {
-            last_contacted_at: statusTimestamp,
             assigned_rep: extra.assigned_rep || l.assigned_rep || "Current Rep",
           } : {}),
         };
@@ -2380,9 +2376,7 @@ function ColdOutreachLegacy({ region, coldLeads, setColdLeads, page = 0, setPage
         updated_at: updatedLead.updated_at,
       });
       const leadName = updatedLead.company || updatedLead.name || String(id);
-      showStatusToast(statusMatches(normalizedStatus, "Contacted", "coldOutreach")
-        ? `✅ Recorded as Contacted - ${leadName}`
-        : `✅ Status updated to ${normalizedStatus} - ${leadName}`);
+      showStatusToast(`✅ Status updated to '${normalizedStatus}' for ${leadName}`);
     }
   };
 
