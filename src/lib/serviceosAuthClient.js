@@ -128,7 +128,7 @@ export async function validateServiceOSContext(session) {
 
   // 1. Validate organization HUC
   const orgRes = await authenticatedRestFetch(
-    "organizations?select=id,code&code=eq.HUC&limit=1",
+    "organization?select=id,code,name&code=eq.HUC&limit=1",
     access_token
   );
   if (!orgRes || !orgRes.ok) {
@@ -142,7 +142,7 @@ export async function validateServiceOSContext(session) {
 
   // 2. Validate both business units HUC-ON and HUC-AZ
   const buRes = await authenticatedRestFetch(
-    `business_units?select=id,code&organization_id=eq.${encodeURIComponent(orgId)}&code=in.(HUC-ON,HUC-AZ)`,
+    `business_unit?select=id,code,name&code=in.(HUC-ON,HUC-AZ)&order=code.asc`,
     access_token
   );
   if (!buRes || !buRes.ok) {
@@ -161,7 +161,7 @@ export async function validateServiceOSContext(session) {
 
   // 3. Validate exactly one active app_user matching the auth user ID
   const userRes = await authenticatedRestFetch(
-    `app_users?select=id,auth_user_id,is_active&auth_user_id=eq.${encodeURIComponent(authUserId)}&is_active=eq.true`,
+    `app_user?select=id,auth_user_id,email,status&auth_user_id=eq.${encodeURIComponent(authUserId)}`,
     access_token
   );
   if (!userRes || !userRes.ok) {
@@ -170,14 +170,21 @@ export async function validateServiceOSContext(session) {
   const appUsers = await userRes.json();
   if (!Array.isArray(appUsers) || appUsers.length !== 1) {
     throw new Error(
-      `ServiceOS access denied: expected exactly one active app_user, found ${Array.isArray(appUsers) ? appUsers.length : "error"}`
+      `ServiceOS access denied: expected exactly one visible app_user, found ${Array.isArray(appUsers) ? appUsers.length : "error"}`
     );
   }
-  const appUserId = appUsers[0].id;
+  const appUser = appUsers[0];
+  if (appUser.auth_user_id !== authUserId) {
+    throw new Error("ServiceOS access denied: app_user auth_user_id mismatch");
+  }
+  if (appUser.status !== "active") {
+    throw new Error("ServiceOS access denied: app_user is not active");
+  }
+  const appUserId = appUser.id;
 
   // 4. Validate app_role with code = owner_admin
   const roleRes = await authenticatedRestFetch(
-    "app_roles?select=id,code&code=eq.owner_admin&limit=1",
+    "app_role?select=id,code,name&code=eq.owner_admin&limit=1",
     access_token
   );
   if (!roleRes || !roleRes.ok) {
@@ -189,22 +196,26 @@ export async function validateServiceOSContext(session) {
   }
   const roleId = roles[0].id;
 
-  // 5. Validate active user_membership with role_id matching owner_admin
+  // 5. Validate active user_membership: matching app_user, org, and owner_admin role
+  //    Enterprise-wide memberships have business_unit_id null — that is valid.
   const memberRes = await authenticatedRestFetch(
-    `user_memberships?select=id,app_user_id,role_id,is_active&app_user_id=eq.${appUserId}&role_id=eq.${roleId}&is_active=eq.true&limit=1`,
+    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&role_id=eq.${encodeURIComponent(roleId)}`,
     access_token
   );
   if (!memberRes || !memberRes.ok) {
     throw new Error("ServiceOS access denied: membership validation failed");
   }
   const memberships = await memberRes.json();
-  if (!Array.isArray(memberships) || memberships.length === 0) {
+  const activeMembership = Array.isArray(memberships)
+    ? memberships.find((m) => m.status === "active")
+    : null;
+  if (!activeMembership) {
     throw new Error("ServiceOS access denied: active owner_admin membership not found");
   }
 
   // 6. Authenticated customer SELECT (zero rows is acceptable; auth failure is not)
   const custRes = await authenticatedRestFetch(
-    "customers?select=id&limit=1",
+    "customer?select=id&limit=1",
     access_token
   );
   if (!custRes || !custRes.ok) {
