@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback } from "react";
 import {
   signInWithPassword,
   refreshSession,
@@ -7,6 +7,17 @@ import {
   signOut,
   validateServiceOSContext,
 } from "../lib/serviceosAuthClient";
+
+// ── Revenue context ───────────────────────────────────────────────────────────
+// Carries business_unit_id and canonical context for Wave 2 revenue features.
+// Null when the auth gate is disabled or before validation completes.
+
+export const ServiceOSRevenueContext = createContext(null);
+
+/** Hook for consuming the authenticated ServiceOS session + revenue context. */
+export function useServiceOSContext() {
+  return useContext(ServiceOSRevenueContext);
+}
 
 const AUTH_ENABLED = import.meta.env.VITE_SERVICEOS_AUTH_ENABLED === "true";
 const PILOT_BADGE = import.meta.env.VITE_SERVICEOS_AUTH_PILOT_BADGE === "true";
@@ -190,13 +201,35 @@ function AuthenticatedGate({ children }) {
   const [status, setStatus] = useState("loading"); // loading | login | denied | ready
   const [session, setSession] = useState(null);
   const [deniedMessage, setDeniedMessage] = useState(null);
+  // Revenue context: orgId, appUserId, roleId, businessUnits, primaryBusinessUnitId
+  const [revenueContext, setRevenueContext] = useState(null);
 
   const handleSignOut = useCallback(async () => {
     const stored = getStoredSession();
     await signOut(stored?.access_token);
     setSession(null);
+    setRevenueContext(null);
     setStatus("login");
   }, []);
+
+  function buildRevenueContext(validationResult) {
+    // Resolve the primary business unit id from the Wave 1 validation result.
+    // businessUnits is an array of { id, code } objects or codes; we carry the
+    // first HUC-ON id as the default context. If the schema only returns codes,
+    // primaryBusinessUnitId will be null until Migration 005 exposes IDs.
+    const units = Array.isArray(validationResult?.businessUnits) ? validationResult.businessUnits : [];
+    const primaryCode = units.find((u) => (typeof u === "string" ? u : u?.code) === "HUC-ON") ?? units[0];
+    const primaryBusinessUnitId =
+      primaryCode != null && typeof primaryCode === "object" ? (primaryCode.id ?? null) : null;
+
+    return {
+      orgId: validationResult?.orgId ?? null,
+      appUserId: validationResult?.appUserId ?? null,
+      roleId: validationResult?.roleId ?? null,
+      businessUnits: units,
+      primaryBusinessUnitId,
+    };
+  }
 
   useEffect(() => {
     async function initSession() {
@@ -216,8 +249,9 @@ function AuthenticatedGate({ children }) {
           }
           active = await refreshSession(stored.refresh_token);
         }
-        await validateServiceOSContext(active);
+        const validationResult = await validateServiceOSContext(active);
         setSession(active);
+        setRevenueContext(buildRevenueContext(validationResult));
         setStatus("ready");
       } catch (err) {
         const msg = err?.message ?? "Session validation failed";
@@ -239,11 +273,16 @@ function AuthenticatedGate({ children }) {
   function handleLoginSuccess(newSession) {
     setSession(newSession);
     setStatus("ready");
+    // Revenue context will be populated on next initSession cycle if needed;
+    // for a fresh login we don't have the validation result here, so we
+    // leave revenueContext null until the gate is re-entered.
+    setRevenueContext(null);
   }
 
   function handleRetry() {
     clearSession();
     setDeniedMessage(null);
+    setRevenueContext(null);
     setStatus("login");
   }
 
@@ -271,7 +310,7 @@ function AuthenticatedGate({ children }) {
 
   // status === "ready"
   return (
-    <>
+    <ServiceOSRevenueContext.Provider value={{ session, revenueContext }}>
       <div style={styles.signOutBar}>
         <button style={styles.signOutBtn} onClick={handleSignOut}>
           Sign Out
@@ -279,7 +318,7 @@ function AuthenticatedGate({ children }) {
       </div>
       {children}
       {PILOT_BADGE && <div style={styles.badge}>ServiceOS Auth Pilot</div>}
-    </>
+    </ServiceOSRevenueContext.Provider>
   );
 }
 
