@@ -123,19 +123,19 @@ function LoginForm({ onSuccess }) {
   const [error, setError] = useState(null);
 
   async function handleSubmit(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError(null);
-    try {
-      const session = await signInWithPassword(email, password);
-      await validateServiceOSContext(session);
-      onSuccess(session);
-    } catch (err) {
-      setError(err?.message ?? "Authentication failed");
-    } finally {
-      setLoading(false);
+      e.preventDefault();
+      setLoading(true);
+      setError(null);
+      try {
+        const session = await signInWithPassword(email, password);
+        const validationResult = await validateServiceOSContext(session);
+        onSuccess(session, validationResult);
+      } catch (err) {
+        setError(err?.message ?? "Authentication failed");
+      } finally {
+        setLoading(false);
+      }
     }
-  }
 
   return (
     <div style={styles.overlay}>
@@ -213,21 +213,22 @@ function AuthenticatedGate({ children }) {
   }, []);
 
   function buildRevenueContext(validationResult) {
-    // Resolve the primary business unit id from the Wave 1 validation result.
-    // businessUnits is an array of { id, code } objects or codes; we carry the
-    // first HUC-ON id as the default context. If the schema only returns codes,
-    // primaryBusinessUnitId will be null until Migration 005 exposes IDs.
-    const units = Array.isArray(validationResult?.businessUnits) ? validationResult.businessUnits : [];
-    const primaryCode = units.find((u) => (typeof u === "string" ? u : u?.code) === "HUC-ON") ?? units[0];
-    const primaryBusinessUnitId =
-      primaryCode != null && typeof primaryCode === "object" ? (primaryCode.id ?? null) : null;
-
+    // validationResult now carries:
+    //   businessUnits       — array of codes (backward compat)
+    //   businessUnitRecords — array of { id, code, name }
+    //   businessUnitByCode  — { "HUC-ON": { id, code, name }, "HUC-AZ": { … } }
+    //   primaryBusinessUnitId — canonical UUID for HUC-ON pilot default
     return {
       orgId: validationResult?.orgId ?? null,
       appUserId: validationResult?.appUserId ?? null,
       roleId: validationResult?.roleId ?? null,
-      businessUnits: units,
-      primaryBusinessUnitId,
+      // Backward compat: array of code strings
+      businessUnits: validationResult?.businessUnits ?? [],
+      // Structured UUID-bearing records for Wave 2
+      businessUnitRecords: validationResult?.businessUnitRecords ?? [],
+      businessUnitByCode: validationResult?.businessUnitByCode ?? {},
+      // Canonical UUID for HUC-ON pilot (derived from live DB record, not region_id)
+      primaryBusinessUnitId: validationResult?.primaryBusinessUnitId ?? null,
     };
   }
 
@@ -270,13 +271,19 @@ function AuthenticatedGate({ children }) {
     initSession();
   }, []);
 
-  function handleLoginSuccess(newSession) {
-    setSession(newSession);
-    setStatus("ready");
-    // Revenue context will be populated on next initSession cycle if needed;
-    // for a fresh login we don't have the validation result here, so we
-    // leave revenueContext null until the gate is re-entered.
-    setRevenueContext(null);
+  async function handleLoginSuccess(newSession, validationResult) {
+    try {
+      // validationResult already obtained by LoginForm; re-validate only if missing
+      const result = validationResult ?? (await validateServiceOSContext(newSession));
+      setSession(newSession);
+      setRevenueContext(buildRevenueContext(result));
+      setStatus("ready");
+    } catch (err) {
+      const msg = err?.message ?? "Post-login validation failed";
+      clearSession();
+      setDeniedMessage(msg);
+      setStatus("denied");
+    }
   }
 
   function handleRetry() {

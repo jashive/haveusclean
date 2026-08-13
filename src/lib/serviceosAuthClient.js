@@ -159,6 +159,14 @@ export async function validateServiceOSContext(session) {
     );
   }
 
+  // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID
+  const businessUnitByCode = {};
+  for (const bu of bus) {
+    businessUnitByCode[bu.code] = { id: bu.id, code: bu.code, name: bu.name };
+  }
+  // Primary business unit defaults to HUC-ON (Ontario pilot)
+  const primaryBusinessUnitId = businessUnitByCode["HUC-ON"]?.id ?? null;
+
   // 3. Validate exactly one active app_user matching the auth user ID
   const userRes = await authenticatedRestFetch(
     `app_user?select=id,auth_user_id,email,status&auth_user_id=eq.${encodeURIComponent(authUserId)}`,
@@ -227,6 +235,13 @@ export async function validateServiceOSContext(session) {
     orgId,
     appUserId,
     roleId,
+    // Backward-compat: array of codes for any code still checking businessUnits
     businessUnits: buCodes,
+    // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id)
+    businessUnitByCode,
+    // Full array of { id, code, name } records
+    businessUnitRecords: bus.map((b) => ({ id: b.id, code: b.code, name: b.name })),
+    // Primary canonical business_unit.id (HUC-ON pilot default)
+    primaryBusinessUnitId,
   };
 }

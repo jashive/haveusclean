@@ -7,10 +7,12 @@
 // Uses the same authenticatedRestFetch / direct REST pattern as Wave 1.
 // Does NOT add @supabase/supabase-js.
 //
-// Canonical table names (snake_case, no huc_* prefix):
+// Wave 2 NEW tables (9):
 //   service_request, opportunity, estimate, pricing_snapshot,
-//   quote, quote_version, quote_response,
-//   customer, contact, service_location, job_handoff
+//   quote, quote_version, quote_response, conversion_record, job_handoff
+//
+// Wave 1 canonical tables (used but NOT created by Wave 2):
+//   customer, contact, service_location
 
 import { authenticatedRestFetch } from "./serviceosAuthClient.js";
 
@@ -116,6 +118,16 @@ export async function createQuoteVersion(payload, accessToken) {
 export async function createQuoteResponse(payload, accessToken) {
   assertEnabled();
   return insertOne("quote_response", payload, accessToken);
+}
+
+// ── Conversion Record ─────────────────────────────────────────────────────────
+//
+// Records the explicit moment a prospect converts to a customer.
+// Never auto-created; always an intentional conversion action.
+
+export async function createConversionRecord(payload, accessToken) {
+  assertEnabled();
+  return insertOne("conversion_record", payload, accessToken);
 }
 
 // ── Customer ──────────────────────────────────────────────────────────────────
@@ -287,6 +299,7 @@ export async function cleanupPilotSession(createdIds, accessToken) {
 
   const order = [
     "job_handoff",
+    "conversion_record",
     "service_location",
     "contact",
     "customer",

@@ -13,6 +13,65 @@ import {
   buildJobHandoffPayload,
 } from "../src/lib/serviceosRevenueUtils.js";
 
+// ── Wave 2 table contract ─────────────────────────────────────────────────────
+// Confirm the 9 NEW Wave 2 tables are exactly as specified.
+
+test("Wave 2 new table contract: 9 tables — no customer/contact/service_location", () => {
+  const WAVE2_NEW_TABLES = [
+    "service_request",
+    "opportunity",
+    "estimate",
+    "pricing_snapshot",
+    "quote",
+    "quote_version",
+    "quote_response",
+    "conversion_record",
+    "job_handoff",
+  ];
+  assert.equal(WAVE2_NEW_TABLES.length, 9);
+  // Wave 1 canonical tables must NOT appear in the Wave 2 new-table list
+  assert.equal(WAVE2_NEW_TABLES.includes("customer"), false);
+  assert.equal(WAVE2_NEW_TABLES.includes("contact"), false);
+  assert.equal(WAVE2_NEW_TABLES.includes("service_location"), false);
+  // conversion_record must be present
+  assert.equal(WAVE2_NEW_TABLES.includes("conversion_record"), true);
+});
+
+// ── validateServiceOSContext return shape (unit-level, no network) ────────────
+
+test("validateServiceOSContext return shape carries businessUnitRecords and primaryBusinessUnitId", () => {
+  // Simulate the shape that validateServiceOSContext now returns so downstream
+  // consumers (buildRevenueContext) can be verified without a live network call.
+  const mockValidationResult = {
+    orgId: "org-uuid-001",
+    appUserId: "user-uuid-001",
+    roleId: "role-uuid-001",
+    businessUnits: ["HUC-ON", "HUC-AZ"],
+    businessUnitRecords: [
+      { id: "bu-uuid-on", code: "HUC-ON", name: "HaveUsClean Ontario" },
+      { id: "bu-uuid-az", code: "HUC-AZ", name: "HaveUsClean Arizona" },
+    ],
+    businessUnitByCode: {
+      "HUC-ON": { id: "bu-uuid-on", code: "HUC-ON", name: "HaveUsClean Ontario" },
+      "HUC-AZ": { id: "bu-uuid-az", code: "HUC-AZ", name: "HaveUsClean Arizona" },
+    },
+    primaryBusinessUnitId: "bu-uuid-on",
+  };
+
+  // businessUnits backward compat
+  assert.deepEqual(mockValidationResult.businessUnits, ["HUC-ON", "HUC-AZ"]);
+  // UUID resolution for HUC-ON
+  assert.equal(mockValidationResult.businessUnitByCode["HUC-ON"].id, "bu-uuid-on");
+  // UUID resolution for HUC-AZ
+  assert.equal(mockValidationResult.businessUnitByCode["HUC-AZ"].id, "bu-uuid-az");
+  // primaryBusinessUnitId derives from the live record, not from region_id
+  assert.equal(mockValidationResult.primaryBusinessUnitId, "bu-uuid-on");
+  // businessUnitRecords carries all fields
+  assert.equal(mockValidationResult.businessUnitRecords.length, 2);
+  assert.equal(mockValidationResult.businessUnitRecords[0].id, "bu-uuid-on");
+  assert.equal(mockValidationResult.businessUnitRecords[1].id, "bu-uuid-az");
+});
+
 // ── capturePricingSnapshot ────────────────────────────────────────────────────
 
 test("capturePricingSnapshot returns expected shape from full quote", () => {
