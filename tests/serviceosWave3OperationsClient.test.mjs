@@ -222,13 +222,71 @@ for (const fnName of ALL_GUARDED) {
 
 // ── Lifecycle update method validation ───────────────────────────────────────
 
-test("updateOperationalJobStatus source text only patches lifecycle fields", () => {
-  const fnStart = clientSrc.indexOf("export async function updateOperationalJobStatus");
+function getExportedFunctionSource(functionName) {
+  const fnStart = clientSrc.indexOf(`export async function ${functionName}`);
   const fnEnd = clientSrc.indexOf("\nexport ", fnStart + 1);
-  const fnBody = clientSrc.slice(fnStart, fnEnd > 0 ? fnEnd : undefined);
+  return clientSrc.slice(fnStart, fnEnd > 0 ? fnEnd : undefined);
+}
+
+test("updateOperationalJobStatus source text only patches lifecycle fields", () => {
+  const fnBody = getExportedFunctionSource("updateOperationalJobStatus");
   assert.ok(!fnBody.includes("pricing_snapshot"), "must not patch pricing_snapshot");
   assert.ok(!fnBody.includes("quote_version"), "must not patch quote_version");
   assert.ok(!fnBody.includes("price"), "must not patch price");
+});
+
+test("updateQaInspectionStatus does not patch nonexistent audit columns", () => {
+  const fnBody = getExportedFunctionSource("updateQaInspectionStatus");
+  assert.ok(
+    !fnBody.includes("updated_by_app_user_id"),
+    "qa_inspection updates must not include updated_by_app_user_id"
+  );
+});
+
+test("updateQaInspectionStatus patch keeps allowed lifecycle fields", () => {
+  const fnBody = getExportedFunctionSource("updateQaInspectionStatus");
+  assert.ok(fnBody.includes("inspection_status"), "qa update must patch inspection_status");
+  assert.ok(fnBody.includes("updated_at"), "qa update may patch updated_at");
+  assert.ok(fnBody.includes("inspected_at"), "qa final status may patch inspected_at");
+});
+
+test("updateOperationalHandoffStatus sends only handoff_status", () => {
+  const fnBody = getExportedFunctionSource("updateOperationalHandoffStatus");
+  assert.ok(
+    /const patch = \{\s*handoff_status: newStatus,\s*\};/s.test(fnBody),
+    "operational_handoff patch must contain only handoff_status"
+  );
+  assert.ok(
+    !fnBody.includes("updated_by_app_user_id"),
+    "operational_handoff update must not patch updated_by_app_user_id"
+  );
+  assert.ok(
+    !fnBody.includes("updated_at"),
+    "operational_handoff update must not patch updated_at"
+  );
+});
+
+test("lifecycle helpers do not patch pricing_snapshot_id or quote_version_id", () => {
+  const lifecycleFnNames = [
+    "updateOperationalJobStatus",
+    "updateScheduleWindowStatus",
+    "updateWorkerAssignmentStatus",
+    "updateWorkOrderStatus",
+    "updateQaInspectionStatus",
+    "updateCorrectiveActionStatus",
+    "updateOperationalHandoffStatus",
+  ];
+  for (const fnName of lifecycleFnNames) {
+    const fnBody = getExportedFunctionSource(fnName);
+    assert.ok(
+      !fnBody.includes("pricing_snapshot_id"),
+      `${fnName} must not patch pricing_snapshot_id`
+    );
+    assert.ok(
+      !fnBody.includes("quote_version_id"),
+      `${fnName} must not patch quote_version_id`
+    );
+  }
 });
 
 // ── createdRecords attachment ─────────────────────────────────────────────────

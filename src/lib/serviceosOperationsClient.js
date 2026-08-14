@@ -467,7 +467,6 @@ export async function updateQaInspectionStatus(
       : {}),
     ...(extra?.score != null ? { score: extra.score } : {}),
     ...(extra?.waiverReason != null ? { waiver_reason: extra.waiverReason } : {}),
-    ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
   };
   return updateById("qa_inspection", id, patch, accessToken);
 }
@@ -520,7 +519,6 @@ export async function updateOperationalHandoffStatus(
   }
   const patch = {
     handoff_status: newStatus,
-    ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
   };
   return updateById("operational_handoff", id, patch, accessToken);
 }
