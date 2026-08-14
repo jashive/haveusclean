@@ -511,6 +511,15 @@ test("M008: quote_version follows draft → sent → accepted lifecycle", () => 
   );
 });
 
+test("M008: quote_response uses canonical field names", () => {
+  const qrMatch = m008.match(/INSERT INTO public\.quote_response[\s\S]*?;/);
+  assert.ok(qrMatch, "M008 quote_response insert not found");
+  const insert = qrMatch[0];
+  assert.ok(insert.includes("response_type"), "M008 quote_response must use response_type");
+  assert.ok(!insert.includes("response_status"), "M008 quote_response must not use stale response_status");
+  assert.ok(!insert.includes("quote_id"), "M008 quote_response must not include quote_id");
+});
+
 test("M008: pricing_snapshot uses canonical field names (no stale fields)", () => {
   const psMatch = m008.match(/INSERT INTO public\.pricing_snapshot\s*\(([^)]+)\)/);
   assert.ok(psMatch, "M008 pricing_snapshot insert column list not found");

@@ -166,16 +166,15 @@ WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;
 -- 1j. Quote response (required for conversion_record lineage)
 INSERT INTO public.quote_response (
  id, organization_id, business_unit_id,
- quote_id, quote_version_id,
- response_status
+ quote_version_id,
+ response_type
 )
 VALUES (
-  '0a000000-0000-0000-0000-000000000002'::uuid,
-  (SELECT organization_id FROM pg_temp.m008_scope),
-  (SELECT business_unit_id FROM pg_temp.m008_scope),
-  '13000000-0000-0000-0000-000000000001'::uuid,
-  '15000000-0000-0000-0000-000000000001'::uuid,
-  'accepted'
+ '0a000000-0000-0000-0000-000000000002'::uuid,
+ (SELECT organization_id FROM pg_temp.m008_scope),
+ (SELECT business_unit_id FROM pg_temp.m008_scope),
+ '15000000-0000-0000-0000-000000000001'::uuid,
+ 'accepted'
 );
 
 UPDATE public.quote_version
