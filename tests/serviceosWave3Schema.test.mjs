@@ -305,6 +305,14 @@ test("M008: no reference to huc_* legacy tables in SQL statements", () => {
   assert.ok(!/huc_/i.test(sqlOnlyLines), "M008 contains huc_* reference in SQL (non-comment) code");
 });
 
+test("M008: does not disable triggers", () => {
+  assert.ok(!/DISABLE\s+TRIGGER/i.test(m008), "M008 must not disable triggers");
+});
+
+test("M008: does not ALTER M001-M007 schemas", () => {
+  assert.ok(!/ALTER\s+TABLE/i.test(m008), "M008 must not ALTER existing schemas");
+});
+
 test("M008: synthetic chain covers full Wave 3 lifecycle", () => {
   const requiredSteps = [
     "operational_job",
@@ -516,8 +524,66 @@ test("M008: quote_response uses canonical field names", () => {
   assert.ok(qrMatch, "M008 quote_response insert not found");
   const insert = qrMatch[0];
   assert.ok(insert.includes("response_type"), "M008 quote_response must use response_type");
+  assert.ok(insert.includes("response_channel"), "M008 quote_response must use response_channel");
+  assert.ok(insert.includes("responded_at"), "M008 quote_response must use responded_at");
   assert.ok(!insert.includes("response_status"), "M008 quote_response must not use stale response_status");
   assert.ok(!insert.includes("quote_id"), "M008 quote_response must not include quote_id");
+});
+
+test("M008: worker_assignment follows proposed → assigned → acknowledged lifecycle", () => {
+  const insertMatch = m008.match(/INSERT INTO public\.worker_assignment[\s\S]*?;/);
+  const assignedMatch = m008.match(
+    /UPDATE public\.worker_assignment\s+SET assignment_status = 'assigned',\s+assigned_at = now\(\)\s+WHERE id = '22000000-0000-0000-0000-000000000001'::uuid;/
+  );
+  const acknowledgedMatch = m008.match(
+    /UPDATE public\.worker_assignment\s+SET assignment_status = 'acknowledged',\s+acknowledged_at = now\(\)\s+WHERE id = '22000000-0000-0000-0000-000000000001'::uuid;/
+  );
+
+  assert.ok(insertMatch, "M008 worker_assignment insert not found");
+  assert.ok(insertMatch[0].includes("'proposed'"), "M008 worker_assignment must begin as proposed");
+  assert.ok(assignedMatch, "M008 must transition worker_assignment from proposed to assigned");
+  assert.ok(acknowledgedMatch, "M008 must transition worker_assignment from assigned to acknowledged");
+  assert.ok(
+    assignedMatch.index > insertMatch.index,
+    "M008 must transition worker_assignment to assigned after insert"
+  );
+  assert.ok(
+    acknowledgedMatch.index > assignedMatch.index,
+    "M008 must transition worker_assignment to acknowledged after assigned"
+  );
+});
+
+test("M008: work_order follows draft → published → in_progress → service_complete → qa_complete → closed lifecycle", () => {
+  const insertMatch = m008.match(/INSERT INTO public\.work_order[\s\S]*?;/);
+  const publishedMatch = m008.match(
+    /UPDATE public\.work_order\s+SET\s+work_order_status = 'published',\s+published_at\s+= now\(\)\s+WHERE\s+id = '23000000-0000-0000-0000-000000000001'::uuid;/
+  );
+  const inProgressMatch = m008.match(
+    /UPDATE public\.work_order\s+SET\s+work_order_status = 'in_progress',\s+started_at\s+= now\(\)\s+WHERE\s+id = '23000000-0000-0000-0000-000000000001'::uuid;/
+  );
+  const serviceCompleteMatch = m008.match(
+    /UPDATE public\.work_order\s+SET\s+work_order_status\s+= 'service_complete',[\s\S]*?WHERE\s+id = '23000000-0000-0000-0000-000000000001'::uuid;/
+  );
+  const qaCompleteMatch = m008.match(
+    /UPDATE public\.work_order\s+SET\s+work_order_status = 'qa_complete'\s+WHERE\s+id = '23000000-0000-0000-0000-000000000001'::uuid;/
+  );
+  const closedMatch = m008.match(
+    /UPDATE public\.work_order\s+SET\s+work_order_status = 'closed'\s+WHERE\s+id = '23000000-0000-0000-0000-000000000001'::uuid;/
+  );
+
+  assert.ok(insertMatch, "M008 work_order insert not found");
+  assert.ok(insertMatch[0].includes("'draft'"), "M008 work_order must begin as draft");
+  assert.ok(!insertMatch[0].includes("published_at"), "M008 work_order insert must not set published_at");
+  assert.ok(publishedMatch, "M008 must transition work_order from draft to published");
+  assert.ok(inProgressMatch, "M008 must transition work_order from published to in_progress");
+  assert.ok(serviceCompleteMatch, "M008 must transition work_order from in_progress to service_complete");
+  assert.ok(qaCompleteMatch, "M008 must transition work_order from service_complete to qa_complete");
+  assert.ok(closedMatch, "M008 must transition work_order from qa_complete to closed");
+  assert.ok(publishedMatch.index > insertMatch.index, "M008 must publish work_order after draft insert");
+  assert.ok(inProgressMatch.index > publishedMatch.index, "M008 must move work_order to in_progress after publish");
+  assert.ok(serviceCompleteMatch.index > inProgressMatch.index, "M008 must move work_order to service_complete after in_progress");
+  assert.ok(qaCompleteMatch.index > serviceCompleteMatch.index, "M008 must move work_order to qa_complete after service_complete");
+  assert.ok(closedMatch.index > qaCompleteMatch.index, "M008 must move work_order to closed after qa_complete");
 });
 
 test("M008: pricing_snapshot uses canonical field names (no stale fields)", () => {
@@ -630,5 +696,20 @@ test("M008: pricing_snapshot references resolved configuration version scope", (
   assert.ok(
     psInsert[0].includes("(SELECT configuration_version_id FROM pg_temp.m008_scope)"),
     "M008 pricing_snapshot must use resolved configuration version id from m008_scope"
+  );
+});
+
+test("M008: sanity assertions check assignment acknowledged, quote_version accepted, and quote_response accepted", () => {
+  assert.ok(
+    m008.includes("worker_assignment status = % (expected acknowledged)"),
+    "M008 sanity assertions must check worker_assignment acknowledged"
+  );
+  assert.ok(
+    m008.includes("quote_version lifecycle_status = % (expected accepted)"),
+    "M008 sanity assertions must check quote_version accepted"
+  );
+  assert.ok(
+    m008.includes("quote_response response_type = % (expected accepted)"),
+    "M008 sanity assertions must check quote_response accepted"
   );
 });

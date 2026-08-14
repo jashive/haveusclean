@@ -167,14 +167,18 @@ WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;
 INSERT INTO public.quote_response (
  id, organization_id, business_unit_id,
  quote_version_id,
- response_type
+ response_type, response_channel, responded_by_name, responded_at, metadata
 )
 VALUES (
  '0a000000-0000-0000-0000-000000000002'::uuid,
  (SELECT organization_id FROM pg_temp.m008_scope),
  (SELECT business_unit_id FROM pg_temp.m008_scope),
  '15000000-0000-0000-0000-000000000001'::uuid,
- 'accepted'
+ 'accepted',
+ 'm008_rehearsal',
+ 'M008 Rehearsal',
+ now(),
+ '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 UPDATE public.quote_version
@@ -314,7 +318,7 @@ INSERT INTO public.worker_assignment (
   id, organization_id, business_unit_id,
   operational_job_id, schedule_window_id,
   worker_id,
-  assignment_role, assignment_status, assigned_at, metadata
+  assignment_role, assignment_status, metadata
 )
 VALUES (
   '22000000-0000-0000-0000-000000000001'::uuid,
@@ -324,10 +328,19 @@ VALUES (
   '21000000-0000-0000-0000-000000000001'::uuid,
   '18000000-0000-0000-0000-000000000001'::uuid,
   'service_worker',
-  'acknowledged',
-  now(),
+  'proposed',
   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
+
+UPDATE public.worker_assignment
+SET assignment_status = 'assigned',
+    assigned_at = now()
+WHERE id = '22000000-0000-0000-0000-000000000001'::uuid;
+
+UPDATE public.worker_assignment
+SET assignment_status = 'acknowledged',
+    acknowledged_at = now()
+WHERE id = '22000000-0000-0000-0000-000000000001'::uuid;
 
 -- ---------------------------------------------------------------------------
 -- STEP 5: work_order — draft then published
@@ -340,7 +353,6 @@ INSERT INTO public.work_order (
   scope_snapshot,
   checklist_template_snapshot,
   pricing_reference_snapshot,
-  published_at,
   metadata
 )
 VALUES (
@@ -350,13 +362,17 @@ VALUES (
   (SELECT jurisdiction_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '21000000-0000-0000-0000-000000000001'::uuid,
-  'published',
+  'draft',
   '{"sqft":1500,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   '{"items":["dust","vacuum","mop"]}'::jsonb,
   '{"pre_tax_total":395.00,"total":446.35,"currency":"CA$","reference_only":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
-  now(),
   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
+
+UPDATE public.work_order
+SET    work_order_status = 'published',
+       published_at      = now()
+WHERE  id = '23000000-0000-0000-0000-000000000001'::uuid;
 
 -- Dispatch the job
 UPDATE public.operational_job
@@ -632,7 +648,10 @@ VALUES (
 DO $$
 DECLARE
   v_oj_status          text;
+  v_wa_status          text;
   v_wo_status          text;
+  v_qv_status          text;
+  v_qr_type            text;
   v_qa_status          text;
   v_oh_status          text;
   v_event_count        integer;
@@ -650,12 +669,36 @@ BEGIN
     RAISE EXCEPTION 'M008 rehearsal assertion FAIL: operational_job status = % (expected closed)', v_oj_status;
   END IF;
 
+  -- worker_assignment must be acknowledged
+  SELECT assignment_status INTO v_wa_status
+  FROM   public.worker_assignment
+  WHERE  id = '22000000-0000-0000-0000-000000000001'::uuid;
+  IF v_wa_status <> 'acknowledged' THEN
+    RAISE EXCEPTION 'M008 rehearsal assertion FAIL: worker_assignment status = % (expected acknowledged)', v_wa_status;
+  END IF;
+
   -- work_order must be closed
   SELECT work_order_status INTO v_wo_status
   FROM   public.work_order
   WHERE  id = '23000000-0000-0000-0000-000000000001'::uuid;
   IF v_wo_status <> 'closed' THEN
     RAISE EXCEPTION 'M008 rehearsal assertion FAIL: work_order status = % (expected closed)', v_wo_status;
+  END IF;
+
+  -- quote_version must be accepted
+  SELECT lifecycle_status INTO v_qv_status
+  FROM   public.quote_version
+  WHERE  id = '15000000-0000-0000-0000-000000000001'::uuid;
+  IF v_qv_status <> 'accepted' THEN
+    RAISE EXCEPTION 'M008 rehearsal assertion FAIL: quote_version lifecycle_status = % (expected accepted)', v_qv_status;
+  END IF;
+
+  -- quote_response must be accepted
+  SELECT response_type INTO v_qr_type
+  FROM   public.quote_response
+  WHERE  id = '0a000000-0000-0000-0000-000000000002'::uuid;
+  IF v_qr_type <> 'accepted' THEN
+    RAISE EXCEPTION 'M008 rehearsal assertion FAIL: quote_response response_type = % (expected accepted)', v_qr_type;
   END IF;
 
   -- qa_inspection must be passed
