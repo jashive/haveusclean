@@ -18,9 +18,15 @@ import {
   cleanupPilotSession,
   getPipelineCreatedRecords,
 } from "../../lib/serviceosRevenueClient.js";
-import { calcResQuote } from "../../lib/pricing.js";
 import { withQuotePresentation } from "../../lib/quoteEngine.js";
-import { REGIONS } from "../../lib/constants.js";
+import {
+  GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+  fetchPublishedGovernedResidentialConfig,
+} from "../../lib/governedResidentialConfig.js";
+import {
+  computeGovernedResidentialQuote,
+  buildGovernedResidentialConfigurationSnapshot,
+} from "../../lib/governedResidentialPricing.js";
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
 
@@ -32,13 +38,12 @@ const PILOT_UI_ENABLED =
 
 function buildPilotQuoteInput() {
   return {
-    dwellingType: "Detached House",
-    dwellingSize: "Medium",
-    serviceType: "Deep Clean",
+    dwellingType: "Apartment / Condo",
     frequency: "One-Time",
-    beds: 3,
+    packageKey: "complete_deep",
+    condition: "Light",
+    beds: 2,
     baths: 2,
-    sqft: 2000,
     addons: [],
   };
 }
@@ -108,22 +113,48 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
   if (!businessUnitId) throw new Error("Pilot requires revenueContext.primaryBusinessUnitId");
   if (!jurisdictionId) throw new Error("Pilot requires revenueContext.primaryJurisdictionId (HUC-ON jurisdiction_id)");
 
+  log("Fetching governed residential configuration…");
+  const configurationVersion = await fetchPublishedGovernedResidentialConfig({
+    accessToken,
+    organizationId: orgId,
+    businessUnitId,
+    jurisdictionId,
+    requiredVersion: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+  });
+  log(`Governed config: ${configurationVersion.version}`, "done");
+
   log("Computing quote…");
-  const region = REGIONS.ON;
   const quoteInput = buildPilotQuoteInput();
-  const rawQuote = calcResQuote(quoteInput, region);
+  const rawQuote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: quoteInput.dwellingType,
+    beds: quoteInput.beds,
+    baths: quoteInput.baths,
+    packageKey: quoteInput.packageKey,
+    condition: quoteInput.condition,
+    frequency: quoteInput.frequency,
+    addons: quoteInput.addons,
+  });
+  if (rawQuote?.requiresOfficeReview) {
+    throw new Error(rawQuote.reason ?? "Governed residential quote requires office review");
+  }
   const quote = withQuotePresentation(rawQuote, {
     type: "residential",
     data: quoteInput,
   });
-  log(`Quote: CA$${quote.total} total (${quote.teamSize} crew, ${quote.jobHours}h)`, "done");
+  log(`GOVERNED CONFIG PRICING`, "done");
+  log(`Quote: CA$${quote.total.toFixed(2)} total`, "done");
 
   log("Capturing pricing snapshot…");
+  const configurationSnapshot = buildGovernedResidentialConfigurationSnapshot(configurationVersion);
   const pricingSnapshotPayload = capturePricingSnapshot({
     quote,
     organizationId: orgId,
     businessUnitId,
     appUserId,
+    configurationVersionId: configurationVersion.id,
+    configurationSnapshot,
+    governedResidential: true,
   });
   log("Snapshot built (not yet persisted)", "done");
 
@@ -155,6 +186,7 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     organizationId: orgId,
     businessUnitId,
     opportunityId: "__pipeline_resolved__",
+    configurationVersionId: configurationVersion.id,
     lifecycleStatus: "prepared",
     versionNo: 1,
     scopeSnapshot: quoteInput,
@@ -177,7 +209,7 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     quoteId: "__pipeline_resolved__",
     pricingSnapshotId: "__pipeline_resolved__",
     versionNo: 1,
-    lineItemsSnapshot: { quoteInput, quoteOutput: quote },
+    lineItemsSnapshot: [{ quoteInput, quoteOutput: quote }],
     metadata: { synthetic: true },
     appUserId,
   });

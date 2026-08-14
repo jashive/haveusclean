@@ -17,6 +17,14 @@ import {
 import { withQuotePresentation } from "../src/lib/quoteEngine.js";
 import { calcResQuote } from "../src/core/pricing/sharedPricing.js";
 import {
+  GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+  fetchPublishedGovernedResidentialConfig,
+} from "../src/lib/governedResidentialConfig.js";
+import {
+  computeGovernedResidentialQuote,
+  buildGovernedResidentialConfigurationSnapshot,
+} from "../src/lib/governedResidentialPricing.js";
+import {
   attachPipelineCreatedRecords,
   getPipelineCreatedRecords,
 } from "../src/lib/serviceosRevenueClient.js";
@@ -115,6 +123,304 @@ test("capturePricingSnapshot: canonical M005 field names (no obsolete fields)", 
   assert.equal(Object.prototype.hasOwnProperty.call(snap, "confidence"), false);
   // NO pricing_snapshot.quote_version_id (M005 has no such field)
   assert.equal(Object.prototype.hasOwnProperty.call(snap, "quote_version_id"), false);
+});
+
+test("fetchPublishedGovernedResidentialConfig requires exactly one published ON-2026-08-v1.0 row", async () => {
+  const row = {
+    id: "cfg-1",
+    organization_id: "org-1",
+    business_unit_id: "bu-on",
+    jurisdiction_id: "jur-on",
+    configuration_type: "residential_pricing",
+    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+    status: "published",
+    effective_from: "2026-08-01",
+    effective_to: null,
+    configuration: {
+      dwelling_matrix: [
+        {
+          dwelling_type: "Apartment / Condo",
+          beds: 2,
+          baths: 2,
+          package_prices: { complete_deep: 395 },
+        },
+      ],
+      tax: { name: "HST", rate: 0.13 },
+      minimum_charge: { amount: 0 },
+    },
+  };
+
+  const result = await fetchPublishedGovernedResidentialConfig({
+    accessToken: "tok",
+    organizationId: "org-1",
+    businessUnitId: "bu-on",
+    jurisdictionId: "jur-on",
+    fetcher: async () => ({
+      ok: true,
+      json: async () => [row],
+    }),
+  });
+  assert.equal(result.id, "cfg-1");
+  assert.equal(result.version, GOVERNED_RESIDENTIAL_REQUIRED_VERSION);
+});
+
+test("fetchPublishedGovernedResidentialConfig fails when missing/wrong version", async () => {
+  await assert.rejects(
+    () =>
+      fetchPublishedGovernedResidentialConfig({
+        accessToken: "tok",
+        organizationId: "org-1",
+        businessUnitId: "bu-on",
+        jurisdictionId: "jur-on",
+        fetcher: async () => ({
+          ok: true,
+          json: async () => [
+            {
+              id: "cfg-1",
+              organization_id: "org-1",
+              business_unit_id: "bu-on",
+              jurisdiction_id: "jur-on",
+              configuration_type: "residential_pricing",
+              version: "ON-2026-07-v0.9",
+              status: "published",
+              configuration: { dwelling_matrix: [], tax: { rate: 0.13 } },
+            },
+          ],
+        }),
+      }),
+    /version must be ON-2026-08-v1.0/
+  );
+
+  await assert.rejects(
+    () =>
+      fetchPublishedGovernedResidentialConfig({
+        accessToken: "tok",
+        organizationId: "org-1",
+        businessUnitId: "bu-on",
+        jurisdictionId: "jur-on",
+        fetcher: async () => ({
+          ok: true,
+          json: async () => [],
+        }),
+      }),
+    /expected exactly one row, found 0/
+  );
+});
+
+test("fetchPublishedGovernedResidentialConfig fails on BU/jurisdiction mismatch and >1 row", async () => {
+  await assert.rejects(
+    () =>
+      fetchPublishedGovernedResidentialConfig({
+        accessToken: "tok",
+        organizationId: "org-1",
+        businessUnitId: "bu-on",
+        jurisdictionId: "jur-on",
+        fetcher: async () => ({
+          ok: true,
+          json: async () => [
+            {
+              id: "cfg-1",
+              organization_id: "org-1",
+              business_unit_id: "bu-az",
+              jurisdiction_id: "jur-on",
+              configuration_type: "residential_pricing",
+              version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+              status: "published",
+              configuration: { dwelling_matrix: [], tax: { rate: 0.13 } },
+            },
+          ],
+        }),
+      }),
+    /business unit mismatch/
+  );
+
+  await assert.rejects(
+    () =>
+      fetchPublishedGovernedResidentialConfig({
+        accessToken: "tok",
+        organizationId: "org-1",
+        businessUnitId: "bu-on",
+        jurisdictionId: "jur-on",
+        fetcher: async () => ({
+          ok: true,
+          json: async () => [
+            {
+              id: "cfg-1",
+              organization_id: "org-1",
+              business_unit_id: "bu-on",
+              jurisdiction_id: "jur-az",
+              configuration_type: "residential_pricing",
+              version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+              status: "published",
+              configuration: { dwelling_matrix: [], tax: { rate: 0.13 } },
+            },
+          ],
+        }),
+      }),
+    /jurisdiction mismatch/
+  );
+
+  await assert.rejects(
+    () =>
+      fetchPublishedGovernedResidentialConfig({
+        accessToken: "tok",
+        organizationId: "org-1",
+        businessUnitId: "bu-on",
+        jurisdictionId: "jur-on",
+        fetcher: async () => ({
+          ok: true,
+          json: async () => [{ id: "cfg-1" }, { id: "cfg-2" }],
+        }),
+      }),
+    /expected exactly one row, found 2/
+  );
+});
+
+test("governed residential deterministic apartment 2/2 complete_deep light one-time computes CA$446.35", () => {
+  const configurationVersion = {
+    id: "cfg-1",
+    configuration_type: "residential_pricing",
+    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+    business_unit_id: "bu-on",
+    jurisdiction_id: "jur-on",
+    effective_from: "2026-08-01",
+    effective_to: null,
+    configuration: {
+      dwelling_matrix: [
+        {
+          dwelling_type: "Apartment / Condo",
+          beds: 2,
+          baths: 2,
+          package_prices: {
+            essential_refresh: 300,
+            signature_initial_reset: 350,
+            complete_deep: 395,
+            move_in_move_out: 430,
+          },
+        },
+      ],
+      condition_markup: {
+        light: 0,
+        moderate: { min: 0.1, max: 0.2 },
+        heavy: { min: 0.2, max: 0.35 },
+      },
+      recurring_discount: {
+        one_time: 0,
+        bi_weekly: { min: 0.1, max: 0.15 },
+      },
+      tax: { name: "HST", rate: 0.13 },
+      minimum_charge: { amount: 0 },
+    },
+  };
+
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+  });
+
+  assert.equal(quote.preTaxTotal, 395);
+  assert.equal(quote.taxAmount, 51.35);
+  assert.equal(quote.total, 446.35);
+});
+
+test("governed residential discretionary range does not invent exact value", () => {
+  const configurationVersion = {
+    id: "cfg-1",
+    configuration_type: "residential_pricing",
+    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+    business_unit_id: "bu-on",
+    jurisdiction_id: "jur-on",
+    configuration: {
+      dwelling_matrix: [
+        {
+          dwelling_type: "Townhouse",
+          beds: 3,
+          baths: 2.5,
+          package_prices: { complete_deep: 520 },
+        },
+      ],
+      condition_markup: {
+        light: 0,
+        moderate: { min: 0.1, max: 0.2 },
+      },
+      tax: { name: "HST", rate: 0.13 },
+      minimum_charge: { amount: 0 },
+    },
+  };
+
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Townhouse",
+    beds: 3,
+    baths: 2.5,
+    packageKey: "complete_deep",
+    condition: "moderate",
+    frequency: "One-Time",
+    addons: [],
+  });
+
+  assert.equal(quote.requiresOfficeReview, true);
+  assert.match(quote.reason, /approved selection within published range/);
+});
+
+test("capturePricingSnapshot governed lineage requires non-null id and non-empty snapshot", () => {
+  const governedConfigVersion = {
+    id: "cfg-1",
+    configuration_type: "residential_pricing",
+    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+    effective_from: "2026-08-01",
+    effective_to: null,
+    business_unit_id: "bu-on",
+    jurisdiction_id: "jur-on",
+    configuration: {
+      dwelling_matrix: [],
+      tax: { name: "HST", rate: 0.13 },
+      minimum_charge: { amount: 0 },
+    },
+  };
+  const configurationSnapshot = buildGovernedResidentialConfigurationSnapshot(governedConfigVersion);
+  const snap = capturePricingSnapshot({
+    quote: {
+      preTaxTotal: 395,
+      taxAmount: 51.35,
+      taxRate: 0.13,
+      taxName: "HST",
+      total: 446.35,
+      quoteContractVersion: "2.0",
+      currency: "CA$",
+    },
+    organizationId: "org-governed",
+    businessUnitId: "bu-on",
+    configurationVersionId: "cfg-1",
+    configurationSnapshot,
+    governedResidential: true,
+  });
+
+  assert.equal(snap.configuration_version_id, "cfg-1");
+  assert.notEqual(snap.configuration_snapshot, null);
+  assert.ok(Object.keys(snap.configuration_snapshot).length > 0);
+  assert.equal(snap.configuration_snapshot.version, GOVERNED_RESIDENTIAL_REQUIRED_VERSION);
+});
+
+test("capturePricingSnapshot governed mode rejects null lineage", () => {
+  assert.throws(
+    () =>
+      capturePricingSnapshot({
+        quote: { total: 100, preTaxTotal: 90, taxAmount: 10, quoteContractVersion: "2.0" },
+        organizationId: "org",
+        businessUnitId: "bu",
+        governedResidential: true,
+        configurationVersionId: null,
+        configurationSnapshot: {},
+      }),
+    /configurationVersionId is required/
+  );
 });
 
 test("capturePricingSnapshot: organizationId required", () => {
@@ -414,6 +720,7 @@ test("buildEstimatePayload: canonical fields — lifecycle_status/scope_snapshot
     organizationId: "org-001",
     businessUnitId: "bu-on",
     opportunityId: "opp-1",
+    configurationVersionId: "cfg-v1",
     lifecycleStatus: "prepared",
     versionNo: 1,
     scopeSnapshot: { sqft: 1500 },
@@ -422,6 +729,7 @@ test("buildEstimatePayload: canonical fields — lifecycle_status/scope_snapshot
 
   assert.equal(payload.organization_id, "org-001");
   assert.equal(payload.opportunity_id, "opp-1");
+  assert.equal(payload.configuration_version_id, "cfg-v1");
   assert.equal(payload.lifecycle_status, "prepared");
   assert.equal(payload.version_no, 1);
   assert.deepEqual(payload.scope_snapshot, { sqft: 1500 });

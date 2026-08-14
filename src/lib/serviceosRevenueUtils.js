@@ -21,6 +21,11 @@ function withJsonArray(value) {
   return value ?? [];
 }
 
+function deepCloneJson(value) {
+  if (value === null || value === undefined) return value;
+  return JSON.parse(JSON.stringify(value));
+}
+
 // ── Pricing snapshot ──────────────────────────────────────────────────────────
 
 /**
@@ -49,6 +54,9 @@ export function capturePricingSnapshot({
   estimateId,
   capturedAt,
   appUserId,
+  configurationVersionId,
+  configurationSnapshot,
+  governedResidential = false,
 }) {
   if (!quote || typeof quote !== "object") {
     throw new Error("capturePricingSnapshot: quote is required");
@@ -71,6 +79,19 @@ export function capturePricingSnapshot({
     : "";
   if (!calculatorVersion) {
     throw new Error("capturePricingSnapshot: quoteContractVersion/calculator version is required");
+  }
+  if (governedResidential) {
+    if (!configurationVersionId) {
+      throw new Error("capturePricingSnapshot: configurationVersionId is required for governed residential pricing");
+    }
+    if (
+      !configurationSnapshot ||
+      typeof configurationSnapshot !== "object" ||
+      Array.isArray(configurationSnapshot) ||
+      Object.keys(configurationSnapshot).length === 0
+    ) {
+      throw new Error("capturePricingSnapshot: configurationSnapshot is required for governed residential pricing");
+    }
   }
 
   // Labor / team economics — preserved in structured field
@@ -99,7 +120,7 @@ export function capturePricingSnapshot({
     business_unit_id: businessUnitId,
     opportunity_id: opportunityId ?? null,
     estimate_id: estimateId ?? null,
-    configuration_version_id: null,
+    configuration_version_id: configurationVersionId ?? null,
     // Ontario pilot canonical tax values
     currency_code: quote.currency === "CA$" || !quote.currency ? "CAD" : (quote.currency ?? "CAD"),
     tax_name: quote.taxName ?? "HST",
@@ -109,7 +130,7 @@ export function capturePricingSnapshot({
     tax_amount: taxAmount,
     total_amount: total,
     calculator_version: calculatorVersion,
-    configuration_snapshot: {},
+    configuration_snapshot: withJsonObject(deepCloneJson(configurationSnapshot ?? {})),
     labor_economics: withJsonObject(laborEconomics),
     calculation_inputs: withJsonObject(calculationInputs),
     calculation_outputs: calculationOutputs,
@@ -231,6 +252,7 @@ export function buildEstimatePayload({
   organizationId,
   businessUnitId,
   opportunityId,
+  configurationVersionId,
   lifecycleStatus,
   versionNo,
   assumptions,
@@ -247,6 +269,7 @@ export function buildEstimatePayload({
     organization_id: organizationId,
     business_unit_id: businessUnitId,
     opportunity_id: opportunityId,
+    ...(configurationVersionId ? { configuration_version_id: configurationVersionId } : {}),
     estimate_number: null,
     version_no: versionNo ?? 1,
     lifecycle_status: lifecycleStatus ?? "prepared",
