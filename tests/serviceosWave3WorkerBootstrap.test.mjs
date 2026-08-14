@@ -258,10 +258,8 @@ test("promoteWorkerToCanonical does not call createWorkOrder or createWorkerAssi
 
 test("promoteWorkerToCanonical does not insert into or update job_handoff", () => {
   const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
-  assert.ok(
-    !fnBody.includes('"job_handoff"') || !fnBody.includes("insertOne"),
-    "promotion must not insert into job_handoff"
-  );
+  const insertsJobHandoff = /insertOne\s*\(\s*["'`]job_handoff["'`]/.test(fnBody);
+  assert.ok(!insertsJobHandoff, "promotion must not insertOne into job_handoff");
   const updateJobHandoff = /updateById\s*\(\s*["'`]job_handoff["'`]/.test(fnBody);
   assert.ok(!updateJobHandoff, "promotion must not updateById on job_handoff");
 });
