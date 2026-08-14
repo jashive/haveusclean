@@ -12,8 +12,11 @@ import {
 } from "../../lib/serviceosOperationsUtils.js";
 import {
   fetchJobHandoffById,
+  fetchEligibleJobHandoffs,
+  fetchActiveWorkers,
   fetchConversionRecordById,
   fetchServiceLocationById,
+  isWorkerScopeCompatibleWithHandoff,
   createOperationalJob,
   createScheduleWindow,
   createWorkerAssignment,
@@ -109,6 +112,30 @@ const styles = {
     boxSizing: "border-box",
     marginBottom: "0.6rem",
   },
+  select: {
+    width: "100%",
+    padding: "0.4rem 0.5rem",
+    background: "#0f1927",
+    border: "1px solid #2d3f5a",
+    borderRadius: 4,
+    color: "#f0f6ff",
+    fontSize: "0.8rem",
+    boxSizing: "border-box",
+    marginBottom: "0.6rem",
+  },
+  helper: { fontSize: "0.72rem", color: "#8899AA", marginBottom: "0.5rem" },
+  btnSmall: {
+    width: "100%",
+    padding: "0.45rem 0.5rem",
+    borderRadius: 4,
+    border: "1px solid #2d3f5a",
+    cursor: "pointer",
+    fontSize: "0.78rem",
+    fontWeight: 600,
+    background: "#0f1927",
+    color: "#7dd3fc",
+    marginBottom: "0.5rem",
+  },
   debugToggle: {
     fontSize: "0.75rem",
     color: "#7dd3fc",
@@ -170,6 +197,13 @@ async function runOperationsPilot({
       quote_version_id: quoteVersionId,
       pricing_snapshot_id: pricingSnapshotId,
     } = jobHandoff;
+
+    if (!workerId) {
+      throw attachOperationsCreatedRecords(
+        new Error("worker_id is required for assignment step — provide a safe Preview worker ID"),
+        created
+      );
+    }
 
     if (!organizationId || !businessUnitId || !conversionRecordId || !quoteVersionId || !pricingSnapshotId) {
       throw attachOperationsCreatedRecords(
@@ -259,12 +293,6 @@ async function runOperationsPilot({
     log("operational_job scheduled", "done");
 
     // ── Step 8/9: Create worker_assignment (requires workerId) ──
-    if (!workerId) {
-      throw attachOperationsCreatedRecords(
-        new Error("worker_id is required for assignment step — provide a safe Preview worker ID"),
-        created
-      );
-    }
     log("Creating worker_assignment (proposed)…");
     const waPayload = buildWorkerAssignmentPayload({
       organizationId,
@@ -495,6 +523,14 @@ async function runOperationsPilot({
 export default function ServiceOSOperationsPilotPanel({ session, revenueContext }) {
   const [jobHandoffId, setJobHandoffId] = useState("");
   const [workerId, setWorkerId] = useState("");
+  const [eligibleHandoffs, setEligibleHandoffs] = useState([]);
+  const [selectedEligibleHandoffId, setSelectedEligibleHandoffId] = useState("");
+  const [activeWorkers, setActiveWorkers] = useState([]);
+  const [selectedActiveWorkerId, setSelectedActiveWorkerId] = useState("");
+  const [loadingHandoffs, setLoadingHandoffs] = useState(false);
+  const [loadingWorkers, setLoadingWorkers] = useState(false);
+  const [handoffNotice, setHandoffNotice] = useState("");
+  const [workerNotice, setWorkerNotice] = useState("");
   const [log, setLog] = useState([]);
   const [running, setRunning] = useState(false);
   const [cleaning, setCleaning] = useState(false);
@@ -505,7 +541,95 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
   const accessToken = session?.access_token ?? null;
   const appUserId = revenueContext?.appUserId ?? null;
 
-  const canRun = !!(accessToken && jobHandoffId.trim());
+  const canRun = !!(accessToken && jobHandoffId.trim() && workerId.trim());
+
+  const selectedHandoff = eligibleHandoffs.find((h) => h?.id === selectedEligibleHandoffId) ?? null;
+
+  const handleLoadEligibleHandoffs = useCallback(async () => {
+    if (!accessToken || loadingHandoffs || running) return;
+    setLoadingHandoffs(true);
+    setError(null);
+    setHandoffNotice("");
+    setWorkerNotice("");
+    try {
+      const rows = await fetchEligibleJobHandoffs(accessToken);
+      setEligibleHandoffs(rows);
+      setActiveWorkers([]);
+      setSelectedActiveWorkerId("");
+      setWorkerId("");
+      if (rows.length === 0) {
+        setSelectedEligibleHandoffId("");
+        setHandoffNotice("No unused ready canonical job handoffs were found.");
+        return;
+      }
+      const nextSelected = rows.find((h) => h?.id === selectedEligibleHandoffId)?.id ?? rows[0]?.id ?? "";
+      setSelectedEligibleHandoffId(nextSelected);
+      setJobHandoffId(nextSelected);
+    } catch (err) {
+      setHandoffNotice(err?.message ?? "Failed to load eligible job handoffs.");
+    } finally {
+      setLoadingHandoffs(false);
+    }
+  }, [accessToken, loadingHandoffs, running, selectedEligibleHandoffId]);
+
+  const handleSelectEligibleHandoff = useCallback(
+    (nextId) => {
+      setSelectedEligibleHandoffId(nextId);
+      setJobHandoffId(nextId);
+      setActiveWorkers([]);
+      setSelectedActiveWorkerId("");
+      setWorkerId("");
+      setWorkerNotice("");
+    },
+    []
+  );
+
+  const handleLoadActiveWorkers = useCallback(async () => {
+    if (!accessToken || loadingWorkers || running) return;
+    setLoadingWorkers(true);
+    setError(null);
+    setWorkerNotice("");
+    try {
+      let handoff = selectedHandoff;
+      const typedHandoffId = jobHandoffId.trim();
+      if (!handoff && typedHandoffId) {
+        handoff = await fetchJobHandoffById(typedHandoffId, accessToken);
+      }
+      if (!handoff) {
+        setActiveWorkers([]);
+        setSelectedActiveWorkerId("");
+        setWorkerId("");
+        setWorkerNotice("Select an eligible canonical job handoff first.");
+        return;
+      }
+      const workers = await fetchActiveWorkers(accessToken);
+      const compatible = workers.filter((worker) =>
+        isWorkerScopeCompatibleWithHandoff(worker, handoff)
+      );
+      setActiveWorkers(compatible);
+      if (compatible.length === 0) {
+        setSelectedActiveWorkerId("");
+        setWorkerId("");
+        setWorkerNotice("No active compatible canonical workers were found.");
+        return;
+      }
+      const nextSelected =
+        compatible.find((w) => w?.id === selectedActiveWorkerId)?.id ?? compatible[0]?.id ?? "";
+      setSelectedActiveWorkerId(nextSelected);
+      setWorkerId(nextSelected);
+    } catch (err) {
+      setWorkerNotice(err?.message ?? "Failed to load active workers.");
+    } finally {
+      setLoadingWorkers(false);
+    }
+  }, [
+    accessToken,
+    loadingWorkers,
+    running,
+    selectedHandoff,
+    jobHandoffId,
+    selectedActiveWorkerId,
+  ]);
 
   const handleRun = useCallback(async () => {
     if (running || !canRun) return;
@@ -554,6 +678,17 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
     }
   }, [cleaning, createdIds, accessToken]);
 
+  const formatHandoffOptionLabel = (handoff) => {
+    const marker = handoff?.metadata?.marker || handoff?.metadata?.source || "n/a";
+    const date = handoff?.handed_off_at ?? handoff?.created_at ?? "n/a";
+    return `${handoff?.id} · BU ${handoff?.business_unit_id ?? "n/a"} · ${handoff?.handoff_status ?? "n/a"} · ${date} · ${marker}`;
+  };
+
+  const formatWorkerOptionLabel = (worker) => {
+    const scope = worker?.business_unit_id ? `BU ${worker.business_unit_id}` : "enterprise";
+    return `${worker?.display_name ?? "Unnamed"} · ${worker?.worker_type ?? "n/a"} · ${worker?.id} · ${scope}`;
+  };
+
   if (!OPERATIONS_PILOT_UI_ENABLED) return null;
 
   return (
@@ -562,20 +697,83 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
         Wave 3 Operations Pilot <span style={styles.badge}>W3-PILOT</span>
       </h3>
 
-      <label style={styles.label}>job_handoff_id (required)</label>
+      <button
+        style={{ ...styles.btnSmall, ...(loadingHandoffs || running || !accessToken ? styles.btnDisabled : {}) }}
+        onClick={handleLoadEligibleHandoffs}
+        disabled={loadingHandoffs || running || !accessToken}
+      >
+        {loadingHandoffs ? "Loading Eligible Handoffs…" : "Load Eligible Handoffs"}
+      </button>
+      <label style={styles.label}>eligible canonical job_handoff</label>
+      <select
+        style={styles.select}
+        value={selectedEligibleHandoffId}
+        onChange={(e) => handleSelectEligibleHandoff(e.target.value)}
+        disabled={running || loadingHandoffs || eligibleHandoffs.length === 0}
+      >
+        <option value="">
+          {eligibleHandoffs.length > 0
+            ? "Select an eligible handoff"
+            : "No eligible handoffs loaded"}
+        </option>
+        {eligibleHandoffs.map((handoff) => (
+          <option key={handoff.id} value={handoff.id}>
+            {formatHandoffOptionLabel(handoff)}
+          </option>
+        ))}
+      </select>
+      {handoffNotice && <div style={styles.helper}>{handoffNotice}</div>}
+
+      <label style={styles.label}>job_handoff_id (required, manual fallback)</label>
       <input
         style={styles.input}
         value={jobHandoffId}
-        onChange={(e) => setJobHandoffId(e.target.value)}
+        onChange={(e) => {
+          setJobHandoffId(e.target.value);
+          setSelectedEligibleHandoffId("");
+        }}
         placeholder="Paste existing job_handoff UUID"
         disabled={running}
       />
 
-      <label style={styles.label}>worker_id (required for assignment step)</label>
+      <button
+        style={{ ...styles.btnSmall, ...(loadingWorkers || running || !accessToken ? styles.btnDisabled : {}) }}
+        onClick={handleLoadActiveWorkers}
+        disabled={loadingWorkers || running || !accessToken}
+      >
+        {loadingWorkers ? "Loading Active Workers…" : "Load Active Workers"}
+      </button>
+      <label style={styles.label}>active canonical worker (scope-compatible)</label>
+      <select
+        style={styles.select}
+        value={selectedActiveWorkerId}
+        onChange={(e) => {
+          setSelectedActiveWorkerId(e.target.value);
+          setWorkerId(e.target.value);
+        }}
+        disabled={running || loadingWorkers || activeWorkers.length === 0}
+      >
+        <option value="">
+          {activeWorkers.length > 0
+            ? "Select an active compatible worker"
+            : "No active workers loaded"}
+        </option>
+        {activeWorkers.map((worker) => (
+          <option key={worker.id} value={worker.id}>
+            {formatWorkerOptionLabel(worker)}
+          </option>
+        ))}
+      </select>
+      {workerNotice && <div style={styles.helper}>{workerNotice}</div>}
+
+      <label style={styles.label}>worker_id (required for assignment step, manual fallback)</label>
       <input
         style={styles.input}
         value={workerId}
-        onChange={(e) => setWorkerId(e.target.value)}
+        onChange={(e) => {
+          setWorkerId(e.target.value);
+          setSelectedActiveWorkerId("");
+        }}
         placeholder="Preview worker UUID"
         disabled={running}
       />
@@ -642,6 +840,8 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
               ? "Requires authenticated session"
               : !jobHandoffId.trim()
               ? "Enter a job_handoff_id to start"
+              : !workerId.trim()
+              ? "Enter a worker_id to start"
               : ""
           }
         >

@@ -103,6 +103,10 @@ async function fetchMany(table, filter, accessToken) {
   return res.json();
 }
 
+function encodeInList(values) {
+  return values.map((v) => encodeURIComponent(v)).join(",");
+}
+
 async function deleteById(table, id, accessToken) {
   const res = await authenticatedRestFetch(
     `${table}?id=eq.${encodeURIComponent(id)}`,
@@ -289,6 +293,60 @@ export async function fetchOperationalHandoffForJob(operationalJobId, accessToke
     accessToken
   );
   return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function fetchEligibleJobHandoffs(accessToken) {
+  assertEnabled();
+
+  const handoffs = await fetchMany(
+    "job_handoff",
+    [
+      "select=id,organization_id,business_unit_id,conversion_record_id,quote_version_id,pricing_snapshot_id,handoff_status,handed_off_at,created_at,metadata",
+      "handoff_status=eq.ready",
+      "order=handed_off_at.desc.nullslast,created_at.desc.nullslast",
+      "limit=20",
+    ].join("&"),
+    accessToken
+  );
+
+  if (!Array.isArray(handoffs) || handoffs.length === 0) return [];
+
+  const handoffIds = handoffs.map((h) => h?.id).filter(Boolean);
+  if (handoffIds.length === 0) return [];
+
+  const usedRows = await fetchMany(
+    "operational_job",
+    `select=job_handoff_id&job_handoff_id=in.(${encodeInList(handoffIds)})`,
+    accessToken
+  );
+  const usedHandoffIds = new Set(
+    Array.isArray(usedRows) ? usedRows.map((row) => row?.job_handoff_id).filter(Boolean) : []
+  );
+
+  return handoffs.filter((handoff) => !usedHandoffIds.has(handoff?.id));
+}
+
+export async function fetchActiveWorkers(accessToken) {
+  assertEnabled();
+  const workers = await fetchMany(
+    "worker",
+    [
+      "select=id,organization_id,business_unit_id,worker_type,display_name,email,status,metadata",
+      "status=eq.active",
+      "order=display_name.asc,id.asc",
+      "limit=100",
+    ].join("&"),
+    accessToken
+  );
+  return Array.isArray(workers) ? workers : [];
+}
+
+export function isWorkerScopeCompatibleWithHandoff(worker, handoff) {
+  if (!worker || !handoff) return false;
+  if (!worker.organization_id || !handoff.organization_id) return false;
+  if (worker.organization_id !== handoff.organization_id) return false;
+  if (worker.business_unit_id == null) return true;
+  return worker.business_unit_id === handoff.business_unit_id;
 }
 
 // ── Upstream lineage reads (Wave 1/2, read-only) ──────────────────────────────

@@ -147,6 +147,54 @@ test("serviceosOperationsClient errors include table, operation, HTTP status", (
   );
 });
 
+test("fetchEligibleJobHandoffs query requests ready canonical handoffs with capped reads", () => {
+  const fnBody = getExportedFunctionSource("fetchEligibleJobHandoffs");
+  assert.ok(fnBody.includes("job_handoff"), "must read job_handoff");
+  assert.ok(fnBody.includes("handoff_status=eq.ready"), "must request ready handoffs only");
+  assert.ok(fnBody.includes("limit=20"), "must cap preview handoff discovery");
+  assert.ok(
+    fnBody.includes("order=handed_off_at.desc.nullslast,created_at.desc.nullslast"),
+    "must prefer newest handoffs first"
+  );
+});
+
+test("fetchEligibleJobHandoffs excludes handoffs already used by operational_job via read check", () => {
+  const fnBody = getExportedFunctionSource("fetchEligibleJobHandoffs");
+  assert.ok(fnBody.includes('"operational_job"'), "must read operational_job for used handoff check");
+  assert.ok(
+    fnBody.includes("job_handoff_id=in."),
+    "must query operational_job by discovered handoff IDs"
+  );
+  assert.ok(
+    fnBody.includes("usedHandoffIds"),
+    "must build used handoff set from read rows"
+  );
+  assert.ok(
+    fnBody.includes("return handoffs.filter"),
+    "must exclude already used handoffs from selector options"
+  );
+});
+
+test("fetchActiveWorkers query requests active canonical workers only", () => {
+  const fnBody = getExportedFunctionSource("fetchActiveWorkers");
+  assert.ok(fnBody.includes('"worker"'), "must read worker table");
+  assert.ok(fnBody.includes("status=eq.active"), "must request active workers only");
+  assert.ok(
+    fnBody.includes("select=id,organization_id,business_unit_id,worker_type,display_name,email,status,metadata"),
+    "must include required worker selector fields"
+  );
+});
+
+test("discovery methods are read-only GET paths and do not call create/update/delete helpers", () => {
+  const handoffFn = getExportedFunctionSource("fetchEligibleJobHandoffs");
+  const workerFn = getExportedFunctionSource("fetchActiveWorkers");
+  const combined = `${handoffFn}\n${workerFn}`;
+  assert.ok(combined.includes("fetchMany("), "discovery should use read helper fetchMany");
+  assert.ok(!combined.includes("insertOne("), "discovery must not insert");
+  assert.ok(!combined.includes("updateById("), "discovery must not update");
+  assert.ok(!combined.includes("deleteById("), "discovery must not delete");
+});
+
 test("serviceosOperationsClient does not silently swallow errors", () => {
   // There must be no empty catch blocks
   const emptyCatch = /catch\s*\([^)]*\)\s*\{\s*\}/g;
@@ -190,6 +238,8 @@ const READ_FNS = [
   "fetchQaInspectionsForJob",
   "fetchCorrectiveActionsForJob",
   "fetchOperationalHandoffForJob",
+  "fetchEligibleJobHandoffs",
+  "fetchActiveWorkers",
   "fetchConversionRecordById",
   "fetchServiceLocationById",
 ];
@@ -312,6 +362,30 @@ test("getOperationsCreatedRecords returns null for non-attached error", () => {
   assert.equal(result, null);
 });
 
+test("isWorkerScopeCompatibleWithHandoff allows enterprise worker (null BU) in same organization", () => {
+  const ok = opsClient.isWorkerScopeCompatibleWithHandoff(
+    { organization_id: "org-1", business_unit_id: null },
+    { organization_id: "org-1", business_unit_id: "bu-1" }
+  );
+  assert.equal(ok, true);
+});
+
+test("isWorkerScopeCompatibleWithHandoff rejects different business unit worker", () => {
+  const ok = opsClient.isWorkerScopeCompatibleWithHandoff(
+    { organization_id: "org-1", business_unit_id: "bu-2" },
+    { organization_id: "org-1", business_unit_id: "bu-1" }
+  );
+  assert.equal(ok, false);
+});
+
+test("isWorkerScopeCompatibleWithHandoff rejects different organization worker", () => {
+  const ok = opsClient.isWorkerScopeCompatibleWithHandoff(
+    { organization_id: "org-2", business_unit_id: null },
+    { organization_id: "org-1", business_unit_id: "bu-1" }
+  );
+  assert.equal(ok, false);
+});
+
 // ── Pilot panel starts from job_handoff, not creating revenue chain ───────────
 
 test("ServiceOSOperationsPilotPanel does not import runRevenuePipeline", async () => {
@@ -330,6 +404,14 @@ test("ServiceOSOperationsPilotPanel does not import runRevenuePipeline", async (
   assert.ok(
     panelSrc.includes("fetchJobHandoffById"),
     "operations pilot must start from fetchJobHandoffById"
+  );
+  assert.ok(
+    panelSrc.includes("fetchEligibleJobHandoffs"),
+    "operations pilot must support eligible handoff discovery"
+  );
+  assert.ok(
+    panelSrc.includes("fetchActiveWorkers"),
+    "operations pilot must support active worker discovery"
   );
   assert.ok(
     panelSrc.includes("job_handoff_id"),
@@ -360,6 +442,83 @@ test("production flags not defaulted true in pilot panel", async () => {
   assert.ok(
     !panelSrc.match(/OPERATIONS_ENABLED\s*=\s*true[^"']/),
     "OPERATIONS_ENABLED must not default to true"
+  );
+});
+
+test("pilot panel includes preview selector controls and empty-state messages", async () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  assert.ok(
+    panelSrc.includes("Load Eligible Handoffs"),
+    "panel must expose eligible handoff loader"
+  );
+  assert.ok(
+    panelSrc.includes("Load Active Workers"),
+    "panel must expose active worker loader"
+  );
+  assert.ok(
+    panelSrc.includes("No unused ready canonical job handoffs were found."),
+    "panel must expose handoff empty-state text"
+  );
+  assert.ok(
+    panelSrc.includes("No active compatible canonical workers were found."),
+    "panel must expose worker empty-state text"
+  );
+});
+
+test("pilot panel keeps manual UUID fallback inputs and requires both IDs to run", async () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  assert.ok(
+    panelSrc.includes("manual fallback"),
+    "manual fallback labels must remain for debug input"
+  );
+  assert.ok(
+    panelSrc.includes("const canRun = !!(accessToken && jobHandoffId.trim() && workerId.trim());"),
+    "pilot run must require both handoff_id and worker_id"
+  );
+  assert.ok(
+    panelSrc.includes("!workerId.trim()"),
+    "run button hint should block until worker_id is provided"
+  );
+});
+
+test("pilot discovery load handlers do not call create methods", async () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const handoffHandlerStart = panelSrc.indexOf("const handleLoadEligibleHandoffs");
+  const handoffHandlerEnd = panelSrc.indexOf("const handleSelectEligibleHandoff", handoffHandlerStart);
+  const handoffHandler = panelSrc.slice(handoffHandlerStart, handoffHandlerEnd > 0 ? handoffHandlerEnd : undefined);
+  assert.ok(!handoffHandler.includes("createOperationalJob"), "handoff load must not call create methods");
+  assert.ok(!handoffHandler.includes("createScheduleWindow"), "handoff load must stay read-only");
+  assert.ok(handoffHandler.includes("fetchEligibleJobHandoffs"), "handoff load should use discovery read");
+
+  const workerHandlerStart = panelSrc.indexOf("const handleLoadActiveWorkers");
+  const workerHandlerEnd = panelSrc.indexOf("const handleRun", workerHandlerStart);
+  const workerHandler = panelSrc.slice(workerHandlerStart, workerHandlerEnd > 0 ? workerHandlerEnd : undefined);
+  assert.ok(!workerHandler.includes("createWorkerAssignment"), "worker load must not call create methods");
+  assert.ok(!workerHandler.includes("createOperationalJob"), "worker load must stay read-only");
+  assert.ok(workerHandler.includes("fetchActiveWorkers"), "worker load should use worker read discovery");
+});
+
+test("runOperationsPilot checks worker_id requirement before first create", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const workerRequiredIdx = panelSrc.indexOf('new Error("worker_id is required for assignment step — provide a safe Preview worker ID")');
+  const createJobIdx = panelSrc.indexOf("createOperationalJob");
+  assert.ok(workerRequiredIdx >= 0, "run should enforce worker_id requirement");
+  assert.ok(createJobIdx >= 0, "run should still create operational_job when valid");
+  assert.ok(
+    workerRequiredIdx < createJobIdx,
+    "worker_id requirement must happen before any write calls begin"
   );
 });
 
