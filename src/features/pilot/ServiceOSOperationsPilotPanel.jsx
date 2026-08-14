@@ -32,6 +32,7 @@ import {
   updateWorkOrderStatus,
   updateQaInspectionStatus,
   cleanupOperationsPilotSession,
+  recoverOperationalHandoff,
   verifyPilotSessionState,
   getOperationsCreatedRecords,
   attachOperationsCreatedRecords,
@@ -49,6 +50,12 @@ const OPERATIONS_PILOT_UI_ENABLED =
   OPERATIONS_ENABLED &&
   typeof import.meta !== "undefined" &&
   import.meta.env?.VITE_SERVICEOS_OPERATIONS_PILOT_UI === "true";
+
+// ── Wave 3 recovery constants (Preview-only) ──────────────────────────────────
+// These are the exact surviving canonical record IDs from the known failed cleanup.
+const WAVE3_RECOVERY_OPERATIONAL_JOB_ID = "3f77f74c-52a6-4872-9876-ba3ae4ab92c0";
+const WAVE3_RECOVERY_WORK_ORDER_ID = "3d0a23c5-fc46-4f4d-bf66-5b7c9f842f8f";
+const WAVE3_RECOVERY_ORIGINAL_HANDOFF_ID = "02dd1ede-4b8e-4d49-994f-e9a0a1357aa3";
 
 // ── Inline styles (follows ServiceOSPilotPanel.jsx pattern) ───────────────────
 
@@ -546,6 +553,12 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
   const [verifying, setVerifying] = useState(false);
   const [verifyJsonError, setVerifyJsonError] = useState(null);
 
+  // ── Wave 3 → Wave 4 boundary recovery state (Preview-only) ──────────────────
+  // recoveryStage: "idle" | "confirming" | "running" | "done" | "error"
+  const [recoveryStage, setRecoveryStage] = useState("idle");
+  const [recoveryResult, setRecoveryResult] = useState(null);
+  const [recoveryError, setRecoveryError] = useState(null);
+
   // ── Legacy workforce bootstrap state ────────────────────────────────────────
   const [loadingCandidates, setLoadingCandidates] = useState(false);
   const [legacyCandidates, setLegacyCandidates] = useState([]);
@@ -750,6 +763,35 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
       setVerifying(false);
     }
   }, [verifying, accessToken, createdIds, verifyJson]);
+
+  // ── Wave 3 → Wave 4 boundary recovery handler (Preview-only) ────────────────
+  const handleRecoverHandoff = useCallback(async () => {
+    if (recoveryStage === "running" || !accessToken) return;
+
+    if (recoveryStage !== "confirming") {
+      // First click: show confirmation warning before any network call
+      setRecoveryStage("confirming");
+      setRecoveryResult(null);
+      setRecoveryError(null);
+      return;
+    }
+
+    // Second (confirmed) click: execute recovery
+    setRecoveryStage("running");
+    setRecoveryError(null);
+    try {
+      const result = await recoverOperationalHandoff(
+        WAVE3_RECOVERY_OPERATIONAL_JOB_ID,
+        WAVE3_RECOVERY_WORK_ORDER_ID,
+        accessToken
+      );
+      setRecoveryResult(result);
+      setRecoveryStage("done");
+    } catch (err) {
+      setRecoveryError(err?.message ?? "Recovery failed");
+      setRecoveryStage("error");
+    }
+  }, [recoveryStage, accessToken]);
 
   // ── Legacy workforce bootstrap handlers ─────────────────────────────────────
 
@@ -1229,6 +1271,133 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
                   {r.error ? ` (${r.error})` : ""}
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Preview-only: Wave 3 → Wave 4 boundary recovery ─────────────── */}
+      {OPERATIONS_PILOT_UI_ENABLED && (
+        <div style={{ borderTop: "1px solid #374151", marginTop: 10, paddingTop: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: "#fbbf24" }}>
+            Restore Wave 3 Handoff Boundary{" "}
+            <span style={{ ...styles.badge, background: "#7c2d12" }}>PREVIEW ONLY</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6 }}>
+            Recovers the missing Wave 3 → Wave 4 <code>operational_handoff</code> boundary after the
+            known failed cleanup. Reads surviving canonical records only. Does not recreate QA or
+            checklist evidence. Goes through the normal M007 trigger.
+          </div>
+
+          {recoveryStage === "idle" && (
+            <button
+              style={{
+                ...styles.btn,
+                background: "#92400e",
+                ...(!accessToken ? styles.btnDisabled : {}),
+              }}
+              onClick={handleRecoverHandoff}
+              disabled={!accessToken}
+            >
+              Restore Wave 3 Handoff Boundary
+            </button>
+          )}
+
+          {recoveryStage === "confirming" && (
+            <div>
+              <div
+                style={{
+                  fontSize: 11,
+                  color: "#fbbf24",
+                  background: "#1c1917",
+                  border: "1px solid #92400e",
+                  borderRadius: 4,
+                  padding: "6px 8px",
+                  marginBottom: 6,
+                }}
+              >
+                Recovery will create one new <strong>operational_handoff</strong> only. It will not
+                recreate QA/checklist evidence and will not modify existing Wave 3 records.
+              </div>
+              <div style={{ display: "flex", gap: 6 }}>
+                <button
+                  style={{ ...styles.btn, background: "#b45309" }}
+                  onClick={handleRecoverHandoff}
+                >
+                  Confirm Restore
+                </button>
+                <button
+                  style={{ ...styles.btn, background: "#374151" }}
+                  onClick={() => setRecoveryStage("idle")}
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          )}
+
+          {recoveryStage === "running" && (
+            <div style={{ fontSize: 11, color: "#9ca3af" }}>Restoring…</div>
+          )}
+
+          {recoveryStage === "error" && (
+            <div>
+              <div style={{ color: "#FF4757", fontSize: 11, marginBottom: 6 }}>{recoveryError}</div>
+              <button
+                style={{ ...styles.btn, background: "#374151" }}
+                onClick={() => setRecoveryStage("idle")}
+              >
+                Reset
+              </button>
+            </div>
+          )}
+
+          {recoveryStage === "done" && recoveryResult && (
+            <div
+              style={{
+                fontSize: 11,
+                background: "#0a1628",
+                border: "1px solid #1e3a5f",
+                borderRadius: 4,
+                padding: "6px 8px",
+                fontFamily: "monospace",
+              }}
+            >
+              {recoveryResult.mode === "already_present" ? (
+                <div style={{ color: "#fbbf24", marginBottom: 4 }}>
+                  operational_handoff already present — no insert performed.
+                </div>
+              ) : (
+                <div style={{ color: "#34d399", marginBottom: 4 }}>
+                  Recovery boundary created — original E2E evidence remains unchanged.
+                </div>
+              )}
+              <div style={{ color: "#d1d5db" }}>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>new handoff id: </span>
+                  {recoveryResult.handoff?.id ?? "—"}
+                </div>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>status: </span>
+                  {recoveryResult.handoff?.handoff_status ?? "—"}
+                </div>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>operational_job_id: </span>
+                  {WAVE3_RECOVERY_OPERATIONAL_JOB_ID}
+                </div>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>work_order_id: </span>
+                  {WAVE3_RECOVERY_WORK_ORDER_ID}
+                </div>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>qa_inspection_id: </span>
+                  <span style={{ color: "#fbbf24" }}>null</span>
+                </div>
+                <div>
+                  <span style={{ color: "#9ca3af" }}>original deleted handoff id: </span>
+                  {WAVE3_RECOVERY_ORIGINAL_HANDOFF_ID}
+                </div>
+              </div>
             </div>
           )}
         </div>

@@ -876,6 +876,127 @@ export async function cleanupOperationsPilotSession(createdIds, accessToken) {
   return true;
 }
 
+// ── Wave 3 → Wave 4 boundary recovery ────────────────────────────────────────
+//
+// Preview-only helper to restore the missing Wave 3 → Wave 4 operational_handoff
+// after a known failed cleanup deleted mutable downstream records.
+//
+// Reads exactly:
+//   - operational_job by exact ID (fetchOneById)
+//   - work_order by exact ID (fetchOneById)
+//   - operational_handoff by exact operational_job_id (duplicate check, limit=1)
+//
+// Inserts exactly ONE row into operational_handoff if preconditions pass and no
+// duplicate exists. Goes through the normal M007 trigger — no bypass.
+// Does NOT insert service_checklist_result, qa_inspection, or any other table.
+// Does NOT use broad scans. Does NOT perform UPDATE or DELETE.
+//
+// @param {string} operationalJobId  Exact UUID of the surviving operational_job
+// @param {string} workOrderId       Exact UUID of the surviving work_order
+// @param {string} accessToken
+// @returns {{ mode: "inserted", handoff: object } | { mode: "already_present", handoff: object }}
+
+export async function recoverOperationalHandoff(
+  operationalJobId,
+  workOrderId,
+  accessToken
+) {
+  assertEnabled();
+
+  if (!operationalJobId)
+    throw new Error("recoverOperationalHandoff: operationalJobId is required");
+  if (!workOrderId)
+    throw new Error("recoverOperationalHandoff: workOrderId is required");
+
+  // 1. Read exact operational_job record — no broad scan
+  const job = await fetchOneById("operational_job", operationalJobId, accessToken);
+  if (!job) {
+    throw new Error(
+      `recoverOperationalHandoff: operational_job ${operationalJobId} not found`
+    );
+  }
+
+  // 2. Read exact work_order record — no broad scan
+  const workOrder = await fetchOneById("work_order", workOrderId, accessToken);
+  if (!workOrder) {
+    throw new Error(
+      `recoverOperationalHandoff: work_order ${workOrderId} not found`
+    );
+  }
+
+  // 3. Precondition: work_order must belong to this operational_job
+  if (workOrder.operational_job_id !== operationalJobId) {
+    throw new Error(
+      `recoverOperationalHandoff: work_order.operational_job_id (${workOrder.operational_job_id}) does not match operational_job.id (${operationalJobId})`
+    );
+  }
+
+  // 4. Precondition: operational_job.operational_status must be qa_passed or closed
+  const VALID_RECOVERY_JOB_STATUSES = ["qa_passed", "closed"];
+  if (!VALID_RECOVERY_JOB_STATUSES.includes(job.operational_status)) {
+    throw new Error(
+      `recoverOperationalHandoff: operational_job.operational_status must be qa_passed or closed, got "${job.operational_status}"`
+    );
+  }
+
+  // 5. Precondition: work_order.work_order_status must be service_complete, qa_complete, or closed
+  const VALID_RECOVERY_WO_STATUSES = ["service_complete", "qa_complete", "closed"];
+  if (!VALID_RECOVERY_WO_STATUSES.includes(workOrder.work_order_status)) {
+    throw new Error(
+      `recoverOperationalHandoff: work_order.work_order_status must be service_complete, qa_complete, or closed, got "${workOrder.work_order_status}"`
+    );
+  }
+
+  // 6. Duplicate check: exact operational_job_id filter, limit=1 — no broad scan
+  const existingRows = await fetchMany(
+    "operational_handoff",
+    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&limit=1`,
+    accessToken
+  );
+  const existing = Array.isArray(existingRows) ? existingRows[0] ?? null : null;
+  if (existing) {
+    return { mode: "already_present", handoff: existing };
+  }
+
+  // 7. Build recovery payload from surviving canonical records — no hardcoded lineage
+  const now = new Date().toISOString();
+  const payload = {
+    organization_id: job.organization_id,
+    business_unit_id: job.business_unit_id,
+    operational_job_id: operationalJobId,
+    work_order_id: workOrderId,
+    // qa_inspection_id explicitly omitted → NULL in DB
+    // QA evidence was deleted; creating a value here would misrepresent provenance
+    pricing_snapshot_id: job.pricing_snapshot_id,
+    quote_version_id: job.quote_version_id,
+    handoff_status: "ready",
+    handoff_payload: {
+      operational_job_id: operationalJobId,
+      work_order_id: workOrderId,
+      organization_id: job.organization_id,
+      business_unit_id: job.business_unit_id,
+      operational_status: job.operational_status,
+      work_order_status: workOrder.work_order_status,
+    },
+    metadata: {
+      recovery_type: "wave3_failed_cleanup_boundary_restore",
+      original_operational_handoff_id: "02dd1ede-4b8e-4d49-994f-e9a0a1357aa3",
+      original_qa_inspection_id: "dcb8468c-1a22-4b44-aba5-7d5dce2fc43d",
+      original_checklist_result_id: "a677ba08-a961-484c-a501-5529b826f5e5",
+      reason:
+        "Original Wave 3 E2E completed successfully; cleanup defect deleted mutable downstream records before append-only protection halted cleanup.",
+      original_e2e_result: "PASS",
+      recovered_boundary_only: true,
+      recovered_at: now,
+      recovery_source: "recoverOperationalHandoff",
+    },
+  };
+
+  // 8. Single INSERT into operational_handoff — goes through M007 trigger, no bypass
+  const handoff = await insertOne("operational_handoff", payload, accessToken);
+  return { mode: "inserted", handoff };
+}
+
 // ── Exact-ID pilot session verifier ───────────────────────────────────────────
 //
 // Performs authenticated GET-only reads for each exact ID from a pilot session.

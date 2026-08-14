@@ -754,3 +754,335 @@ test("panel verification requires explicit button click — not automatic on pas
     "textarea onChange must not automatically trigger handleVerify"
   );
 });
+
+// ── recoverOperationalHandoff tests ──────────────────────────────────────────
+
+test("recoverOperationalHandoff is exported from serviceosOperationsClient", () => {
+  assert.ok(
+    clientSrc.includes("export async function recoverOperationalHandoff"),
+    "recoverOperationalHandoff must be exported"
+  );
+});
+
+test("recoverOperationalHandoff reads only exact operational_job and work_order by ID", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  // Must use fetchOneById for operational_job and work_order
+  assert.ok(
+    fnSrc.includes('fetchOneById("operational_job"'),
+    "must fetch operational_job by exact ID"
+  );
+  assert.ok(
+    fnSrc.includes('fetchOneById("work_order"'),
+    "must fetch work_order by exact ID"
+  );
+});
+
+test("recoverOperationalHandoff uses exact operational_job_id filter for duplicate check — no broad scan", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  // Duplicate check uses fetchMany with operational_job_id=eq. filter and limit=1
+  assert.ok(
+    fnSrc.includes("operational_job_id=eq."),
+    "duplicate check must use exact operational_job_id filter"
+  );
+  assert.ok(
+    fnSrc.includes("limit=1"),
+    "duplicate check must use limit=1 to avoid broad scan"
+  );
+});
+
+test("recoverOperationalHandoff does not perform DELETE or UPDATE", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    !fnSrc.includes("deleteById"),
+    "recoverOperationalHandoff must not call deleteById"
+  );
+  assert.ok(
+    !fnSrc.includes("updateById"),
+    "recoverOperationalHandoff must not call updateById"
+  );
+  assert.ok(
+    !fnSrc.includes('method: "DELETE"'),
+    "recoverOperationalHandoff must not issue DELETE requests"
+  );
+  assert.ok(
+    !fnSrc.includes('method: "PATCH"'),
+    "recoverOperationalHandoff must not issue PATCH requests"
+  );
+});
+
+test("recoverOperationalHandoff inserts only into operational_handoff — not checklist or qa_inspection", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  // Must insert into operational_handoff
+  assert.ok(
+    fnSrc.includes('insertOne("operational_handoff"'),
+    "must insert into operational_handoff"
+  );
+  // Must NOT insert into service_checklist_result or qa_inspection
+  assert.ok(
+    !fnSrc.includes('insertOne("service_checklist_result"'),
+    "must not insert into service_checklist_result"
+  );
+  assert.ok(
+    !fnSrc.includes('insertOne("qa_inspection"'),
+    "must not insert into qa_inspection"
+  );
+});
+
+test("recoverOperationalHandoff payload does not include qa_inspection_id", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  // The payload object must not set qa_inspection_id to a non-null value
+  // It must be explicitly omitted (→ NULL in DB)
+  const payloadStart = fnSrc.indexOf("const payload =");
+  const payloadEnd = fnSrc.indexOf("};", payloadStart) + 2;
+  const payloadSrc = fnSrc.slice(payloadStart, payloadEnd);
+
+  assert.ok(
+    !payloadSrc.includes("qa_inspection_id:") ||
+      payloadSrc.includes("// qa_inspection_id"),
+    "payload must not set qa_inspection_id to a value (must be omitted → NULL)"
+  );
+});
+
+test("recoverOperationalHandoff derives pricing_snapshot_id and quote_version_id from operational_job", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    fnSrc.includes("job.pricing_snapshot_id"),
+    "pricing_snapshot_id must come from the fetched operational_job row"
+  );
+  assert.ok(
+    fnSrc.includes("job.quote_version_id"),
+    "quote_version_id must come from the fetched operational_job row"
+  );
+});
+
+test("recoverOperationalHandoff metadata includes all required recovery fields", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    fnSrc.includes('"wave3_failed_cleanup_boundary_restore"'),
+    "metadata must include recovery_type"
+  );
+  assert.ok(
+    fnSrc.includes('"02dd1ede-4b8e-4d49-994f-e9a0a1357aa3"'),
+    "metadata must include original_operational_handoff_id"
+  );
+  assert.ok(
+    fnSrc.includes('"dcb8468c-1a22-4b44-aba5-7d5dce2fc43d"'),
+    "metadata must include original_qa_inspection_id"
+  );
+  assert.ok(
+    fnSrc.includes('"a677ba08-a961-484c-a501-5529b826f5e5"'),
+    "metadata must include original_checklist_result_id"
+  );
+  assert.ok(
+    fnSrc.includes('"PASS"'),
+    "metadata must include original_e2e_result: PASS"
+  );
+  assert.ok(
+    fnSrc.includes("recovered_boundary_only: true"),
+    "metadata must include recovered_boundary_only: true"
+  );
+});
+
+test("recoverOperationalHandoff returns already_present when duplicate handoff exists", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    fnSrc.includes('"already_present"'),
+    "must return mode: already_present when a handoff already exists"
+  );
+  assert.ok(
+    fnSrc.includes("return { mode: \"already_present\""),
+    "must return without inserting when duplicate is found"
+  );
+});
+
+test("recoverOperationalHandoff fails closed when job status is unsupported", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  // Must include valid job status check
+  assert.ok(
+    fnSrc.includes("qa_passed") && fnSrc.includes("closed"),
+    "must check operational_job.operational_status against qa_passed/closed"
+  );
+  assert.ok(
+    fnSrc.includes("VALID_RECOVERY_JOB_STATUSES") || fnSrc.includes("validJobStatuses"),
+    "must use a named list for valid job statuses"
+  );
+});
+
+test("recoverOperationalHandoff fails closed when work_order status is unsupported", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    fnSrc.includes("service_complete") && fnSrc.includes("qa_complete"),
+    "must check work_order.work_order_status against service_complete/qa_complete/closed"
+  );
+});
+
+test("recoverOperationalHandoff does not call runOperationsPilot", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    !fnSrc.includes("runOperationsPilot"),
+    "recoverOperationalHandoff must not call runOperationsPilot"
+  );
+});
+
+test("recoverOperationalHandoff does not call cleanupOperationsPilotSession", () => {
+  const start = clientSrc.indexOf("export async function recoverOperationalHandoff");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  const fnSrc = clientSrc.slice(start, end > 0 ? end : undefined);
+
+  assert.ok(
+    !fnSrc.includes("cleanupOperationsPilotSession"),
+    "recoverOperationalHandoff must not call cleanupOperationsPilotSession"
+  );
+});
+
+test("panel handleRecoverHandoff requires explicit confirm click — not immediate execution", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const handlerStart = panelSrc.indexOf("const handleRecoverHandoff");
+  const handlerEnd = panelSrc.indexOf("\n  const ", handlerStart + 1);
+  const handlerSrc = panelSrc.slice(handlerStart, handlerEnd > 0 ? handlerEnd : undefined);
+
+  // Must check for "confirming" stage before executing
+  assert.ok(
+    handlerSrc.includes('"confirming"'),
+    "handler must use a confirming stage before executing recovery"
+  );
+  // Must set recoveryStage to confirming on first click
+  assert.ok(
+    handlerSrc.includes('setRecoveryStage("confirming")'),
+    "handler must set stage to confirming on first click"
+  );
+  // Must only call recoverOperationalHandoff after confirmation
+  const confirmingIdx = handlerSrc.indexOf('"confirming"');
+  const recoverCallIdx = handlerSrc.indexOf("recoverOperationalHandoff(");
+  assert.ok(
+    confirmingIdx < recoverCallIdx,
+    "recoverOperationalHandoff call must appear after the confirming guard"
+  );
+});
+
+test("panel recovery section only renders when OPERATIONS_PILOT_UI_ENABLED", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  // The recovery UI section must be guarded by OPERATIONS_PILOT_UI_ENABLED
+  const recoverySectionIdx = panelSrc.indexOf("Restore Wave 3 Handoff Boundary");
+  assert.ok(recoverySectionIdx >= 0, "panel must contain recovery section heading");
+
+  // Find the nearest OPERATIONS_PILOT_UI_ENABLED guard before the section
+  const guardIdx = panelSrc.lastIndexOf("OPERATIONS_PILOT_UI_ENABLED", recoverySectionIdx);
+  assert.ok(
+    guardIdx >= 0 && guardIdx < recoverySectionIdx,
+    "recovery section must be guarded by OPERATIONS_PILOT_UI_ENABLED"
+  );
+});
+
+test("panel recovery UI displays qa_inspection_id as null in result", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  // The result display must show qa_inspection_id: null
+  assert.ok(
+    panelSrc.includes("qa_inspection_id") && panelSrc.includes(">null<"),
+    "recovery result UI must display qa_inspection_id as null"
+  );
+});
+
+test("panel recovery UI displays original deleted handoff ID", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  assert.ok(
+    panelSrc.includes("WAVE3_RECOVERY_ORIGINAL_HANDOFF_ID"),
+    "recovery result UI must reference the original deleted handoff ID constant"
+  );
+  assert.ok(
+    panelSrc.includes("02dd1ede-4b8e-4d49-994f-e9a0a1357aa3"),
+    "original deleted handoff ID constant must contain the correct UUID"
+  );
+});
+
+test("panel recovery does not call runOperationsPilot", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const handlerStart = panelSrc.indexOf("const handleRecoverHandoff");
+  const handlerEnd = panelSrc.indexOf("\n  const ", handlerStart + 1);
+  const handlerSrc = panelSrc.slice(handlerStart, handlerEnd > 0 ? handlerEnd : undefined);
+  assert.ok(
+    !handlerSrc.includes("runOperationsPilot"),
+    "handleRecoverHandoff must not call runOperationsPilot"
+  );
+});
+
+test("panel recovery does not call cleanupOperationsPilotSession", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const handlerStart = panelSrc.indexOf("const handleRecoverHandoff");
+  const handlerEnd = panelSrc.indexOf("\n  const ", handlerStart + 1);
+  const handlerSrc = panelSrc.slice(handlerStart, handlerEnd > 0 ? handlerEnd : undefined);
+  assert.ok(
+    !handlerSrc.includes("cleanupOperationsPilotSession"),
+    "handleRecoverHandoff must not call cleanupOperationsPilotSession"
+  );
+});
+
+test("existing verifyPilotSessionState behavior is unchanged", () => {
+  // Verify that verifyPilotSessionState is still exported and unchanged
+  assert.ok(
+    clientSrc.includes("export async function verifyPilotSessionState"),
+    "verifyPilotSessionState must remain exported"
+  );
+  // TABLE_MAP keys must still be present
+  assert.ok(
+    clientSrc.includes('"operationalHandoff": "operational_handoff"') ||
+      clientSrc.includes("operationalHandoff: \"operational_handoff\""),
+    "TABLE_MAP must still map operationalHandoff"
+  );
+  assert.ok(
+    clientSrc.includes('"checklistResult": "service_checklist_result"') ||
+      clientSrc.includes("checklistResult: \"service_checklist_result\""),
+    "TABLE_MAP must still map checklistResult"
+  );
+});
