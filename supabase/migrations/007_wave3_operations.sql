@@ -15,36 +15,48 @@ BEGIN;
 -- within a given organization.  Returns NULL if no active worker record exists.
 CREATE OR REPLACE FUNCTION public.current_worker_id(target_org uuid)
   RETURNS uuid
-  LANGUAGE sql
+  LANGUAGE plpgsql
   STABLE
   SECURITY DEFINER
   SET search_path = public
 AS $$
-  SELECT w.id
+DECLARE
+  v_id uuid;
+  v_count integer;
+BEGIN
+  SELECT COUNT(*) INTO v_count
   FROM   public.worker w
   WHERE  w.organization_id = target_org
     AND  w.app_user_id     = public.current_app_user_id()
-  LIMIT  1;
+    AND  w.status          = 'active';
+
+  IF v_count = 0 THEN
+    RETURN NULL;
+  END IF;
+
+  IF v_count > 1 THEN
+    -- Fail closed: multiple active workers is ambiguous; return deterministically
+    -- by lowest id. In practice org design should prevent this.
+    SELECT w.id INTO v_id
+    FROM   public.worker w
+    WHERE  w.organization_id = target_org
+      AND  w.app_user_id     = public.current_app_user_id()
+      AND  w.status          = 'active'
+    ORDER BY w.id
+    LIMIT 1;
+    RETURN v_id;
+  END IF;
+
+  SELECT w.id INTO v_id
+  FROM   public.worker w
+  WHERE  w.organization_id = target_org
+    AND  w.app_user_id     = public.current_app_user_id()
+    AND  w.status          = 'active';
+  RETURN v_id;
+END;
 $$;
 
--- worker_has_active_assignment: true when the current authenticated user
--- has a non-released, non-cancelled worker_assignment for the target job.
-CREATE OR REPLACE FUNCTION public.worker_has_active_assignment(target_job uuid)
-  RETURNS boolean
-  LANGUAGE sql
-  STABLE
-  SECURITY DEFINER
-  SET search_path = public
-AS $$
-  SELECT EXISTS (
-    SELECT 1
-    FROM   public.worker_assignment wa
-    JOIN   public.worker            w  ON w.id = wa.worker_id
-    WHERE  wa.operational_job_id = target_job
-      AND  w.app_user_id         = public.current_app_user_id()
-      AND  wa.assignment_status NOT IN ('released', 'cancelled', 'declined')
-  );
-$$;
+
 
 -- ---------------------------------------------------------------------------
 -- SECTION 1: TABLE DEFINITIONS
@@ -951,6 +963,72 @@ BEGIN
 END;
 $$;
 
+
+-- ---------------------------------------------------------------------------
+-- worker_assignment lifecycle guard
+-- Controlled transitions:
+--   proposed   -> assigned | declined | cancelled
+--   assigned   -> acknowledged | declined | released | cancelled
+--   acknowledged -> completed | released | cancelled
+--   declined / released / completed / cancelled = terminal
+--
+-- Worker self-service: only assigned->acknowledged|declined and
+-- acknowledged->completed are permitted when updater IS the assignment worker.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.wave3_guard_wa_lifecycle()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+DECLARE
+  v_current_worker_id uuid;
+  v_is_self_update    boolean;
+BEGIN
+  -- Terminal states are immutable
+  IF OLD.assignment_status IN ('declined', 'released', 'completed', 'cancelled') THEN
+    RAISE EXCEPTION 'worker_assignment: status % is terminal and cannot be changed', OLD.assignment_status;
+  END IF;
+
+  -- No-op if status unchanged
+  IF NEW.assignment_status = OLD.assignment_status THEN
+    RETURN NEW;
+  END IF;
+
+  -- Validate state machine transitions
+  CASE OLD.assignment_status
+    WHEN 'proposed' THEN
+      IF NEW.assignment_status NOT IN ('assigned', 'declined', 'cancelled') THEN
+        RAISE EXCEPTION 'worker_assignment: invalid transition % -> %', OLD.assignment_status, NEW.assignment_status;
+      END IF;
+    WHEN 'assigned' THEN
+      IF NEW.assignment_status NOT IN ('acknowledged', 'declined', 'released', 'cancelled') THEN
+        RAISE EXCEPTION 'worker_assignment: invalid transition % -> %', OLD.assignment_status, NEW.assignment_status;
+      END IF;
+    WHEN 'acknowledged' THEN
+      IF NEW.assignment_status NOT IN ('completed', 'released', 'cancelled') THEN
+        RAISE EXCEPTION 'worker_assignment: invalid transition % -> %', OLD.assignment_status, NEW.assignment_status;
+      END IF;
+    ELSE
+      RAISE EXCEPTION 'worker_assignment: unrecognised source status %', OLD.assignment_status;
+  END CASE;
+
+  -- Self-update restriction: if the session user IS the assigned worker,
+  -- only the subset of operationally valid worker transitions are permitted.
+  SELECT public.current_worker_id(OLD.organization_id) INTO v_current_worker_id;
+  v_is_self_update := (v_current_worker_id IS NOT NULL AND v_current_worker_id = OLD.worker_id);
+
+  IF v_is_self_update THEN
+    IF OLD.assignment_status = 'assigned' AND NEW.assignment_status NOT IN ('acknowledged', 'declined') THEN
+      RAISE EXCEPTION 'worker_assignment: worker may only self-transition assigned->acknowledged|declined';
+    END IF;
+    IF OLD.assignment_status = 'acknowledged' AND NEW.assignment_status NOT IN ('completed') THEN
+      RAISE EXCEPTION 'worker_assignment: worker may only self-transition acknowledged->completed';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.wave3_guard_wa_immutable()
   RETURNS trigger
   LANGUAGE plpgsql
@@ -962,6 +1040,10 @@ BEGIN
   IF NEW.operational_job_id   <> OLD.operational_job_id   THEN RAISE EXCEPTION 'worker_assignment: operational_job_id is immutable'; END IF;
   IF NEW.schedule_window_id   <> OLD.schedule_window_id   THEN RAISE EXCEPTION 'worker_assignment: schedule_window_id is immutable'; END IF;
   IF NEW.worker_id            <> OLD.worker_id            THEN RAISE EXCEPTION 'worker_assignment: worker_id is immutable'; END IF;
+  IF NEW.assignment_role      <> OLD.assignment_role      THEN RAISE EXCEPTION 'worker_assignment: assignment_role is immutable'; END IF;
+  IF OLD.assigned_at IS NOT NULL AND NEW.assigned_at IS DISTINCT FROM OLD.assigned_at THEN
+    RAISE EXCEPTION 'worker_assignment: assigned_at is immutable once set';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -1041,6 +1123,42 @@ $$;
 -- ──────────────────────────────────────────────────────────────────────────
 -- T10: work_order_event — append-only (forbid UPDATE / DELETE)
 -- ──────────────────────────────────────────────────────────────────────────
+
+-- work_order_event scope validator: cross-check operational_job/work_order chain
+CREATE OR REPLACE FUNCTION public.wave3_validate_woe_scope()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+DECLARE
+  v_wo public.work_order%ROWTYPE;
+  v_wa public.worker_assignment%ROWTYPE;
+BEGIN
+  -- work_order must belong to the declared operational_job
+  SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'work_order_event: work_order % not found', NEW.work_order_id;
+  END IF;
+  IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+    RAISE EXCEPTION 'work_order_event: work_order does not belong to declared operational_job';
+  END IF;
+  IF v_wo.organization_id  <> NEW.organization_id  THEN RAISE EXCEPTION 'work_order_event: organization_id mismatch with work_order'; END IF;
+  IF v_wo.business_unit_id <> NEW.business_unit_id THEN RAISE EXCEPTION 'work_order_event: business_unit_id mismatch with work_order'; END IF;
+
+  -- worker_assignment, if provided, must belong to the same operational_job
+  IF NEW.worker_assignment_id IS NOT NULL THEN
+    SELECT * INTO v_wa FROM public.worker_assignment WHERE id = NEW.worker_assignment_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'work_order_event: worker_assignment % not found', NEW.worker_assignment_id;
+    END IF;
+    IF v_wa.operational_job_id <> NEW.operational_job_id THEN
+      RAISE EXCEPTION 'work_order_event: worker_assignment does not belong to declared operational_job';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.wave3_deny_woe_mutation()
   RETURNS trigger
   LANGUAGE plpgsql
@@ -1054,6 +1172,42 @@ $$;
 -- ──────────────────────────────────────────────────────────────────────────
 -- T11: completion_evidence — append-only
 -- ──────────────────────────────────────────────────────────────────────────
+
+-- completion_evidence scope validator: cross-check operational_job/work_order chain
+CREATE OR REPLACE FUNCTION public.wave3_validate_ce_scope()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+DECLARE
+  v_wo public.work_order%ROWTYPE;
+  v_wa public.worker_assignment%ROWTYPE;
+BEGIN
+  -- work_order must belong to the declared operational_job
+  SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'completion_evidence: work_order % not found', NEW.work_order_id;
+  END IF;
+  IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+    RAISE EXCEPTION 'completion_evidence: work_order does not belong to declared operational_job';
+  END IF;
+  IF v_wo.organization_id  <> NEW.organization_id  THEN RAISE EXCEPTION 'completion_evidence: organization_id mismatch with work_order'; END IF;
+  IF v_wo.business_unit_id <> NEW.business_unit_id THEN RAISE EXCEPTION 'completion_evidence: business_unit_id mismatch with work_order'; END IF;
+
+  -- worker_assignment, if provided, must belong to the same operational_job
+  IF NEW.worker_assignment_id IS NOT NULL THEN
+    SELECT * INTO v_wa FROM public.worker_assignment WHERE id = NEW.worker_assignment_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'completion_evidence: worker_assignment % not found', NEW.worker_assignment_id;
+    END IF;
+    IF v_wa.operational_job_id <> NEW.operational_job_id THEN
+      RAISE EXCEPTION 'completion_evidence: worker_assignment does not belong to declared operational_job';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.wave3_deny_ce_mutation()
   RETURNS trigger
   LANGUAGE plpgsql
@@ -1067,6 +1221,28 @@ $$;
 -- ──────────────────────────────────────────────────────────────────────────
 -- T12: service_checklist_result — final-result immutability
 -- ──────────────────────────────────────────────────────────────────────────
+
+-- service_checklist_result scope validator: cross-check work_order belongs to operational_job
+CREATE OR REPLACE FUNCTION public.wave3_validate_scr_scope()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+DECLARE
+  v_wo public.work_order%ROWTYPE;
+BEGIN
+  SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'service_checklist_result: work_order % not found', NEW.work_order_id;
+  END IF;
+  IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+    RAISE EXCEPTION 'service_checklist_result: work_order does not belong to declared operational_job';
+  END IF;
+  IF v_wo.organization_id  <> NEW.organization_id  THEN RAISE EXCEPTION 'service_checklist_result: organization_id mismatch with work_order'; END IF;
+  IF v_wo.business_unit_id <> NEW.business_unit_id THEN RAISE EXCEPTION 'service_checklist_result: business_unit_id mismatch with work_order'; END IF;
+  RETURN NEW;
+END;
+$$;
 CREATE OR REPLACE FUNCTION public.wave3_guard_scr_final_immutable()
   RETURNS trigger
   LANGUAGE plpgsql
@@ -1090,11 +1266,32 @@ CREATE OR REPLACE FUNCTION public.wave3_guard_qi_scope()
 AS $$
 DECLARE
   v_oj public.operational_job%ROWTYPE;
+  v_wo public.work_order%ROWTYPE;
+  v_iw public.worker%ROWTYPE;
 BEGIN
   SELECT * INTO v_oj FROM public.operational_job WHERE id = NEW.operational_job_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'qa_inspection: operational_job % not found', NEW.operational_job_id; END IF;
   IF v_oj.organization_id  <> NEW.organization_id  THEN RAISE EXCEPTION 'qa_inspection: organization_id mismatch'; END IF;
   IF v_oj.business_unit_id <> NEW.business_unit_id THEN RAISE EXCEPTION 'qa_inspection: business_unit_id mismatch'; END IF;
+
+  -- work_order must belong to the declared operational_job
+  IF NEW.work_order_id IS NOT NULL THEN
+    SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'qa_inspection: work_order % not found', NEW.work_order_id; END IF;
+    IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+      RAISE EXCEPTION 'qa_inspection: work_order does not belong to declared operational_job';
+    END IF;
+  END IF;
+
+  -- inspector_worker_id, if provided, must belong to same organization
+  IF NEW.inspector_worker_id IS NOT NULL THEN
+    SELECT * INTO v_iw FROM public.worker WHERE id = NEW.inspector_worker_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'qa_inspection: inspector_worker % not found', NEW.inspector_worker_id; END IF;
+    IF v_iw.organization_id <> NEW.organization_id THEN
+      RAISE EXCEPTION 'qa_inspection: inspector_worker does not belong to same organization';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -1122,11 +1319,46 @@ CREATE OR REPLACE FUNCTION public.wave3_validate_ca_scope()
 AS $$
 DECLARE
   v_oj public.operational_job%ROWTYPE;
+  v_wo public.work_order%ROWTYPE;
+  v_qi public.qa_inspection%ROWTYPE;
+  v_aw public.worker%ROWTYPE;
 BEGIN
   SELECT * INTO v_oj FROM public.operational_job WHERE id = NEW.operational_job_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'corrective_action: operational_job % not found', NEW.operational_job_id; END IF;
   IF v_oj.organization_id  <> NEW.organization_id  THEN RAISE EXCEPTION 'corrective_action: organization_id mismatch'; END IF;
   IF v_oj.business_unit_id <> NEW.business_unit_id THEN RAISE EXCEPTION 'corrective_action: business_unit_id mismatch'; END IF;
+
+  -- work_order must belong to the declared operational_job
+  IF NEW.work_order_id IS NOT NULL THEN
+    SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'corrective_action: work_order % not found', NEW.work_order_id; END IF;
+    IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+      RAISE EXCEPTION 'corrective_action: work_order does not belong to declared operational_job';
+    END IF;
+  END IF;
+
+  -- qa_inspection, if provided, must belong to same operational_job/work_order
+  IF NEW.qa_inspection_id IS NOT NULL THEN
+    SELECT * INTO v_qi FROM public.qa_inspection WHERE id = NEW.qa_inspection_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'corrective_action: qa_inspection % not found', NEW.qa_inspection_id; END IF;
+    IF v_qi.operational_job_id <> NEW.operational_job_id THEN
+      RAISE EXCEPTION 'corrective_action: qa_inspection does not belong to declared operational_job';
+    END IF;
+    IF NEW.work_order_id IS NOT NULL AND v_qi.work_order_id IS NOT NULL
+       AND v_qi.work_order_id <> NEW.work_order_id THEN
+      RAISE EXCEPTION 'corrective_action: qa_inspection does not belong to declared work_order';
+    END IF;
+  END IF;
+
+  -- assigned_worker_id, if provided, must belong to same organization/BU scope
+  IF NEW.assigned_worker_id IS NOT NULL THEN
+    SELECT * INTO v_aw FROM public.worker WHERE id = NEW.assigned_worker_id;
+    IF NOT FOUND THEN RAISE EXCEPTION 'corrective_action: assigned_worker % not found', NEW.assigned_worker_id; END IF;
+    IF v_aw.organization_id <> NEW.organization_id THEN
+      RAISE EXCEPTION 'corrective_action: assigned_worker does not belong to same organization';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -1179,6 +1411,24 @@ BEGIN
     AND  action_status NOT IN ('verified', 'cancelled');
   IF v_blocking > 0 THEN
     RAISE EXCEPTION 'operational_handoff: % unresolved corrective action(s) block handoff', v_blocking;
+  END IF;
+
+  -- qa_inspection_id, if provided, must belong to the same operational_job/work_order
+  IF NEW.qa_inspection_id IS NOT NULL THEN
+    PERFORM 1 FROM public.qa_inspection qi
+    WHERE  qi.id = NEW.qa_inspection_id
+      AND  qi.operational_job_id = NEW.operational_job_id;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'operational_handoff: qa_inspection does not belong to declared operational_job';
+    END IF;
+    IF NEW.work_order_id IS NOT NULL THEN
+      PERFORM 1 FROM public.qa_inspection qi
+      WHERE  qi.id = NEW.qa_inspection_id
+        AND  (qi.work_order_id IS NULL OR qi.work_order_id = NEW.work_order_id);
+      IF NOT FOUND THEN
+        RAISE EXCEPTION 'operational_handoff: qa_inspection does not belong to declared work_order';
+      END IF;
+    END IF;
   END IF;
 
   RETURN NEW;
@@ -1236,6 +1486,30 @@ CREATE TRIGGER trg_sw_updated_at
 CREATE TRIGGER trg_wa_scope_validate
   BEFORE INSERT ON public.worker_assignment
   FOR EACH ROW EXECUTE FUNCTION public.wave3_validate_wa_scope();
+CREATE TRIGGER trg_wa_lifecycle_guard
+  BEFORE UPDATE OF assignment_status ON public.worker_assignment
+  FOR EACH ROW EXECUTE FUNCTION public.wave3_guard_wa_lifecycle();
+-- worker_has_active_assignment: true when the current authenticated user
+-- has a non-terminal, active worker_assignment for the target job,
+-- and the worker record is active.
+CREATE OR REPLACE FUNCTION public.worker_has_active_assignment(target_job uuid)
+  RETURNS boolean
+  LANGUAGE sql
+  STABLE
+  SECURITY DEFINER
+  SET search_path = public
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM   public.worker_assignment wa
+    JOIN   public.worker            w  ON w.id = wa.worker_id
+    WHERE  wa.operational_job_id = target_job
+      AND  w.app_user_id         = public.current_app_user_id()
+      AND  w.status              = 'active'
+      AND  wa.assignment_status NOT IN ('released', 'cancelled', 'declined', 'completed')
+  );
+$$;
+
 
 CREATE TRIGGER trg_wa_immutable
   BEFORE UPDATE ON public.worker_assignment
@@ -1262,7 +1536,11 @@ CREATE TRIGGER trg_wo_updated_at
   BEFORE UPDATE ON public.work_order
   FOR EACH ROW EXECUTE FUNCTION public.wave3_set_updated_at();
 
--- work_order_event (append-only)
+-- work_order_event (append-only + scope)
+CREATE TRIGGER trg_woe_scope_validate
+  BEFORE INSERT ON public.work_order_event
+  FOR EACH ROW EXECUTE FUNCTION public.wave3_validate_woe_scope();
+
 CREATE TRIGGER trg_woe_deny_update
   BEFORE UPDATE ON public.work_order_event
   FOR EACH ROW EXECUTE FUNCTION public.wave3_deny_woe_mutation();
@@ -1271,7 +1549,11 @@ CREATE TRIGGER trg_woe_deny_delete
   BEFORE DELETE ON public.work_order_event
   FOR EACH ROW EXECUTE FUNCTION public.wave3_deny_woe_mutation();
 
--- completion_evidence (append-only)
+-- completion_evidence (append-only + scope)
+CREATE TRIGGER trg_ce_scope_validate
+  BEFORE INSERT ON public.completion_evidence
+  FOR EACH ROW EXECUTE FUNCTION public.wave3_validate_ce_scope();
+
 CREATE TRIGGER trg_ce_deny_update
   BEFORE UPDATE ON public.completion_evidence
   FOR EACH ROW EXECUTE FUNCTION public.wave3_deny_ce_mutation();
@@ -1281,6 +1563,10 @@ CREATE TRIGGER trg_ce_deny_delete
   FOR EACH ROW EXECUTE FUNCTION public.wave3_deny_ce_mutation();
 
 -- service_checklist_result
+CREATE TRIGGER trg_scr_scope_validate
+  BEFORE INSERT ON public.service_checklist_result
+  FOR EACH ROW EXECUTE FUNCTION public.wave3_validate_scr_scope();
+
 CREATE TRIGGER trg_scr_final_immutable
   BEFORE UPDATE ON public.service_checklist_result
   FOR EACH ROW EXECUTE FUNCTION public.wave3_guard_scr_final_immutable();
@@ -1612,6 +1898,8 @@ DECLARE
   v_missing_fk_or_unique_count   integer;
   v_missing_guard_trigger_count  integer;
   v_legacy_huc_touch_count       integer;
+  v_lifecycle_trigger_present    boolean;
+  v_active_worker_helper_ok      boolean;
 
   v_expected_wave3_tables text[] := ARRAY[
     'operational_job', 'schedule_window', 'worker_assignment',
@@ -1735,20 +2023,48 @@ BEGIN
   END IF;
 
   -- 9. Legacy huc_* touch count (must be zero)
-  -- Check for any DDL on huc_ tables within this migration (static guard:
-  -- this DO block ensures none were created; cross-check against pg_class)
+  -- Count triggers on huc_* tables that reference any wave3 trigger function.
+  -- If this migration accidentally added triggers to huc_* tables, this will be non-zero.
   SELECT COUNT(*) INTO v_legacy_huc_touch_count
-  FROM   pg_class c
-  JOIN   pg_namespace n ON n.oid = c.relnamespace
+  FROM   pg_trigger    tr
+  JOIN   pg_class      c  ON c.oid = tr.tgrelid
+  JOIN   pg_namespace  n  ON n.oid = c.relnamespace
+  JOIN   pg_proc       p  ON p.oid = tr.tgfoid
   WHERE  n.nspname = 'public'
     AND  c.relname LIKE 'huc_%'
-    AND  c.relkind = 'r'  -- only check relations altered here (there should be none)
-    AND  FALSE; -- static: this migration never modifies huc_* tables
+    AND  p.proname LIKE 'wave3_%';
 
-  v_legacy_huc_touch_count := 0; -- migration contains no huc_* DDL by construction
+  IF v_legacy_huc_touch_count <> 0 THEN
+    RAISE EXCEPTION 'M007 FAIL: % wave3 trigger(s) found on huc_* tables', v_legacy_huc_touch_count;
+  END IF;
+
+  -- 10. Worker assignment lifecycle trigger present
+  SELECT EXISTS(
+    SELECT 1 FROM information_schema.triggers
+    WHERE  trigger_schema     = 'public'
+      AND  event_object_table = 'worker_assignment'
+      AND  trigger_name       = 'trg_wa_lifecycle_guard'
+  ) INTO v_lifecycle_trigger_present;
+
+  IF NOT v_lifecycle_trigger_present THEN
+    RAISE EXCEPTION 'M007 FAIL: worker_assignment lifecycle guard trigger (trg_wa_lifecycle_guard) missing';
+  END IF;
+
+  -- 11. Active-worker helper includes status='active' filter
+  SELECT EXISTS(
+    SELECT 1 FROM pg_proc p
+    JOIN   pg_namespace n ON n.oid = p.pronamespace
+    WHERE  n.nspname   = 'public'
+      AND  p.proname   = 'current_worker_id'
+      AND  pg_get_functiondef(p.oid) LIKE '%status%active%'
+  ) INTO v_active_worker_helper_ok;
+
+  IF NOT v_active_worker_helper_ok THEN
+    RAISE EXCEPTION 'M007 FAIL: current_worker_id helper does not enforce status=''active''';
+  END IF;
 
   -- ALL GATES PASSED
-  RAISE NOTICE 'M007_PASS | wave3_tables_found=% | expected_tables=% | rls_enabled_count=% | anon_privilege_violation_count=% | authenticated_table_count=% | policy_count=% | missing_required_dependency_count=% | missing_fk_or_unique_count=% | missing_guard_trigger_count=% | legacy_huc_touch_count=%',
+  RAISE NOTICE 'M007_PASS | wave3_tables_found=% | expected_tables=% | rls_enabled_count=% | anon_privilege_violation_count=% | authenticated_table_count=% | policy_count=% | missing_required_dependency_count=% | missing_fk_or_unique_count=% | missing_guard_trigger_count=% | legacy_huc_touch_count=% | lifecycle_trigger_present=% | active_worker_helper_ok=%',
     v_wave3_tables_found,
     v_expected_tables,
     v_rls_enabled_count,
@@ -1758,7 +2074,9 @@ BEGIN
     v_missing_dep_count,
     v_missing_fk_or_unique_count,
     v_missing_guard_trigger_count,
-    v_legacy_huc_touch_count;
+    v_legacy_huc_touch_count,
+    v_lifecycle_trigger_present,
+    v_active_worker_helper_ok;
 
 END;
 $$;

@@ -46,24 +46,20 @@ INSERT INTO public.customer (id, organization_id, business_unit_id, customer_typ
 VALUES ('d0000000-0000-0000-0000-000000000001'::uuid,
         'a0000000-0000-0000-0000-000000000001'::uuid,
         'b0000000-0000-0000-0000-000000000001'::uuid,
-        'residential',
+        'person',
         'Rehearsal Customer M008');
 
--- 1e. Contact
-INSERT INTO public.contact (id, organization_id, business_unit_id, customer_id, contact_type, first_name, last_name)
+-- 1e. Contact (canonical: no organization_id/business_unit_id)
+INSERT INTO public.contact (id, customer_id, contact_type, first_name, last_name)
 VALUES ('e0000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
         'primary',
         'Jane',
         'Rehearsal');
 
--- 1f. Service location
-INSERT INTO public.service_location (id, organization_id, business_unit_id, customer_id, jurisdiction_id, address_line_1, city)
+-- 1f. Service location (canonical: no organization_id/business_unit_id, uses address_line1)
+INSERT INTO public.service_location (id, customer_id, jurisdiction_id, address_line1, city)
 VALUES ('f0000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
         'c0000000-0000-0000-0000-000000000001'::uuid,
         '1 Rehearsal Street',
@@ -83,75 +79,131 @@ VALUES ('12000000-0000-0000-0000-000000000001'::uuid,
         '11000000-0000-0000-0000-000000000001'::uuid,
         'qualified');
 
--- 1i. Quote
-INSERT INTO public.quote (id, organization_id, business_unit_id, opportunity_id)
-VALUES ('13000000-0000-0000-0000-000000000001'::uuid,
+-- 1i. Estimate (required lineage)
+INSERT INTO public.estimate (id, organization_id, business_unit_id, opportunity_id)
+VALUES ('0e000000-0000-0000-0000-000000000001'::uuid,
         'a0000000-0000-0000-0000-000000000001'::uuid,
         'b0000000-0000-0000-0000-000000000001'::uuid,
         '12000000-0000-0000-0000-000000000001'::uuid);
 
--- 1j. Pricing snapshot (governed lineage)
+-- 1j. Quote
+INSERT INTO public.quote (id, organization_id, business_unit_id, opportunity_id, estimate_id)
+VALUES ('13000000-0000-0000-0000-000000000001'::uuid,
+        'a0000000-0000-0000-0000-000000000001'::uuid,
+        'b0000000-0000-0000-0000-000000000001'::uuid,
+        '12000000-0000-0000-0000-000000000001'::uuid,
+        '0e000000-0000-0000-0000-000000000001'::uuid);
+
+-- 1k. Configuration version (create rehearsal row to support pricing_snapshot lineage)
+INSERT INTO public.configuration_version (
+  id, organization_id, version_label, is_active
+)
+VALUES (
+  '14cf0000-0000-0000-0000-000000000001'::uuid,
+  'a0000000-0000-0000-0000-000000000001'::uuid,
+  'ON-2026-08-v1.0-rehearsal',
+  true
+);
+
+-- 1l. Pricing snapshot (canonical M005/Wave 2 shape)
 INSERT INTO public.pricing_snapshot (
   id, organization_id, business_unit_id,
-  quote_id, frozen_at,
-  calculator_version, quote_contract_version,
-  pre_tax_total, tax_amount, tax_name, tax_rate, total_amount, currency,
-  configuration_version_id, configuration_snapshot,
-  labor_economics, governance_flags
+  opportunity_id, estimate_id,
+  configuration_version_id,
+  currency_code,
+  tax_name, tax_rate,
+  subtotal_amount, discount_amount, tax_amount, total_amount,
+  calculator_version,
+  configuration_snapshot,
+  labor_economics,
+  calculation_inputs, calculation_outputs, raw_calculation_snapshot,
+  frozen_at,
+  created_by_app_user_id
 )
 VALUES (
   '14000000-0000-0000-0000-000000000001'::uuid,
   'a0000000-0000-0000-0000-000000000001'::uuid,
   'b0000000-0000-0000-0000-000000000001'::uuid,
-  '13000000-0000-0000-0000-000000000001'::uuid,
-  now(),
-  '2.0', '2.0',
-  395.00, 51.35, 'HST', 0.13, 446.35, 'CA$',
-  '14cfg000-0000-0000-0000-000000000001'::uuid,
+  '12000000-0000-0000-0000-000000000001'::uuid,
+  '0e000000-0000-0000-0000-000000000001'::uuid,
+  '14cf0000-0000-0000-0000-000000000001'::uuid,
+  'CAD',
+  'HST', 0.13,
+  395.00, 0.00, 51.35, 446.35,
+  '2.0',
   '{"version":"ON-2026-08-v1.0","tax":{"label":"HST"}}'::jsonb,
   '{}'::jsonb,
-  '{"governed":true}'::jsonb
+  '{"sqft":1500,"dwelling_type":"apartment"}'::jsonb,
+  '{"line_items":[{"key":"base_clean","amount":395.00}],"subtotal":395.00,"tax":51.35,"total":446.35}'::jsonb,
+  '{"pre_tax_total":395.00,"tax_amount":51.35,"total":446.35}'::jsonb,
+  now(),
+  '19000000-0000-0000-0000-000000000001'::uuid
 );
 
--- 1k. Quote version
+-- 1m. Quote version (canonical: lifecycle_status, version_no, estimate_id)
 INSERT INTO public.quote_version (
   id, organization_id, business_unit_id,
-  quote_id, pricing_snapshot_id,
-  version_status, version_number
+  quote_id, estimate_id, pricing_snapshot_id,
+  version_no, lifecycle_status,
+  created_by_app_user_id
 )
 VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
   'a0000000-0000-0000-0000-000000000001'::uuid,
   'b0000000-0000-0000-0000-000000000001'::uuid,
   '13000000-0000-0000-0000-000000000001'::uuid,
+  '0e000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
+  1,
   'accepted',
-  1
+  '19000000-0000-0000-0000-000000000001'::uuid
 );
 
--- 1l. Conversion record
+-- 1n. Quote response (required for conversion_record lineage)
+INSERT INTO public.quote_response (
+  id, organization_id, business_unit_id,
+  quote_id, quote_version_id,
+  response_status
+)
+VALUES (
+  '0r000000-0000-0000-0000-000000000001'::uuid,
+  'a0000000-0000-0000-0000-000000000001'::uuid,
+  'b0000000-0000-0000-0000-000000000001'::uuid,
+  '13000000-0000-0000-0000-000000000001'::uuid,
+  '15000000-0000-0000-0000-000000000001'::uuid,
+  'accepted'
+);
+
+-- 1o. Conversion record (canonical lineage: service_request_id, estimate_id, quote_id, quote_response_id)
 INSERT INTO public.conversion_record (
   id, organization_id, business_unit_id,
-  opportunity_id, quote_version_id, pricing_snapshot_id,
-  customer_id, contact_id, service_location_id
+  service_request_id, opportunity_id, estimate_id,
+  quote_id, quote_version_id, quote_response_id,
+  customer_id, contact_id, service_location_id,
+  created_by_app_user_id
 )
 VALUES (
   '16000000-0000-0000-0000-000000000001'::uuid,
   'a0000000-0000-0000-0000-000000000001'::uuid,
   'b0000000-0000-0000-0000-000000000001'::uuid,
+  '11000000-0000-0000-0000-000000000001'::uuid,
   '12000000-0000-0000-0000-000000000001'::uuid,
+  '0e000000-0000-0000-0000-000000000001'::uuid,
+  '13000000-0000-0000-0000-000000000001'::uuid,
   '15000000-0000-0000-0000-000000000001'::uuid,
-  '14000000-0000-0000-0000-000000000001'::uuid,
+  '0r000000-0000-0000-0000-000000000001'::uuid,
   'd0000000-0000-0000-0000-000000000001'::uuid,
   'e0000000-0000-0000-0000-000000000001'::uuid,
-  'f0000000-0000-0000-0000-000000000001'::uuid
+  'f0000000-0000-0000-0000-000000000001'::uuid,
+  '19000000-0000-0000-0000-000000000001'::uuid
 );
 
--- 1m. Job handoff (Wave 2 -> Wave 3 boundary)
+-- 1p. Job handoff (Wave 2 -> Wave 3 boundary)
 INSERT INTO public.job_handoff (
   id, organization_id, business_unit_id,
   conversion_record_id, quote_version_id, pricing_snapshot_id,
-  handoff_status, handoff_payload, handed_off_at
+  handoff_status, handoff_payload, metadata, handed_off_at,
+  created_by_app_user_id
 )
 VALUES (
   '17000000-0000-0000-0000-000000000001'::uuid,
@@ -161,17 +213,20 @@ VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   'ready',
-  '{"source":"pilot_ui","synthetic":true}'::jsonb,
-  now()
+  '{"source":"pilot_ui","synthetic":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"rehearsal":true}'::jsonb,
+  now(),
+  '19000000-0000-0000-0000-000000000001'::uuid
 );
 
--- 1n. Worker (required for assignment)
-INSERT INTO public.worker (id, organization_id, business_unit_id, app_user_id, display_name)
+-- 1q. Worker (required for assignment; status must be active)
+INSERT INTO public.worker (id, organization_id, business_unit_id, app_user_id, display_name, status)
 VALUES ('18000000-0000-0000-0000-000000000001'::uuid,
         'a0000000-0000-0000-0000-000000000001'::uuid,
         'b0000000-0000-0000-0000-000000000001'::uuid,
         '19000000-0000-0000-0000-000000000001'::uuid,
-        'Worker M008');
+        'Worker M008',
+        'active');
 
 -- ---------------------------------------------------------------------------
 -- STEP 2: WAVE 3 — operational_job creation
@@ -668,8 +723,13 @@ ROLLBACK;
 SELECT
   CASE
     WHEN (
+      -- Wave 2: job_handoff
+      (SELECT COUNT(*) FROM public.job_handoff
+       WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%'
+          OR metadata::text         LIKE '%wave3_m008_rehearsal_v1%') = 0
+
       -- operational_job
-      (SELECT COUNT(*) FROM public.operational_job
+      AND (SELECT COUNT(*) FROM public.operational_job
        WHERE commercial_authority_snapshot::text LIKE '%wave3_m008_rehearsal_v1%'
           OR metadata::text LIKE '%wave3_m008_rehearsal_v1%') = 0
 
@@ -700,4 +760,30 @@ SELECT
     THEN 'M008_REHEARSAL_PASS_ROLLED_BACK'
     ELSE 'M008_REHEARSAL_FAIL_ARTIFACTS_REMAIN'
   END AS result,
-  0  AS remaining_artifact_count;
+  (
+    -- computed actual count of all rehearsal artifacts across every Wave 2 + Wave 3 table
+    (SELECT COUNT(*) FROM public.job_handoff
+     WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%'
+        OR metadata::text        LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.operational_job
+     WHERE commercial_authority_snapshot::text LIKE '%wave3_m008_rehearsal_v1%'
+        OR metadata::text                      LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.work_order_event
+       WHERE event_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.operational_handoff
+       WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.schedule_window
+       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.worker_assignment
+       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.work_order
+       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.completion_evidence
+       WHERE evidence_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.service_checklist_result
+       WHERE result_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.qa_inspection
+       WHERE findings::text LIKE '%wave3_m008_rehearsal_v1%')
+    + (SELECT COUNT(*) FROM public.corrective_action
+       WHERE resolution_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+  ) AS remaining_artifact_count;

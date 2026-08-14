@@ -341,3 +341,165 @@ test("M008: pricing_snapshot lineage assertion included in in-transaction checks
     "M008 rehearsal missing configuration_version_id lineage check"
   );
 });
+
+// ── NEW: M007 function order check ───────────────────────────────────────────
+
+test("M007: worker_has_active_assignment is defined AFTER worker_assignment table", () => {
+  const waTableIdx = m007.indexOf("CREATE TABLE public.worker_assignment");
+  const whaFnIdx   = m007.indexOf("worker_has_active_assignment: true when");
+  assert.ok(waTableIdx > 0, "worker_assignment table not found in M007");
+  assert.ok(whaFnIdx > waTableIdx,
+    "worker_has_active_assignment must be defined AFTER worker_assignment table"
+  );
+});
+
+// ── NEW: M007 active worker enforcement ──────────────────────────────────────
+
+test("M007: current_worker_id requires status='active'", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.current_worker_id[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "current_worker_id function not found");
+  assert.ok(
+    fnMatch[0].includes("'active'"),
+    "current_worker_id must enforce worker status='active'"
+  );
+});
+
+test("M007: worker_has_active_assignment requires worker status='active'", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.worker_has_active_assignment[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "worker_has_active_assignment function not found");
+  assert.ok(
+    fnMatch[0].includes("'active'"),
+    "worker_has_active_assignment must enforce worker status='active'"
+  );
+});
+
+// ── NEW: M007 assignment lifecycle trigger ────────────────────────────────────
+
+test("M007: worker assignment lifecycle guard trigger exists (trg_wa_lifecycle_guard)", () => {
+  assert.ok(
+    m007.includes("trg_wa_lifecycle_guard"),
+    "M007 missing trg_wa_lifecycle_guard trigger"
+  );
+});
+
+test("M007: wave3_guard_wa_lifecycle enforces terminal states", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.wave3_guard_wa_lifecycle[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "wave3_guard_wa_lifecycle function not found");
+  const fn = fnMatch[0];
+  ["declined", "released", "completed", "cancelled"].forEach((s) => {
+    assert.ok(fn.includes(`'${s}'`), `lifecycle guard missing terminal state: ${s}`);
+  });
+});
+
+// ── NEW: M007 child scope validator cross-checks ─────────────────────────────
+
+test("M007: work_order_event scope validator (trg_woe_scope_validate) exists and cross-checks work_order", () => {
+  assert.ok(m007.includes("trg_woe_scope_validate"), "M007 missing trg_woe_scope_validate");
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.wave3_validate_woe_scope[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "wave3_validate_woe_scope function not found");
+  assert.ok(
+    fnMatch[0].includes("v_wo.operational_job_id"),
+    "wave3_validate_woe_scope must cross-check work_order.operational_job_id"
+  );
+});
+
+test("M007: completion_evidence scope validator (trg_ce_scope_validate) exists", () => {
+  assert.ok(m007.includes("trg_ce_scope_validate"), "M007 missing trg_ce_scope_validate");
+  assert.ok(m007.includes("wave3_validate_ce_scope"), "M007 missing wave3_validate_ce_scope function");
+});
+
+test("M007: service_checklist_result scope validator (trg_scr_scope_validate) exists", () => {
+  assert.ok(m007.includes("trg_scr_scope_validate"), "M007 missing trg_scr_scope_validate");
+  assert.ok(m007.includes("wave3_validate_scr_scope"), "M007 missing wave3_validate_scr_scope function");
+});
+
+test("M007: qa_inspection scope validator cross-checks work_order.operational_job_id", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.wave3_guard_qi_scope[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "wave3_guard_qi_scope function not found");
+  assert.ok(
+    fnMatch[0].includes("v_wo.operational_job_id"),
+    "wave3_guard_qi_scope must cross-check work_order.operational_job_id"
+  );
+});
+
+test("M007: corrective_action scope validator cross-checks work_order and qa_inspection", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.wave3_validate_ca_scope[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "wave3_validate_ca_scope function not found");
+  const fn = fnMatch[0];
+  assert.ok(fn.includes("v_wo.operational_job_id"), "ca_scope must cross-check work_order.operational_job_id");
+  assert.ok(fn.includes("v_qi.operational_job_id"), "ca_scope must cross-check qa_inspection.operational_job_id");
+});
+
+test("M007: operational_handoff lineage validator cross-checks qa_inspection_id", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.wave3_validate_oh_lineage[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "wave3_validate_oh_lineage function not found");
+  assert.ok(
+    fnMatch[0].includes("qa_inspection_id"),
+    "wave3_validate_oh_lineage must cross-check qa_inspection_id"
+  );
+});
+
+// ── NEW: M008 canonical column contract assertions ────────────────────────────
+
+test("M008: contact insert does NOT contain organization_id or business_unit_id", () => {
+  const contactMatch = m008.match(/INSERT INTO public\.contact[\s\S]*?;/);
+  assert.ok(contactMatch, "M008 contact insert not found");
+  const insert = contactMatch[0];
+  assert.ok(!insert.includes("organization_id"), "M008 contact insert must not include organization_id");
+  assert.ok(!insert.includes("business_unit_id"), "M008 contact insert must not include business_unit_id");
+});
+
+test("M008: service_location uses address_line1 (not address_line_1)", () => {
+  assert.ok(m008.includes("address_line1"), "M008 service_location must use address_line1");
+  assert.ok(!m008.includes("address_line_1"), "M008 must not use stale address_line_1");
+});
+
+test("M008: quote_version uses lifecycle_status and version_no", () => {
+  const qvMatch = m008.match(/INSERT INTO public\.quote_version[\s\S]*?;/);
+  assert.ok(qvMatch, "M008 quote_version insert not found");
+  const insert = qvMatch[0];
+  assert.ok(insert.includes("lifecycle_status"), "M008 quote_version must use lifecycle_status");
+  assert.ok(insert.includes("version_no"), "M008 quote_version must use version_no");
+  assert.ok(!insert.includes("version_status"), "M008 quote_version must not use stale version_status");
+  assert.ok(!insert.includes("version_number"), "M008 quote_version must not use stale version_number");
+});
+
+test("M008: pricing_snapshot uses canonical field names (no stale fields)", () => {
+  const psMatch = m008.match(/INSERT INTO public\.pricing_snapshot\s*\(([^)]+)\)/);
+  assert.ok(psMatch, "M008 pricing_snapshot insert column list not found");
+  const colList = psMatch[1]; // only the column names, before VALUES
+  // Must have canonical fields
+  assert.ok(colList.includes("currency_code"), "M008 pricing_snapshot must use currency_code");
+  assert.ok(colList.includes("subtotal_amount"), "M008 pricing_snapshot must use subtotal_amount");
+  // Must NOT have stale column names
+  assert.ok(!colList.includes("quote_id"), "M008 pricing_snapshot must not use stale quote_id");
+  assert.ok(!colList.includes("pre_tax_total"), "M008 pricing_snapshot must not use stale pre_tax_total");
+  assert.ok(
+    !/(?:^|,)\s*currency\s*(?:,|$)/m.test(colList),
+    "M008 pricing_snapshot must not use stale currency column"
+  );
+  assert.ok(!colList.includes("quote_contract_version"), "M008 pricing_snapshot must not use stale quote_contract_version");
+  assert.ok(!colList.includes("governance_flags"), "M008 pricing_snapshot must not use stale governance_flags");
+});
+
+test("M008: conversion_record includes required lineage fields", () => {
+  const crMatch = m008.match(/INSERT INTO public\.conversion_record[\s\S]*?;/);
+  assert.ok(crMatch, "M008 conversion_record insert not found");
+  const insert = crMatch[0];
+  ["service_request_id", "estimate_id", "quote_id", "quote_response_id"].forEach((f) => {
+    assert.ok(insert.includes(f), `M008 conversion_record missing required field: ${f}`);
+  });
+});
+
+test("M008: remaining_artifact_count is computed (not hard-coded 0)", () => {
+  // Must NOT be the literal '0  AS remaining_artifact_count'
+  assert.ok(
+    !m008.includes("0  AS remaining_artifact_count"),
+    "M008 remaining_artifact_count must be computed, not hard-coded 0"
+  );
+  // Must contain a subquery COUNT
+  assert.ok(
+    m008.includes("COUNT(*) FROM public.operational_job"),
+    "M008 remaining_artifact_count must compute actual counts"
+  );
+});
