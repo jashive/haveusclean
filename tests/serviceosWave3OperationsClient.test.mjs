@@ -391,8 +391,9 @@ test("JobsView.jsx does not import Wave 3 operations modules", async () => {
 // ── Cleanup reverse dependency order validation ───────────────────────────────
 
 test("cleanup order: operational_handoff appears before operational_job in source", () => {
-  const handoffIdx = clientSrc.indexOf('"operational_handoff"');
-  const ojIdx = clientSrc.lastIndexOf('"operational_job"');
+  const cleanupBody = getExportedFunctionSource("cleanupOperationsPilotSession");
+  const handoffIdx = cleanupBody.indexOf('"operational_handoff"');
+  const ojIdx = cleanupBody.indexOf('"operational_job"');
   assert.ok(
     handoffIdx < ojIdx,
     "operational_handoff must be cleaned up before operational_job"
@@ -400,8 +401,9 @@ test("cleanup order: operational_handoff appears before operational_job in sourc
 });
 
 test("cleanup order: work_order appears before schedule_window in source", () => {
-  const woIdx = clientSrc.indexOf('"work_order"');
-  const swIdx = clientSrc.lastIndexOf('"schedule_window"');
+  const cleanupBody = getExportedFunctionSource("cleanupOperationsPilotSession");
+  const woIdx = cleanupBody.indexOf('"work_order"');
+  const swIdx = cleanupBody.indexOf('"schedule_window"');
   assert.ok(
     woIdx < swIdx,
     "work_order must be cleaned up before schedule_window"
