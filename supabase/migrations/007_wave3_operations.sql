@@ -21,30 +21,29 @@ CREATE OR REPLACE FUNCTION public.current_worker_id(target_org uuid)
   SET search_path = public
 AS $$
 DECLARE
-  v_id uuid;
-  v_count integer;
+  v_worker_ids uuid[];
 BEGIN
-  SELECT COUNT(*) INTO v_count
-  FROM   public.worker w
-  WHERE  w.organization_id = target_org
-    AND  w.app_user_id     = public.current_app_user_id()
-    AND  w.status          = 'active';
+  SELECT array_agg(s.id) INTO v_worker_ids
+  FROM (
+    SELECT w.id
+    FROM   public.worker w
+    WHERE  w.organization_id = target_org
+      AND  w.app_user_id     = public.current_app_user_id()
+      AND  w.status          = 'active'
+    ORDER BY w.id
+    LIMIT 2
+  ) s;
 
-  IF v_count = 0 THEN
+  IF COALESCE(array_length(v_worker_ids, 1), 0) = 0 THEN
     RETURN NULL;
   END IF;
 
-  IF v_count > 1 THEN
+  IF array_length(v_worker_ids, 1) > 1 THEN
     -- Fail closed: multiple active workers is ambiguous.
     RETURN NULL;
   END IF;
 
-  SELECT w.id INTO v_id
-  FROM   public.worker w
-  WHERE  w.organization_id = target_org
-    AND  w.app_user_id     = public.current_app_user_id()
-    AND  w.status          = 'active';
-  RETURN v_id;
+  RETURN v_worker_ids[1];
 END;
 $$;
 

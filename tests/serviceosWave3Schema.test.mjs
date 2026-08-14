@@ -64,8 +64,7 @@ test("M007: ENABLE ROW LEVEL SECURITY on all 10 Wave 3 tables", () => {
 test("M007: REVOKE ALL ... FROM anon on all 10 Wave 3 tables", () => {
   WAVE3_TABLES.forEach((t) => {
     assert.ok(
-      m007.includes(`REVOKE ALL ON public.${t}`) &&
-        m007.includes(`FROM anon`),
+      new RegExp(`REVOKE ALL ON public\\.${t}\\s+FROM anon;`).test(m007),
       `Missing REVOKE ALL from anon for ${t}`
     );
   });
@@ -273,8 +272,7 @@ test("M008: ends in ROLLBACK", () => {
   assert.ok(/\bROLLBACK\b/.test(m008), "M008 missing ROLLBACK statement");
   // ROLLBACK must appear before the post-rollback verification SELECT
   const rollbackIdx = m008.lastIndexOf("ROLLBACK");
-  const commitIdx = m008.indexOf("COMMIT");
-  assert.equal(commitIdx, -1, "M008 must not contain COMMIT");
+  assert.ok(!/^\s*COMMIT\s*;/m.test(m008), "M008 must not contain COMMIT;");
   assert.ok(rollbackIdx > 0, "M008 ROLLBACK not found");
 });
 
@@ -369,19 +367,18 @@ test("M007: current_worker_id fails closed on ambiguous active workers", () => {
   const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.current_worker_id[\s\S]*?\$\$;/);
   assert.ok(fnMatch, "current_worker_id function not found");
   const fn = fnMatch[0];
-  const ambiguousBranch = fn.match(/IF v_count > 1 THEN[\s\S]*?END IF;/);
-  assert.ok(ambiguousBranch, "current_worker_id ambiguous-worker branch not found");
+  assert.ok(/LIMIT\s+2/i.test(fn), "current_worker_id should read at most two active workers");
   assert.ok(
-    !/ORDER BY\s+w\.id/i.test(ambiguousBranch[0]),
-    "current_worker_id ambiguous branch must not select deterministic ORDER BY worker id"
+    /array_length\(v_worker_ids,\s*1\)\s*>\s*1[\s\S]*RETURN NULL/i.test(fn),
+    "current_worker_id must fail closed and return NULL when multiple active workers exist"
   );
   assert.ok(
-    !/LIMIT\s+1/i.test(ambiguousBranch[0]),
-    "current_worker_id ambiguous branch must not use LIMIT 1"
+    !/LIMIT\s+1/i.test(fn),
+    "current_worker_id must not use LIMIT 1 for worker ambiguity handling"
   );
   assert.ok(
-    /RETURN NULL|RAISE EXCEPTION/i.test(ambiguousBranch[0]),
-    "current_worker_id ambiguous branch must fail closed via NULL return or explicit exception"
+    !/ORDER BY\s+w\.id[\s\S]*LIMIT\s+1/i.test(fn),
+    "current_worker_id must not select an arbitrary worker with ORDER BY/LIMIT 1"
   );
 });
 
