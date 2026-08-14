@@ -911,7 +911,6 @@ test("buildEstimatePayload: canonical fields — lifecycle_status/scope_snapshot
     organizationId: "org-001",
     businessUnitId: "bu-on",
     opportunityId: "opp-1",
-    configurationVersionId: "cfg-v1",
     lifecycleStatus: "prepared",
     versionNo: 1,
     scopeSnapshot: { sqft: 1500 },
@@ -920,11 +919,13 @@ test("buildEstimatePayload: canonical fields — lifecycle_status/scope_snapshot
 
   assert.equal(payload.organization_id, "org-001");
   assert.equal(payload.opportunity_id, "opp-1");
-  assert.equal(payload.configuration_version_id, "cfg-v1");
   assert.equal(payload.lifecycle_status, "prepared");
   assert.equal(payload.version_no, 1);
   assert.deepEqual(payload.scope_snapshot, { sqft: 1500 });
   assert.equal(payload.created_by_app_user_id, "usr-1");
+
+  // configuration_version_id must never appear on estimate — it belongs on pricing_snapshot
+  assert.equal(Object.prototype.hasOwnProperty.call(payload, "configuration_version_id"), false);
 
   // Obsolete fields
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "quote_type"), false);

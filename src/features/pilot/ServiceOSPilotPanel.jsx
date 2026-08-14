@@ -186,7 +186,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     organizationId: orgId,
     businessUnitId,
     opportunityId: "__pipeline_resolved__",
-    configurationVersionId: configurationVersion.id,
     lifecycleStatus: "prepared",
     versionNo: 1,
     scopeSnapshot: quoteInput,
