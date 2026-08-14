@@ -1,4 +1,4 @@
-import { getSupabaseConfig } from "./supabaseConfig";
+import { getSupabaseConfig } from "./supabaseConfig.js";
 
 const SESSION_KEY = "huc:serviceos-auth:v1";
 

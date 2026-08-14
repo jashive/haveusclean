@@ -15,8 +15,7 @@ import {
   buildJobHandoffPayload,
 } from "../src/lib/serviceosRevenueUtils.js";
 import { withQuotePresentation } from "../src/lib/quoteEngine.js";
-import { calcResQuote } from "../src/lib/pricing.js";
-import { REGIONS } from "../src/lib/constants.js";
+import { calcResQuote } from "../src/core/pricing/sharedPricing.js";
 import {
   attachPipelineCreatedRecords,
   getPipelineCreatedRecords,
@@ -153,7 +152,7 @@ test("governed residential quote includes quoteContractVersion 2.0", () => {
     sqft: 2000,
     addons: [],
   };
-  const rawQuote = calcResQuote(quoteInput, REGIONS.ON);
+  const rawQuote = calcResQuote(quoteInput);
   const governedQuote = withQuotePresentation(rawQuote, { type: "residential", data: quoteInput });
   assert.equal(governedQuote.quoteContractVersion, "2.0");
 });
@@ -169,7 +168,7 @@ test("capturePricingSnapshot maps governed quote version to calculator_version",
     sqft: 2000,
     addons: [],
   };
-  const rawQuote = calcResQuote(quoteInput, REGIONS.ON);
+  const rawQuote = calcResQuote(quoteInput);
   const governedQuote = withQuotePresentation(rawQuote, { type: "residential", data: quoteInput });
   const snap = capturePricingSnapshot({
     quote: governedQuote,
@@ -247,7 +246,12 @@ test("M005 required JSONB fields default to canonical empty values instead of nu
     discountAmount: 0,
     currency: null,
   });
-  assert.deepEqual(pricingSnapshot.raw_calculation_snapshot, { total: 100, preTaxTotal: 90, taxAmount: 10 });
+  assert.deepEqual(pricingSnapshot.raw_calculation_snapshot, {
+    total: 100,
+    preTaxTotal: 90,
+    taxAmount: 10,
+    quoteContractVersion: "2.0",
+  });
   assert.deepEqual(pricingSnapshot.metadata, {});
 
   const quote = buildQuotePayload({
