@@ -15,6 +15,7 @@ const m008 = readFileSync(
   resolve(ROOT, "supabase/rehearsals/008_wave3_operations_rehearsal.sql"),
   "utf8"
 );
+const UUID_HEX_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ── M007: exact 10 Wave 3 table names ─────────────────────────────────────
 
@@ -364,6 +365,26 @@ test("M007: current_worker_id requires status='active'", () => {
   );
 });
 
+test("M007: current_worker_id fails closed on ambiguous active workers", () => {
+  const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.current_worker_id[\s\S]*?\$\$;/);
+  assert.ok(fnMatch, "current_worker_id function not found");
+  const fn = fnMatch[0];
+  const ambiguousBranch = fn.match(/IF v_count > 1 THEN[\s\S]*?END IF;/);
+  assert.ok(ambiguousBranch, "current_worker_id ambiguous-worker branch not found");
+  assert.ok(
+    !/ORDER BY\s+w\.id/i.test(ambiguousBranch[0]),
+    "current_worker_id ambiguous branch must not select deterministic ORDER BY worker id"
+  );
+  assert.ok(
+    !/LIMIT\s+1/i.test(ambiguousBranch[0]),
+    "current_worker_id ambiguous branch must not use LIMIT 1"
+  );
+  assert.ok(
+    /RETURN NULL|RAISE EXCEPTION/i.test(ambiguousBranch[0]),
+    "current_worker_id ambiguous branch must fail closed via NULL return or explicit exception"
+  );
+});
+
 test("M007: worker_has_active_assignment requires worker status='active'", () => {
   const fnMatch = m007.match(/CREATE OR REPLACE FUNCTION public\.worker_has_active_assignment[\s\S]*?\$\$;/);
   assert.ok(fnMatch, "worker_has_active_assignment function not found");
@@ -501,5 +522,78 @@ test("M008: remaining_artifact_count is computed (not hard-coded 0)", () => {
   assert.ok(
     m008.includes("COUNT(*) FROM public.operational_job"),
     "M008 remaining_artifact_count must compute actual counts"
+  );
+});
+
+test("M008: resolves published ON-2026-08-v1.0 residential_pricing scope", () => {
+  assert.ok(
+    m008.includes("FROM public.configuration_version cv"),
+    "M008 must resolve scope from configuration_version"
+  );
+  assert.ok(
+    m008.includes("cv.configuration_type = 'residential_pricing'"),
+    "M008 must filter configuration_type='residential_pricing'"
+  );
+  assert.ok(
+    m008.includes("cv.version = 'ON-2026-08-v1.0'"),
+    "M008 must filter version='ON-2026-08-v1.0'"
+  );
+  assert.ok(
+    m008.includes("cv.status = 'published'"),
+    "M008 must filter status='published'"
+  );
+});
+
+test("M008: does not insert configuration_version", () => {
+  assert.ok(
+    !/INSERT INTO public\.configuration_version\b/.test(m008),
+    "M008 must not insert synthetic configuration_version rows"
+  );
+});
+
+test("M008: does not insert synthetic organization/business_unit/jurisdiction", () => {
+  ["organization", "business_unit", "jurisdiction"].forEach((tableName) => {
+    assert.ok(
+      !new RegExp(`INSERT INTO public\\.${tableName}\\b`).test(m008),
+      `M008 must not insert synthetic ${tableName} rows`
+    );
+  });
+});
+
+test("M008: all hard-coded rehearsal UUID literals are valid hexadecimal UUIDs", () => {
+  const uuidLiterals = Array.from(m008.matchAll(/'([0-9a-z-]{36})'::uuid/gi), (m) => m[1]);
+  assert.ok(uuidLiterals.length > 0, "No hard-coded UUID literals found in M008");
+  uuidLiterals.forEach((id) => {
+    assert.ok(UUID_HEX_REGEX.test(id), `Invalid hexadecimal UUID literal in M008: ${id}`);
+  });
+});
+
+test("M008: does not reference synthetic app_user ids", () => {
+  assert.ok(
+    !m008.includes("19000000-0000-0000-0000-000000000001"),
+    "M008 must not reference synthetic app_user UUIDs"
+  );
+  assert.ok(
+    !/app_user_id/.test(m008),
+    "M008 rehearsal inserts must not include synthetic app_user references"
+  );
+});
+
+test("M008: worker insert uses contractor + active without app_user_id", () => {
+  const workerInsert = m008.match(/INSERT INTO public\.worker[\s\S]*?;/);
+  assert.ok(workerInsert, "M008 worker insert not found");
+  const insert = workerInsert[0];
+  assert.ok(insert.includes("worker_type"), "M008 worker insert must include worker_type");
+  assert.ok(insert.includes("'contractor'"), "M008 worker_type must be contractor");
+  assert.ok(insert.includes("'active'"), "M008 worker status must be active");
+  assert.ok(!insert.includes("app_user_id"), "M008 worker insert must not include app_user_id");
+});
+
+test("M008: pricing_snapshot references resolved configuration version scope", () => {
+  const psInsert = m008.match(/INSERT INTO public\.pricing_snapshot[\s\S]*?;/);
+  assert.ok(psInsert, "M008 pricing_snapshot insert not found");
+  assert.ok(
+    psInsert[0].includes("(SELECT configuration_version_id FROM pg_temp.m008_scope)"),
+    "M008 pricing_snapshot must use resolved configuration version id from m008_scope"
   );
 });

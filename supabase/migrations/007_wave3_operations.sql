@@ -35,16 +35,8 @@ BEGIN
   END IF;
 
   IF v_count > 1 THEN
-    -- Fail closed: multiple active workers is ambiguous; return deterministically
-    -- by lowest id. In practice org design should prevent this.
-    SELECT w.id INTO v_id
-    FROM   public.worker w
-    WHERE  w.organization_id = target_org
-      AND  w.app_user_id     = public.current_app_user_id()
-      AND  w.status          = 'active'
-    ORDER BY w.id
-    LIMIT 1;
-    RETURN v_id;
+    -- Fail closed: multiple active workers is ambiguous.
+    RETURN NULL;
   END IF;
 
   SELECT w.id INTO v_id

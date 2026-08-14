@@ -17,39 +17,53 @@ BEGIN;
 -- The marker is never committed. After ROLLBACK it must not exist in any table.
 
 -- ---------------------------------------------------------------------------
--- STEP 1: Synthetic Wave 1/2 prerequisite records
+-- STEP 1: Resolve authoritative rehearsal scope from governed published config
 --
--- In production these records already exist.  For rehearsal we construct
--- minimal canonical rows in a single transaction that will be fully rolled back.
--- No huc_* tables are referenced.
+-- Reuse the proven live HUC-ON scope from the published governed residential
+-- configuration. Do NOT synthesize organization/business_unit/jurisdiction/
+-- configuration_version authority rows in this rehearsal.
 -- ---------------------------------------------------------------------------
 
--- 1a. Organization
-INSERT INTO public.organization (id, name)
-VALUES ('a0000000-0000-0000-0000-000000000001'::uuid, 'Rehearsal Org M008');
+DO $$
+DECLARE
+  v_scope_count integer;
+BEGIN
+  SELECT COUNT(*) INTO v_scope_count
+  FROM public.configuration_version cv
+  WHERE cv.configuration_type = 'residential_pricing'
+    AND cv.version = 'ON-2026-08-v1.0'
+    AND cv.status = 'published';
 
--- 1b. Business unit
-INSERT INTO public.business_unit (id, organization_id, name)
-VALUES ('b0000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'Rehearsal BU M008');
+  IF v_scope_count <> 1 THEN
+    RAISE EXCEPTION 'M008 rehearsal scope resolution failed: expected exactly one published residential_pricing ON-2026-08-v1.0 row, found %', v_scope_count;
+  END IF;
 
--- 1c. Jurisdiction
-INSERT INTO public.jurisdiction (id, organization_id, name, province_code)
-VALUES ('c0000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'Ontario M008',
-        'ON');
+  CREATE TEMP TABLE pg_temp.m008_scope ON COMMIT DROP AS
+  SELECT
+    cv.id AS configuration_version_id,
+    cv.organization_id,
+    cv.business_unit_id,
+    cv.jurisdiction_id
+  FROM public.configuration_version cv
+  WHERE cv.configuration_type = 'residential_pricing'
+    AND cv.version = 'ON-2026-08-v1.0'
+    AND cv.status = 'published';
+END;
+$$;
 
--- 1d. Customer
+-- ---------------------------------------------------------------------------
+-- STEP 1A: Synthetic Wave 1/2 records below resolved authority scope
+-- ---------------------------------------------------------------------------
+
+-- 1a. Customer
 INSERT INTO public.customer (id, organization_id, business_unit_id, customer_type, display_name)
 VALUES ('d0000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
         'person',
         'Rehearsal Customer M008');
 
--- 1e. Contact (canonical: no organization_id/business_unit_id)
+-- 1b. Contact (canonical: no organization_id/business_unit_id)
 INSERT INTO public.contact (id, customer_id, contact_type, first_name, last_name)
 VALUES ('e0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
@@ -57,55 +71,44 @@ VALUES ('e0000000-0000-0000-0000-000000000001'::uuid,
         'Jane',
         'Rehearsal');
 
--- 1f. Service location (canonical: no organization_id/business_unit_id, uses address_line1)
+-- 1c. Service location (canonical: no organization_id/business_unit_id, uses address_line1)
 INSERT INTO public.service_location (id, customer_id, jurisdiction_id, address_line1, city)
 VALUES ('f0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
-        'c0000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT jurisdiction_id FROM pg_temp.m008_scope),
         '1 Rehearsal Street',
         'Toronto');
 
--- 1g. Service request
+-- 1d. Service request
 INSERT INTO public.service_request (id, organization_id, business_unit_id)
 VALUES ('11000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid);
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope));
 
--- 1h. Opportunity
+-- 1e. Opportunity
 INSERT INTO public.opportunity (id, organization_id, business_unit_id, service_request_id, stage)
 VALUES ('12000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
         '11000000-0000-0000-0000-000000000001'::uuid,
         'qualified');
 
--- 1i. Estimate (required lineage)
+-- 1f. Estimate (required lineage)
 INSERT INTO public.estimate (id, organization_id, business_unit_id, opportunity_id)
 VALUES ('0e000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
         '12000000-0000-0000-0000-000000000001'::uuid);
 
--- 1j. Quote
+-- 1g. Quote
 INSERT INTO public.quote (id, organization_id, business_unit_id, opportunity_id, estimate_id)
 VALUES ('13000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
         '12000000-0000-0000-0000-000000000001'::uuid,
         '0e000000-0000-0000-0000-000000000001'::uuid);
 
--- 1k. Configuration version (create rehearsal row to support pricing_snapshot lineage)
-INSERT INTO public.configuration_version (
-  id, organization_id, version_label, is_active
-)
-VALUES (
-  '14cf0000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'ON-2026-08-v1.0-rehearsal',
-  true
-);
-
--- 1l. Pricing snapshot (canonical M005/Wave 2 shape)
+-- 1h. Pricing snapshot (canonical M005/Wave 2 shape)
 INSERT INTO public.pricing_snapshot (
   id, organization_id, business_unit_id,
   opportunity_id, estimate_id,
@@ -117,116 +120,112 @@ INSERT INTO public.pricing_snapshot (
   configuration_snapshot,
   labor_economics,
   calculation_inputs, calculation_outputs, raw_calculation_snapshot,
-  frozen_at,
-  created_by_app_user_id
+  frozen_at
 )
 VALUES (
   '14000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '12000000-0000-0000-0000-000000000001'::uuid,
   '0e000000-0000-0000-0000-000000000001'::uuid,
-  '14cf0000-0000-0000-0000-000000000001'::uuid,
+  (SELECT configuration_version_id FROM pg_temp.m008_scope),
   'CAD',
   'HST', 0.13,
   395.00, 0.00, 51.35, 446.35,
   '2.0',
-  '{"version":"ON-2026-08-v1.0","tax":{"label":"HST"}}'::jsonb,
+  '{"version":"ON-2026-08-v1.0","tax":{"label":"HST"},"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   '{}'::jsonb,
   '{"sqft":1500,"dwelling_type":"apartment"}'::jsonb,
   '{"line_items":[{"key":"base_clean","amount":395.00}],"subtotal":395.00,"tax":51.35,"total":446.35}'::jsonb,
   '{"pre_tax_total":395.00,"tax_amount":51.35,"total":446.35}'::jsonb,
-  now(),
-  '19000000-0000-0000-0000-000000000001'::uuid
+  now()
 );
 
--- 1m. Quote version (canonical: lifecycle_status, version_no, estimate_id)
+-- 1i. Quote version (canonical: lifecycle_status, version_no, estimate_id)
 INSERT INTO public.quote_version (
   id, organization_id, business_unit_id,
   quote_id, estimate_id, pricing_snapshot_id,
-  version_no, lifecycle_status,
-  created_by_app_user_id
+  version_no, lifecycle_status
 )
 VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '13000000-0000-0000-0000-000000000001'::uuid,
   '0e000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   1,
-  'accepted',
-  '19000000-0000-0000-0000-000000000001'::uuid
+  'accepted'
 );
 
--- 1n. Quote response (required for conversion_record lineage)
+-- 1j. Quote response (required for conversion_record lineage)
 INSERT INTO public.quote_response (
   id, organization_id, business_unit_id,
   quote_id, quote_version_id,
   response_status
 )
 VALUES (
-  '0r000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  '0a000000-0000-0000-0000-000000000002'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '13000000-0000-0000-0000-000000000001'::uuid,
   '15000000-0000-0000-0000-000000000001'::uuid,
   'accepted'
 );
 
--- 1o. Conversion record (canonical lineage: service_request_id, estimate_id, quote_id, quote_response_id)
+-- 1k. Conversion record (canonical lineage: service_request_id, estimate_id, quote_id, quote_response_id)
 INSERT INTO public.conversion_record (
   id, organization_id, business_unit_id,
   service_request_id, opportunity_id, estimate_id,
   quote_id, quote_version_id, quote_response_id,
-  customer_id, contact_id, service_location_id,
-  created_by_app_user_id
+  customer_id, contact_id, service_location_id
 )
 VALUES (
   '16000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '11000000-0000-0000-0000-000000000001'::uuid,
   '12000000-0000-0000-0000-000000000001'::uuid,
   '0e000000-0000-0000-0000-000000000001'::uuid,
   '13000000-0000-0000-0000-000000000001'::uuid,
   '15000000-0000-0000-0000-000000000001'::uuid,
-  '0r000000-0000-0000-0000-000000000001'::uuid,
+  '0a000000-0000-0000-0000-000000000002'::uuid,
   'd0000000-0000-0000-0000-000000000001'::uuid,
   'e0000000-0000-0000-0000-000000000001'::uuid,
-  'f0000000-0000-0000-0000-000000000001'::uuid,
-  '19000000-0000-0000-0000-000000000001'::uuid
+  'f0000000-0000-0000-0000-000000000001'::uuid
 );
 
--- 1p. Job handoff (Wave 2 -> Wave 3 boundary)
+-- 1l. Job handoff (Wave 2 -> Wave 3 boundary)
 INSERT INTO public.job_handoff (
   id, organization_id, business_unit_id,
   conversion_record_id, quote_version_id, pricing_snapshot_id,
-  handoff_status, handoff_payload, metadata, handed_off_at,
-  created_by_app_user_id
+  handoff_status, handoff_payload, metadata, handed_off_at
 )
 VALUES (
   '17000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '16000000-0000-0000-0000-000000000001'::uuid,
   '15000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   'ready',
   '{"source":"pilot_ui","synthetic":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
-  '{"rehearsal":true}'::jsonb,
-  now(),
-  '19000000-0000-0000-0000-000000000001'::uuid
+  '{"rehearsal":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  now()
 );
 
--- 1q. Worker (required for assignment; status must be active)
-INSERT INTO public.worker (id, organization_id, business_unit_id, app_user_id, display_name, status)
+-- 1m. Worker (required for assignment; status must be active)
+INSERT INTO public.worker (
+  id, organization_id, business_unit_id,
+  worker_type, display_name, status, metadata
+)
 VALUES ('18000000-0000-0000-0000-000000000001'::uuid,
-        'a0000000-0000-0000-0000-000000000001'::uuid,
-        'b0000000-0000-0000-0000-000000000001'::uuid,
-        '19000000-0000-0000-0000-000000000001'::uuid,
+        (SELECT organization_id FROM pg_temp.m008_scope),
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
+        'contractor',
         'Worker M008',
-        'active');
+        'active',
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- ---------------------------------------------------------------------------
 -- STEP 2: WAVE 3 — operational_job creation
@@ -249,13 +248,14 @@ INSERT INTO public.operational_job (
   service_family,
   operational_status,
   service_scope_snapshot,
-  commercial_authority_snapshot
+  commercial_authority_snapshot,
+  metadata
 )
 VALUES (
   '20000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
-  'c0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
+  (SELECT jurisdiction_id FROM pg_temp.m008_scope),
   '17000000-0000-0000-0000-000000000001'::uuid,
   '16000000-0000-0000-0000-000000000001'::uuid,
   '15000000-0000-0000-0000-000000000001'::uuid,
@@ -265,8 +265,9 @@ VALUES (
   'f0000000-0000-0000-0000-000000000001'::uuid,
   'residential_cleaning',
   'ready_to_schedule',
-  '{"sqft":1500,"dwelling_type":"apartment","bedrooms":2,"bathrooms":2}'::jsonb,
-  '{"pre_tax_total":395.00,"tax_amount":51.35,"total":446.35,"currency":"CA$","quote_version_id":"15000000-0000-0000-0000-000000000001","pricing_snapshot_id":"14000000-0000-0000-0000-000000000001"}'::jsonb
+  '{"sqft":1500,"dwelling_type":"apartment","bedrooms":2,"bathrooms":2,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"pre_tax_total":395.00,"tax_amount":51.35,"total":446.35,"currency":"CA$","quote_version_id":"15000000-0000-0000-0000-000000000001","pricing_snapshot_id":"14000000-0000-0000-0000-000000000001","marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- ---------------------------------------------------------------------------
@@ -277,18 +278,19 @@ INSERT INTO public.schedule_window (
   id, organization_id, business_unit_id, jurisdiction_id,
   operational_job_id,
   scheduled_start, scheduled_end,
-  timezone, status
+  timezone, status, metadata
 )
 VALUES (
   '21000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
-  'c0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
+  (SELECT jurisdiction_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   now() + interval '1 day',
   now() + interval '1 day' + interval '4 hours',
   'America/Toronto',
-  'confirmed'
+  'confirmed',
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- Transition operational_job to scheduled
@@ -304,18 +306,19 @@ INSERT INTO public.worker_assignment (
   id, organization_id, business_unit_id,
   operational_job_id, schedule_window_id,
   worker_id,
-  assignment_role, assignment_status, assigned_at
+  assignment_role, assignment_status, assigned_at, metadata
 )
 VALUES (
   '22000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '21000000-0000-0000-0000-000000000001'::uuid,
   '18000000-0000-0000-0000-000000000001'::uuid,
   'service_worker',
   'acknowledged',
-  now()
+  now(),
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- ---------------------------------------------------------------------------
@@ -329,20 +332,22 @@ INSERT INTO public.work_order (
   scope_snapshot,
   checklist_template_snapshot,
   pricing_reference_snapshot,
-  published_at
+  published_at,
+  metadata
 )
 VALUES (
   '23000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
-  'c0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
+  (SELECT jurisdiction_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '21000000-0000-0000-0000-000000000001'::uuid,
   'published',
-  '{"sqft":1500}'::jsonb,
+  '{"sqft":1500,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   '{"items":["dust","vacuum","mop"]}'::jsonb,
-  '{"pre_tax_total":395.00,"total":446.35,"currency":"CA$","reference_only":true}'::jsonb,
-  now()
+  '{"pre_tax_total":395.00,"total":446.35,"currency":"CA$","reference_only":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  now(),
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- Dispatch the job
@@ -372,8 +377,8 @@ INSERT INTO public.work_order_event (
 )
 VALUES
   ('24000000-0000-0000-0000-000000000001'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    '22000000-0000-0000-0000-000000000001'::uuid,
@@ -383,15 +388,15 @@ VALUES
    '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb),
 
   ('24000000-0000-0000-0000-000000000002'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    '22000000-0000-0000-0000-000000000001'::uuid,
    'work_started',
    now(),
    '18000000-0000-0000-0000-000000000001'::uuid,
-   '{}'::jsonb);
+   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- ---------------------------------------------------------------------------
 -- STEP 7: completion_evidence
@@ -405,26 +410,26 @@ INSERT INTO public.completion_evidence (
 )
 VALUES
   ('25000000-0000-0000-0000-000000000001'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    '22000000-0000-0000-0000-000000000001'::uuid,
    'photo_before',
    now(),
    '18000000-0000-0000-0000-000000000001'::uuid,
-   '{"storage_reference":"rehearsal/before.jpg"}'::jsonb),
+   '{"storage_reference":"rehearsal/before.jpg","marker":"wave3_m008_rehearsal_v1"}'::jsonb),
 
   ('25000000-0000-0000-0000-000000000002'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    '22000000-0000-0000-0000-000000000001'::uuid,
    'photo_after',
    now(),
    '18000000-0000-0000-0000-000000000001'::uuid,
-   '{"storage_reference":"rehearsal/after.jpg"}'::jsonb);
+   '{"storage_reference":"rehearsal/after.jpg","marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- ---------------------------------------------------------------------------
 -- STEP 8: service_checklist_result
@@ -435,34 +440,38 @@ INSERT INTO public.service_checklist_result (
   operational_job_id, work_order_id,
   checklist_item_key, checklist_item_label,
   result_status,
+  result_payload,
   completed_by_worker_id, completed_at
 )
 VALUES
   ('26000000-0000-0000-0000-000000000001'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    'dust_surfaces', 'Dust all surfaces',
    'pass',
+   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
    '18000000-0000-0000-0000-000000000001'::uuid, now()),
 
   ('26000000-0000-0000-0000-000000000002'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    'vacuum_floors', 'Vacuum all floors',
    'pass',
+   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
    '18000000-0000-0000-0000-000000000001'::uuid, now()),
 
   ('26000000-0000-0000-0000-000000000003'::uuid,
-   'a0000000-0000-0000-0000-000000000001'::uuid,
-   'b0000000-0000-0000-0000-000000000001'::uuid,
+   (SELECT organization_id FROM pg_temp.m008_scope),
+   (SELECT business_unit_id FROM pg_temp.m008_scope),
    '20000000-0000-0000-0000-000000000001'::uuid,
    '23000000-0000-0000-0000-000000000001'::uuid,
    'mop_floors', 'Mop hard floors',
    'pass',
+   '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
    '18000000-0000-0000-0000-000000000001'::uuid, now());
 
 -- ---------------------------------------------------------------------------
@@ -476,15 +485,15 @@ INSERT INTO public.work_order_event (
 )
 VALUES (
   '27000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '23000000-0000-0000-0000-000000000001'::uuid,
   '22000000-0000-0000-0000-000000000001'::uuid,
   'work_completed',
   now(),
   '18000000-0000-0000-0000-000000000001'::uuid,
-  '{}'::jsonb
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 UPDATE public.work_order
@@ -513,14 +522,14 @@ INSERT INTO public.qa_inspection (
 )
 VALUES (
   '28000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '23000000-0000-0000-0000-000000000001'::uuid,
   'passed',
   'standard',
   98.0,
-  '{"notes":"All checklist items passed. No issues found."}'::jsonb,
+  '{"notes":"All checklist items passed. No issues found.","marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   now()
 );
 
@@ -536,13 +545,13 @@ INSERT INTO public.work_order_event (
 )
 VALUES (
   '28000000-0000-0000-0000-000000000002'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '23000000-0000-0000-0000-000000000001'::uuid,
   'qa_passed',
   now(),
-  '{}'::jsonb
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- ---------------------------------------------------------------------------
@@ -572,13 +581,13 @@ INSERT INTO public.work_order_event (
 )
 VALUES (
   '29000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '23000000-0000-0000-0000-000000000001'::uuid,
   'closed',
   now(),
-  '{}'::jsonb
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- ---------------------------------------------------------------------------
@@ -591,12 +600,12 @@ INSERT INTO public.operational_handoff (
   operational_job_id, work_order_id,
   qa_inspection_id,
   pricing_snapshot_id, quote_version_id,
-  handoff_status, handoff_payload, handed_off_at
+  handoff_status, handoff_payload, metadata, handed_off_at
 )
 VALUES (
   '30000000-0000-0000-0000-000000000001'::uuid,
-  'a0000000-0000-0000-0000-000000000001'::uuid,
-  'b0000000-0000-0000-0000-000000000001'::uuid,
+  (SELECT organization_id FROM pg_temp.m008_scope),
+  (SELECT business_unit_id FROM pg_temp.m008_scope),
   '20000000-0000-0000-0000-000000000001'::uuid,
   '23000000-0000-0000-0000-000000000001'::uuid,
   '28000000-0000-0000-0000-000000000001'::uuid,
@@ -604,6 +613,7 @@ VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
   'ready',
   '{"source":"wave3_rehearsal","marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   now()
 );
 
@@ -681,12 +691,12 @@ BEGIN
     RAISE EXCEPTION 'M008 rehearsal assertion FAIL: % checklist pass rows (expected 3)', v_checklist_pass;
   END IF;
 
-  -- pricing_snapshot configuration_version_id is populated (governed lineage check)
+  -- pricing_snapshot configuration_version_id must match resolved governed scope
   SELECT configuration_version_id INTO v_ps_cfg_version_id
   FROM   public.pricing_snapshot
   WHERE  id = '14000000-0000-0000-0000-000000000001'::uuid;
-  IF v_ps_cfg_version_id IS NULL THEN
-    RAISE EXCEPTION 'M008 rehearsal assertion FAIL: pricing_snapshot.configuration_version_id is null';
+  IF v_ps_cfg_version_id IS DISTINCT FROM (SELECT configuration_version_id FROM pg_temp.m008_scope) THEN
+    RAISE EXCEPTION 'M008 rehearsal assertion FAIL: pricing_snapshot.configuration_version_id does not match resolved published configuration';
   END IF;
 
   -- operational_handoff lineage matches operational_job commercial authority
@@ -720,70 +730,78 @@ ROLLBACK;
 -- Execute this statement separately after running the ROLLBACK above.
 -- =============================================================================
 
+WITH rehearsal_artifacts AS (
+  SELECT
+    (
+      -- Wave 1/2 synthetic records created by this rehearsal
+      (SELECT COUNT(*) FROM public.customer
+       WHERE id = 'd0000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.contact
+         WHERE id = 'e0000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.service_location
+         WHERE id = 'f0000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.service_request
+         WHERE id = '11000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.opportunity
+         WHERE id = '12000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.estimate
+         WHERE id = '0e000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.quote
+         WHERE id = '13000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.pricing_snapshot
+         WHERE id = '14000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.quote_version
+         WHERE id = '15000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.quote_response
+         WHERE id = '0a000000-0000-0000-0000-000000000002'::uuid)
+      + (SELECT COUNT(*) FROM public.conversion_record
+         WHERE id = '16000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.job_handoff
+         WHERE id = '17000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.worker
+         WHERE id = '18000000-0000-0000-0000-000000000001'::uuid)
+
+      -- Wave 3 synthetic records created by this rehearsal
+      + (SELECT COUNT(*) FROM public.operational_job
+         WHERE id = '20000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.schedule_window
+         WHERE id = '21000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.worker_assignment
+         WHERE id = '22000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.work_order
+         WHERE id = '23000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.work_order_event
+         WHERE id IN (
+           '24000000-0000-0000-0000-000000000001'::uuid,
+           '24000000-0000-0000-0000-000000000002'::uuid,
+           '27000000-0000-0000-0000-000000000001'::uuid,
+           '28000000-0000-0000-0000-000000000002'::uuid,
+           '29000000-0000-0000-0000-000000000001'::uuid
+         ))
+      + (SELECT COUNT(*) FROM public.completion_evidence
+         WHERE id IN (
+           '25000000-0000-0000-0000-000000000001'::uuid,
+           '25000000-0000-0000-0000-000000000002'::uuid
+         ))
+      + (SELECT COUNT(*) FROM public.service_checklist_result
+         WHERE id IN (
+           '26000000-0000-0000-0000-000000000001'::uuid,
+           '26000000-0000-0000-0000-000000000002'::uuid,
+           '26000000-0000-0000-0000-000000000003'::uuid
+         ))
+      + (SELECT COUNT(*) FROM public.qa_inspection
+         WHERE id = '28000000-0000-0000-0000-000000000001'::uuid)
+      + (SELECT COUNT(*) FROM public.corrective_action
+         WHERE resolution_payload::text LIKE '%wave3_m008_rehearsal_v1%')
+      + (SELECT COUNT(*) FROM public.operational_handoff
+         WHERE id = '30000000-0000-0000-0000-000000000001'::uuid)
+    ) AS remaining_artifact_count
+)
 SELECT
   CASE
-    WHEN (
-      -- Wave 2: job_handoff
-      (SELECT COUNT(*) FROM public.job_handoff
-       WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%'
-          OR metadata::text         LIKE '%wave3_m008_rehearsal_v1%') = 0
-
-      -- operational_job
-      AND (SELECT COUNT(*) FROM public.operational_job
-       WHERE commercial_authority_snapshot::text LIKE '%wave3_m008_rehearsal_v1%'
-          OR metadata::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-
-      -- work_order_event
-      AND (SELECT COUNT(*) FROM public.work_order_event
-           WHERE event_payload::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-
-      -- operational_handoff
-      AND (SELECT COUNT(*) FROM public.operational_handoff
-           WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-
-      -- Schedule / assignment / work_order / evidence / checklist / qa / corrective
-      AND (SELECT COUNT(*) FROM public.schedule_window
-           WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.worker_assignment
-           WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.work_order
-           WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.completion_evidence
-           WHERE evidence_payload::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.service_checklist_result
-           WHERE result_payload::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.qa_inspection
-           WHERE findings::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-      AND (SELECT COUNT(*) FROM public.corrective_action
-           WHERE resolution_payload::text LIKE '%wave3_m008_rehearsal_v1%') = 0
-    )
+    WHEN remaining_artifact_count = 0
     THEN 'M008_REHEARSAL_PASS_ROLLED_BACK'
     ELSE 'M008_REHEARSAL_FAIL_ARTIFACTS_REMAIN'
   END AS result,
-  (
-    -- computed actual count of all rehearsal artifacts across every Wave 2 + Wave 3 table
-    (SELECT COUNT(*) FROM public.job_handoff
-     WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%'
-        OR metadata::text        LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.operational_job
-     WHERE commercial_authority_snapshot::text LIKE '%wave3_m008_rehearsal_v1%'
-        OR metadata::text                      LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.work_order_event
-       WHERE event_payload::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.operational_handoff
-       WHERE handoff_payload::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.schedule_window
-       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.worker_assignment
-       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.work_order
-       WHERE metadata::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.completion_evidence
-       WHERE evidence_payload::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.service_checklist_result
-       WHERE result_payload::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.qa_inspection
-       WHERE findings::text LIKE '%wave3_m008_rehearsal_v1%')
-    + (SELECT COUNT(*) FROM public.corrective_action
-       WHERE resolution_payload::text LIKE '%wave3_m008_rehearsal_v1%')
-  ) AS remaining_artifact_count;
+  remaining_artifact_count
+FROM rehearsal_artifacts;
