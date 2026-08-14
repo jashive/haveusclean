@@ -581,6 +581,147 @@ export async function updateOperationalHandoffStatus(
   return updateById("operational_handoff", id, patch, accessToken);
 }
 
+// ── Legacy workforce bootstrap (Preview-only, read + explicit promote) ────────
+//
+// fetchLegacyWorkerCandidates: GET-only read from huc_partners.
+//   Returns safe identification fields only — PIN and other secrets are never
+//   included.  Candidates already promoted to canonical worker are excluded.
+//
+// promoteWorkerToCanonical: Creates ONE canonical worker from a selected legacy
+//   candidate.  Requires an explicit caller-driven action — never auto-invoked.
+//   Is idempotent: returns the existing worker if this source was already
+//   promoted (matched by source lineage metadata or email).
+//   Does NOT create operational_job, schedule_window, work_order, or any other
+//   Wave 3 operational records.
+//   Does NOT modify the selected job_handoff.
+//   Does NOT modify or delete the huc_partners row.
+
+export async function fetchLegacyWorkerCandidates(accessToken) {
+  assertEnabled();
+
+  // Read safe identification fields from legacy huc_partners.
+  // huc_partners stores profile data in a `data` JSONB column.
+  const rows = await fetchMany(
+    "huc_partners",
+    "select=id,data&order=id.asc&limit=50",
+    accessToken
+  );
+  if (!Array.isArray(rows)) return [];
+
+  // Extract already-promoted source_record_ids so they can be filtered out.
+  const promotedRows = await fetchMany(
+    "worker",
+    "select=metadata&metadata->>bootstrap_reason=eq.wave3_preview_pilot&limit=200",
+    accessToken
+  );
+  const promotedSourceIds = new Set(
+    Array.isArray(promotedRows)
+      ? promotedRows
+          .map((r) => r?.metadata?.source_record_id)
+          .filter(Boolean)
+          .map(String)
+      : []
+  );
+
+  return rows
+    .map((row) => {
+      if (!row?.id) return null;
+      const d = row.data ?? {};
+      // Do NOT include pin or other secret fields
+      return {
+        source_id: String(row.id),
+        name: d.name ?? null,
+        email: d.email ?? null,
+        phone: d.phone ?? null,
+        partner_type: d.partner_type ?? d.type ?? null,
+      };
+    })
+    .filter(Boolean)
+    .filter((c) => !promotedSourceIds.has(c.source_id));
+}
+
+async function _findExistingCanonicalWorkerForSource(sourceId, email, accessToken) {
+  // Check by source lineage first (metadata.source_record_id)
+  if (sourceId) {
+    const byLineage = await fetchMany(
+      "worker",
+      `select=id,organization_id,business_unit_id,worker_type,display_name,email,status,metadata&metadata->>source_record_id=eq.${encodeURIComponent(sourceId)}&limit=1`,
+      accessToken
+    );
+    if (Array.isArray(byLineage) && byLineage.length > 0 && byLineage[0]?.id) {
+      return byLineage[0];
+    }
+  }
+  // Check by email as additional dedup guard
+  if (email) {
+    const byEmail = await fetchMany(
+      "worker",
+      `select=id,organization_id,business_unit_id,worker_type,display_name,email,status,metadata&email=eq.${encodeURIComponent(email)}&limit=1`,
+      accessToken
+    );
+    if (Array.isArray(byEmail) && byEmail.length > 0 && byEmail[0]?.id) {
+      return byEmail[0];
+    }
+  }
+  return null;
+}
+
+// @param {object} candidate   Safe candidate from fetchLegacyWorkerCandidates
+// @param {object} handoff     Canonical job_handoff supplying org + BU scope
+// @param {string} accessToken
+// @param {string|null} appUserId
+// @returns {{ worker: object, wasExisting: boolean }}
+export async function promoteWorkerToCanonical(candidate, handoff, accessToken, appUserId) {
+  assertEnabled();
+
+  if (!candidate?.source_id) {
+    throw new Error("promoteWorkerToCanonical: candidate.source_id is required");
+  }
+  if (!handoff?.organization_id) {
+    throw new Error("promoteWorkerToCanonical: handoff.organization_id is required");
+  }
+  if (!handoff?.business_unit_id) {
+    throw new Error("promoteWorkerToCanonical: handoff.business_unit_id is required");
+  }
+  if (!accessToken) {
+    throw new Error("promoteWorkerToCanonical: accessToken is required");
+  }
+
+  // Idempotency: return existing canonical worker if this legacy record was
+  // already promoted (matched via source lineage or email).
+  const existing = await _findExistingCanonicalWorkerForSource(
+    candidate.source_id,
+    candidate.email ?? null,
+    accessToken
+  );
+  if (existing) {
+    return { worker: existing, wasExisting: true };
+  }
+
+  // Build canonical worker payload from real source fields only.
+  // worker_type defaults conservatively to contractor per spec.
+  const workerPayload = {
+    organization_id: handoff.organization_id,
+    business_unit_id: handoff.business_unit_id,
+    worker_type: "contractor",
+    display_name: candidate.name ?? "Unknown",
+    status: "active",
+    metadata: {
+      source_system: "huc_partners",
+      source_record_id: candidate.source_id,
+      bootstrap_reason: "wave3_preview_pilot",
+      migration_mode: "controlled_preview_bootstrap",
+      ...(candidate.phone ? { source_phone: candidate.phone } : {}),
+      ...(appUserId ? { promoted_by_app_user_id: appUserId } : {}),
+      promoted_at: new Date().toISOString(),
+    },
+  };
+  if (candidate.email) workerPayload.email = candidate.email;
+
+  const newWorker = await insertOne("worker", workerPayload, accessToken);
+  return { worker: newWorker, wasExisting: false };
+}
+
 // ── Pilot cleanup ─────────────────────────────────────────────────────────────
 //
 // Deletes ONLY rows created by the current pilot session.

@@ -34,6 +34,8 @@ import {
   cleanupOperationsPilotSession,
   getOperationsCreatedRecords,
   attachOperationsCreatedRecords,
+  fetchLegacyWorkerCandidates,
+  promoteWorkerToCanonical,
 } from "../../lib/serviceosOperationsClient.js";
 
 // ── Feature flags ─────────────────────────────────────────────────────────────
@@ -538,6 +540,14 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
   const [error, setError] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
 
+  // ── Legacy workforce bootstrap state ────────────────────────────────────────
+  const [loadingCandidates, setLoadingCandidates] = useState(false);
+  const [legacyCandidates, setLegacyCandidates] = useState([]);
+  const [selectedCandidateSourceId, setSelectedCandidateSourceId] = useState("");
+  const [promotingWorker, setPromotingWorker] = useState(false);
+  const [promotionResult, setPromotionResult] = useState(null);
+  const [candidateNotice, setCandidateNotice] = useState("");
+
   const accessToken = session?.access_token ?? null;
   const appUserId = revenueContext?.appUserId ?? null;
 
@@ -678,6 +688,93 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
     }
   }, [cleaning, createdIds, accessToken]);
 
+  // ── Legacy workforce bootstrap handlers ─────────────────────────────────────
+
+  const handleLoadLegacyCandidates = useCallback(async () => {
+    if (!accessToken || loadingCandidates || running) return;
+    setLoadingCandidates(true);
+    setCandidateNotice("");
+    setPromotionResult(null);
+    try {
+      const candidates = await fetchLegacyWorkerCandidates(accessToken);
+      setLegacyCandidates(candidates);
+      if (candidates.length === 0) {
+        setSelectedCandidateSourceId("");
+        setCandidateNotice("No legacy worker candidates found (or all already promoted).");
+        return;
+      }
+      const nextId =
+        candidates.find((c) => c?.source_id === selectedCandidateSourceId)?.source_id ??
+        candidates[0]?.source_id ??
+        "";
+      setSelectedCandidateSourceId(nextId);
+    } catch (err) {
+      setCandidateNotice(err?.message ?? "Failed to load legacy candidates.");
+    } finally {
+      setLoadingCandidates(false);
+    }
+  }, [accessToken, loadingCandidates, running, selectedCandidateSourceId]);
+
+  const handlePromoteWorker = useCallback(async () => {
+    if (promotingWorker || running || !accessToken) return;
+    const candidate = legacyCandidates.find((c) => c?.source_id === selectedCandidateSourceId);
+    if (!candidate) return;
+
+    // Resolve canonical handoff for org/BU scope
+    let handoff = selectedHandoff;
+    const typedHandoffId = jobHandoffId.trim();
+    if (!handoff && typedHandoffId) {
+      handoff = await fetchJobHandoffById(typedHandoffId, accessToken);
+    }
+    if (!handoff) {
+      setCandidateNotice("Select or enter a canonical job_handoff to provide organization/BU scope.");
+      return;
+    }
+
+    setPromotingWorker(true);
+    setCandidateNotice("");
+    setPromotionResult(null);
+    try {
+      const result = await promoteWorkerToCanonical(candidate, handoff, accessToken, appUserId);
+      setPromotionResult(result);
+      // Auto-place canonical worker UUID into worker_id field
+      setWorkerId(result.worker.id);
+      setSelectedActiveWorkerId(result.worker.id);
+      // Refresh active workers list
+      const refreshed = await fetchActiveWorkers(accessToken);
+      const compatible = refreshed.filter((w) =>
+        isWorkerScopeCompatibleWithHandoff(w, handoff)
+      );
+      setActiveWorkers(compatible);
+      // Remove the promoted candidate from the candidates list
+      setLegacyCandidates((prev) => prev.filter((c) => c.source_id !== candidate.source_id));
+      setSelectedCandidateSourceId("");
+    } catch (err) {
+      setCandidateNotice(err?.message ?? "Worker promotion failed.");
+    } finally {
+      setPromotingWorker(false);
+    }
+  }, [
+    promotingWorker,
+    running,
+    accessToken,
+    legacyCandidates,
+    selectedCandidateSourceId,
+    selectedHandoff,
+    jobHandoffId,
+    appUserId,
+  ]);
+
+  const formatCandidateOptionLabel = (c) => {
+    const parts = [
+      `id:${c.source_id}`,
+      c.name ?? "no name",
+      c.email ? `email:${c.email}` : null,
+      c.partner_type ? `type:${c.partner_type}` : null,
+    ].filter(Boolean);
+    return parts.join(" · ");
+  };
+
   const formatHandoffOptionLabel = (handoff) => {
     const marker = handoff?.metadata?.marker || handoff?.metadata?.source || "n/a";
     const date = handoff?.handed_off_at ?? handoff?.created_at ?? "n/a";
@@ -777,6 +874,84 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
         placeholder="Preview worker UUID"
         disabled={running}
       />
+
+      {/* ── Legacy Workforce Bootstrap ────────────────────────────────────── */}
+      <hr style={styles.divider} />
+      <div style={{ ...styles.step, color: "#7dd3fc", fontWeight: 600, marginBottom: "0.4rem" }}>
+        Legacy Workforce Bootstrap <span style={{ ...styles.badge, background: "#065f46" }}>PREVIEW ONLY</span>
+      </div>
+
+      <button
+        style={{ ...styles.btnSmall, ...(loadingCandidates || running || !accessToken ? styles.btnDisabled : {}) }}
+        onClick={handleLoadLegacyCandidates}
+        disabled={loadingCandidates || running || !accessToken}
+      >
+        {loadingCandidates ? "Loading Legacy Worker Candidates…" : "Load Legacy Worker Candidates"}
+      </button>
+      <label style={styles.label}>legacy huc_partners candidate (read-only source)</label>
+      <select
+        style={styles.select}
+        value={selectedCandidateSourceId}
+        onChange={(e) => {
+          setSelectedCandidateSourceId(e.target.value);
+          setPromotionResult(null);
+          setCandidateNotice("");
+        }}
+        disabled={running || loadingCandidates || legacyCandidates.length === 0}
+      >
+        <option value="">
+          {legacyCandidates.length > 0
+            ? "Select a legacy candidate"
+            : "No legacy candidates loaded"}
+        </option>
+        {legacyCandidates.map((c) => (
+          <option key={c.source_id} value={c.source_id}>
+            {formatCandidateOptionLabel(c)}
+          </option>
+        ))}
+      </select>
+      {candidateNotice && <div style={styles.helper}>{candidateNotice}</div>}
+
+      {promotionResult && (
+        <div style={{ ...styles.stepDone, margin: "0.3rem 0" }}>
+          ✓ Canonical worker {promotionResult.wasExisting ? "already existed" : "created"}:{" "}
+          <span style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>
+            {promotionResult.worker?.id}
+          </span>
+        </div>
+      )}
+
+      <button
+        style={{
+          ...styles.btnSmall,
+          background: "#064e3b",
+          color: "#6ee7b7",
+          border: "1px solid #065f46",
+          ...(promotingWorker || running || !accessToken || !selectedCandidateSourceId || (!selectedHandoff && !jobHandoffId.trim())
+            ? styles.btnDisabled
+            : {}),
+        }}
+        onClick={handlePromoteWorker}
+        disabled={
+          promotingWorker ||
+          running ||
+          !accessToken ||
+          !selectedCandidateSourceId ||
+          (!selectedHandoff && !jobHandoffId.trim())
+        }
+        title={
+          !accessToken
+            ? "Requires authenticated session"
+            : !selectedCandidateSourceId
+            ? "Select a legacy candidate first"
+            : !selectedHandoff && !jobHandoffId.trim()
+            ? "Select or enter a job_handoff for org/BU scope"
+            : "Promote selected legacy record to canonical worker"
+        }
+      >
+        {promotingWorker ? "Promoting…" : "Promote Selected Worker to Canonical"}
+      </button>
+      {/* ── End Legacy Workforce Bootstrap ───────────────────────────────── */}
 
       {log.length > 0 && (
         <>
