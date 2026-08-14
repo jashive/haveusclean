@@ -541,6 +541,10 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
   const [error, setError] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
   const [retainedEvidence, setRetainedEvidence] = useState(null);
+  const [verifyJson, setVerifyJson] = useState("");
+  const [verifyResults, setVerifyResults] = useState(null);
+  const [verifying, setVerifying] = useState(false);
+  const [verifyJsonError, setVerifyJsonError] = useState(null);
 
   // ── Legacy workforce bootstrap state ────────────────────────────────────────
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -704,6 +708,48 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
       setCleaning(false);
     }
   }, [cleaning, createdIds, accessToken]);
+
+  const handleVerify = useCallback(async () => {
+    if (verifying || !accessToken) return;
+    setVerifyJsonError(null);
+    setVerifyResults(null);
+
+    // Resolve the ID map: prefer current createdIds, fall back to manual JSON
+    let idsToVerify;
+    if (createdIds && Object.keys(createdIds).length > 0) {
+      idsToVerify = Object.fromEntries(
+        Object.entries(createdIds).map(([k, v]) => [k, v?.id ?? v])
+      );
+    } else {
+      // Parse manually supplied JSON
+      if (!verifyJson.trim()) {
+        setVerifyJsonError("No pilot IDs available — paste verification JSON or run the pilot first.");
+        return;
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(verifyJson.trim());
+      } catch {
+        setVerifyJsonError("Malformed JSON — fix the input before verifying. No network requests were made.");
+        return;
+      }
+      if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+        setVerifyJsonError("JSON must be a flat object of label → UUID. No network requests were made.");
+        return;
+      }
+      idsToVerify = parsed;
+    }
+
+    setVerifying(true);
+    try {
+      const results = await verifyPilotSessionState(idsToVerify, accessToken);
+      setVerifyResults(results);
+    } catch (err) {
+      setVerifyJsonError(err?.message ?? "Verification failed");
+    } finally {
+      setVerifying(false);
+    }
+  }, [verifying, accessToken, createdIds, verifyJson]);
 
   // ── Legacy workforce bootstrap handlers ─────────────────────────────────────
 
@@ -1082,6 +1128,109 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
       {!OPERATIONS_ENABLED && (
         <div style={{ ...styles.step, marginTop: 6, color: "#FF4757" }}>
           VITE_SERVICEOS_OPERATIONS_ENABLED is not true — all calls will fail.
+        </div>
+      )}
+
+      {/* ── Preview-only: Read-only recovery verifier ───────────────────── */}
+      {OPERATIONS_PILOT_UI_ENABLED && (
+        <div style={{ borderTop: "1px solid #374151", marginTop: 10, paddingTop: 10 }}>
+          <div style={{ fontWeight: 600, fontSize: 12, marginBottom: 6, color: "#93c5fd" }}>
+            Verify Current Pilot Records{" "}
+            <span style={{ ...styles.badge, background: "#1e3a5f" }}>PREVIEW ONLY</span>
+          </div>
+          <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6 }}>
+            Reads exact pilot record IDs. No writes. No mutations.
+          </div>
+
+          {/* Manual recovery textarea — only shown when no createdIds in memory */}
+          {(!createdIds || Object.keys(createdIds).length === 0) && (
+            <div style={{ marginBottom: 6 }}>
+              <label style={{ fontSize: 11, color: "#d1d5db", display: "block", marginBottom: 2 }}>
+                Pilot verification IDs (read-only verification only)
+              </label>
+              <textarea
+                value={verifyJson}
+                onChange={(e) => {
+                  setVerifyJson(e.target.value);
+                  setVerifyJsonError(null);
+                }}
+                placeholder={'{\n  "checklistResult": "uuid-here",\n  ...\n}'}
+                rows={5}
+                style={{
+                  width: "100%",
+                  background: "#111827",
+                  color: "#f9fafb",
+                  border: "1px solid #374151",
+                  borderRadius: 4,
+                  padding: "4px 6px",
+                  fontSize: 11,
+                  fontFamily: "monospace",
+                  boxSizing: "border-box",
+                  resize: "vertical",
+                }}
+              />
+            </div>
+          )}
+
+          {verifyJsonError && (
+            <div style={{ color: "#FF4757", fontSize: 11, marginBottom: 6 }}>
+              {verifyJsonError}
+            </div>
+          )}
+
+          <button
+            style={{
+              ...styles.btn,
+              background: "#1e40af",
+              ...(!accessToken || verifying ? styles.btnDisabled : {}),
+            }}
+            onClick={handleVerify}
+            disabled={!accessToken || verifying}
+          >
+            {verifying ? "Verifying…" : "Verify Current Pilot Records"}
+          </button>
+
+          {verifyResults && (
+            <div style={{ marginTop: 8 }}>
+              {(() => {
+                const present = verifyResults.filter((r) => r.status === "present").length;
+                const absent = verifyResults.filter((r) => r.status === "absent").length;
+                const errCount = verifyResults.filter((r) => r.status === "error").length;
+                const unsupported = verifyResults.filter((r) => r.status === "unsupported").length;
+                return (
+                  <div style={{ fontSize: 11, color: "#9ca3af", marginBottom: 6 }}>
+                    present: {present} · absent: {absent} · error: {errCount}
+                    {unsupported > 0 ? ` · unsupported: ${unsupported}` : ""}
+                  </div>
+                );
+              })()}
+              {verifyResults.map((r, i) => (
+                <div
+                  key={i}
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 0",
+                    color:
+                      r.status === "present"
+                        ? "#34d399"
+                        : r.status === "absent"
+                        ? "#fbbf24"
+                        : r.status === "unsupported"
+                        ? "#9ca3af"
+                        : "#FF4757",
+                  }}
+                >
+                  <span style={{ fontWeight: 600 }}>{r.label}</span>
+                  {r.table ? ` · ${r.table}` : ""}
+                  {" · "}
+                  <span style={{ fontFamily: "monospace" }}>{r.id}</span>
+                  {" · "}
+                  <span>{r.status}</span>
+                  {r.error ? ` (${r.error})` : ""}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>

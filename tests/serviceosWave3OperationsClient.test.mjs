@@ -571,3 +571,186 @@ test("cleanup order: work_order appears before schedule_window in source", () =>
     "work_order must be cleaned up before schedule_window"
   );
 });
+
+// ── verifyPilotSessionState: TABLE_MAP and safety ─────────────────────────────
+
+test("verifyPilotSessionState TABLE_MAP maps checklistResult to service_checklist_result", () => {
+  // The TABLE_MAP must contain the canonical pilot key 'checklistResult'
+  assert.ok(
+    clientSrc.includes('"checklistResult"') && clientSrc.includes('"service_checklist_result"'),
+    "checklistResult key must be present and mapped to service_checklist_result"
+  );
+  // Confirm the mapping is on the same line or adjacent
+  const tableMapStart = clientSrc.indexOf("const TABLE_MAP");
+  const tableMapEnd = clientSrc.indexOf("};", tableMapStart);
+  const tableMapBlock = clientSrc.slice(tableMapStart, tableMapEnd + 2);
+  assert.ok(
+    tableMapBlock.includes("checklistResult") && tableMapBlock.includes("service_checklist_result"),
+    "checklistResult must map to service_checklist_result inside TABLE_MAP"
+  );
+});
+
+test("verifyPilotSessionState does not use label as table name fallback", () => {
+  // The unsafe '?? label' fallback must be absent from the verifier function
+  const verifyFnStart = clientSrc.indexOf("export async function verifyPilotSessionState");
+  const verifyFnEnd = clientSrc.indexOf("\nexport", verifyFnStart + 1);
+  const verifyFn = clientSrc.slice(verifyFnStart, verifyFnEnd > 0 ? verifyFnEnd : undefined);
+  assert.ok(
+    !verifyFn.includes("?? label"),
+    "verifyPilotSessionState must not fall back to using label as a table name"
+  );
+});
+
+test("verifyPilotSessionState rejects unknown labels as unsupported (never arbitrary table)", () => {
+  const verifyFnStart = clientSrc.indexOf("export async function verifyPilotSessionState");
+  const verifyFnEnd = clientSrc.indexOf("\nexport", verifyFnStart + 1);
+  const verifyFn = clientSrc.slice(verifyFnStart, verifyFnEnd > 0 ? verifyFnEnd : undefined);
+  assert.ok(
+    verifyFn.includes('"unsupported"'),
+    "unknown labels must be marked unsupported, not used as table names"
+  );
+  assert.ok(
+    !verifyFn.includes("?? label"),
+    "unsafe label fallback must not be present"
+  );
+});
+
+test("verifyPilotSessionState uses only fetchOneById (no fetchMany, no writes)", () => {
+  const verifyFnStart = clientSrc.indexOf("export async function verifyPilotSessionState");
+  const verifyFnEnd = clientSrc.indexOf("\nexport", verifyFnStart + 1);
+  const verifyFn = clientSrc.slice(verifyFnStart, verifyFnEnd > 0 ? verifyFnEnd : undefined);
+  assert.ok(verifyFn.includes("fetchOneById"), "verifier must use fetchOneById");
+  assert.ok(!verifyFn.includes("fetchMany"), "verifier must not use fetchMany");
+  assert.ok(!verifyFn.includes("insertOne"), "verifier must not use insertOne");
+  assert.ok(!verifyFn.includes("updateById"), "verifier must not use updateById");
+  assert.ok(!verifyFn.includes("deleteById"), "verifier must not use deleteById");
+});
+
+// ── Panel: verification UI is present and Preview-gated ───────────────────────
+
+test("panel includes Verify Current Pilot Records button", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  assert.ok(
+    panelSrc.includes("Verify Current Pilot Records"),
+    "panel must have a Verify Current Pilot Records control"
+  );
+});
+
+test("panel verification UI is gated behind OPERATIONS_PILOT_UI_ENABLED", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const verifyBtnIdx = panelSrc.indexOf("Verify Current Pilot Records");
+  const pilotUiCheckIdx = panelSrc.lastIndexOf("OPERATIONS_PILOT_UI_ENABLED", verifyBtnIdx);
+  assert.ok(
+    pilotUiCheckIdx >= 0,
+    "Verify Current Pilot Records must appear inside an OPERATIONS_PILOT_UI_ENABLED guard"
+  );
+});
+
+test("panel exposes manual recovery JSON textarea labeled correctly", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  assert.ok(
+    panelSrc.includes("Pilot verification IDs (read-only verification only)"),
+    "panel must have the exact recovery textarea label"
+  );
+});
+
+test("panel handleVerify does not call runOperationsPilot or cleanupOperationsPilotSession", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const verifyHandlerStart = panelSrc.indexOf("const handleVerify");
+  const verifyHandlerEnd = panelSrc.indexOf("\n  const ", verifyHandlerStart + 1);
+  const verifyHandler = panelSrc.slice(verifyHandlerStart, verifyHandlerEnd > 0 ? verifyHandlerEnd : undefined);
+  assert.ok(
+    !verifyHandler.includes("runOperationsPilot"),
+    "handleVerify must not call runOperationsPilot"
+  );
+  assert.ok(
+    !verifyHandler.includes("cleanupOperationsPilotSession"),
+    "handleVerify must not call cleanupOperationsPilotSession"
+  );
+  assert.ok(
+    verifyHandler.includes("verifyPilotSessionState"),
+    "handleVerify must call verifyPilotSessionState"
+  );
+});
+
+test("panel handleVerify uses verifyPilotSessionState not any write calls", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const verifyHandlerStart = panelSrc.indexOf("const handleVerify");
+  const verifyHandlerEnd = panelSrc.indexOf("\n  const ", verifyHandlerStart + 1);
+  const verifyHandler = panelSrc.slice(verifyHandlerStart, verifyHandlerEnd > 0 ? verifyHandlerEnd : undefined);
+  assert.ok(!verifyHandler.includes("insertOne"), "handleVerify must not call insertOne");
+  assert.ok(!verifyHandler.includes("updateById"), "handleVerify must not call updateById");
+  assert.ok(!verifyHandler.includes("deleteById"), "handleVerify must not call deleteById");
+  assert.ok(!verifyHandler.includes("createOperationalJob"), "handleVerify must not call createOperationalJob");
+});
+
+test("panel malformed JSON guard prevents network requests", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  // The handler must parse JSON before calling verifyPilotSessionState
+  const verifyHandlerStart = panelSrc.indexOf("const handleVerify");
+  const verifyHandlerEnd = panelSrc.indexOf("\n  const ", verifyHandlerStart + 1);
+  const verifyHandler = panelSrc.slice(verifyHandlerStart, verifyHandlerEnd > 0 ? verifyHandlerEnd : undefined);
+  const parseIdx = verifyHandler.indexOf("JSON.parse");
+  const verifyCallIdx = verifyHandler.indexOf("verifyPilotSessionState");
+  assert.ok(parseIdx >= 0, "handler must call JSON.parse on manual input");
+  assert.ok(
+    parseIdx < verifyCallIdx,
+    "JSON.parse must occur before verifyPilotSessionState to gate network calls"
+  );
+  // On parse error it must return early (setting an error state) not proceed
+  assert.ok(
+    verifyHandler.includes("Malformed JSON"),
+    "malformed JSON must produce a clear validation error message"
+  );
+});
+
+test("panel verification can use current createdIds (no manual JSON required)", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  const verifyHandlerStart = panelSrc.indexOf("const handleVerify");
+  const verifyHandlerEnd = panelSrc.indexOf("\n  const ", verifyHandlerStart + 1);
+  const verifyHandler = panelSrc.slice(verifyHandlerStart, verifyHandlerEnd > 0 ? verifyHandlerEnd : undefined);
+  assert.ok(
+    verifyHandler.includes("createdIds") && verifyHandler.includes("verifyJson"),
+    "handleVerify must support both createdIds (runtime) and manual verifyJson (recovery) paths"
+  );
+});
+
+test("panel verification requires explicit button click — not automatic on paste", () => {
+  const panelSrc = readFileSync(
+    resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
+    "utf8"
+  );
+  // onChange for the textarea must only update state, not call handleVerify
+  const textareaOnChangeStart = panelSrc.indexOf("setVerifyJson(e.target.value)");
+  assert.ok(textareaOnChangeStart >= 0, "textarea onChange must update verifyJson state");
+  // The verify call must be on button onClick, not in onChange
+  const onChangeSnippet = panelSrc.slice(
+    panelSrc.lastIndexOf("onChange", textareaOnChangeStart),
+    textareaOnChangeStart + 40
+  );
+  assert.ok(
+    !onChangeSnippet.includes("handleVerify"),
+    "textarea onChange must not automatically trigger handleVerify"
+  );
+});

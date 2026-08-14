@@ -899,20 +899,34 @@ export async function verifyPilotSessionState(ids, accessToken) {
     workOrderEventCompleted: "work_order_event",
     workOrderEvent: "work_order_event",
     completionEvidence: "completion_evidence",
+    checklistResult: "service_checklist_result",
     serviceChecklistResult: "service_checklist_result",
     qaInspection: "qa_inspection",
     operationalHandoff: "operational_handoff",
   };
 
   const results = [];
-  for (const [label, id] of Object.entries(ids)) {
-    if (!id) continue;
-    const table = TABLE_MAP[label] ?? label;
-    try {
-      const row = await fetchOneById(table, id, accessToken);
-      results.push({ label, table, id, status: row ? "present" : "absent" });
-    } catch (err) {
-      results.push({ label, table, id, status: "error", error: err.message });
+  for (const [label, rawId] of Object.entries(ids)) {
+    // Handle checklistResults as an array or scalar under the same table
+    const idsToVerify = label === "checklistResults" && Array.isArray(rawId)
+      ? rawId.map((v) => ({ label, id: v?.id ?? v }))
+      : [{ label, id: rawId?.id ?? rawId }];
+
+    const table = TABLE_MAP[label];
+    if (!table) {
+      // Unknown label — never fall back to using the label as a table name
+      results.push({ label, table: null, id: String(rawId ?? ""), status: "unsupported" });
+      continue;
+    }
+
+    for (const { label: entryLabel, id } of idsToVerify) {
+      if (!id) continue;
+      try {
+        const row = await fetchOneById(table, id, accessToken);
+        results.push({ label: entryLabel, table, id, status: row ? "present" : "absent" });
+      } catch (err) {
+        results.push({ label: entryLabel, table, id, status: "error", error: err.message });
+      }
     }
   }
   return results;
