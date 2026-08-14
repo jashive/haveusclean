@@ -56,57 +56,127 @@ $$;
 -- ---------------------------------------------------------------------------
 
 -- 1a. Customer
-INSERT INTO public.customer (id, organization_id, business_unit_id, customer_type, display_name)
+INSERT INTO public.customer (
+  id, organization_id, business_unit_id,
+  customer_type, display_name, legal_name, status, notes, metadata
+)
 VALUES ('d0000000-0000-0000-0000-000000000001'::uuid,
         (SELECT organization_id FROM pg_temp.m008_scope),
         (SELECT business_unit_id FROM pg_temp.m008_scope),
         'person',
-        'Rehearsal Customer M008');
+        'Rehearsal Customer M008',
+        NULL,
+        'active',
+        NULL,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1b. Contact (canonical: no organization_id/business_unit_id)
-INSERT INTO public.contact (id, customer_id, contact_type, first_name, last_name)
+INSERT INTO public.contact (
+  id, customer_id, contact_type,
+  first_name, last_name, email, phone, is_primary, metadata
+)
 VALUES ('e0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
         'primary',
         'Jane',
-        'Rehearsal');
+        'Rehearsal',
+        NULL,
+        NULL,
+        true,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1c. Service location (canonical: no organization_id/business_unit_id, uses address_line1)
-INSERT INTO public.service_location (id, customer_id, jurisdiction_id, address_line1, city)
+INSERT INTO public.service_location (
+  id, customer_id, jurisdiction_id,
+  label, address_line1, address_line2, city, subdivision, postal_code,
+  country_code, access_notes, latitude, longitude, metadata
+)
 VALUES ('f0000000-0000-0000-0000-000000000001'::uuid,
         'd0000000-0000-0000-0000-000000000001'::uuid,
         (SELECT jurisdiction_id FROM pg_temp.m008_scope),
+        'Primary Residence',
         '1 Rehearsal Street',
-        'Toronto');
+        NULL,
+        'Toronto',
+        'ON',
+        'M5V 1A1',
+        'CA',
+        NULL,
+        NULL,
+        NULL,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1d. Service request
-INSERT INTO public.service_request (id, organization_id, business_unit_id)
+INSERT INTO public.service_request (
+  id, organization_id, business_unit_id,
+  service_category, lifecycle_status, intake_channel, requested_at,
+  title, description, requirements, metadata
+)
 VALUES ('11000000-0000-0000-0000-000000000001'::uuid,
         (SELECT organization_id FROM pg_temp.m008_scope),
-        (SELECT business_unit_id FROM pg_temp.m008_scope));
+        (SELECT business_unit_id FROM pg_temp.m008_scope),
+        'residential',
+        'qualified',
+        'm008_rehearsal',
+        now(),
+        'M008 Residential Rehearsal',
+        'Wave 3 controlled rollback rehearsal',
+        '{"service":"complete_deep_clean","bedrooms":2,"bathrooms":2,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1e. Opportunity
-INSERT INTO public.opportunity (id, organization_id, business_unit_id, service_request_id, stage)
+INSERT INTO public.opportunity (
+  id, organization_id, business_unit_id,
+  service_request_id, stage, close_reason, expected_close_date,
+  probability_percent, title, summary, metadata
+)
 VALUES ('12000000-0000-0000-0000-000000000001'::uuid,
         (SELECT organization_id FROM pg_temp.m008_scope),
         (SELECT business_unit_id FROM pg_temp.m008_scope),
         '11000000-0000-0000-0000-000000000001'::uuid,
-        'qualified');
+        'qualified',
+        NULL,
+        NULL,
+        NULL,
+        'M008 Residential Opportunity',
+        'Controlled Wave 3 rollback rehearsal',
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1f. Estimate (required lineage)
-INSERT INTO public.estimate (id, organization_id, business_unit_id, opportunity_id)
+INSERT INTO public.estimate (
+  id, organization_id, business_unit_id,
+  opportunity_id, estimate_number, version_no, lifecycle_status,
+  assumptions, scope_snapshot, notes, metadata
+)
 VALUES ('0e000000-0000-0000-0000-000000000001'::uuid,
         (SELECT organization_id FROM pg_temp.m008_scope),
         (SELECT business_unit_id FROM pg_temp.m008_scope),
-        '12000000-0000-0000-0000-000000000001'::uuid);
+        '12000000-0000-0000-0000-000000000001'::uuid,
+        NULL,
+        1,
+        'prepared',
+        '{"rehearsal":true}'::jsonb,
+        '{"service":"complete_deep_clean","bedrooms":2,"bathrooms":2,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+        NULL,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1g. Quote
-INSERT INTO public.quote (id, organization_id, business_unit_id, opportunity_id, estimate_id)
+INSERT INTO public.quote (
+  id, organization_id, business_unit_id,
+  opportunity_id, estimate_id, quote_number, lifecycle_status,
+  customer_id, contact_id, service_location_id, metadata
+)
 VALUES ('13000000-0000-0000-0000-000000000001'::uuid,
         (SELECT organization_id FROM pg_temp.m008_scope),
         (SELECT business_unit_id FROM pg_temp.m008_scope),
         '12000000-0000-0000-0000-000000000001'::uuid,
-        '0e000000-0000-0000-0000-000000000001'::uuid);
+        '0e000000-0000-0000-0000-000000000001'::uuid,
+        NULL,
+        'active',
+        NULL,
+        NULL,
+        NULL,
+        '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb);
 
 -- 1h. Pricing snapshot (canonical M005/Wave 2 shape)
 INSERT INTO public.pricing_snapshot (
@@ -120,7 +190,7 @@ INSERT INTO public.pricing_snapshot (
   configuration_snapshot,
   labor_economics,
   calculation_inputs, calculation_outputs, raw_calculation_snapshot,
-  frozen_at
+  frozen_at, metadata
 )
 VALUES (
   '14000000-0000-0000-0000-000000000001'::uuid,
@@ -135,17 +205,19 @@ VALUES (
   '2.0',
   '{"version":"ON-2026-08-v1.0","tax":{"label":"HST"},"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   '{}'::jsonb,
-  '{"sqft":1500,"dwelling_type":"apartment"}'::jsonb,
-  '{"line_items":[{"key":"base_clean","amount":395.00}],"subtotal":395.00,"tax":51.35,"total":446.35}'::jsonb,
-  '{"pre_tax_total":395.00,"tax_amount":51.35,"total":446.35}'::jsonb,
-  now()
+  '{"service":"complete_deep_clean","bedrooms":2,"bathrooms":2,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"line_items":[{"key":"complete_deep_clean","amount":395.00}],"subtotal":395.00,"tax":51.35,"taxRate":0.13,"total":446.35,"currency":"CAD"}'::jsonb,
+  '{"quoteContractVersion":"2.0","preTaxTotal":395.00,"taxAmount":51.35,"taxRate":0.13,"total":446.35,"currency":"CAD","marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  now(),
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- 1i. Quote version (canonical: lifecycle_status, version_no, estimate_id)
 INSERT INTO public.quote_version (
   id, organization_id, business_unit_id,
   quote_id, estimate_id, pricing_snapshot_id,
-  version_no, lifecycle_status
+  version_no, lifecycle_status, valid_until, title, terms_text,
+  line_items_snapshot, commercial_snapshot, sent_at, metadata
 )
 VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
@@ -155,7 +227,14 @@ VALUES (
   '0e000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   1,
- 'draft'
+ 'draft',
+ NULL,
+ 'M008 Residential Quote v1',
+ NULL,
+ '[{"key":"complete_deep_clean","amount":395.00}]'::jsonb,
+ '{"subtotal":395.00,"tax":51.35,"total":446.35,"currency":"CAD","marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+ NULL,
+ '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
  
 UPDATE public.quote_version
@@ -166,18 +245,22 @@ WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;
 -- 1j. Quote response (required for conversion_record lineage)
 INSERT INTO public.quote_response (
  id, organization_id, business_unit_id,
- quote_version_id,
- response_type, response_channel, responded_by_name, responded_at, metadata
+ quote_version_id, idempotency_key_id,
+ response_type, response_channel, responded_by_name, responded_by_email,
+ responded_at, notes, metadata
 )
 VALUES (
  '0a000000-0000-0000-0000-000000000002'::uuid,
  (SELECT organization_id FROM pg_temp.m008_scope),
  (SELECT business_unit_id FROM pg_temp.m008_scope),
  '15000000-0000-0000-0000-000000000001'::uuid,
+ NULL,
  'accepted',
  'm008_rehearsal',
  'M008 Rehearsal',
+ NULL,
  now(),
+ NULL,
  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
@@ -190,7 +273,7 @@ INSERT INTO public.conversion_record (
   id, organization_id, business_unit_id,
   service_request_id, opportunity_id, estimate_id,
   quote_id, quote_version_id, quote_response_id,
-  customer_id, contact_id, service_location_id
+  customer_id, contact_id, service_location_id, metadata
 )
 VALUES (
   '16000000-0000-0000-0000-000000000001'::uuid,
@@ -204,7 +287,8 @@ VALUES (
   '0a000000-0000-0000-0000-000000000002'::uuid,
   'd0000000-0000-0000-0000-000000000001'::uuid,
   'e0000000-0000-0000-0000-000000000001'::uuid,
-  'f0000000-0000-0000-0000-000000000001'::uuid
+  'f0000000-0000-0000-0000-000000000001'::uuid,
+  '{"marker":"wave3_m008_rehearsal_v1"}'::jsonb
 );
 
 -- 1l. Job handoff (Wave 2 -> Wave 3 boundary)
@@ -221,7 +305,7 @@ VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   'ready',
-  '{"source":"pilot_ui","synthetic":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
+  '{"source":"m008_rehearsal","synthetic":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   '{"rehearsal":true,"marker":"wave3_m008_rehearsal_v1"}'::jsonb,
   now()
 );

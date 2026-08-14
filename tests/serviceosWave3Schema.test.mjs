@@ -17,6 +17,26 @@ const m008 = readFileSync(
 );
 const UUID_HEX_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+function getInsertStatement(sql, tableName) {
+  const match = sql.match(new RegExp(`INSERT INTO public\\.${tableName}[\\s\\S]*?;`));
+  assert.ok(match, `${tableName} insert not found`);
+  return match[0];
+}
+
+function getInsertColumns(sql, tableName) {
+  const statement = getInsertStatement(sql, tableName);
+  const match = statement.match(/INSERT INTO public\.[a-z_]+\s*\(([\s\S]*?)\)\s*VALUES/);
+  assert.ok(match, `${tableName} insert column list not found`);
+  return match[1]
+    .split(",")
+    .map((column) => column.trim())
+    .filter(Boolean);
+}
+
+function assertExactInsertColumns(sql, tableName, expectedColumns) {
+  assert.deepEqual(getInsertColumns(sql, tableName), expectedColumns);
+}
+
 // ── M007: exact 10 Wave 3 table names ─────────────────────────────────────
 
 const WAVE3_TABLES = [
@@ -467,25 +487,161 @@ test("M007: operational_handoff lineage validator cross-checks qa_inspection_id"
 
 // ── NEW: M008 canonical column contract assertions ────────────────────────────
 
-test("M008: contact insert does NOT contain organization_id or business_unit_id", () => {
-  const contactMatch = m008.match(/INSERT INTO public\.contact[\s\S]*?;/);
-  assert.ok(contactMatch, "M008 contact insert not found");
-  const insert = contactMatch[0];
+test("M008: customer insert matches canonical Wave 1 builder fields", () => {
+  assertExactInsertColumns(m008, "customer", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "customer_type",
+    "display_name",
+    "legal_name",
+    "status",
+    "notes",
+    "metadata",
+  ]);
+});
+
+test("M008: contact insert matches canonical Wave 1 builder fields", () => {
+  const insert = getInsertStatement(m008, "contact");
+  assertExactInsertColumns(m008, "contact", [
+    "id",
+    "customer_id",
+    "contact_type",
+    "first_name",
+    "last_name",
+    "email",
+    "phone",
+    "is_primary",
+    "metadata",
+  ]);
   assert.ok(!insert.includes("organization_id"), "M008 contact insert must not include organization_id");
   assert.ok(!insert.includes("business_unit_id"), "M008 contact insert must not include business_unit_id");
 });
 
-test("M008: service_location uses address_line1 (not address_line_1)", () => {
-  assert.ok(m008.includes("address_line1"), "M008 service_location must use address_line1");
+test("M008: service_location insert matches canonical Wave 1 builder fields", () => {
+  const insert = getInsertStatement(m008, "service_location");
+  assertExactInsertColumns(m008, "service_location", [
+    "id",
+    "customer_id",
+    "jurisdiction_id",
+    "label",
+    "address_line1",
+    "address_line2",
+    "city",
+    "subdivision",
+    "postal_code",
+    "country_code",
+    "access_notes",
+    "latitude",
+    "longitude",
+    "metadata",
+  ]);
+  assert.ok(insert.includes("address_line1"), "M008 service_location must use address_line1");
+  assert.ok(!insert.includes("organization_id"), "M008 service_location must not include organization_id");
+  assert.ok(!insert.includes("business_unit_id"), "M008 service_location must not include business_unit_id");
   assert.ok(!m008.includes("address_line_1"), "M008 must not use stale address_line_1");
 });
 
+test("M008: service_request insert matches canonical builder fields and values", () => {
+  const insert = getInsertStatement(m008, "service_request");
+  assertExactInsertColumns(m008, "service_request", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "service_category",
+    "lifecycle_status",
+    "intake_channel",
+    "requested_at",
+    "title",
+    "description",
+    "requirements",
+    "metadata",
+  ]);
+  assert.ok(insert.includes("'residential'"), "M008 service_request must use service_category='residential'");
+  assert.ok(insert.includes("'qualified'"), "M008 service_request must use lifecycle_status='qualified'");
+});
+
+test("M008: opportunity insert matches canonical builder fields", () => {
+  assertExactInsertColumns(m008, "opportunity", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "service_request_id",
+    "stage",
+    "close_reason",
+    "expected_close_date",
+    "probability_percent",
+    "title",
+    "summary",
+    "metadata",
+  ]);
+});
+
+test("M008: estimate insert matches canonical builder fields and values", () => {
+  const insert = getInsertStatement(m008, "estimate");
+  assertExactInsertColumns(m008, "estimate", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "opportunity_id",
+    "estimate_number",
+    "version_no",
+    "lifecycle_status",
+    "assumptions",
+    "scope_snapshot",
+    "notes",
+    "metadata",
+  ]);
+  ["version_no", "lifecycle_status", "assumptions", "scope_snapshot", "metadata"].forEach((field) => {
+    assert.ok(insert.includes(field), `M008 estimate missing ${field}`);
+  });
+  assert.ok(insert.includes("'prepared'"), "M008 estimate must use lifecycle_status='prepared'");
+  assert.ok(!insert.includes("configuration_version_id"), "M008 estimate must not include configuration_version_id");
+});
+
+test("M008: quote insert matches canonical builder fields and values", () => {
+  const insert = getInsertStatement(m008, "quote");
+  assertExactInsertColumns(m008, "quote", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "opportunity_id",
+    "estimate_id",
+    "quote_number",
+    "lifecycle_status",
+    "customer_id",
+    "contact_id",
+    "service_location_id",
+    "metadata",
+  ]);
+  assert.ok(insert.includes("'active'"), "M008 quote must use lifecycle_status='active'");
+  assert.ok(!insert.includes("pricing_snapshot_id"), "M008 quote must not include pricing_snapshot_id");
+});
+
 test("M008: quote_version uses lifecycle_status and version_no", () => {
-  const qvMatch = m008.match(/INSERT INTO public\.quote_version[\s\S]*?;/);
-  assert.ok(qvMatch, "M008 quote_version insert not found");
-  const insert = qvMatch[0];
+  const insert = getInsertStatement(m008, "quote_version");
+  assertExactInsertColumns(m008, "quote_version", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "quote_id",
+    "estimate_id",
+    "pricing_snapshot_id",
+    "version_no",
+    "lifecycle_status",
+    "valid_until",
+    "title",
+    "terms_text",
+    "line_items_snapshot",
+    "commercial_snapshot",
+    "sent_at",
+    "metadata",
+  ]);
   assert.ok(insert.includes("lifecycle_status"), "M008 quote_version must use lifecycle_status");
   assert.ok(insert.includes("version_no"), "M008 quote_version must use version_no");
+  assert.ok(insert.includes("line_items_snapshot"), "M008 quote_version must use line_items_snapshot");
+  assert.ok(insert.includes("commercial_snapshot"), "M008 quote_version must use commercial_snapshot");
+  assert.ok(insert.includes("metadata"), "M008 quote_version must use metadata");
   assert.ok(!insert.includes("version_status"), "M008 quote_version must not use stale version_status");
   assert.ok(!insert.includes("version_number"), "M008 quote_version must not use stale version_number");
   assert.ok(insert.includes("'draft'"), "M008 quote_version must begin as draft");
@@ -520,9 +676,21 @@ test("M008: quote_version follows draft → sent → accepted lifecycle", () => 
 });
 
 test("M008: quote_response uses canonical field names", () => {
-  const qrMatch = m008.match(/INSERT INTO public\.quote_response[\s\S]*?;/);
-  assert.ok(qrMatch, "M008 quote_response insert not found");
-  const insert = qrMatch[0];
+  const insert = getInsertStatement(m008, "quote_response");
+  assertExactInsertColumns(m008, "quote_response", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "quote_version_id",
+    "idempotency_key_id",
+    "response_type",
+    "response_channel",
+    "responded_by_name",
+    "responded_by_email",
+    "responded_at",
+    "notes",
+    "metadata",
+  ]);
   assert.ok(insert.includes("response_type"), "M008 quote_response must use response_type");
   assert.ok(insert.includes("response_channel"), "M008 quote_response must use response_channel");
   assert.ok(insert.includes("responded_at"), "M008 quote_response must use responded_at");
@@ -587,9 +755,30 @@ test("M008: work_order follows draft → published → in_progress → service_c
 });
 
 test("M008: pricing_snapshot uses canonical field names (no stale fields)", () => {
-  const psMatch = m008.match(/INSERT INTO public\.pricing_snapshot\s*\(([^)]+)\)/);
-  assert.ok(psMatch, "M008 pricing_snapshot insert column list not found");
-  const colList = psMatch[1]; // only the column names, before VALUES
+  const colList = getInsertColumns(m008, "pricing_snapshot").join(",");
+  assertExactInsertColumns(m008, "pricing_snapshot", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "opportunity_id",
+    "estimate_id",
+    "configuration_version_id",
+    "currency_code",
+    "tax_name",
+    "tax_rate",
+    "subtotal_amount",
+    "discount_amount",
+    "tax_amount",
+    "total_amount",
+    "calculator_version",
+    "configuration_snapshot",
+    "labor_economics",
+    "calculation_inputs",
+    "calculation_outputs",
+    "raw_calculation_snapshot",
+    "frozen_at",
+    "metadata",
+  ]);
   // Must have canonical fields
   assert.ok(colList.includes("currency_code"), "M008 pricing_snapshot must use currency_code");
   assert.ok(colList.includes("subtotal_amount"), "M008 pricing_snapshot must use subtotal_amount");
@@ -605,12 +794,50 @@ test("M008: pricing_snapshot uses canonical field names (no stale fields)", () =
 });
 
 test("M008: conversion_record includes required lineage fields", () => {
-  const crMatch = m008.match(/INSERT INTO public\.conversion_record[\s\S]*?;/);
-  assert.ok(crMatch, "M008 conversion_record insert not found");
-  const insert = crMatch[0];
-  ["service_request_id", "estimate_id", "quote_id", "quote_response_id"].forEach((f) => {
+  const insert = getInsertStatement(m008, "conversion_record");
+  assertExactInsertColumns(m008, "conversion_record", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "service_request_id",
+    "opportunity_id",
+    "estimate_id",
+    "quote_id",
+    "quote_version_id",
+    "quote_response_id",
+    "customer_id",
+    "contact_id",
+    "service_location_id",
+    "metadata",
+  ]);
+  [
+    "service_request_id",
+    "opportunity_id",
+    "estimate_id",
+    "quote_id",
+    "quote_version_id",
+    "quote_response_id",
+    "customer_id",
+    "contact_id",
+    "service_location_id",
+  ].forEach((f) => {
     assert.ok(insert.includes(f), `M008 conversion_record missing required field: ${f}`);
   });
+});
+
+test("M008: job_handoff insert matches actual builder fields", () => {
+  assertExactInsertColumns(m008, "job_handoff", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "conversion_record_id",
+    "quote_version_id",
+    "pricing_snapshot_id",
+    "handoff_status",
+    "handoff_payload",
+    "metadata",
+    "handed_off_at",
+  ]);
 });
 
 test("M008: remaining_artifact_count is computed (not hard-coded 0)", () => {
@@ -681,9 +908,16 @@ test("M008: does not reference synthetic app_user ids", () => {
 });
 
 test("M008: worker insert uses contractor + active without app_user_id", () => {
-  const workerInsert = m008.match(/INSERT INTO public\.worker[\s\S]*?;/);
-  assert.ok(workerInsert, "M008 worker insert not found");
-  const insert = workerInsert[0];
+  const insert = getInsertStatement(m008, "worker");
+  assertExactInsertColumns(m008, "worker", [
+    "id",
+    "organization_id",
+    "business_unit_id",
+    "worker_type",
+    "display_name",
+    "status",
+    "metadata",
+  ]);
   assert.ok(insert.includes("worker_type"), "M008 worker insert must include worker_type");
   assert.ok(insert.includes("'contractor'"), "M008 worker_type must be contractor");
   assert.ok(insert.includes("'active'"), "M008 worker status must be active");
