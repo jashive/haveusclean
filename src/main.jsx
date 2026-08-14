@@ -7,20 +7,40 @@ const REVENUE_PILOT_UI =
   typeof import.meta !== 'undefined' &&
   import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === 'true'
 
+const OPERATIONS_PILOT_UI =
+  typeof import.meta !== 'undefined' &&
+  import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === 'true' &&
+  import.meta.env?.VITE_SERVICEOS_OPERATIONS_PILOT_UI === 'true'
+
 const ServiceOSPilotPanel = REVENUE_PILOT_UI
   ? lazy(() => import('./features/pilot/ServiceOSPilotPanel'))
   : null
 
+const ServiceOSOperationsPilotPanel = OPERATIONS_PILOT_UI
+  ? lazy(() => import('./features/pilot/ServiceOSOperationsPilotPanel'))
+  : null
+
 function PilotPanelMount() {
   const ctx = useServiceOSContext()
-  if (!ServiceOSPilotPanel) return null
   return (
-    <Suspense fallback={null}>
-      <ServiceOSPilotPanel
-        session={ctx?.session ?? null}
-        revenueContext={ctx?.revenueContext ?? null}
-      />
-    </Suspense>
+    <>
+      {ServiceOSPilotPanel && (
+        <Suspense fallback={null}>
+          <ServiceOSPilotPanel
+            session={ctx?.session ?? null}
+            revenueContext={ctx?.revenueContext ?? null}
+          />
+        </Suspense>
+      )}
+      {ServiceOSOperationsPilotPanel && (
+        <Suspense fallback={null}>
+          <ServiceOSOperationsPilotPanel
+            session={ctx?.session ?? null}
+            revenueContext={ctx?.revenueContext ?? null}
+          />
+        </Suspense>
+      )}
+    </>
   )
 }
 
