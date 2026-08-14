@@ -32,6 +32,7 @@ import {
   updateWorkOrderStatus,
   updateQaInspectionStatus,
   cleanupOperationsPilotSession,
+  verifyPilotSessionState,
   getOperationsCreatedRecords,
   attachOperationsCreatedRecords,
   fetchLegacyWorkerCandidates,
@@ -539,6 +540,7 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
   const [createdIds, setCreatedIds] = useState(null);
   const [error, setError] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [retainedEvidence, setRetainedEvidence] = useState(null);
 
   // ── Legacy workforce bootstrap state ────────────────────────────────────────
   const [loadingCandidates, setLoadingCandidates] = useState(false);
@@ -673,10 +675,25 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
     if (cleaning || !createdIds || !accessToken) return;
     setCleaning(true);
     setError(null);
+    setRetainedEvidence(null);
     try {
-      await cleanupOperationsPilotSession(createdIds, accessToken);
-      setLog((prev) => [...prev, { msg: "Operations pilot records cleaned up", kind: "done" }]);
-      setCreatedIds(null);
+      const result = await cleanupOperationsPilotSession(createdIds, accessToken);
+      if (result && typeof result === "object" && result.mode === "retained_test_evidence") {
+        // Completed E2E — records are governed canonical test evidence, not deleted
+        setRetainedEvidence(result);
+        setLog((prev) => [
+          ...prev,
+          {
+            msg: "Wave 3 test evidence retained under canonical append-only governance.",
+            kind: "done",
+          },
+        ]);
+        // Keep createdIds so the UI still shows the retained chain
+      } else {
+        setLog((prev) => [...prev, { msg: "Operations pilot records cleaned up", kind: "done" }]);
+        setCreatedIds(null);
+        setRetainedEvidence(null);
+      }
     } catch (err) {
       setError(err?.message ?? "Cleanup failed");
       setLog((prev) => [
@@ -976,6 +993,33 @@ export default function ServiceOSOperationsPilotPanel({ session, revenueContext 
       )}
 
       {error && <div style={styles.stepError}>✗ {error}</div>}
+
+      {retainedEvidence && (
+        <div style={{ ...styles.stepDone, marginTop: "0.5rem", lineHeight: 1.6 }}>
+          <strong>Wave 3 test evidence retained under canonical append-only governance.</strong>
+          <div>
+            <em>Immutable records (append-only, retained):</em>
+            {retainedEvidence.immutableRecordsRetained.map((r, i) => (
+              <div key={i} style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>
+                {r.table}: {r.id}
+              </div>
+            ))}
+          </div>
+          {retainedEvidence.mutableRecordsRetained.length > 0 && (
+            <div>
+              <em>Mutable records (preserved with chain):</em>
+              {retainedEvidence.mutableRecordsRetained.map((r, i) => (
+                <div key={i} style={{ fontFamily: "monospace", fontSize: "0.72rem" }}>
+                  {r.table}: {r.id}
+                </div>
+              ))}
+            </div>
+          )}
+          {retainedEvidence.upstreamPreserved && (
+            <div style={{ marginTop: "0.2rem" }}>✓ Upstream Wave 2 job_handoff authority preserved</div>
+          )}
+        </div>
+      )}
 
       {createdIds && Object.keys(createdIds).length > 0 && (
         <>

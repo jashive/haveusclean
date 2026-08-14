@@ -476,6 +476,169 @@ test("cleanupOperationsPilotSession does not target huc_partners table", () => {
   assert.ok(!deletePartners, "cleanup must not deleteById from huc_partners table");
 });
 
+// ── cleanupOperationsPilotSession: append-only tables never deleted ───────────
+
+function getCleanupBody() {
+  const start = clientSrc.indexOf("export async function cleanupOperationsPilotSession");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  return start >= 0 ? clientSrc.slice(start, end > 0 ? end : undefined) : "";
+}
+
+test("cleanupOperationsPilotSession never DELETEs work_order_event", () => {
+  const body = getCleanupBody();
+  const deletesEvent = /deleteById\s*\(\s*["'`]work_order_event["'`]/.test(body);
+  assert.ok(!deletesEvent, "cleanup must never call deleteById on work_order_event");
+});
+
+test("cleanupOperationsPilotSession never DELETEs completion_evidence", () => {
+  const body = getCleanupBody();
+  const deletesEvidence = /deleteById\s*\(\s*["'`]completion_evidence["'`]/.test(body);
+  assert.ok(!deletesEvidence, "cleanup must never call deleteById on completion_evidence");
+});
+
+test("cleanupOperationsPilotSession returns retained_test_evidence when immutable records exist", () => {
+  const body = getCleanupBody();
+  assert.ok(
+    body.includes('"retained_test_evidence"') || body.includes("retained_test_evidence"),
+    "cleanup must include retained_test_evidence result mode"
+  );
+  assert.ok(
+    body.includes("immutableRecordsRetained"),
+    "result must include immutableRecordsRetained array"
+  );
+  assert.ok(
+    body.includes("upstreamPreserved"),
+    "result must confirm upstream preservation"
+  );
+});
+
+test("cleanupOperationsPilotSession does not begin partial destructive cleanup when immutable records exist", () => {
+  const body = getCleanupBody();
+  // The immutable-records detection and return must come BEFORE any deleteById call
+  const retainedIdx = body.indexOf("retained_test_evidence");
+  const deleteIdx = body.indexOf("deleteById");
+  assert.ok(retainedIdx > -1, "retained_test_evidence branch must be present");
+  assert.ok(deleteIdx > -1, "deleteById must exist for the mutable-only path");
+  assert.ok(
+    retainedIdx < deleteIdx,
+    "retained_test_evidence return must come before any deleteById — prevents partial destructive cleanup"
+  );
+});
+
+test("cleanupOperationsPilotSession upstream job_handoff is never deleted", () => {
+  const body = getCleanupBody();
+  const deletesHandoff = /deleteById\s*\(\s*["'`]job_handoff["'`]/.test(body);
+  assert.ok(!deletesHandoff, "cleanup must not deleteById from job_handoff");
+});
+
+test("cleanupOperationsPilotSession canonical worker is never deleted", () => {
+  const body = getCleanupBody();
+  const deletesWorker = /deleteById\s*\(\s*["'`]worker["'`]/.test(body);
+  assert.ok(!deletesWorker, "cleanup must not deleteById from worker table");
+});
+
+// ── verifyPilotSessionState: GET-only exact-ID verifier ───────────────────────
+
+function getVerifierBody() {
+  const start = clientSrc.indexOf("export async function verifyPilotSessionState");
+  const end = clientSrc.indexOf("\nexport ", start + 1);
+  return start >= 0 ? clientSrc.slice(start, end > 0 ? end : undefined) : "";
+}
+
+test("verifyPilotSessionState is exported from serviceosOperationsClient", () => {
+  assert.ok(
+    clientSrc.includes("export async function verifyPilotSessionState"),
+    "verifyPilotSessionState must be exported"
+  );
+});
+
+test("verifyPilotSessionState uses GET-only reads (fetchOneById, not deleteById or insertOne)", () => {
+  const body = getVerifierBody();
+  assert.ok(body.length > 0, "verifyPilotSessionState function must exist");
+  assert.ok(
+    body.includes("fetchOneById"),
+    "verifier must use fetchOneById (read-only GET)"
+  );
+  assert.ok(
+    !body.includes("deleteById"),
+    "verifier must not call deleteById"
+  );
+  assert.ok(
+    !body.includes("insertOne"),
+    "verifier must not call insertOne"
+  );
+  assert.ok(
+    !body.includes("updateById"),
+    "verifier must not call updateById"
+  );
+});
+
+test("verifyPilotSessionState does not broad-scan tables (uses exact id per fetch)", () => {
+  const body = getVerifierBody();
+  // Uses fetchOneById(table, id, ...) not fetchMany with broad filter
+  assert.ok(
+    !body.includes("fetchMany"),
+    "verifier must not use fetchMany — only exact-ID single-row reads"
+  );
+});
+
+test("verifyPilotSessionState reports present or absent for each record", () => {
+  const body = getVerifierBody();
+  assert.ok(
+    body.includes('"present"'),
+    "verifier must report status present when row found"
+  );
+  assert.ok(
+    body.includes('"absent"'),
+    "verifier must report status absent when row not found"
+  );
+});
+
+test("verifyPilotSessionState covers all required Wave 3 entity types", () => {
+  const body = getVerifierBody();
+  const required = [
+    "operational_job",
+    "schedule_window",
+    "worker_assignment",
+    "work_order",
+    "work_order_event",
+    "completion_evidence",
+    "service_checklist_result",
+    "qa_inspection",
+    "operational_handoff",
+  ];
+  for (const table of required) {
+    assert.ok(body.includes(table), `verifier must cover table: ${table}`);
+  }
+});
+
+test("cleanupOperationsPilotSession does not trigger an operational rerun", () => {
+  const body = getCleanupBody();
+  assert.ok(!body.includes("runOperationsPilot"), "cleanup must not call runOperationsPilot");
+  assert.ok(!body.includes("createOperationalJob"), "cleanup must not create operational records");
+  assert.ok(!body.includes("createWorkOrder"), "cleanup must not create work_order");
+});
+
+// ── Panel: retained-evidence display ─────────────────────────────────────────
+
+test("pilot panel imports verifyPilotSessionState", () => {
+  assert.ok(
+    panelSrc.includes("verifyPilotSessionState"),
+    "panel must import verifyPilotSessionState"
+  );
+});
+
+test("pilot panel displays retained-evidence message when cleanup returns retained_test_evidence", () => {
+  assert.ok(
+    panelSrc.includes("retained_test_evidence"),
+    "panel must handle retained_test_evidence result mode"
+  );
+  assert.ok(
+    panelSrc.includes("Wave 3 test evidence retained under canonical append-only governance"),
+    "panel must display governance retention message, not imply deletion"
+  );
+});
+
 // ── Feature flag: new functions are guarded ───────────────────────────────────
 
 import * as opsClient from "../src/lib/serviceosOperationsClient.js";

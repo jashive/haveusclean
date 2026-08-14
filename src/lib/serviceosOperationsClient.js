@@ -743,38 +743,96 @@ export async function promoteWorkerToCanonical(candidate, handoff, accessToken, 
 
 // ── Pilot cleanup ─────────────────────────────────────────────────────────────
 //
-// Deletes ONLY rows created by the current pilot session.
+// Deletes ONLY mutable rows created by the current pilot session.
 // Deletion order respects FK dependencies (children first).
 // Does NOT delete upstream Wave 1/2 tables:
 //   job_handoff, conversion_record, quote_version, pricing_snapshot,
 //   customer, contact, service_location, worker
 //
+// Append-only canonical tables — NEVER DELETED:
+//   work_order_event, completion_evidence
+//
+// If a pilot session contains any append-only records, cleanup returns a
+// retained_test_evidence result without beginning any destructive work.
+//
 // @param {object} createdIds  Map of entity → { id }
 // @param {string} accessToken
+// @returns {true | { mode: "retained_test_evidence", immutableRecordsRetained: Array,
+//                    mutableRecordsRetained: Array, upstreamPreserved: boolean }}
 
 export async function cleanupOperationsPilotSession(createdIds, accessToken) {
   assertEnabled();
 
-  // Reverse FK dependency order — Wave 3 records only
+  // Collect every append-only record present in this session.
+  // These are canonical records and must remain immutable — never delete them.
+  const IMMUTABLE_EVENT_KEYS = [
+    "workOrderEventCompleted",
+    "workOrderEventWorkStarted",
+    "workOrderEventArrived",
+    "workOrderEventDispatched",
+    "workOrderEventAckd",
+    "workOrderEventAssigned",
+    "workOrderEventScheduled",
+    "workOrderEvent",
+  ];
+  const IMMUTABLE_EVIDENCE_KEYS = ["completionEvidence", "completionEvidences"];
+
+  const immutableRecordsRetained = [];
+  for (const key of IMMUTABLE_EVENT_KEYS) {
+    const val = createdIds[key];
+    if (val?.id) immutableRecordsRetained.push({ table: "work_order_event", id: val.id });
+  }
+  for (const key of IMMUTABLE_EVIDENCE_KEYS) {
+    const val = createdIds[key];
+    if (Array.isArray(val)) {
+      for (const row of val) {
+        if (row?.id) immutableRecordsRetained.push({ table: "completion_evidence", id: row.id });
+      }
+    } else if (val?.id) {
+      immutableRecordsRetained.push({ table: "completion_evidence", id: val.id });
+    }
+  }
+
+  // If any append-only records exist, this is a completed E2E run.
+  // Do NOT begin partial destructive cleanup — return a governed retention result.
+  if (immutableRecordsRetained.length > 0) {
+    const mutableRecordsRetained = [];
+    for (const key of [
+      "operationalHandoff",
+      "correctiveAction",
+      "qaInspection",
+      "checklistResult",
+      "checklistResults",
+      "workOrder",
+      "workerAssignment",
+      "scheduleWindow",
+      "operationalJob",
+    ]) {
+      const val = createdIds[key];
+      if (Array.isArray(val)) {
+        for (const row of val) {
+          if (row?.id) mutableRecordsRetained.push({ table: key, id: row.id });
+        }
+      } else if (val?.id) {
+        mutableRecordsRetained.push({ table: key, id: val.id });
+      }
+    }
+    return {
+      mode: "retained_test_evidence",
+      immutableRecordsRetained,
+      mutableRecordsRetained,
+      upstreamPreserved: true,
+    };
+  }
+
+  // No append-only records — safe to attempt mutable record deletion.
+  // Reverse FK dependency order (children first), excluding append-only tables.
   const order = [
     { table: "operational_handoff", key: "operationalHandoff" },
     { table: "corrective_action", key: "correctiveAction" },
     { table: "qa_inspection", key: "qaInspection" },
     { table: "service_checklist_result", key: "checklistResult" },
-    // Multiple checklist results stored as array
     { table: "service_checklist_result", key: "checklistResults", multi: true },
-    { table: "completion_evidence", key: "completionEvidence" },
-    // Multiple evidence stored as array
-    { table: "completion_evidence", key: "completionEvidences", multi: true },
-    { table: "work_order_event", key: "workOrderEventCompleted" },
-    { table: "work_order_event", key: "workOrderEventWorkStarted" },
-    { table: "work_order_event", key: "workOrderEventArrived" },
-    { table: "work_order_event", key: "workOrderEventDispatched" },
-    { table: "work_order_event", key: "workOrderEventAckd" },
-    { table: "work_order_event", key: "workOrderEventAssigned" },
-    { table: "work_order_event", key: "workOrderEventScheduled" },
-    // Generic event key
-    { table: "work_order_event", key: "workOrderEvent" },
     { table: "work_order", key: "workOrder" },
     { table: "worker_assignment", key: "workerAssignment" },
     { table: "schedule_window", key: "scheduleWindow" },
@@ -816,4 +874,46 @@ export async function cleanupOperationsPilotSession(createdIds, accessToken) {
     );
   }
   return true;
+}
+
+// ── Exact-ID pilot session verifier ───────────────────────────────────────────
+//
+// Performs authenticated GET-only reads for each exact ID from a pilot session.
+// Reports whether each record is present or absent — no table scans.
+// NO writes. No broad queries.
+//
+// @param {object} ids  Map of label → id string for all pilot records to verify
+// @param {string} accessToken
+// @returns {Array<{ label: string, table: string, id: string, status: "present"|"absent"|"error", error?: string }>}
+
+export async function verifyPilotSessionState(ids, accessToken) {
+  assertEnabled();
+
+  const TABLE_MAP = {
+    operationalJob: "operational_job",
+    scheduleWindow: "schedule_window",
+    workerAssignment: "worker_assignment",
+    workOrder: "work_order",
+    workOrderEventArrived: "work_order_event",
+    workOrderEventWorkStarted: "work_order_event",
+    workOrderEventCompleted: "work_order_event",
+    workOrderEvent: "work_order_event",
+    completionEvidence: "completion_evidence",
+    serviceChecklistResult: "service_checklist_result",
+    qaInspection: "qa_inspection",
+    operationalHandoff: "operational_handoff",
+  };
+
+  const results = [];
+  for (const [label, id] of Object.entries(ids)) {
+    if (!id) continue;
+    const table = TABLE_MAP[label] ?? label;
+    try {
+      const row = await fetchOneById(table, id, accessToken);
+      results.push({ label, table, id, status: row ? "present" : "absent" });
+    } catch (err) {
+      results.push({ label, table, id, status: "error", error: err.message });
+    }
+  }
+  return results;
 }
