@@ -29,6 +29,17 @@ test("Wave 2 new table contract: exactly 9 tables — customer/contact/service_l
     "conversion_record",
     "job_handoff",
   ];
+  assert.deepEqual(WAVE2_NEW_TABLES, [
+    "service_request",
+    "opportunity",
+    "estimate",
+    "pricing_snapshot",
+    "quote",
+    "quote_version",
+    "quote_response",
+    "conversion_record",
+    "job_handoff",
+  ]);
   assert.equal(WAVE2_NEW_TABLES.length, 9);
   assert.equal(WAVE2_NEW_TABLES.includes("customer"), false);
   assert.equal(WAVE2_NEW_TABLES.includes("contact"), false);
@@ -122,6 +133,145 @@ test("capturePricingSnapshot: capturedAt maps to frozen_at", () => {
     capturedAt: "2025-06-01T00:00:00.000Z",
   });
   assert.equal(snap.frozen_at, "2025-06-01T00:00:00.000Z");
+});
+
+test("M005 required JSONB fields default to canonical empty values instead of null", () => {
+  const serviceRequest = buildServiceRequestPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    requirements: null,
+    metadata: null,
+  });
+  assert.deepEqual(serviceRequest.requirements, {});
+  assert.deepEqual(serviceRequest.metadata, {});
+
+  const opportunity = buildOpportunityPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    serviceRequestId: "sr-1",
+    metadata: null,
+  });
+  assert.deepEqual(opportunity.metadata, {});
+
+  const estimate = buildEstimatePayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    opportunityId: "opp-1",
+    assumptions: null,
+    scopeSnapshot: null,
+    metadata: null,
+  });
+  assert.deepEqual(estimate.assumptions, {});
+  assert.deepEqual(estimate.scope_snapshot, {});
+  assert.deepEqual(estimate.metadata, {});
+
+  const pricingSnapshot = capturePricingSnapshot({
+    quote: { total: 100, preTaxTotal: 90, taxAmount: 10 },
+    organizationId: "org",
+    businessUnitId: "bu",
+  });
+  assert.deepEqual(pricingSnapshot.configuration_snapshot, {});
+  assert.notEqual(pricingSnapshot.configuration_snapshot, null);
+  assert.deepEqual(pricingSnapshot.labor_economics, {
+    teamSize: null,
+    jobHours: null,
+    partnerPayTotal: null,
+    partnerPayEach: null,
+    profit: null,
+    discountPct: null,
+  });
+  assert.deepEqual(pricingSnapshot.calculation_inputs, {});
+  assert.notEqual(pricingSnapshot.calculation_inputs, null);
+  assert.deepEqual(pricingSnapshot.calculation_outputs, {
+    preTaxTotal: 90,
+    taxAmount: 10,
+    taxRate: 0,
+    total: 100,
+    discountAmount: 0,
+    currency: null,
+  });
+  assert.deepEqual(pricingSnapshot.raw_calculation_snapshot, { total: 100, preTaxTotal: 90, taxAmount: 10 });
+  assert.deepEqual(pricingSnapshot.metadata, {});
+
+  const quote = buildQuotePayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    opportunityId: "opp-1",
+    metadata: null,
+  });
+  assert.deepEqual(quote.metadata, {});
+
+  const quoteVersion = buildQuoteVersionPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    quoteId: "q-1",
+    pricingSnapshotId: "snap-1",
+    lineItemsSnapshot: null,
+    commercialSnapshot: null,
+    metadata: null,
+  });
+  assert.deepEqual(quoteVersion.line_items_snapshot, []);
+  assert.notEqual(quoteVersion.line_items_snapshot, null);
+  assert.deepEqual(quoteVersion.commercial_snapshot, {});
+  assert.notEqual(quoteVersion.commercial_snapshot, null);
+  assert.deepEqual(quoteVersion.metadata, {});
+
+  const quoteResponse = buildQuoteResponsePayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    quoteVersionId: "qv-1",
+    responseType: "declined",
+    metadata: null,
+  });
+  assert.deepEqual(quoteResponse.metadata, {});
+
+  const customer = buildCustomerPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    metadata: null,
+  });
+  assert.deepEqual(customer.metadata, {});
+
+  const contact = buildContactPayload({
+    customerId: "cust-1",
+    metadata: null,
+  });
+  assert.deepEqual(contact.metadata, {});
+
+  const serviceLocation = buildServiceLocationPayload({
+    customerId: "cust-1",
+    jurisdictionId: "jur-1",
+    metadata: null,
+  });
+  assert.deepEqual(serviceLocation.metadata, {});
+
+  const conversionRecord = buildConversionRecordPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    serviceRequestId: "sr-1",
+    opportunityId: "opp-1",
+    estimateId: "est-1",
+    quoteId: "q-1",
+    quoteVersionId: "qv-1",
+    quoteResponseId: "qr-1",
+    customerId: "cust-1",
+    contactId: "ct-1",
+    serviceLocationId: "sl-1",
+    metadata: null,
+  });
+  assert.deepEqual(conversionRecord.metadata, {});
+
+  const jobHandoff = buildJobHandoffPayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    conversionRecordId: "cr-1",
+    quoteVersionId: "qv-1",
+    pricingSnapshotId: "snap-1",
+    handoffPayload: null,
+    metadata: null,
+  });
+  assert.deepEqual(jobHandoff.handoff_payload, {});
+  assert.deepEqual(jobHandoff.metadata, {});
 });
 
 // ── buildServiceRequestPayload ────────────────────────────────────────────────
@@ -307,6 +457,28 @@ test("buildQuoteResponsePayload: no quote_id; uses responded_by_name/email not r
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "quote_id"), false);
   // Obsolete field
   assert.equal(Object.prototype.hasOwnProperty.call(payload, "responded_by"), false);
+});
+
+test("buildQuoteResponsePayload: accepts declined", () => {
+  const payload = buildQuoteResponsePayload({
+    organizationId: "org",
+    businessUnitId: "bu",
+    quoteVersionId: "qv-1",
+    responseType: "declined",
+  });
+  assert.equal(payload.response_type, "declined");
+});
+
+test("buildQuoteResponsePayload: rejects rejected", () => {
+  assert.throws(
+    () => buildQuoteResponsePayload({
+      organizationId: "org",
+      businessUnitId: "bu",
+      quoteVersionId: "qv-1",
+      responseType: "rejected",
+    }),
+    /responseType must be "accepted" or "declined"/
+  );
 });
 
 test("buildQuoteResponsePayload: rejects invalid responseType", () => {

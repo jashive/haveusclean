@@ -13,6 +13,14 @@
 //   → Conversion Record
 //   → Job Handoff (Wave 3 boundary only)
 
+function withJsonObject(value) {
+  return value ?? {};
+}
+
+function withJsonArray(value) {
+  return value ?? [];
+}
+
 // ── Pricing snapshot ──────────────────────────────────────────────────────────
 
 /**
@@ -95,14 +103,14 @@ export function capturePricingSnapshot({
     tax_amount: taxAmount,
     total_amount: total,
     calculator_version: quote.quoteContractVersion ?? null,
-    configuration_snapshot: null,
-    labor_economics: laborEconomics,
-    calculation_inputs: calculationInputs,
+    configuration_snapshot: {},
+    labor_economics: withJsonObject(laborEconomics),
+    calculation_inputs: withJsonObject(calculationInputs),
     calculation_outputs: calculationOutputs,
     // Complete raw quote preserved — never recomputed after snapshot stored
-    raw_calculation_snapshot: quote,
+    raw_calculation_snapshot: withJsonObject(quote),
     frozen_at: frozenAt,
-    metadata: null,
+    metadata: {},
     created_by_app_user_id: appUserId ?? null,
   };
 }
@@ -120,6 +128,7 @@ export function capturePricingSnapshot({
  * @param {string} [opts.intakeChannel]    Default: "pilot_ui"
  * @param {string} [opts.title]
  * @param {string} [opts.description]
+ * @param {object} [opts.requirements]
  * @param {object} [opts.metadata]
  * @param {string} [opts.appUserId]
  */
@@ -131,6 +140,7 @@ export function buildServiceRequestPayload({
   intakeChannel,
   title,
   description,
+  requirements,
   metadata,
   appUserId,
 }) {
@@ -146,8 +156,8 @@ export function buildServiceRequestPayload({
     requested_at: new Date().toISOString(),
     title: title ?? null,
     description: description ?? null,
-    requirements: null,
-    metadata: metadata ?? null,
+    requirements: withJsonObject(requirements),
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
     updated_by_app_user_id: appUserId ?? null,
   };
@@ -190,7 +200,7 @@ export function buildOpportunityPayload({
     probability_percent: null,
     title: title ?? null,
     summary: summary ?? null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
     updated_by_app_user_id: appUserId ?? null,
   };
@@ -205,6 +215,7 @@ export function buildOpportunityPayload({
  * @param {string} opts.opportunityId
  * @param {string} [opts.lifecycleStatus]  Default: "prepared"
  * @param {number} [opts.versionNo]        Default: 1
+ * @param {object} [opts.assumptions]
  * @param {object} [opts.scopeSnapshot]    Quote inputs / scope details
  * @param {string} [opts.notes]
  * @param {object} [opts.metadata]
@@ -216,6 +227,7 @@ export function buildEstimatePayload({
   opportunityId,
   lifecycleStatus,
   versionNo,
+  assumptions,
   scopeSnapshot,
   notes,
   metadata,
@@ -232,10 +244,10 @@ export function buildEstimatePayload({
     estimate_number: null,
     version_no: versionNo ?? 1,
     lifecycle_status: lifecycleStatus ?? "prepared",
-    assumptions: null,
-    scope_snapshot: scopeSnapshot ?? null,
+    assumptions: withJsonObject(assumptions),
+    scope_snapshot: withJsonObject(scopeSnapshot),
     notes: notes ?? null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
     updated_by_app_user_id: appUserId ?? null,
   };
@@ -277,7 +289,7 @@ export function buildQuotePayload({
     customer_id: null,
     contact_id: null,
     service_location_id: null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
     updated_by_app_user_id: appUserId ?? null,
   };
@@ -296,6 +308,7 @@ export function buildQuotePayload({
  * @param {number} [opts.versionNo]       Default: 1
  * @param {string} [opts.estimateId]
  * @param {object} [opts.lineItemsSnapshot]
+ * @param {object} [opts.commercialSnapshot]
  * @param {string} [opts.title]
  * @param {object} [opts.metadata]
  * @param {string} [opts.appUserId]
@@ -308,6 +321,7 @@ export function buildQuoteVersionPayload({
   versionNo,
   estimateId,
   lineItemsSnapshot,
+  commercialSnapshot,
   title,
   metadata,
   appUserId,
@@ -329,10 +343,10 @@ export function buildQuoteVersionPayload({
     valid_until: null,
     title: title ?? null,
     terms_text: null,
-    line_items_snapshot: lineItemsSnapshot ?? null,
-    commercial_snapshot: null,
+    line_items_snapshot: withJsonArray(lineItemsSnapshot),
+    commercial_snapshot: withJsonObject(commercialSnapshot),
     sent_at: null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
     updated_by_app_user_id: appUserId ?? null,
   };
@@ -341,13 +355,13 @@ export function buildQuoteVersionPayload({
 /**
  * Build a quote_response INSERT payload.
  * NOTE: There is NO quote_id field — the response links via quote_version_id.
- * The quote_version MUST be in "sent" status when inserting an accepted response.
+ * The quote_version MUST be in "sent" status when inserting an accepted or declined response.
  *
  * @param {object} opts
  * @param {string} opts.organizationId
  * @param {string} opts.businessUnitId
  * @param {string} opts.quoteVersionId
- * @param {"accepted"|"rejected"} opts.responseType
+ * @param {"accepted"|"declined"} opts.responseType
  * @param {string} [opts.responseChannel]   Default: "pilot_ui"
  * @param {string} [opts.respondedByName]
  * @param {string} [opts.respondedByEmail]
@@ -370,8 +384,8 @@ export function buildQuoteResponsePayload({
   if (!organizationId) throw new Error("buildQuoteResponsePayload: organizationId required");
   if (!businessUnitId) throw new Error("buildQuoteResponsePayload: businessUnitId required");
   if (!quoteVersionId) throw new Error("buildQuoteResponsePayload: quoteVersionId required");
-  if (responseType !== "accepted" && responseType !== "rejected") {
-    throw new Error('buildQuoteResponsePayload: responseType must be "accepted" or "rejected"');
+  if (responseType !== "accepted" && responseType !== "declined") {
+    throw new Error('buildQuoteResponsePayload: responseType must be "accepted" or "declined"');
   }
 
   return {
@@ -385,7 +399,7 @@ export function buildQuoteResponsePayload({
     responded_by_email: respondedByEmail ?? null,
     responded_at: new Date().toISOString(),
     notes: notes ?? null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
   };
 }
@@ -429,7 +443,7 @@ export function buildCustomerPayload({
     legal_name: legalName ?? null,
     status: "active",
     notes: null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
   };
 }
 
@@ -465,7 +479,7 @@ export function buildContactPayload({
     email: email ?? null,
     phone: phone ?? null,
     is_primary: true,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
   };
 }
 
@@ -516,7 +530,7 @@ export function buildServiceLocationPayload({
     access_notes: accessNotes ?? null,
     latitude: null,
     longitude: null,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
   };
 }
 
@@ -581,7 +595,7 @@ export function buildConversionRecordPayload({
     customer_id: customerId,
     contact_id: contactId,
     service_location_id: serviceLocationId,
-    metadata: metadata ?? null,
+    metadata: withJsonObject(metadata),
     created_by_app_user_id: appUserId ?? null,
   };
 }
@@ -628,8 +642,8 @@ export function buildJobHandoffPayload({
     quote_version_id: quoteVersionId,
     pricing_snapshot_id: pricingSnapshotId,
     handoff_status: "ready",
-    handoff_payload: handoffPayload ?? null,
-    metadata: metadata ?? null,
+    handoff_payload: withJsonObject(handoffPayload),
+    metadata: withJsonObject(metadata),
     handed_off_at: new Date().toISOString(),
     created_by_app_user_id: appUserId ?? null,
   };
