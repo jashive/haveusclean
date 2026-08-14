@@ -480,6 +480,26 @@ test("M008: quote_version uses lifecycle_status and version_no", () => {
   assert.ok(insert.includes("version_no"), "M008 quote_version must use version_no");
   assert.ok(!insert.includes("version_status"), "M008 quote_version must not use stale version_status");
   assert.ok(!insert.includes("version_number"), "M008 quote_version must not use stale version_number");
+  assert.ok(insert.includes("'draft'"), "M008 quote_version must begin as draft");
+});
+
+test("M008: quote_version follows draft → sent → accepted lifecycle", () => {
+  const insertIdx = m008.indexOf("INSERT INTO public.quote_version");
+  const sentIdx = m008.indexOf(
+    "UPDATE public.quote_version\nSET lifecycle_status = 'sent',\n    sent_at = now()"
+  );
+  const responseIdx = m008.indexOf("INSERT INTO public.quote_response");
+  const acceptedIdx = m008.indexOf(
+    "UPDATE public.quote_version\nSET lifecycle_status = 'accepted'"
+  );
+
+  assert.ok(insertIdx >= 0, "M008 quote_version insert not found");
+  assert.ok(sentIdx > insertIdx, "M008 must transition quote_version from draft to sent after insert");
+  assert.ok(responseIdx > sentIdx, "M008 quote_response must occur after quote_version is sent");
+  assert.ok(
+    acceptedIdx > responseIdx,
+    "M008 must transition quote_version from sent to accepted after quote_response insert"
+  );
 });
 
 test("M008: pricing_snapshot uses canonical field names (no stale fields)", () => {

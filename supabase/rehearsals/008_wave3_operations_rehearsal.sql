@@ -155,14 +155,19 @@ VALUES (
   '0e000000-0000-0000-0000-000000000001'::uuid,
   '14000000-0000-0000-0000-000000000001'::uuid,
   1,
-  'accepted'
+ 'draft'
 );
+ 
+UPDATE public.quote_version
+SET lifecycle_status = 'sent',
+   sent_at = now()
+WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;
 
 -- 1j. Quote response (required for conversion_record lineage)
 INSERT INTO public.quote_response (
-  id, organization_id, business_unit_id,
-  quote_id, quote_version_id,
-  response_status
+ id, organization_id, business_unit_id,
+ quote_id, quote_version_id,
+ response_status
 )
 VALUES (
   '0a000000-0000-0000-0000-000000000002'::uuid,
@@ -172,6 +177,10 @@ VALUES (
   '15000000-0000-0000-0000-000000000001'::uuid,
   'accepted'
 );
+
+UPDATE public.quote_version
+SET lifecycle_status = 'accepted'
+WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;
 
 -- 1k. Conversion record (canonical lineage: service_request_id, estimate_id, quote_id, quote_response_id)
 INSERT INTO public.conversion_record (
