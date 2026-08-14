@@ -190,6 +190,31 @@ export async function createOperationalHandoff(payload, accessToken) {
   return insertOne("operational_handoff", payload, accessToken);
 }
 
+export async function createRequiredEvidencePolicy(payload, accessToken) {
+  assertEnabled();
+  return insertOne("required_evidence_policy", payload, accessToken);
+}
+
+export async function createWorkOrderGovernanceLink(payload, accessToken) {
+  assertEnabled();
+  return insertOne("work_order_governance_link", payload, accessToken);
+}
+
+export async function createWorkOrderEvidenceRequirement(payload, accessToken) {
+  assertEnabled();
+  return insertOne("work_order_evidence_requirement", payload, accessToken);
+}
+
+export async function createServiceException(payload, accessToken) {
+  assertEnabled();
+  return insertOne("service_exception", payload, accessToken);
+}
+
+export async function createCustomerOutcome(payload, accessToken) {
+  assertEnabled();
+  return insertOne("customer_outcome", payload, accessToken);
+}
+
 // ── READ methods ──────────────────────────────────────────────────────────────
 
 export async function fetchJobHandoffById(id, accessToken) {
@@ -293,6 +318,55 @@ export async function fetchOperationalHandoffForJob(operationalJobId, accessToke
     accessToken
   );
   return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function fetchRequiredEvidencePoliciesByConfigurationVersion(
+  configurationVersionId,
+  accessToken
+) {
+  assertEnabled();
+  return fetchMany(
+    "required_evidence_policy",
+    `configuration_version_id=eq.${encodeURIComponent(configurationVersionId)}&order=service_family.asc,requirement_key.asc`,
+    accessToken
+  );
+}
+
+export async function fetchGovernanceLinkForWorkOrder(workOrderId, accessToken) {
+  assertEnabled();
+  const rows = await fetchMany(
+    "work_order_governance_link",
+    `work_order_id=eq.${encodeURIComponent(workOrderId)}&limit=1`,
+    accessToken
+  );
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function fetchEvidenceRequirementsForWorkOrder(workOrderId, accessToken) {
+  assertEnabled();
+  return fetchMany(
+    "work_order_evidence_requirement",
+    `work_order_id=eq.${encodeURIComponent(workOrderId)}&order=requirement_key.asc`,
+    accessToken
+  );
+}
+
+export async function fetchServiceExceptionsForJob(operationalJobId, accessToken) {
+  assertEnabled();
+  return fetchMany(
+    "service_exception",
+    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&order=reported_at.asc,created_at.asc`,
+    accessToken
+  );
+}
+
+export async function fetchCustomerOutcomesForJob(operationalJobId, accessToken) {
+  assertEnabled();
+  return fetchMany(
+    "customer_outcome",
+    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&order=reported_at.asc,created_at.asc`,
+    accessToken
+  );
 }
 
 export async function fetchEligibleJobHandoffs(accessToken) {
@@ -579,6 +653,72 @@ export async function updateOperationalHandoffStatus(
     handoff_status: newStatus,
   };
   return updateById("operational_handoff", id, patch, accessToken);
+}
+
+const VALID_SERVICE_EXCEPTION_STATUSES = [
+  "reported",
+  "triaged",
+  "corrective_action_required",
+  "ready_for_reinspection",
+  "resolved",
+  "closed",
+  "cancelled",
+];
+
+export async function updateServiceExceptionStatus(
+  id,
+  newStatus,
+  accessToken,
+  appUserId
+) {
+  assertEnabled();
+  if (!VALID_SERVICE_EXCEPTION_STATUSES.includes(newStatus)) {
+    throw new Error(
+      `updateServiceExceptionStatus: invalid status "${newStatus}". Valid: ${VALID_SERVICE_EXCEPTION_STATUSES.join(", ")}`
+    );
+  }
+  const now = new Date().toISOString();
+  const patch = {
+    triage_status: newStatus,
+    updated_at: now,
+    ...(newStatus !== "reported" ? { triaged_at: now } : {}),
+    ...(newStatus === "resolved" ? { resolved_at: now } : {}),
+    ...(newStatus === "closed" ? { closed_at: now } : {}),
+    ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
+  };
+  return updateById("service_exception", id, patch, accessToken);
+}
+
+const VALID_CUSTOMER_OUTCOME_STATUSES = [
+  "reported",
+  "acknowledged",
+  "investigating",
+  "resolved",
+  "closed",
+  "dismissed",
+];
+
+export async function updateCustomerOutcomeStatus(
+  id,
+  newStatus,
+  accessToken,
+  appUserId
+) {
+  assertEnabled();
+  if (!VALID_CUSTOMER_OUTCOME_STATUSES.includes(newStatus)) {
+    throw new Error(
+      `updateCustomerOutcomeStatus: invalid status "${newStatus}". Valid: ${VALID_CUSTOMER_OUTCOME_STATUSES.join(", ")}`
+    );
+  }
+  const now = new Date().toISOString();
+  const patch = {
+    outcome_status: newStatus,
+    updated_at: now,
+    ...(newStatus === "resolved" ? { resolved_at: now } : {}),
+    ...(newStatus === "closed" ? { closed_at: now } : {}),
+    ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
+  };
+  return updateById("customer_outcome", id, patch, accessToken);
 }
 
 // ── Legacy workforce bootstrap (Preview-only, read + explicit promote) ────────

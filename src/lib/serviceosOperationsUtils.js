@@ -130,6 +130,65 @@ export const CORRECTIVE_ACTION_TYPES = [
 
 export const OPERATIONAL_HANDOFF_STATUSES = ["ready", "consumed", "cancelled"];
 
+export const SERVICE_EXCEPTION_CATEGORIES = [
+  "service_quality",
+  "safety",
+  "access",
+  "equipment",
+  "documentation",
+  "customer_issue",
+  "other",
+];
+
+export const SERVICE_EXCEPTION_SEVERITIES = ["low", "medium", "high", "critical"];
+
+export const SERVICE_EXCEPTION_SOURCES = [
+  "worker",
+  "qa",
+  "office_ops",
+  "system",
+  "customer",
+  "other",
+];
+
+export const SERVICE_EXCEPTION_STATUSES = [
+  "reported",
+  "triaged",
+  "corrective_action_required",
+  "ready_for_reinspection",
+  "resolved",
+  "closed",
+  "cancelled",
+];
+
+export const CUSTOMER_OUTCOME_TYPES = [
+  "praise",
+  "complaint",
+  "service_issue",
+  "reclean_request",
+  "damage_concern",
+  "resolution",
+  "other",
+];
+
+export const CUSTOMER_OUTCOME_STATUSES = [
+  "reported",
+  "acknowledged",
+  "investigating",
+  "resolved",
+  "closed",
+  "dismissed",
+];
+
+export const CUSTOMER_OUTCOME_SOURCES = [
+  "customer",
+  "office_ops",
+  "qa",
+  "worker",
+  "system",
+  "other",
+];
+
 // ── Internal helpers ──────────────────────────────────────────────────────────
 
 function requireField(value, name) {
@@ -151,6 +210,23 @@ function requireEnum(value, validValues, fieldName) {
 
 function withJsonObject(value) {
   return value ?? {};
+}
+
+function withJsonArray(value, fieldName) {
+  const next = value ?? [];
+  if (!Array.isArray(next)) {
+    throw new Error(`${fieldName} must be an array when provided`);
+  }
+  return next;
+}
+
+function requirePositiveInteger(value, fieldName) {
+  requireField(value, fieldName);
+  const normalized = Number(value);
+  if (!Number.isInteger(normalized) || normalized <= 0) {
+    throw new Error(`${fieldName} must be a positive integer. Got: ${value}`);
+  }
+  return normalized;
 }
 
 // ── 1. operational_job ────────────────────────────────────────────────────────
@@ -648,6 +724,265 @@ export function buildOperationalHandoffPayload({
     quote_version_id: quoteVersionId,
     handoff_status: hstatus,
     handoff_payload: withJsonObject(handoffPayload),
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
+// ── Wave 4: required evidence policy ────────────────────────────────────────────
+
+export function buildRequiredEvidencePolicyPayload({
+  organizationId,
+  businessUnitId,
+  jurisdictionId,
+  configurationVersionId,
+  serviceFamily,
+  serviceTaskKey,
+  serviceModuleKey,
+  requirementKey,
+  evidenceType,
+  requiredCount,
+  isMandatory,
+  storageRulePayload,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(jurisdictionId, "jurisdictionId");
+  requireField(configurationVersionId, "configurationVersionId");
+  requireField(serviceFamily, "serviceFamily");
+  requireField(requirementKey, "requirementKey");
+  requireEnum(evidenceType, EVIDENCE_TYPES, "evidenceType");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    jurisdiction_id: jurisdictionId,
+    configuration_version_id: configurationVersionId,
+    service_family: serviceFamily,
+    ...(serviceTaskKey != null ? { service_task_key: serviceTaskKey } : {}),
+    ...(serviceModuleKey != null ? { service_module_key: serviceModuleKey } : {}),
+    requirement_key: requirementKey,
+    evidence_type: evidenceType,
+    required_count: requirePositiveInteger(requiredCount ?? 1, "requiredCount"),
+    is_mandatory: isMandatory ?? true,
+    storage_rule_payload: withJsonObject(storageRulePayload),
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
+export function buildWorkOrderGovernanceLinkPayload({
+  organizationId,
+  businessUnitId,
+  jurisdictionId,
+  operationalJobId,
+  workOrderId,
+  configurationVersionId,
+  checklistVersionReference,
+  taskDefinitionReference,
+  sopReferenceSnapshot,
+  governanceSnapshot,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(jurisdictionId, "jurisdictionId");
+  requireField(operationalJobId, "operationalJobId");
+  requireField(workOrderId, "workOrderId");
+  requireField(configurationVersionId, "configurationVersionId");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    jurisdiction_id: jurisdictionId,
+    operational_job_id: operationalJobId,
+    work_order_id: workOrderId,
+    configuration_version_id: configurationVersionId,
+    ...(checklistVersionReference != null
+      ? { checklist_version_reference: checklistVersionReference }
+      : {}),
+    ...(taskDefinitionReference != null
+      ? { task_definition_reference: taskDefinitionReference }
+      : {}),
+    sop_reference_snapshot: withJsonArray(sopReferenceSnapshot, "sopReferenceSnapshot"),
+    governance_snapshot: withJsonObject(governanceSnapshot),
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
+export function buildWorkOrderEvidenceRequirementPayload({
+  organizationId,
+  businessUnitId,
+  operationalJobId,
+  workOrderId,
+  workOrderGovernanceLinkId,
+  requiredEvidencePolicyId,
+  sourceConfigurationVersionId,
+  serviceTaskKey,
+  serviceModuleKey,
+  requirementKey,
+  evidenceType,
+  requiredCount,
+  isMandatory,
+  storageRulePayload,
+  qualitySignalPayload,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(operationalJobId, "operationalJobId");
+  requireField(workOrderId, "workOrderId");
+  requireField(workOrderGovernanceLinkId, "workOrderGovernanceLinkId");
+  requireField(sourceConfigurationVersionId, "sourceConfigurationVersionId");
+  requireField(requirementKey, "requirementKey");
+  requireEnum(evidenceType, EVIDENCE_TYPES, "evidenceType");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    operational_job_id: operationalJobId,
+    work_order_id: workOrderId,
+    work_order_governance_link_id: workOrderGovernanceLinkId,
+    ...(requiredEvidencePolicyId != null
+      ? { required_evidence_policy_id: requiredEvidencePolicyId }
+      : {}),
+    source_configuration_version_id: sourceConfigurationVersionId,
+    ...(serviceTaskKey != null ? { service_task_key: serviceTaskKey } : {}),
+    ...(serviceModuleKey != null ? { service_module_key: serviceModuleKey } : {}),
+    requirement_key: requirementKey,
+    evidence_type: evidenceType,
+    required_count: requirePositiveInteger(requiredCount ?? 1, "requiredCount"),
+    is_mandatory: isMandatory ?? true,
+    storage_rule_payload: withJsonObject(storageRulePayload),
+    quality_signal_payload: withJsonObject(qualitySignalPayload),
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
+export function buildServiceExceptionPayload({
+  organizationId,
+  businessUnitId,
+  operationalJobId,
+  workOrderId,
+  qaInspectionId,
+  correctiveActionId,
+  sourceType,
+  actorWorkerId,
+  actorAppUserId,
+  exceptionCategory,
+  severity,
+  description,
+  findings,
+  triageStatus,
+  correctiveActionRequired,
+  reportedAt,
+  triagedAt,
+  resolutionPayload,
+  resolvedAt,
+  closedAt,
+  qualitySignalPayload,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(operationalJobId, "operationalJobId");
+  requireField(workOrderId, "workOrderId");
+  requireField(description, "description");
+  requireEnum(sourceType ?? "other", SERVICE_EXCEPTION_SOURCES, "sourceType");
+  requireEnum(exceptionCategory, SERVICE_EXCEPTION_CATEGORIES, "exceptionCategory");
+  requireEnum(severity, SERVICE_EXCEPTION_SEVERITIES, "severity");
+
+  const nextStatus = triageStatus ?? "reported";
+  requireEnum(nextStatus, SERVICE_EXCEPTION_STATUSES, "triageStatus");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    operational_job_id: operationalJobId,
+    work_order_id: workOrderId,
+    ...(qaInspectionId != null ? { qa_inspection_id: qaInspectionId } : {}),
+    ...(correctiveActionId != null ? { corrective_action_id: correctiveActionId } : {}),
+    source_type: sourceType ?? "other",
+    ...(actorWorkerId != null ? { actor_worker_id: actorWorkerId } : {}),
+    ...(actorAppUserId != null ? { actor_app_user_id: actorAppUserId } : {}),
+    exception_category: exceptionCategory,
+    severity,
+    description,
+    findings: withJsonObject(findings),
+    triage_status: nextStatus,
+    corrective_action_required: correctiveActionRequired ?? false,
+    reported_at: reportedAt ?? new Date().toISOString(),
+    ...(triagedAt != null ? { triaged_at: triagedAt } : {}),
+    resolution_payload: withJsonObject(resolutionPayload),
+    ...(resolvedAt != null ? { resolved_at: resolvedAt } : {}),
+    ...(closedAt != null ? { closed_at: closedAt } : {}),
+    quality_signal_payload: withJsonObject(qualitySignalPayload),
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
+export function buildCustomerOutcomePayload({
+  organizationId,
+  businessUnitId,
+  operationalJobId,
+  workOrderId,
+  customerId,
+  contactId,
+  serviceLocationId,
+  outcomeType,
+  outcomeStatus,
+  outcomeSource,
+  sourceChannel,
+  reportedAt,
+  recordedAt,
+  description,
+  details,
+  resolutionPayload,
+  resolvedAt,
+  closedAt,
+  qualitySignalPayload,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(operationalJobId, "operationalJobId");
+  requireField(customerId, "customerId");
+  requireField(description, "description");
+  requireEnum(outcomeType, CUSTOMER_OUTCOME_TYPES, "outcomeType");
+  requireEnum(outcomeSource ?? "customer", CUSTOMER_OUTCOME_SOURCES, "outcomeSource");
+
+  const nextStatus = outcomeStatus ?? "reported";
+  requireEnum(nextStatus, CUSTOMER_OUTCOME_STATUSES, "outcomeStatus");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    operational_job_id: operationalJobId,
+    ...(workOrderId != null ? { work_order_id: workOrderId } : {}),
+    customer_id: customerId,
+    ...(contactId != null ? { contact_id: contactId } : {}),
+    ...(serviceLocationId != null ? { service_location_id: serviceLocationId } : {}),
+    outcome_type: outcomeType,
+    outcome_status: nextStatus,
+    outcome_source: outcomeSource ?? "customer",
+    ...(sourceChannel != null ? { source_channel: sourceChannel } : {}),
+    reported_at: reportedAt ?? new Date().toISOString(),
+    recorded_at: recordedAt ?? new Date().toISOString(),
+    description,
+    details: withJsonObject(details),
+    resolution_payload: withJsonObject(resolutionPayload),
+    ...(resolvedAt != null ? { resolved_at: resolvedAt } : {}),
+    ...(closedAt != null ? { closed_at: closedAt } : {}),
+    quality_signal_payload: withJsonObject(qualitySignalPayload),
     metadata: withJsonObject(metadata),
     ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
   };
