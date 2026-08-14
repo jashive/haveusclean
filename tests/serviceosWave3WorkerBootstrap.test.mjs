@@ -189,6 +189,82 @@ test("promoteWorkerToCanonical uses display_name from candidate source, not fabr
     !fnBody.includes("Synthetic Worker"),
     "display_name must not use a synthetic/fabricated value"
   );
+  assert.ok(
+    !fnBody.includes('"Unknown"'),
+    'display_name must not fall back to "Unknown" placeholder'
+  );
+});
+
+// ── promoteWorkerToCanonical: null/empty/whitespace name blocks promotion ─────
+
+test("promoteWorkerToCanonical blocks promotion when candidate.name is null", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    fnBody.includes("!candidate.name"),
+    "must guard against null or falsy candidate.name before building payload"
+  );
+  assert.ok(
+    fnBody.includes("canonical promotion blocked"),
+    "error message must reference canonical promotion blocked"
+  );
+});
+
+test("promoteWorkerToCanonical blocks promotion when candidate.name is empty string", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // empty string is falsy — same !candidate.name guard covers it
+  assert.ok(
+    fnBody.includes("!candidate.name"),
+    "falsy guard must cover empty string"
+  );
+});
+
+test("promoteWorkerToCanonical blocks promotion when candidate.name is whitespace-only", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    fnBody.includes(".trim()"),
+    "must trim and reject whitespace-only names"
+  );
+});
+
+test("promoteWorkerToCanonical does not insert worker when name is invalid", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // The throw must appear BEFORE the insertOne call
+  const throwIdx = fnBody.indexOf("canonical promotion blocked");
+  const insertIdx = fnBody.indexOf("insertOne");
+  assert.ok(throwIdx > -1, "error throw must exist");
+  assert.ok(insertIdx > -1, "insertOne must exist");
+  assert.ok(throwIdx < insertIdx, "name validation throw must come before insertOne");
+});
+
+// ── promoteWorkerToCanonical: real phone maps to canonical worker.phone ───────
+
+test("promoteWorkerToCanonical maps candidate.phone to canonical worker.phone", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    fnBody.includes("workerPayload.phone = candidate.phone") ||
+      fnBody.includes("phone: candidate.phone"),
+    "real phone must map to canonical worker.phone field"
+  );
+});
+
+test("promoteWorkerToCanonical does not generate fake phone numbers", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    !fnBody.includes("555-") && !fnBody.includes("fake") && !fnBody.includes("generated"),
+    "must not contain fabricated phone patterns"
+  );
+});
+
+test("promoteWorkerToCanonical omits phone when candidate.phone is missing (null-safe)", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    fnBody.includes("candidate.phone"),
+    "phone assignment must be conditional on candidate.phone presence"
+  );
+  // phone must NOT be in the workerPayload object literal directly — it is set conditionally
+  const payloadLiteralEnd = fnBody.indexOf("};", fnBody.indexOf("const workerPayload"));
+  const phoneInLiteral = fnBody.slice(fnBody.indexOf("const workerPayload"), payloadLiteralEnd).includes("phone:");
+  assert.ok(!phoneInLiteral, "phone must not be unconditionally set in workerPayload literal");
 });
 
 test("promoteWorkerToCanonical uses email from candidate source when present", () => {

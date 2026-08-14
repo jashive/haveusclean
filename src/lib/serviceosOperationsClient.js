@@ -698,25 +698,33 @@ export async function promoteWorkerToCanonical(candidate, handoff, accessToken, 
     return { worker: existing, wasExisting: true };
   }
 
+  // Fail closed if the legacy candidate has no real display name.
+  // Do NOT fabricate placeholder personal data.
+  if (!candidate.name || !candidate.name.trim()) {
+    throw new Error(
+      "Selected legacy worker candidate has no real display name; canonical promotion blocked."
+    );
+  }
+
   // Build canonical worker payload from real source fields only.
   // worker_type defaults conservatively to contractor per spec.
   const workerPayload = {
     organization_id: handoff.organization_id,
     business_unit_id: handoff.business_unit_id,
     worker_type: "contractor",
-    display_name: candidate.name ?? "Unknown",
+    display_name: candidate.name,
     status: "active",
     metadata: {
       source_system: "huc_partners",
       source_record_id: candidate.source_id,
       bootstrap_reason: "wave3_preview_pilot",
       migration_mode: "controlled_preview_bootstrap",
-      ...(candidate.phone ? { source_phone: candidate.phone } : {}),
       ...(appUserId ? { promoted_by_app_user_id: appUserId } : {}),
       promoted_at: new Date().toISOString(),
     },
   };
   if (candidate.email) workerPayload.email = candidate.email;
+  if (candidate.phone) workerPayload.phone = candidate.phone;
 
   const newWorker = await insertOne("worker", workerPayload, accessToken);
   return { worker: newWorker, wasExisting: false };
