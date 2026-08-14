@@ -304,6 +304,104 @@ test("_findExistingCanonicalWorkerForSource checks by email as additional dedup 
   );
 });
 
+// ── promoteWorkerToCanonical: scope safety for existing worker match ───────────
+
+test("promoteWorkerToCanonical accepts existing worker: same org + same BU", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // Scope check must compare organization_id
+  assert.ok(
+    fnBody.includes("existing.organization_id === handoff.organization_id"),
+    "must verify organization_id matches handoff"
+  );
+  // And must also check business_unit_id equality
+  assert.ok(
+    fnBody.includes("existing.business_unit_id === handoff.business_unit_id"),
+    "must verify business_unit_id matches handoff"
+  );
+});
+
+test("promoteWorkerToCanonical accepts existing worker: same org + null BU (enterprise/global)", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // null BU on existing worker is permitted
+  assert.ok(
+    fnBody.includes("existing.business_unit_id == null"),
+    "null business_unit_id on existing worker must be allowed (enterprise scope)"
+  );
+});
+
+test("promoteWorkerToCanonical rejects existing worker from different organization", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // The throw must contain the scope-blocked error
+  assert.ok(
+    fnBody.includes("outside the selected handoff organization/business-unit scope"),
+    "must throw with scope-blocked message when org differs"
+  );
+  // And must happen inside the existing-worker branch (before insertOne)
+  const scopeThrowIdx = fnBody.indexOf("outside the selected handoff organization/business-unit scope");
+  const insertIdx = fnBody.indexOf("insertOne");
+  assert.ok(scopeThrowIdx < insertIdx, "scope-rejection throw must appear before insertOne");
+});
+
+test("promoteWorkerToCanonical rejects existing worker: same org but different non-null BU", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // buMatch requires null OR exact equality — different non-null BU fails both conditions
+  assert.ok(
+    fnBody.includes("existing.business_unit_id == null") &&
+      fnBody.includes("existing.business_unit_id === handoff.business_unit_id"),
+    "BU check must require null OR exact match; different non-null BU must be rejected"
+  );
+});
+
+test("promoteWorkerToCanonical: incompatible existing worker does not cause a second worker insert", () => {
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  // Scope throw is inside the `if (existing)` block, before any insertOne call
+  const existingBlockStart = fnBody.indexOf("if (existing)");
+  const scopeThrow = fnBody.indexOf("outside the selected handoff organization/business-unit scope");
+  const insertIdx = fnBody.indexOf("insertOne");
+  assert.ok(existingBlockStart > -1, "existing-worker branch must be present");
+  assert.ok(scopeThrow > existingBlockStart, "scope throw must be inside existing-worker branch");
+  assert.ok(scopeThrow < insertIdx, "scope throw must prevent reaching insertOne");
+});
+
+test("promoteWorkerToCanonical: incompatible existing worker does not populate worker_id", () => {
+  // The function throws, so callers cannot receive a worker object.
+  // Verify that the scope error throw is unconditional (not behind an inner return).
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(
+    fnBody.includes("throw new Error") &&
+      fnBody.includes("outside the selected handoff organization/business-unit scope"),
+    "must throw (not return) when scope is incompatible — caller cannot set worker_id"
+  );
+});
+
+test("promoteWorkerToCanonical: incompatible existing worker cannot arm Run Operations Pilot", () => {
+  // Run Operations Pilot is armed only when canRun is true, which requires workerId.
+  // workerId is set only on success inside handlePromoteWorker's try block.
+  // The thrown scope error routes to catch, leaving workerId unchanged.
+  const panelBody = panelSrc;
+  assert.ok(
+    panelBody.includes("setWorkerId(result.worker.id)"),
+    "workerId must only be set inside the success (try) path"
+  );
+  // setWorkerId must NOT appear in the catch block
+  const catchIdx = panelBody.indexOf("} catch (err)");
+  const catchEnd = panelBody.indexOf("} finally", catchIdx);
+  const catchBlock = panelBody.slice(catchIdx, catchEnd > catchIdx ? catchEnd : undefined);
+  assert.ok(
+    !catchBlock.includes("setWorkerId"),
+    "setWorkerId must not be called in catch — incompatible worker cannot arm Run Operations Pilot"
+  );
+});
+
+test("promoteWorkerToCanonical scope failure: no operational records created", () => {
+  // The scope throw exits before any operational record builders are called.
+  const fnBody = getExportedFunctionSource(clientSrc, "promoteWorkerToCanonical");
+  assert.ok(!fnBody.includes("createOperationalJob"), "no operational_job on scope failure");
+  assert.ok(!fnBody.includes("createScheduleWindow"), "no schedule_window on scope failure");
+  assert.ok(!fnBody.includes("createWorkOrder"), "no work_order on scope failure");
+  assert.ok(!fnBody.includes("createWorkerAssignment"), "no worker_assignment on scope failure");
+});
+
 // ── promoteWorkerToCanonical: does NOT create Wave 3 operational records ──────
 
 test("promoteWorkerToCanonical does not call createOperationalJob", () => {

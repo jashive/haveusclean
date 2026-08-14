@@ -695,6 +695,17 @@ export async function promoteWorkerToCanonical(candidate, handoff, accessToken, 
     accessToken
   );
   if (existing) {
+    // Validate scope before accepting: existing worker must belong to the same
+    // organization, and its BU must be null (enterprise/global) or match exactly.
+    const orgMatch = existing.organization_id === handoff.organization_id;
+    const buMatch =
+      existing.business_unit_id == null ||
+      existing.business_unit_id === handoff.business_unit_id;
+    if (!orgMatch || !buMatch) {
+      throw new Error(
+        "Existing canonical worker match is outside the selected handoff organization/business-unit scope; promotion blocked."
+      );
+    }
     return { worker: existing, wasExisting: true };
   }
 
