@@ -512,8 +512,11 @@ test("runOperationsPilot checks worker_id requirement before first create", () =
     resolve(__dirname, "../src/features/pilot/ServiceOSOperationsPilotPanel.jsx"),
     "utf8"
   );
-  const workerRequiredIdx = panelSrc.indexOf('new Error("worker_id is required for assignment step — provide a safe Preview worker ID")');
-  const createJobIdx = panelSrc.indexOf("createOperationalJob");
+  const runFnStart = panelSrc.indexOf("async function runOperationsPilot");
+  const runFnEnd = panelSrc.indexOf("// ── Component", runFnStart);
+  const runFnBody = panelSrc.slice(runFnStart, runFnEnd > 0 ? runFnEnd : undefined);
+  const workerRequiredIdx = runFnBody.indexOf('new Error("worker_id is required for assignment step — provide a safe Preview worker ID")');
+  const createJobIdx = runFnBody.indexOf("createOperationalJob");
   assert.ok(workerRequiredIdx >= 0, "run should enforce worker_id requirement");
   assert.ok(createJobIdx >= 0, "run should still create operational_job when valid");
   assert.ok(
