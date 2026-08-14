@@ -484,20 +484,29 @@ test("M008: quote_version uses lifecycle_status and version_no", () => {
 });
 
 test("M008: quote_version follows draft → sent → accepted lifecycle", () => {
-  const insertIdx = m008.indexOf("INSERT INTO public.quote_version");
-  const sentIdx = m008.indexOf(
-    "UPDATE public.quote_version\nSET lifecycle_status = 'sent',\n    sent_at = now()"
+  const insertMatch = m008.match(/INSERT INTO public\.quote_version[\s\S]*?;/);
+  const sentMatch = m008.match(
+    /UPDATE public\.quote_version\s+SET lifecycle_status = 'sent',\s+sent_at = now\(\)\s+WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;/
   );
-  const responseIdx = m008.indexOf("INSERT INTO public.quote_response");
-  const acceptedIdx = m008.indexOf(
-    "UPDATE public.quote_version\nSET lifecycle_status = 'accepted'"
+  const responseMatch = m008.match(/INSERT INTO public\.quote_response[\s\S]*?;/);
+  const acceptedMatch = m008.match(
+    /UPDATE public\.quote_version\s+SET lifecycle_status = 'accepted'\s+WHERE id = '15000000-0000-0000-0000-000000000001'::uuid;/
   );
 
-  assert.ok(insertIdx >= 0, "M008 quote_version insert not found");
-  assert.ok(sentIdx > insertIdx, "M008 must transition quote_version from draft to sent after insert");
-  assert.ok(responseIdx > sentIdx, "M008 quote_response must occur after quote_version is sent");
+  assert.ok(insertMatch, "M008 quote_version insert not found");
+  assert.ok(sentMatch, "M008 must transition quote_version from draft to sent");
+  assert.ok(responseMatch, "M008 quote_response insert not found");
+  assert.ok(acceptedMatch, "M008 must transition quote_version from sent to accepted");
   assert.ok(
-    acceptedIdx > responseIdx,
+    sentMatch.index > insertMatch.index,
+    "M008 must transition quote_version from draft to sent after insert"
+  );
+  assert.ok(
+    responseMatch.index > sentMatch.index,
+    "M008 quote_response must occur after quote_version is sent"
+  );
+  assert.ok(
+    acceptedMatch.index > responseMatch.index,
     "M008 must transition quote_version from sent to accepted after quote_response insert"
   );
 });
