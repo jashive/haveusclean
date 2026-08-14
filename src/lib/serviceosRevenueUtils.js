@@ -66,6 +66,12 @@ export function capturePricingSnapshot({
   const taxAmount = quote.taxAmount ?? 0;
   const total = quote.total ?? 0;
   const discountAmount = quote.discountAmt ?? quote.discountAmount ?? 0;
+  const calculatorVersion = typeof quote.quoteContractVersion === "string"
+    ? quote.quoteContractVersion.trim()
+    : "";
+  if (!calculatorVersion) {
+    throw new Error("capturePricingSnapshot: quoteContractVersion/calculator version is required");
+  }
 
   // Labor / team economics — preserved in structured field
   const laborEconomics = {
@@ -102,7 +108,7 @@ export function capturePricingSnapshot({
     discount_amount: discountAmount,
     tax_amount: taxAmount,
     total_amount: total,
-    calculator_version: quote.quoteContractVersion ?? null,
+    calculator_version: calculatorVersion,
     configuration_snapshot: {},
     labor_economics: withJsonObject(laborEconomics),
     calculation_inputs: withJsonObject(calculationInputs),

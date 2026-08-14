@@ -13,8 +13,13 @@ import {
   buildConversionRecordPayload,
   buildJobHandoffPayload,
 } from "../../lib/serviceosRevenueUtils.js";
-import { runRevenuePipeline, cleanupPilotSession } from "../../lib/serviceosRevenueClient.js";
+import {
+  runRevenuePipeline,
+  cleanupPilotSession,
+  getPipelineCreatedRecords,
+} from "../../lib/serviceosRevenueClient.js";
 import { calcResQuote } from "../../lib/pricing.js";
+import { withQuotePresentation } from "../../lib/quoteEngine.js";
 import { REGIONS } from "../../lib/constants.js";
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
@@ -106,7 +111,11 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
   log("Computing quote…");
   const region = REGIONS.ON;
   const quoteInput = buildPilotQuoteInput();
-  const quote = calcResQuote(quoteInput, region);
+  const rawQuote = calcResQuote(quoteInput, region);
+  const quote = withQuotePresentation(rawQuote, {
+    type: "residential",
+    data: quoteInput,
+  });
   log(`Quote: CA$${quote.total} total (${quote.teamSize} crew, ${quote.jobHours}h)`, "done");
 
   log("Capturing pricing snapshot…");
@@ -299,6 +308,10 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
       });
       setCreatedIds(created);
     } catch (err) {
+      const partialCreated = getPipelineCreatedRecords(err);
+      if (partialCreated && Object.keys(partialCreated).length > 0) {
+        setCreatedIds(partialCreated);
+      }
       setError(err?.message ?? "Pipeline failed");
       setLog((prev) => [...prev, { msg: err?.message ?? "Pipeline failed", kind: "error" }]);
     } finally {

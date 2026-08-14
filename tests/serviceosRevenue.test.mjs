@@ -14,6 +14,13 @@ import {
   buildConversionRecordPayload,
   buildJobHandoffPayload,
 } from "../src/lib/serviceosRevenueUtils.js";
+import { withQuotePresentation } from "../src/lib/quoteEngine.js";
+import { calcResQuote } from "../src/lib/pricing.js";
+import { REGIONS } from "../src/lib/constants.js";
+import {
+  attachPipelineCreatedRecords,
+  getPipelineCreatedRecords,
+} from "../src/lib/serviceosRevenueClient.js";
 
 // ── Wave 2 table contract ─────────────────────────────────────────────────────
 
@@ -127,12 +134,62 @@ test("capturePricingSnapshot: businessUnitId required", () => {
 
 test("capturePricingSnapshot: capturedAt maps to frozen_at", () => {
   const snap = capturePricingSnapshot({
-    quote: { total: 100, preTaxTotal: 90, taxAmount: 10 },
+    quote: { total: 100, preTaxTotal: 90, taxAmount: 10, quoteContractVersion: "2.0" },
     organizationId: "org",
     businessUnitId: "bu",
     capturedAt: "2025-06-01T00:00:00.000Z",
   });
   assert.equal(snap.frozen_at, "2025-06-01T00:00:00.000Z");
+});
+
+test("governed residential quote includes quoteContractVersion 2.0", () => {
+  const quoteInput = {
+    dwellingType: "Detached House",
+    dwellingSize: "Medium",
+    serviceType: "Deep Clean",
+    frequency: "One-Time",
+    beds: 3,
+    baths: 2,
+    sqft: 2000,
+    addons: [],
+  };
+  const rawQuote = calcResQuote(quoteInput, REGIONS.ON);
+  const governedQuote = withQuotePresentation(rawQuote, { type: "residential", data: quoteInput });
+  assert.equal(governedQuote.quoteContractVersion, "2.0");
+});
+
+test("capturePricingSnapshot maps governed quote version to calculator_version", () => {
+  const quoteInput = {
+    dwellingType: "Detached House",
+    dwellingSize: "Medium",
+    serviceType: "Deep Clean",
+    frequency: "One-Time",
+    beds: 3,
+    baths: 2,
+    sqft: 2000,
+    addons: [],
+  };
+  const rawQuote = calcResQuote(quoteInput, REGIONS.ON);
+  const governedQuote = withQuotePresentation(rawQuote, { type: "residential", data: quoteInput });
+  const snap = capturePricingSnapshot({
+    quote: governedQuote,
+    organizationId: "org-governed",
+    businessUnitId: "bu-governed",
+  });
+  assert.equal(snap.calculator_version, "2.0");
+  assert.notEqual(snap.calculator_version, null);
+});
+
+test("capturePricingSnapshot rejects missing quote contract version", () => {
+  assert.throws(
+    () =>
+      capturePricingSnapshot({
+        quote: { total: 100, preTaxTotal: 90, taxAmount: 10 },
+        organizationId: "org",
+        businessUnitId: "bu",
+      }),
+    /quoteContractVersion\/calculator version is required/
+  );
 });
 
 test("M005 required JSONB fields default to canonical empty values instead of null", () => {
@@ -166,7 +223,7 @@ test("M005 required JSONB fields default to canonical empty values instead of nu
   assert.deepEqual(estimate.metadata, {});
 
   const pricingSnapshot = capturePricingSnapshot({
-    quote: { total: 100, preTaxTotal: 90, taxAmount: 10 },
+    quote: { total: 100, preTaxTotal: 90, taxAmount: 10, quoteContractVersion: "2.0" },
     organizationId: "org",
     businessUnitId: "bu",
   });
@@ -666,7 +723,11 @@ test("all payload builders propagate organization_id and business_unit_id", () =
   assert.equal(est.organization_id, orgId);
   assert.equal(est.business_unit_id, buId);
 
-  const snap = capturePricingSnapshot({ quote: { total: 100 }, organizationId: orgId, businessUnitId: buId });
+  const snap = capturePricingSnapshot({
+    quote: { total: 100, quoteContractVersion: "2.0" },
+    organizationId: orgId,
+    businessUnitId: buId,
+  });
   assert.equal(snap.organization_id, orgId);
   assert.equal(snap.business_unit_id, buId);
 
@@ -693,6 +754,20 @@ test("all payload builders propagate organization_id and business_unit_id", () =
   const jh = buildJobHandoffPayload({ organizationId: orgId, businessUnitId: buId, conversionRecordId: "cr", quoteVersionId: "qv", pricingSnapshotId: "snap" });
   assert.equal(jh.organization_id, orgId);
   assert.equal(jh.business_unit_id, buId);
+});
+
+test("attach/get pipeline created records preserves partial IDs", () => {
+  const partialCreated = {
+    serviceRequest: { id: "sr-1" },
+    opportunity: { id: "opp-1" },
+  };
+  const error = attachPipelineCreatedRecords(new Error("step failed"), partialCreated);
+  assert.equal(error.message, "step failed");
+  assert.deepEqual(getPipelineCreatedRecords(error), partialCreated);
+});
+
+test("getPipelineCreatedRecords returns null when no created map exists", () => {
+  assert.equal(getPipelineCreatedRecords(new Error("plain failure")), null);
 });
 
 // ── quote_version lifecycle ───────────────────────────────────────────────────

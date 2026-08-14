@@ -82,6 +82,17 @@ async function deleteById(table, id, accessToken) {
   return true;
 }
 
+export function getPipelineCreatedRecords(error) {
+  const created = error?.createdRecords;
+  return created && typeof created === "object" ? created : null;
+}
+
+export function attachPipelineCreatedRecords(error, createdRecords) {
+  const err = error instanceof Error ? error : new Error(String(error ?? "Revenue pipeline failed"));
+  err.createdRecords = { ...createdRecords };
+  return err;
+}
+
 // ── Service Request ───────────────────────────────────────────────────────────
 
 export async function createServiceRequest(payload, accessToken) {
@@ -231,6 +242,7 @@ export async function createJobHandoff(payload, accessToken) {
  * @param {object} opts.jobHandoffPayload
  * @param {string} opts.accessToken
  * @returns {Promise<object>} Map of entity → created row
+ * @throws {Error} Includes error.createdRecords with rows created before failure
  */
 export async function runRevenuePipeline({
   serviceRequestPayload,
@@ -248,130 +260,134 @@ export async function runRevenuePipeline({
   accessToken,
 }) {
   assertEnabled();
+  const created = {};
 
-  // 1. Service request
-  const serviceRequest = await insertOne("service_request", serviceRequestPayload, accessToken);
+  try {
+    // 1. Service request
+    const serviceRequest = await insertOne("service_request", serviceRequestPayload, accessToken);
+    created.serviceRequest = serviceRequest;
 
-  // 2. Opportunity (linked to service_request)
-  const opportunity = await insertOne(
-    "opportunity",
-    { ...opportunityPayload, service_request_id: serviceRequest.id },
-    accessToken
-  );
+    // 2. Opportunity (linked to service_request)
+    const opportunity = await insertOne(
+      "opportunity",
+      { ...opportunityPayload, service_request_id: serviceRequest.id },
+      accessToken
+    );
+    created.opportunity = opportunity;
 
-  // 3. Estimate (linked to opportunity)
-  const estimate = await insertOne(
-    "estimate",
-    { ...estimatePayload, opportunity_id: opportunity.id },
-    accessToken
-  );
+    // 3. Estimate (linked to opportunity)
+    const estimate = await insertOne(
+      "estimate",
+      { ...estimatePayload, opportunity_id: opportunity.id },
+      accessToken
+    );
+    created.estimate = estimate;
 
-  // 4. Pricing snapshot — immutable economics locked here
-  const pricingSnapshot = await insertOne(
-    "pricing_snapshot",
-    { ...pricingSnapshotPayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
-    accessToken
-  );
+    // 4. Pricing snapshot — immutable economics locked here
+    const pricingSnapshot = await insertOne(
+      "pricing_snapshot",
+      { ...pricingSnapshotPayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
+      accessToken
+    );
+    created.pricingSnapshot = pricingSnapshot;
 
-  // 5. Quote (linked to opportunity and estimate; no pricing_snapshot_id on quote)
-  const quote = await insertOne(
-    "quote",
-    { ...quotePayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
-    accessToken
-  );
+    // 5. Quote (linked to opportunity and estimate; no pricing_snapshot_id on quote)
+    const quote = await insertOne(
+      "quote",
+      { ...quotePayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
+      accessToken
+    );
+    created.quote = quote;
 
-  // 6. Quote version — MUST start as draft; pricing_snapshot_id goes HERE
-  const quoteVersion = await insertOne(
-    "quote_version",
-    {
-      ...quoteVersionPayload,
-      quote_id: quote.id,
-      estimate_id: estimate.id,
-      pricing_snapshot_id: pricingSnapshot.id,
-    },
-    accessToken
-  );
+    // 6. Quote version — MUST start as draft; pricing_snapshot_id goes HERE
+    const quoteVersion = await insertOne(
+      "quote_version",
+      {
+        ...quoteVersionPayload,
+        quote_id: quote.id,
+        estimate_id: estimate.id,
+        pricing_snapshot_id: pricingSnapshot.id,
+      },
+      accessToken
+    );
+    created.quoteVersion = quoteVersion;
 
-  // 7. Transition quote_version: draft → sent
-  await updateById(
-    "quote_version",
-    quoteVersion.id,
-    { lifecycle_status: "sent", sent_at: new Date().toISOString() },
-    accessToken
-  );
+    // 7. Transition quote_version: draft → sent
+    await updateById(
+      "quote_version",
+      quoteVersion.id,
+      { lifecycle_status: "sent", sent_at: new Date().toISOString() },
+      accessToken
+    );
 
-  // 8. Quote response — accepted; quote_version is now "sent"
-  const quoteResponse = await insertOne(
-    "quote_response",
-    { ...quoteResponsePayload, quote_version_id: quoteVersion.id },
-    accessToken
-  );
+    // 8. Quote response — accepted; quote_version is now "sent"
+    const quoteResponse = await insertOne(
+      "quote_response",
+      { ...quoteResponsePayload, quote_version_id: quoteVersion.id },
+      accessToken
+    );
+    created.quoteResponse = quoteResponse;
 
-  // 9. Transition quote_version: sent → accepted
-  await updateById(
-    "quote_version",
-    quoteVersion.id,
-    { lifecycle_status: "accepted" },
-    accessToken
-  );
+    // 9. Transition quote_version: sent → accepted
+    await updateById(
+      "quote_version",
+      quoteVersion.id,
+      { lifecycle_status: "accepted" },
+      accessToken
+    );
 
-  // 10–12. Explicit customer conversion — Wave 1 canonical tables
-  const customer = await insertOne("customer", customerPayload, accessToken);
-  const contact = await insertOne(
-    "contact",
-    { ...contactPayload, customer_id: customer.id },
-    accessToken
-  );
-  const serviceLocation = await insertOne(
-    "service_location",
-    { ...serviceLocationPayload, customer_id: customer.id },
-    accessToken
-  );
+    // 10–12. Explicit customer conversion — Wave 1 canonical tables
+    const customer = await insertOne("customer", customerPayload, accessToken);
+    created.customer = customer;
+    const contact = await insertOne(
+      "contact",
+      { ...contactPayload, customer_id: customer.id },
+      accessToken
+    );
+    created.contact = contact;
+    const serviceLocation = await insertOne(
+      "service_location",
+      { ...serviceLocationPayload, customer_id: customer.id },
+      accessToken
+    );
+    created.serviceLocation = serviceLocation;
 
-  // 13. Conversion record — links the entire pipeline to the converted customer
-  const conversionRecord = await insertOne(
-    "conversion_record",
-    {
-      ...conversionRecordPayload,
-      service_request_id: serviceRequest.id,
-      opportunity_id: opportunity.id,
-      estimate_id: estimate.id,
-      quote_id: quote.id,
-      quote_version_id: quoteVersion.id,
-      quote_response_id: quoteResponse.id,
-      customer_id: customer.id,
-      contact_id: contact.id,
-      service_location_id: serviceLocation.id,
-    },
-    accessToken
-  );
+    // 13. Conversion record — links the entire pipeline to the converted customer
+    const conversionRecord = await insertOne(
+      "conversion_record",
+      {
+        ...conversionRecordPayload,
+        service_request_id: serviceRequest.id,
+        opportunity_id: opportunity.id,
+        estimate_id: estimate.id,
+        quote_id: quote.id,
+        quote_version_id: quoteVersion.id,
+        quote_response_id: quoteResponse.id,
+        customer_id: customer.id,
+        contact_id: contact.id,
+        service_location_id: serviceLocation.id,
+      },
+      accessToken
+    );
+    created.conversionRecord = conversionRecord;
 
-  // 14. Wave 3 boundary: job_handoff references conversion_record
-  const jobHandoff = await insertOne(
-    "job_handoff",
-    {
-      ...jobHandoffPayload,
-      conversion_record_id: conversionRecord.id,
-      quote_version_id: quoteVersion.id,
-      pricing_snapshot_id: pricingSnapshot.id,
-    },
-    accessToken
-  );
+    // 14. Wave 3 boundary: job_handoff references conversion_record
+    const jobHandoff = await insertOne(
+      "job_handoff",
+      {
+        ...jobHandoffPayload,
+        conversion_record_id: conversionRecord.id,
+        quote_version_id: quoteVersion.id,
+        pricing_snapshot_id: pricingSnapshot.id,
+      },
+      accessToken
+    );
+    created.jobHandoff = jobHandoff;
 
-  return {
-    serviceRequest,
-    opportunity,
-    estimate,
-    pricingSnapshot,
-    quote,
-    quoteVersion,
-    quoteResponse,
-    customer,
-    contact,
-    serviceLocation,
-    conversionRecord,
-    jobHandoff,
-  };
+    return created;
+  } catch (error) {
+    throw attachPipelineCreatedRecords(error, created);
+  }
 }
 
 // ── Pilot cleanup ─────────────────────────────────────────────────────────────
