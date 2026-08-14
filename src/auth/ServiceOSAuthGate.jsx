@@ -215,9 +215,10 @@ function AuthenticatedGate({ children }) {
   function buildRevenueContext(validationResult) {
     // validationResult now carries:
     //   businessUnits       — array of codes (backward compat)
-    //   businessUnitRecords — array of { id, code, name }
-    //   businessUnitByCode  — { "HUC-ON": { id, code, name }, "HUC-AZ": { … } }
+    //   businessUnitRecords — array of { id, code, name, jurisdictionId }
+    //   businessUnitByCode  — { "HUC-ON": { id, code, name, jurisdictionId }, … }
     //   primaryBusinessUnitId — canonical UUID for HUC-ON pilot default
+    //   primaryJurisdictionId — HUC-ON jurisdiction_id for service_location (from live DB)
     return {
       orgId: validationResult?.orgId ?? null,
       appUserId: validationResult?.appUserId ?? null,
@@ -229,6 +230,8 @@ function AuthenticatedGate({ children }) {
       businessUnitByCode: validationResult?.businessUnitByCode ?? {},
       // Canonical UUID for HUC-ON pilot (derived from live DB record, not region_id)
       primaryBusinessUnitId: validationResult?.primaryBusinessUnitId ?? null,
+      // HUC-ON jurisdiction_id for service_location (from live DB, not invented)
+      primaryJurisdictionId: validationResult?.primaryJurisdictionId ?? null,
     };
   }
 

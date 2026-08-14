@@ -140,9 +140,9 @@ export async function validateServiceOSContext(session) {
   }
   const orgId = orgs[0].id;
 
-  // 2. Validate both business units HUC-ON and HUC-AZ
+  // 2. Validate both business units HUC-ON and HUC-AZ (include jurisdiction_id for service_location)
   const buRes = await authenticatedRestFetch(
-    `business_unit?select=id,code,name&code=in.(HUC-ON,HUC-AZ)&order=code.asc`,
+    `business_unit?select=id,code,name,jurisdiction_id&code=in.(HUC-ON,HUC-AZ)&order=code.asc`,
     access_token
   );
   if (!buRes || !buRes.ok) {
@@ -159,13 +159,20 @@ export async function validateServiceOSContext(session) {
     );
   }
 
-  // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID
+  // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID + jurisdiction
   const businessUnitByCode = {};
   for (const bu of bus) {
-    businessUnitByCode[bu.code] = { id: bu.id, code: bu.code, name: bu.name };
+    businessUnitByCode[bu.code] = {
+      id: bu.id,
+      code: bu.code,
+      name: bu.name,
+      jurisdictionId: bu.jurisdiction_id ?? null,
+    };
   }
   // Primary business unit defaults to HUC-ON (Ontario pilot)
   const primaryBusinessUnitId = businessUnitByCode["HUC-ON"]?.id ?? null;
+  // Jurisdiction for HUC-ON pilot service locations — derived from live DB, never invented
+  const primaryJurisdictionId = businessUnitByCode["HUC-ON"]?.jurisdictionId ?? null;
 
   // 3. Validate exactly one active app_user matching the auth user ID
   const userRes = await authenticatedRestFetch(
@@ -237,11 +244,18 @@ export async function validateServiceOSContext(session) {
     roleId,
     // Backward-compat: array of codes for any code still checking businessUnits
     businessUnits: buCodes,
-    // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id)
+    // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id + jurisdictionId)
     businessUnitByCode,
-    // Full array of { id, code, name } records
-    businessUnitRecords: bus.map((b) => ({ id: b.id, code: b.code, name: b.name })),
+    // Full array of { id, code, name, jurisdictionId } records
+    businessUnitRecords: bus.map((b) => ({
+      id: b.id,
+      code: b.code,
+      name: b.name,
+      jurisdictionId: b.jurisdiction_id ?? null,
+    })),
     // Primary canonical business_unit.id (HUC-ON pilot default)
     primaryBusinessUnitId,
+    // HUC-ON jurisdiction_id for service_location — from live DB, never invented
+    primaryJurisdictionId,
   };
 }

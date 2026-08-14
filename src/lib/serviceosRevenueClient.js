@@ -48,6 +48,29 @@ async function insertOne(table, payload, accessToken) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+/**
+ * Update a single column on a table row by id.
+ * Used for quote_version lifecycle transitions (draft → sent → accepted).
+ * Only updates the specified fields — no other edits allowed per the pipeline contract.
+ */
+async function updateById(table, id, patch, accessToken) {
+  const res = await authenticatedRestFetch(
+    `${table}?id=eq.${encodeURIComponent(id)}`,
+    accessToken,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=representation" },
+      body: JSON.stringify(patch),
+    }
+  );
+  if (!res || !res.ok) {
+    const text = await res?.text().catch(() => "");
+    throw new Error(`Revenue update failed on ${table} id=${id}: ${res?.status ?? "network error"} ${text}`);
+  }
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
 async function deleteById(table, id, accessToken) {
   const res = await authenticatedRestFetch(`${table}?id=eq.${encodeURIComponent(id)}`, accessToken, {
     method: "DELETE",
@@ -61,13 +84,6 @@ async function deleteById(table, id, accessToken) {
 
 // ── Service Request ───────────────────────────────────────────────────────────
 
-/**
- * Create a service_request record.
- *
- * @param {object} payload   Fields matching the service_request schema
- * @param {string} accessToken
- * @returns {Promise<object>} Created row
- */
 export async function createServiceRequest(payload, accessToken) {
   assertEnabled();
   return insertOne("service_request", payload, accessToken);
@@ -89,11 +105,6 @@ export async function createEstimate(payload, accessToken) {
 
 // ── Pricing Snapshot ──────────────────────────────────────────────────────────
 
-/**
- * Persist a pricing snapshot.
- * The snapshot captures accepted economics so they are never recomputed
- * from future JS pricing constants.
- */
 export async function createPricingSnapshot(payload, accessToken) {
   assertEnabled();
   return insertOne("pricing_snapshot", payload, accessToken);
@@ -111,6 +122,28 @@ export async function createQuote(payload, accessToken) {
 export async function createQuoteVersion(payload, accessToken) {
   assertEnabled();
   return insertOne("quote_version", payload, accessToken);
+}
+
+/**
+ * Transition a quote_version through its lifecycle.
+ * Valid transitions: draft → sent, sent → accepted
+ * Do NOT combine with commercial edits.
+ *
+ * @param {string} quoteVersionId
+ * @param {"sent"|"accepted"} newStatus
+ * @param {string} accessToken
+ * @returns {Promise<object>} Updated row
+ */
+export async function updateQuoteVersionStatus(quoteVersionId, newStatus, accessToken) {
+  assertEnabled();
+  if (newStatus !== "sent" && newStatus !== "accepted") {
+    throw new Error('updateQuoteVersionStatus: newStatus must be "sent" or "accepted"');
+  }
+  const patch = { lifecycle_status: newStatus };
+  if (newStatus === "sent") {
+    patch.sent_at = new Date().toISOString();
+  }
+  return updateById("quote_version", quoteVersionId, patch, accessToken);
 }
 
 // ── Quote Response ────────────────────────────────────────────────────────────
@@ -132,8 +165,8 @@ export async function createConversionRecord(payload, accessToken) {
 
 // ── Customer ──────────────────────────────────────────────────────────────────
 //
-// Customers are NOT deduplicated by name. Each explicit conversion produces
-// a distinct customer row. Email/phone live on contact, not here.
+// Wave 1 canonical table. Customers are NOT deduplicated by email.
+// Email/phone live on contact, not here.
 
 export async function createCustomer(payload, accessToken) {
   assertEnabled();
@@ -167,18 +200,21 @@ export async function createJobHandoff(payload, accessToken) {
 
 /**
  * Run the full revenue pipeline for a single accepted quote.
- * Returns an object with every created row ID so callers can track them.
+ * Returns an object with every created row so callers can track them.
  *
- * Steps:
- *   1. service_request
- *   2. opportunity
- *   3. estimate
- *   4. pricing_snapshot  (economics locked here)
- *   5. quote
- *   6. quote_version
- *   7. quote_response (accepted)
- *   8. customer + contact + service_location (explicit conversion)
- *   9. job_handoff (Wave 3 boundary)
+ * Pipeline order (M005-verified):
+ *   1.  service_request
+ *   2.  opportunity
+ *   3.  estimate
+ *   4.  pricing_snapshot  (economics locked here; immutable after creation)
+ *   5.  quote
+ *   6.  quote_version (lifecycle_status = draft)
+ *   7.  UPDATE quote_version: draft → sent
+ *   8.  quote_response (accepted; quote_version must be "sent")
+ *   9.  UPDATE quote_version: sent → accepted
+ *   10. customer + contact + service_location (explicit conversion; Wave 1 tables)
+ *   13. conversion_record
+ *   14. job_handoff (Wave 3 boundary)
  *
  * @param {object} opts
  * @param {object} opts.serviceRequestPayload
@@ -191,6 +227,7 @@ export async function createJobHandoff(payload, accessToken) {
  * @param {object} opts.customerPayload
  * @param {object} opts.contactPayload
  * @param {object} opts.serviceLocationPayload
+ * @param {object} opts.conversionRecordPayload
  * @param {object} opts.jobHandoffPayload
  * @param {string} opts.accessToken
  * @returns {Promise<object>} Map of entity → created row
@@ -206,44 +243,79 @@ export async function runRevenuePipeline({
   customerPayload,
   contactPayload,
   serviceLocationPayload,
+  conversionRecordPayload,
   jobHandoffPayload,
   accessToken,
 }) {
   assertEnabled();
 
+  // 1. Service request
   const serviceRequest = await insertOne("service_request", serviceRequestPayload, accessToken);
+
+  // 2. Opportunity (linked to service_request)
   const opportunity = await insertOne(
     "opportunity",
     { ...opportunityPayload, service_request_id: serviceRequest.id },
     accessToken
   );
+
+  // 3. Estimate (linked to opportunity)
   const estimate = await insertOne(
     "estimate",
     { ...estimatePayload, opportunity_id: opportunity.id },
     accessToken
   );
+
+  // 4. Pricing snapshot — immutable economics locked here
   const pricingSnapshot = await insertOne(
     "pricing_snapshot",
-    pricingSnapshotPayload,
+    { ...pricingSnapshotPayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
     accessToken
   );
+
+  // 5. Quote (linked to opportunity and estimate; no pricing_snapshot_id on quote)
   const quote = await insertOne(
     "quote",
-    { ...quotePayload, estimate_id: estimate.id, pricing_snapshot_id: pricingSnapshot.id },
+    { ...quotePayload, opportunity_id: opportunity.id, estimate_id: estimate.id },
     accessToken
   );
+
+  // 6. Quote version — MUST start as draft; pricing_snapshot_id goes HERE
   const quoteVersion = await insertOne(
     "quote_version",
-    { ...quoteVersionPayload, quote_id: quote.id, pricing_snapshot_id: pricingSnapshot.id },
+    {
+      ...quoteVersionPayload,
+      quote_id: quote.id,
+      estimate_id: estimate.id,
+      pricing_snapshot_id: pricingSnapshot.id,
+    },
     accessToken
   );
+
+  // 7. Transition quote_version: draft → sent
+  await updateById(
+    "quote_version",
+    quoteVersion.id,
+    { lifecycle_status: "sent", sent_at: new Date().toISOString() },
+    accessToken
+  );
+
+  // 8. Quote response — accepted; quote_version is now "sent"
   const quoteResponse = await insertOne(
     "quote_response",
     { ...quoteResponsePayload, quote_version_id: quoteVersion.id },
     accessToken
   );
 
-  // Explicit customer conversion — never auto-converted from a cold prospect
+  // 9. Transition quote_version: sent → accepted
+  await updateById(
+    "quote_version",
+    quoteVersion.id,
+    { lifecycle_status: "accepted" },
+    accessToken
+  );
+
+  // 10–12. Explicit customer conversion — Wave 1 canonical tables
   const customer = await insertOne("customer", customerPayload, accessToken);
   const contact = await insertOne(
     "contact",
@@ -256,15 +328,31 @@ export async function runRevenuePipeline({
     accessToken
   );
 
-  // Wave 3 boundary: job_handoff only
+  // 13. Conversion record — links the entire pipeline to the converted customer
+  const conversionRecord = await insertOne(
+    "conversion_record",
+    {
+      ...conversionRecordPayload,
+      service_request_id: serviceRequest.id,
+      opportunity_id: opportunity.id,
+      estimate_id: estimate.id,
+      quote_id: quote.id,
+      quote_version_id: quoteVersion.id,
+      quote_response_id: quoteResponse.id,
+      customer_id: customer.id,
+      contact_id: contact.id,
+      service_location_id: serviceLocation.id,
+    },
+    accessToken
+  );
+
+  // 14. Wave 3 boundary: job_handoff references conversion_record
   const jobHandoff = await insertOne(
     "job_handoff",
     {
       ...jobHandoffPayload,
+      conversion_record_id: conversionRecord.id,
       quote_version_id: quoteVersion.id,
-      customer_id: customer.id,
-      contact_id: contact.id,
-      service_location_id: serviceLocation.id,
       pricing_snapshot_id: pricingSnapshot.id,
     },
     accessToken
@@ -281,6 +369,7 @@ export async function runRevenuePipeline({
     customer,
     contact,
     serviceLocation,
+    conversionRecord,
     jobHandoff,
   };
 }
@@ -289,6 +378,8 @@ export async function runRevenuePipeline({
 //
 // Deletes ONLY the records explicitly created by a synthetic pilot session.
 // Deletion order respects foreign-key dependencies (children first).
+// pricing_snapshot is immutable but orphan snapshots may be deleted after
+// quote_version is deleted.
 
 /**
  * @param {object} createdIds  Map of entity → { id } as returned by runRevenuePipeline

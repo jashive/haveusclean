@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from "react";
 import {
   capturePricingSnapshot,
+  buildServiceRequestPayload,
   buildOpportunityPayload,
   buildEstimatePayload,
   buildQuotePayload,
@@ -9,6 +10,7 @@ import {
   buildCustomerPayload,
   buildContactPayload,
   buildServiceLocationPayload,
+  buildConversionRecordPayload,
   buildJobHandoffPayload,
 } from "../../lib/serviceosRevenueUtils.js";
 import { runRevenuePipeline, cleanupPilotSession } from "../../lib/serviceosRevenueClient.js";
@@ -22,13 +24,6 @@ const PILOT_UI_ENABLED =
   import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === "true";
 
 // ── Synthetic pilot data ──────────────────────────────────────────────────────
-
-const PILOT_SERVICE_REQUEST = {
-  description: "[PILOT] Synthetic Wave 2 service request",
-  source: "pilot_ui",
-  status: "pending",
-  is_pilot: true,
-};
 
 function buildPilotQuoteInput() {
   return {
@@ -100,8 +95,13 @@ const styles = {
 
 // ── Pipeline runner ───────────────────────────────────────────────────────────
 
-async function runPilot({ businessUnitId, appUserId, accessToken, setLog }) {
+async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, accessToken, setLog }) {
   const log = (msg, kind = "step") => setLog((prev) => [...prev, { msg, kind }]);
+
+  // Validate required canonical context before any network calls
+  if (!orgId) throw new Error("Pilot requires revenueContext.orgId");
+  if (!businessUnitId) throw new Error("Pilot requires revenueContext.primaryBusinessUnitId");
+  if (!jurisdictionId) throw new Error("Pilot requires revenueContext.primaryJurisdictionId (HUC-ON jurisdiction_id)");
 
   log("Computing quote…");
   const region = REGIONS.ON;
@@ -110,76 +110,136 @@ async function runPilot({ businessUnitId, appUserId, accessToken, setLog }) {
   log(`Quote: CA$${quote.total} total (${quote.teamSize} crew, ${quote.jobHours}h)`, "done");
 
   log("Capturing pricing snapshot…");
-  const pricingSnapshotPayload = capturePricingSnapshot({ quote, businessUnitId });
-  log("Snapshot captured (not yet persisted)", "done");
-
-  log("Building pipeline payloads…");
-  const serviceRequestPayload = { ...PILOT_SERVICE_REQUEST, business_unit_id: businessUnitId };
-
-  const opportunityPayload = buildOpportunityPayload({
-    serviceRequestId: "__placeholder__",
+  const pricingSnapshotPayload = capturePricingSnapshot({
+    quote,
+    organizationId: orgId,
     businessUnitId,
     appUserId,
-    notes: "[PILOT] Synthetic opportunity",
+  });
+  log("Snapshot built (not yet persisted)", "done");
+
+  log("Building pipeline payloads…");
+
+  const serviceRequestPayload = buildServiceRequestPayload({
+    organizationId: orgId,
+    businessUnitId,
+    serviceCategory: "residential",
+    lifecycleStatus: "qualified",
+    intakeChannel: "pilot_ui",
+    title: "[PILOT] Synthetic Wave 2 service request",
+    description: "[PILOT] Synthetic Wave 2 service request",
+    metadata: { synthetic: true, source: "pilot_ui" },
+    appUserId,
+  });
+
+  const opportunityPayload = buildOpportunityPayload({
+    organizationId: orgId,
+    businessUnitId,
+    serviceRequestId: "__pipeline_resolved__",
+    stage: "qualified",
+    title: "[PILOT] Synthetic opportunity",
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const estimatePayload = buildEstimatePayload({
-    opportunityId: "__placeholder__",
+    organizationId: orgId,
     businessUnitId,
-    quoteType: "residential",
-    quoteInput,
+    opportunityId: "__pipeline_resolved__",
+    lifecycleStatus: "prepared",
+    versionNo: 1,
+    scopeSnapshot: quoteInput,
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const quotePayload = buildQuotePayload({
-    estimateId: "__placeholder__",
+    organizationId: orgId,
     businessUnitId,
-    totalAmount: quote.total,
+    opportunityId: "__pipeline_resolved__",
+    lifecycleStatus: "active",
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const quoteVersionPayload = buildQuoteVersionPayload({
-    quoteId: "__placeholder__",
-    versionNumber: 1,
+    organizationId: orgId,
+    businessUnitId,
+    quoteId: "__pipeline_resolved__",
+    pricingSnapshotId: "__pipeline_resolved__",
+    versionNo: 1,
+    lineItemsSnapshot: { quoteInput, quoteOutput: quote },
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const quoteResponsePayload = buildQuoteResponsePayload({
-    quoteVersionId: "__placeholder__",
+    organizationId: orgId,
+    businessUnitId,
+    quoteVersionId: "__pipeline_resolved__",
     responseType: "accepted",
-    respondedBy: appUserId,
+    responseChannel: "pilot_ui",
+    respondedByName: "Pilot User",
     notes: "[PILOT] Synthetic acceptance",
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const customerPayload = buildCustomerPayload({
+    organizationId: orgId,
     businessUnitId,
-    name: "[PILOT] Synthetic Customer",
-    type: "residential",
-    sourceRef: "pilot_ui",
+    customerType: "person",
+    displayName: "[PILOT] Synthetic Customer",
+    metadata: { synthetic: true, source: "pilot_ui" },
   });
 
   const contactPayload = buildContactPayload({
-    customerId: "__placeholder__",
+    customerId: "__pipeline_resolved__",
+    contactType: "primary",
     firstName: "Pilot",
     lastName: "Contact",
     email: "pilot-contact@example.invalid",
     phone: null,
+    metadata: { synthetic: true },
   });
 
   const serviceLocationPayload = buildServiceLocationPayload({
-    customerId: "__placeholder__",
-    businessUnitId,
+    customerId: "__pipeline_resolved__",
+    jurisdictionId,
+    label: "Pilot Location",
     addressLine1: "123 Pilot Street",
     city: "Toronto",
-    provinceState: "ON",
+    subdivision: "ON",
     postalCode: "M5V 0A1",
-    country: "CA",
+    countryCode: "CA",
+    metadata: { synthetic: true },
+  });
+
+  const conversionRecordPayload = buildConversionRecordPayload({
+    organizationId: orgId,
+    businessUnitId,
+    serviceRequestId: "__pipeline_resolved__",
+    opportunityId: "__pipeline_resolved__",
+    estimateId: "__pipeline_resolved__",
+    quoteId: "__pipeline_resolved__",
+    quoteVersionId: "__pipeline_resolved__",
+    quoteResponseId: "__pipeline_resolved__",
+    customerId: "__pipeline_resolved__",
+    contactId: "__pipeline_resolved__",
+    serviceLocationId: "__pipeline_resolved__",
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   const jobHandoffPayload = buildJobHandoffPayload({
-    quoteVersionId: "__placeholder__",
-    customerId: "__placeholder__",
-    serviceLocationId: "__placeholder__",
+    organizationId: orgId,
     businessUnitId,
-    contactId: null,
-    pricingSnapshotId: null,
+    conversionRecordId: "__pipeline_resolved__",
+    quoteVersionId: "__pipeline_resolved__",
+    pricingSnapshotId: "__pipeline_resolved__",
+    handoffPayload: { source: "pilot_ui", synthetic: true },
+    metadata: { synthetic: true },
+    appUserId,
   });
 
   log("Running revenue pipeline…");
@@ -195,11 +255,12 @@ async function runPilot({ businessUnitId, appUserId, accessToken, setLog }) {
     customerPayload,
     contactPayload,
     serviceLocationPayload,
+    conversionRecordPayload,
     jobHandoffPayload,
     accessToken,
   });
 
-  log("Pipeline complete — Wave 3 job_handoff boundary created", "done");
+  log("Pipeline complete — conversion_record created, Wave 3 job_handoff boundary set", "done");
   return created;
 }
 
@@ -213,17 +274,29 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
   const [error, setError] = useState(null);
 
   const accessToken = session?.access_token;
+  const orgId = revenueContext?.orgId ?? null;
   const businessUnitId = revenueContext?.primaryBusinessUnitId ?? null;
+  const jurisdictionId = revenueContext?.primaryJurisdictionId ?? null;
   const appUserId = revenueContext?.appUserId ?? null;
 
+  // Refuse to run if any required canonical context is missing
+  const canRun = !!(accessToken && orgId && businessUnitId && jurisdictionId);
+
   const handleRun = useCallback(async () => {
-    if (running || !accessToken || !businessUnitId) return;
+    if (running || !canRun) return;
     setRunning(true);
     setError(null);
     setLog([]);
     setCreatedIds(null);
     try {
-      const created = await runPilot({ businessUnitId, appUserId, accessToken, setLog });
+      const created = await runPilot({
+        orgId,
+        businessUnitId,
+        jurisdictionId,
+        appUserId,
+        accessToken,
+        setLog,
+      });
       setCreatedIds(created);
     } catch (err) {
       setError(err?.message ?? "Pipeline failed");
@@ -231,7 +304,7 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
     } finally {
       setRunning(false);
     }
-  }, [running, accessToken, businessUnitId, appUserId]);
+  }, [running, canRun, accessToken, orgId, businessUnitId, jurisdictionId, appUserId]);
 
   const handleCleanup = useCallback(async () => {
     if (cleaning || !createdIds || !accessToken) return;
@@ -273,9 +346,18 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
       {createdIds && (
         <div style={styles.summary}>
           Created:{" "}
-          {["serviceRequest", "opportunity", "estimate", "pricingSnapshot", "quote", "quoteVersion", "quoteResponse", "customer", "contact", "serviceLocation", "jobHandoff"]
+          {[
+            "serviceRequest", "opportunity", "estimate", "pricingSnapshot",
+            "quote", "quoteVersion", "quoteResponse",
+            "customer", "contact", "serviceLocation",
+            "conversionRecord", "jobHandoff",
+          ]
             .filter((k) => createdIds[k]?.id)
-            .map((k) => <span key={k} style={styles.summaryValue}>{k.replace(/([A-Z])/g, " $1").trim()} </span>)}
+            .map((k) => (
+              <span key={k} style={styles.summaryValue}>
+                {k.replace(/([A-Z])/g, " $1").trim()}{" "}
+              </span>
+            ))}
         </div>
       )}
 
@@ -283,10 +365,10 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
 
       <div style={styles.actions}>
         <button
-          style={{ ...styles.btn, ...styles.btnRun, ...(running || !businessUnitId ? styles.btnDisabled : {}) }}
+          style={{ ...styles.btn, ...styles.btnRun, ...(!canRun || running ? styles.btnDisabled : {}) }}
           onClick={handleRun}
-          disabled={running || !businessUnitId}
-          title={!businessUnitId ? "No business_unit_id available" : ""}
+          disabled={!canRun || running}
+          title={!canRun ? "Missing canonical context (orgId / businessUnitId / jurisdictionId)" : ""}
         >
           {running ? "Running…" : "Run Pilot"}
         </button>
@@ -299,9 +381,10 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
         </button>
       </div>
 
-      {!businessUnitId && (
+      {!canRun && (
         <div style={{ ...styles.step, marginTop: 6 }}>
-          Requires VITE_SERVICEOS_REVENUE_ENABLED + authenticated session with business unit context.
+          Requires VITE_SERVICEOS_REVENUE_ENABLED + authenticated session with
+          orgId, primaryBusinessUnitId, and primaryJurisdictionId in context.
         </div>
       )}
     </div>
