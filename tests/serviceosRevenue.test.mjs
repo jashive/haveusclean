@@ -125,8 +125,8 @@ test("capturePricingSnapshot: canonical M005 field names (no obsolete fields)", 
   assert.equal(Object.prototype.hasOwnProperty.call(snap, "quote_version_id"), false);
 });
 
-test("fetchPublishedGovernedResidentialConfig requires exactly one published ON-2026-08-v1.0 row", async () => {
-  const row = {
+function buildPublishedGovernedResidentialConfigVersion() {
+  return {
     id: "cfg-1",
     organization_id: "org-1",
     business_unit_id: "bu-on",
@@ -137,18 +137,107 @@ test("fetchPublishedGovernedResidentialConfig requires exactly one published ON-
     effective_from: "2026-08-01",
     effective_to: null,
     configuration: {
-      dwelling_matrix: [
-        {
-          dwelling_type: "Apartment / Condo",
-          beds: 2,
-          baths: 2,
-          package_prices: { complete_deep: 395 },
+      schema_version: "1.0.0",
+      service_family: "residential",
+      brand: "HaveUsClean",
+      business_unit_code: "ON",
+      jurisdiction_code: "ON",
+      currency_code: "CAD",
+      authority: "configuration_version",
+      tax: {
+        label: "HST",
+        rate: 0.13,
+        applies_to_final_subtotal: true,
+      },
+      minimum_charge: {
+        general_residential: 200,
+        partial_cleaning: 200,
+        move_in_move_out: 200,
+        tax_extra: true,
+        exceptions: [
+          "approved recurring appointments",
+          "smaller Essential Refresh services specifically listed in the matrix",
+        ],
+        management_approval_required_below_minimum: true,
+      },
+      dwelling_matrix: {
+        apartments_condos: {
+          "2bed_2bath": {
+            sqft_min: 850,
+            sqft_max: 1100,
+            essential_refresh: 200,
+            signature_initial_reset: 275,
+            complete_deep: 395,
+            move_in_move_out: 260,
+          },
         },
-      ],
-      tax: { name: "HST", rate: 0.13 },
-      minimum_charge: { amount: 0 },
+        townhouses: {
+          "3bed_2_5bath": {
+            sqft_min: 1300,
+            sqft_max: 1800,
+            essential_refresh: 275,
+            signature_initial_reset: 350,
+            complete_deep: 470,
+            move_in_move_out: 325,
+          },
+        },
+        semi_detached_detached: {
+          "4bed_2_5bath": {
+            sqft_min: 1800,
+            sqft_max: 2300,
+            essential_refresh: 325,
+            signature_initial_reset: 425,
+            complete_deep: 545,
+            move_in_move_out: 400,
+          },
+        },
+      },
+      packages: {
+        essential_refresh: { label: "Essential Refresh Clean" },
+        signature_initial_reset: { label: "Signature Initial Reset Clean" },
+        complete_deep: { label: "Complete Deep Clean" },
+        move_in_move_out: { label: "Move-In / Move-Out Clean" },
+      },
+      kitchen_bath_packages: {},
+      bathroom_only: {},
+      partial_cleaning: {},
+      move_in_move_out_addons: {},
+      premium_addons: {},
+      recurring_service: {
+        new_customer_first_visit_recommendation: "Signature Initial Reset Clean",
+        ongoing_baseline: "Essential Refresh Clean",
+        weekly_discount: { min: 0.1, max: 0.15 },
+        biweekly_discount: { min: 0.05, max: 0.1 },
+        monthly_discount: { min: 0, max: 0.05 },
+        heavy_work_automatic_discount: false,
+      },
+      condition_adjustments: {
+        light: { minimum_markup: 0, maximum_markup: 0, instruction: "Use starting price" },
+        moderate: { minimum_markup: 0.1, maximum_markup: 0.15 },
+        heavy: { minimum_markup: 0.2, maximum_markup: 0.35 },
+        custom_quote_required_for: ["biohazard"],
+      },
+      urgency: {
+        same_day_subject_to_availability: true,
+        small_job_premium: { minimum: 25, maximum: 50 },
+        larger_job_premium: { minimum: 50, maximum: 100 },
+        evening_holiday_urgent_dispatch: "custom_based_on_staffing",
+        waiver_requires_operational_reason_or_management_approval: true,
+      },
+      square_footage_adjustments: {
+        use_dwelling_matrix_inside_typical_range: true,
+        additional_250_500_sqft: { minimum: 25, maximum: 50 },
+        additional_500_1000_sqft: { minimum: 50, maximum: 100 },
+        more_than_1000_sqft_above_typical: "custom_quote_recommended",
+        additional_factors: ["layout complexity"],
+      },
+      quote_controls: {},
     },
   };
+}
+
+test("fetchPublishedGovernedResidentialConfig requires exactly one published ON-2026-08-v1.0 row", async () => {
+  const row = buildPublishedGovernedResidentialConfigVersion();
 
   const result = await fetchPublishedGovernedResidentialConfig({
     accessToken: "tok",
@@ -277,41 +366,7 @@ test("fetchPublishedGovernedResidentialConfig fails on BU/jurisdiction mismatch 
 });
 
 test("governed residential deterministic apartment 2/2 complete_deep light one-time computes CA$446.35", () => {
-  const configurationVersion = {
-    id: "cfg-1",
-    configuration_type: "residential_pricing",
-    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
-    business_unit_id: "bu-on",
-    jurisdiction_id: "jur-on",
-    effective_from: "2026-08-01",
-    effective_to: null,
-    configuration: {
-      dwelling_matrix: [
-        {
-          dwelling_type: "Apartment / Condo",
-          beds: 2,
-          baths: 2,
-          package_prices: {
-            essential_refresh: 300,
-            signature_initial_reset: 350,
-            complete_deep: 395,
-            move_in_move_out: 430,
-          },
-        },
-      ],
-      condition_markup: {
-        light: 0,
-        moderate: { min: 0.1, max: 0.2 },
-        heavy: { min: 0.2, max: 0.35 },
-      },
-      recurring_discount: {
-        one_time: 0,
-        bi_weekly: { min: 0.1, max: 0.15 },
-      },
-      tax: { name: "HST", rate: 0.13 },
-      minimum_charge: { amount: 0 },
-    },
-  };
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
 
   const quote = computeGovernedResidentialQuote({
     configurationVersion,
@@ -327,33 +382,52 @@ test("governed residential deterministic apartment 2/2 complete_deep light one-t
   assert.equal(quote.preTaxTotal, 395);
   assert.equal(quote.taxAmount, 51.35);
   assert.equal(quote.total, 446.35);
+  assert.equal(quote.taxName, "HST");
 });
 
-test("governed residential discretionary range does not invent exact value", () => {
-  const configurationVersion = {
-    id: "cfg-1",
-    configuration_type: "residential_pricing",
-    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
-    business_unit_id: "bu-on",
-    jurisdiction_id: "jur-on",
-    configuration: {
-      dwelling_matrix: [
-        {
-          dwelling_type: "Townhouse",
-          beds: 3,
-          baths: 2.5,
-          package_prices: { complete_deep: 520 },
-        },
-      ],
-      condition_markup: {
-        light: 0,
-        moderate: { min: 0.1, max: 0.2 },
-      },
-      tax: { name: "HST", rate: 0.13 },
-      minimum_charge: { amount: 0 },
-    },
-  };
+test("governed residential resolves published townhouses and semi_detached_detached matrix row keys", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const townhouse = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Townhouse",
+    beds: 3,
+    baths: 2.5,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+  });
+  const semiDetached = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Detached House / Semi-Detached",
+    beds: 4,
+    baths: 2.5,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+  });
+  assert.equal(townhouse.preTaxTotal, 470);
+  assert.equal(semiDetached.preTaxTotal, 545);
+});
 
+test("governed residential light condition deterministically produces 0 markup", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "light",
+    frequency: "One-Time",
+    addons: [],
+  });
+  assert.equal(quote.preTaxTotal, 395);
+});
+
+test("governed residential moderate condition requires approved selection", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
   const quote = computeGovernedResidentialQuote({
     configurationVersion,
     dwellingType: "Townhouse",
@@ -369,21 +443,126 @@ test("governed residential discretionary range does not invent exact value", () 
   assert.match(quote.reason, /approved selection within published range/);
 });
 
-test("capturePricingSnapshot governed lineage requires non-null id and non-empty snapshot", () => {
-  const governedConfigVersion = {
-    id: "cfg-1",
-    configuration_type: "residential_pricing",
-    version: GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
-    effective_from: "2026-08-01",
-    effective_to: null,
-    business_unit_id: "bu-on",
-    jurisdiction_id: "jur-on",
-    configuration: {
-      dwelling_matrix: [],
-      tax: { name: "HST", rate: 0.13 },
-      minimum_charge: { amount: 0 },
+test("governed residential moderate condition accepts approved selection within range", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Townhouse",
+    beds: 3,
+    baths: 2.5,
+    packageKey: "complete_deep",
+    condition: "moderate",
+    frequency: "One-Time",
+    addons: [],
+    approvedSelections: { conditionMarkupPct: 0.12 },
+  });
+  assert.equal(quote.preTaxTotal, 526.4);
+});
+
+test("governed residential rejects approved condition selection outside range", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Townhouse",
+    beds: 3,
+    baths: 2.5,
+    packageKey: "complete_deep",
+    condition: "moderate",
+    frequency: "One-Time",
+    addons: [],
+    approvedSelections: { conditionMarkupPct: 0.18 },
+  });
+  assert.equal(quote.requiresOfficeReview, true);
+});
+
+test("governed residential recurring weekly discount reads recurring_service.weekly_discount", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "Weekly",
+    addons: [],
+    approvedSelections: { recurringDiscountPct: 0.1 },
+  });
+  assert.equal(quote.preTaxTotal, 355.5);
+});
+
+test("governed residential minimum charge reads minimum_charge.general_residential", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "essential_refresh",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+  });
+  assert.equal(quote.preTaxTotal, 200);
+});
+
+test("governed residential urgency and sqft adjustments are dollar ranges, not percentages", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const quote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+    approvedSelections: {
+      urgencyLevel: "small_job_premium",
+      urgencyPremiumAmount: 25,
+      sqftBand: "additional_250_500_sqft",
+      sqftAdjustmentAmount: 25,
     },
-  };
+  });
+  assert.equal(quote.preTaxTotal, 445);
+});
+
+test("governed residential urgency and sqft out-of-range approvals require office review", () => {
+  const configurationVersion = buildPublishedGovernedResidentialConfigVersion();
+  const urgencyQuote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+    approvedSelections: {
+      urgencyLevel: "small_job_premium",
+      urgencyPremiumAmount: 10,
+    },
+  });
+  const sqftQuote = computeGovernedResidentialQuote({
+    configurationVersion,
+    dwellingType: "Apartment / Condo",
+    beds: 2,
+    baths: 2,
+    packageKey: "complete_deep",
+    condition: "Light",
+    frequency: "One-Time",
+    addons: [],
+    approvedSelections: {
+      sqftBand: "additional_250_500_sqft",
+      sqftAdjustmentAmount: 10,
+    },
+  });
+  assert.equal(urgencyQuote.requiresOfficeReview, true);
+  assert.equal(sqftQuote.requiresOfficeReview, true);
+});
+
+test("capturePricingSnapshot governed lineage requires non-null id and non-empty snapshot", () => {
+  const governedConfigVersion = buildPublishedGovernedResidentialConfigVersion();
   const configurationSnapshot = buildGovernedResidentialConfigurationSnapshot(governedConfigVersion);
   const snap = capturePricingSnapshot({
     quote: {
@@ -406,6 +585,18 @@ test("capturePricingSnapshot governed lineage requires non-null id and non-empty
   assert.notEqual(snap.configuration_snapshot, null);
   assert.ok(Object.keys(snap.configuration_snapshot).length > 0);
   assert.equal(snap.configuration_snapshot.version, GOVERNED_RESIDENTIAL_REQUIRED_VERSION);
+  assert.equal(snap.configuration_snapshot.tax.label, "HST");
+  assert.equal(snap.configuration_snapshot.minimum_charge.general_residential, 200);
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "authority"));
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "dwelling_matrix"));
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "condition_adjustments"));
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "recurring_service"));
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "urgency"));
+  assert.ok(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "square_footage_adjustments"));
+  assert.equal(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "condition_markup"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "recurring_discount"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "sqft_adjustment"), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(snap.configuration_snapshot, "urgency_premium"), false);
 });
 
 test("capturePricingSnapshot governed mode rejects null lineage", () => {
