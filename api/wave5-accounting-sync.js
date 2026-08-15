@@ -8,38 +8,45 @@
 //   This handler does NOT fabricate QuickBooks IDs.
 //   It does NOT substitute Stripe as the accounting ledger.
 //
-// LIVE QUICKBOOKS PREREQUISITES (not yet satisfied — see notes below):
-//   The following environment variables must be present for live QBO operation:
-//     QBO_CLIENT_ID         – QuickBooks OAuth 2.0 Client ID
-//     QBO_CLIENT_SECRET     – QuickBooks OAuth 2.0 Client Secret
-//     QBO_REFRESH_TOKEN     – OAuth 2.0 refresh token (per company/realm)
-//     QBO_REALM_ID          – QuickBooks Company/Realm ID
-//     QBO_SANDBOX           – "true" for sandbox; "false" for production
-//     SERVICEOS_ENVIRONMENT – "production" | "preview" | "test"
+// CANONICAL INPUT (A6):
+//   Client MUST provide:
+//     invoice_request_id  – stable reference to the canonical invoice record
+//     idempotency_key     – stable idempotency identifier for this sync attempt
 //
-// PREVIEW/TEST ADAPTER:
-//   When SERVICEOS_ENVIRONMENT is "preview" or "test" AND all QBO credentials
-//   are absent, a safe test adapter path is used.
-//   The test adapter is PROHIBITED when SERVICEOS_ENVIRONMENT === "production".
+//   The server loads ALL monetary values (currency, subtotal, tax, total) and
+//   operational_job_id from the canonical invoice_request row using the
+//   Supabase service-role credential. Client-supplied monetary values are
+//   IGNORED and REJECTED if present.
 //
-// IDEMPOTENCY:
-//   The caller must provide an idempotency_key.
-//   The handler returns the same synthetic/real reference for duplicate keys.
+// IDEMPOTENCY (A7):
+//   accounting_sync_outbox.idempotency_key is the durable canonical record.
+//   Before creating a QBO invoice:
+//     1. Resolve outbox by idempotency_key.
+//     2. If acknowledged with provider_reference_id, return stored result.
+//     3. Never issue a second live provider request after acknowledged state.
+//
+// ENVIRONMENT FAIL-CLOSED (A8):
+//   Missing or unknown SERVICEOS_ENVIRONMENT causes hard failure.
+//   Preview/test adapter ONLY when environment is explicitly "preview" or "test".
+//   Production ONLY when explicitly "production".
+//
+// LIVE QUICKBOOKS PREREQUISITES:
+//   QBO_CLIENT_ID, QBO_CLIENT_SECRET, QBO_REFRESH_TOKEN, QBO_REALM_ID, QBO_SANDBOX
+//   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY
 //
 // IMPORTANT: This handler does NOT use the legacy placeholder accounting file.
-// That file fabricates synthetic QB IDs at runtime and must not be used for canonical accounting.
-// It must NOT be used as canonical proof of QuickBooks synchronization.
+// That file fabricates synthetic QB IDs at runtime and must not be used for
+// canonical accounting.
 
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company";
 const QBO_PRODUCTION_BASE = "https://quickbooks.api.intuit.com/v3/company";
 
+// A8: FAIL CLOSED — missing/unknown SERVICEOS_ENVIRONMENT returns null (caller must reject)
 function getEnvironment() {
-  return (process.env.SERVICEOS_ENVIRONMENT || "test").toLowerCase();
-}
-
-function isProductionEnvironment() {
-  return getEnvironment() === "production";
+  const raw = (process.env.SERVICEOS_ENVIRONMENT || "").trim().toLowerCase();
+  if (raw === "production" || raw === "preview" || raw === "test") return raw;
+  return null; // unknown/missing — caller must fail closed
 }
 
 function hasLiveQBOCredentials() {
@@ -51,10 +58,112 @@ function hasLiveQBOCredentials() {
   );
 }
 
-/**
- * Refresh a QBO access token using the refresh token.
- * Returns { access_token, expires_in }.
- */
+function hasSupabaseServiceCredentials() {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
+}
+
+// ── A6: Load canonical invoice_request from DB via service role ───────────────
+async function loadCanonicalInvoiceRequest(invoiceRequestId) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const res = await fetch(
+    `${supabaseUrl}/rest/v1/invoice_request?id=eq.${encodeURIComponent(invoiceRequestId)}&limit=1`,
+    {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `******
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to load invoice_request: HTTP ${res.status} ${text}`);
+  }
+
+  const rows = await res.json();
+  const row = Array.isArray(rows) ? rows[0] : null;
+  if (!row) throw new Error(`invoice_request ${invoiceRequestId} not found`);
+  return row;
+}
+
+// ── A7: Resolve outbox by idempotency_key via service role ────────────────────
+async function resolveOutboxByIdempotencyKey(idempotencyKey) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const res = await fetch(
+    `${supabaseUrl}/rest/v1/accounting_sync_outbox?idempotency_key=eq.${encodeURIComponent(idempotencyKey)}&limit=1`,
+    {
+      headers: {
+        apikey: serviceKey,
+        Authorization: `******
+        "Content-Type": "application/json",
+      },
+    }
+  );
+
+  if (!res.ok) return null;
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+// ── A7: Persist outbox row via service role ───────────────────────────────────
+async function upsertOutboxRow(payload) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const res = await fetch(`${supabaseUrl}/rest/v1/accounting_sync_outbox`, {
+    method: "POST",
+    headers: {
+      apikey: serviceKey,
+      Authorization: `******
+      "Content-Type": "application/json",
+      Prefer: "return=representation",
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to persist accounting_sync_outbox: HTTP ${res.status} ${text}`);
+  }
+
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
+// ── A7: Update outbox status via service role ─────────────────────────────────
+async function updateOutboxRow(id, patch) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+  const res = await fetch(
+    `${supabaseUrl}/rest/v1/accounting_sync_outbox?id=eq.${encodeURIComponent(id)}`,
+    {
+      method: "PATCH",
+      headers: {
+        apikey: serviceKey,
+        Authorization: `******
+        "Content-Type": "application/json",
+        Prefer: "return=representation",
+      },
+      body: JSON.stringify(patch),
+    }
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to update accounting_sync_outbox: HTTP ${res.status} ${text}`);
+  }
+
+  const rows = await res.json();
+  return Array.isArray(rows) ? rows[0] : rows;
+}
+
+// ── QBO token refresh ─────────────────────────────────────────────────────────
 async function refreshQBOAccessToken() {
   const clientId = process.env.QBO_CLIENT_ID;
   const clientSecret = process.env.QBO_CLIENT_SECRET;
@@ -83,10 +192,7 @@ async function refreshQBOAccessToken() {
   return res.json();
 }
 
-/**
- * Create an invoice in QuickBooks Online.
- * Returns the QBO Invoice object with Id and SyncToken.
- */
+// ── QBO invoice creation ──────────────────────────────────────────────────────
 async function createQBOInvoice(accessToken, realmId, invoicePayload, isSandbox) {
   const base = isSandbox ? QBO_SANDBOX_BASE : QBO_PRODUCTION_BASE;
   const url = `${base}/${realmId}/invoice`;
@@ -114,39 +220,97 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: "Method not allowed" });
   }
 
+  // A8: FAIL CLOSED — reject unknown/missing environment
   const env = getEnvironment();
+  if (!env) {
+    return res.status(503).json({
+      success: false,
+      error: "SERVICEOS_ENVIRONMENT is not set or is not a recognized value. "
+        + "Server finance provider code requires explicit environment: production | preview | test.",
+      missing_prerequisites: ["SERVICEOS_ENVIRONMENT"],
+    });
+  }
+
+  const isProduction = env === "production";
+  const isPreviewOrTest = env === "preview" || env === "test";
+
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
-  const {
-    idempotency_key,
-    invoice_request_id,
-    currency_code,
-    subtotal_amount,
-    tax_amount,
-    total_amount,
-    financial_snapshot,
-    operational_job_id,
-  } = body;
-
-  // ── Input validation ──────────────────────────────────────────────────────
+  // A6: Accept ONLY invoice_request_id and idempotency_key from client
+  const { idempotency_key, invoice_request_id } = body;
 
   if (!idempotency_key || !String(idempotency_key).trim()) {
     return res.status(400).json({ success: false, error: "idempotency_key is required" });
   }
-
   if (!invoice_request_id) {
     return res.status(400).json({ success: false, error: "invoice_request_id is required" });
   }
 
-  if (!currency_code || total_amount === undefined || total_amount === null) {
-    return res.status(400).json({ success: false, error: "currency_code and total_amount are required" });
+  const canonicalKey = String(idempotency_key).trim();
+
+  // Supabase service credentials required to load canonical data
+  if (!hasSupabaseServiceCredentials()) {
+    return res.status(503).json({
+      success: false,
+      error: "Supabase service credentials (SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) are required for canonical invoice loading.",
+      missing_prerequisites: ["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"].filter((k) => !process.env[k]),
+    });
   }
 
-  // ── Production guard: test adapter prohibited ─────────────────────────────
+  // A7: Resolve outbox by idempotency_key — return stored result if already acknowledged
+  let outboxRow = await resolveOutboxByIdempotencyKey(canonicalKey).catch(() => null);
+
+  if (outboxRow && outboxRow.outbox_status === "acknowledged" && outboxRow.provider_reference_id) {
+    // A7: Already acknowledged — return stored result without issuing another provider request
+    return res.status(200).json({
+      success: true,
+      idempotent: true,
+      outbox_id: outboxRow.id,
+      is_test_adapter: outboxRow.is_test_adapter,
+      provider: outboxRow.provider,
+      provider_reference_id: outboxRow.provider_reference_id,
+      provider_reference_type: "qbo_invoice_id",
+      idempotency_key: canonicalKey,
+      invoice_request_id,
+      acknowledged_at: outboxRow.acknowledged_at,
+      environment: env,
+    });
+  }
+
+  // A6: Load canonical invoice_request from DB (server-side only — never trust client monetary values)
+  let invoiceRequest;
+  try {
+    invoiceRequest = await loadCanonicalInvoiceRequest(invoice_request_id);
+  } catch (loadErr) {
+    return res.status(400).json({
+      success: false,
+      error: "Cannot load canonical invoice_request from DB",
+      detail: loadErr.message,
+      invoice_request_id,
+    });
+  }
+
+  if (invoiceRequest.request_status === "void" || invoiceRequest.request_status === "cancelled") {
+    return res.status(400).json({
+      success: false,
+      error: `invoice_request is ${invoiceRequest.request_status} — cannot sync`,
+      invoice_request_id,
+    });
+  }
+
+  // A6: Derive ALL monetary values from canonical DB record
+  const canonicalCurrency    = invoiceRequest.currency_code;
+  const canonicalSubtotal    = Number(invoiceRequest.subtotal_amount);
+  const canonicalTax         = Number(invoiceRequest.tax_amount);
+  const canonicalTotal       = Number(invoiceRequest.total_amount);
+  const canonicalJobId       = invoiceRequest.operational_job_id;
+  const canonicalOrgId       = invoiceRequest.organization_id;
+  const canonicalBuId        = invoiceRequest.business_unit_id;
 
   const liveCreds = hasLiveQBOCredentials();
 
-  if (isProductionEnvironment() && !liveCreds) {
+  // ── Production guard: test adapter PROHIBITED ─────────────────────────────
+  if (isProduction && !liveCreds) {
     return res.status(503).json({
       success: false,
       error: "QuickBooks accounting sync is not configured for Production.",
@@ -162,10 +326,44 @@ export default async function handler(req, res) {
   }
 
   // ── Preview / test adapter path ───────────────────────────────────────────
+  if (isPreviewOrTest && !liveCreds) {
+    // A7: Persist through the same governed outbox flow — marked is_test_adapter=true, provider=preview_test
+    const testReference = `PREVIEW-TEST-${canonicalKey.replace(/[^a-zA-Z0-9-]/g, "_")}`;
+    const acknowledgedAt = new Date().toISOString();
 
-  if (!liveCreds && !isProductionEnvironment()) {
-    // Safe test adapter: clearly marked, no real QuickBooks call.
-    const testReference = `PREVIEW-TEST-${String(idempotency_key).trim().replace(/[^a-zA-Z0-9-]/g, "_")}`;
+    // Persist outbox row (server-side via service role)
+    let persistedOutbox = outboxRow;
+    if (!persistedOutbox) {
+      try {
+        persistedOutbox = await upsertOutboxRow({
+          organization_id: canonicalOrgId,
+          business_unit_id: canonicalBuId,
+          invoice_request_id,
+          idempotency_key: canonicalKey,
+          provider: "preview_test",
+          outbox_status: "acknowledged",
+          is_test_adapter: true,
+          provider_reference_id: testReference,
+          provider_reference_type: "test_invoice_ref",
+          response_payload: { adapter: "preview_test", reference: testReference },
+          acknowledged_at: acknowledgedAt,
+          attempt_count: 1,
+          last_attempted_at: acknowledgedAt,
+          request_payload: {
+            invoice_request_id,
+            operational_job_id: canonicalJobId,
+            currency_code: canonicalCurrency,
+            subtotal_amount: canonicalSubtotal,
+            tax_amount: canonicalTax,
+            total_amount: canonicalTotal,
+          },
+          metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync" },
+        });
+      } catch (persistErr) {
+        // Non-blocking for test path: log but continue
+        console.warn("Preview outbox persist failed (non-blocking):", persistErr.message);
+      }
+    }
 
     return res.status(200).json({
       success: true,
@@ -176,12 +374,15 @@ export default async function handler(req, res) {
       provider: "preview_test",
       provider_reference_id: testReference,
       provider_reference_type: "test_invoice_ref",
-      idempotency_key: String(idempotency_key).trim(),
+      idempotency_key: canonicalKey,
       invoice_request_id,
-      currency_code,
-      total_amount,
-      acknowledged_at: new Date().toISOString(),
+      currency_code: canonicalCurrency,
+      subtotal_amount: canonicalSubtotal,
+      tax_amount: canonicalTax,
+      total_amount: canonicalTotal,
+      acknowledged_at: acknowledgedAt,
       environment: env,
+      outbox_id: persistedOutbox?.id ?? null,
       missing_live_prerequisites: [
         "QBO_CLIENT_ID",
         "QBO_CLIENT_SECRET",
@@ -193,11 +394,56 @@ export default async function handler(req, res) {
 
   // ── Live QuickBooks path ──────────────────────────────────────────────────
 
+  // A7: Create outbox row in 'pending' state if not yet exists
+  let outboxId = outboxRow?.id ?? null;
+  const nowIso = new Date().toISOString();
+
+  if (!outboxRow) {
+    try {
+      const newOutbox = await upsertOutboxRow({
+        organization_id: canonicalOrgId,
+        business_unit_id: canonicalBuId,
+        invoice_request_id,
+        idempotency_key: canonicalKey,
+        provider: "quickbooks",
+        outbox_status: "pending",
+        is_test_adapter: false,
+        attempt_count: 0,
+        request_payload: {
+          invoice_request_id,
+          operational_job_id: canonicalJobId,
+          currency_code: canonicalCurrency,
+          subtotal_amount: canonicalSubtotal,
+          tax_amount: canonicalTax,
+          total_amount: canonicalTotal,
+        },
+        metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync" },
+      });
+      outboxId = newOutbox?.id ?? null;
+    } catch (outboxErr) {
+      return res.status(500).json({
+        success: false,
+        error: "Failed to create accounting_sync_outbox row",
+        detail: outboxErr.message,
+        idempotency_key: canonicalKey,
+        invoice_request_id,
+      });
+    }
+  }
+
   try {
     const isSandbox = process.env.QBO_SANDBOX !== "false";
     const realmId = process.env.QBO_REALM_ID;
 
-    // Refresh access token
+    // Mark as sent
+    if (outboxId) {
+      await updateOutboxRow(outboxId, {
+        outbox_status: "sent",
+        last_attempted_at: nowIso,
+        attempt_count: (outboxRow?.attempt_count ?? 0) + 1,
+      }).catch(() => {});
+    }
+
     const tokenData = await refreshQBOAccessToken();
     const accessToken = tokenData.access_token;
 
@@ -205,32 +451,27 @@ export default async function handler(req, res) {
       throw new Error("QBO token refresh returned no access_token");
     }
 
-    // Build a minimal QBO Invoice object.
-    // Line items use the frozen subtotal from the accepted pricing snapshot.
-    // Tax is included as a separate TxnTaxDetail if applicable.
+    // A6: Build QBO Invoice from canonical DB values — client monetary values are never used
     const qboInvoice = {
       DocNumber: String(invoice_request_id).substring(0, 21),
-      PrivateNote: `ServiceOS Wave 5 | operational_job: ${operational_job_id} | idempotency: ${idempotency_key}`,
+      PrivateNote: `ServiceOS Wave 5 | operational_job: ${canonicalJobId} | idempotency: ${canonicalKey}`,
       Line: [
         {
-          Amount: Number(subtotal_amount),
+          Amount: canonicalSubtotal,
           DetailType: "SalesItemLineDetail",
           SalesItemLineDetail: {
             ItemRef: { value: "1", name: "Services" },
-            UnitPrice: Number(subtotal_amount),
+            UnitPrice: canonicalSubtotal,
             Qty: 1,
           },
           Description: `Professional cleaning service — ServiceOS | invoice_request: ${invoice_request_id}`,
         },
       ],
-      CurrencyRef: { value: String(currency_code).toUpperCase() },
+      CurrencyRef: { value: String(canonicalCurrency).toUpperCase() },
     };
 
-    // Add tax line if tax_amount > 0
-    if (Number(tax_amount) > 0) {
-      qboInvoice.TxnTaxDetail = {
-        TotalTax: Number(tax_amount),
-      };
+    if (canonicalTax > 0) {
+      qboInvoice.TxnTaxDetail = { TotalTax: canonicalTax };
     }
 
     const qboResponse = await createQBOInvoice(accessToken, realmId, { Invoice: qboInvoice }, isSandbox);
@@ -240,27 +481,81 @@ export default async function handler(req, res) {
       throw new Error("QBO invoice creation returned no Invoice.Id");
     }
 
+    // A7: Mark acknowledged with real provider_reference_id from QBO response
+    const acknowledgedAt = new Date().toISOString();
+    if (outboxId) {
+      await updateOutboxRow(outboxId, {
+        outbox_status: "acknowledged",
+        provider_reference_id: String(qboInvoiceId),
+        provider_reference_type: "qbo_invoice_id",
+        response_payload: qboResponse,
+        acknowledged_at: acknowledgedAt,
+        last_attempted_at: acknowledgedAt,
+      }).catch(() => {});
+    }
+
     return res.status(200).json({
       success: true,
       is_test_adapter: false,
       provider: "quickbooks",
       provider_reference_id: String(qboInvoiceId),
       provider_reference_type: "qbo_invoice_id",
-      idempotency_key: String(idempotency_key).trim(),
+      idempotency_key: canonicalKey,
       invoice_request_id,
-      currency_code,
-      total_amount,
-      acknowledged_at: new Date().toISOString(),
+      currency_code: canonicalCurrency,
+      subtotal_amount: canonicalSubtotal,
+      tax_amount: canonicalTax,
+      total_amount: canonicalTotal,
+      acknowledged_at: acknowledgedAt,
       environment: env,
+      outbox_id: outboxId,
       qbo_sync_token: qboResponse?.Invoice?.SyncToken ?? null,
     });
   } catch (err) {
+    // Mark failed in outbox
+    if (outboxId) {
+      await updateOutboxRow(outboxId, {
+        outbox_status: "failed",
+        response_payload: { error: err.message },
+        last_attempted_at: new Date().toISOString(),
+      }).catch(() => {});
+    }
+
     return res.status(500).json({
       success: false,
       error: "QuickBooks accounting sync failed",
       detail: err.message,
-      idempotency_key: String(idempotency_key).trim(),
+      idempotency_key: canonicalKey,
       invoice_request_id,
     });
   }
 }
+//
+// ARCHITECTURE:
+//   This is a governed INTERFACE boundary between ServiceOS and QuickBooks.
+//   QuickBooks is the FORMAL ACCOUNTING LEDGER AUTHORITY.
+//   This handler does NOT fabricate QuickBooks IDs.
+//   It does NOT substitute Stripe as the accounting ledger.
+//
+// LIVE QUICKBOOKS PREREQUISITES (not yet satisfied — see notes below):
+//   The following environment variables must be present for live QBO operation:
+//     QBO_CLIENT_ID         – QuickBooks OAuth 2.0 Client ID
+//     QBO_CLIENT_SECRET     – QuickBooks OAuth 2.0 Client Secret
+//     QBO_REFRESH_TOKEN     – OAuth 2.0 refresh token (per company/realm)
+//     QBO_REALM_ID          – QuickBooks Company/Realm ID
+//     QBO_SANDBOX           – "true" for sandbox; "false" for production
+//     SERVICEOS_ENVIRONMENT – "production" | "preview" | "test"
+//
+// PREVIEW/TEST ADAPTER:
+//   When SERVICEOS_ENVIRONMENT is "preview" or "test" AND all QBO credentials
+//   are absent, a safe test adapter path is used.
+//   The test adapter is PROHIBITED when SERVICEOS_ENVIRONMENT === "production".
+//
+// IDEMPOTENCY:
+//   The caller must provide an idempotency_key.
+//   The handler returns the same synthetic/real reference for duplicate keys.
+//
+// IMPORTANT: This handler does NOT use the legacy placeholder accounting file.
+// That file fabricates synthetic QB IDs at runtime and must not be used for canonical accounting.
+// It must NOT be used as canonical proof of QuickBooks synchronization.
+

@@ -29,7 +29,8 @@ import {
   createContractorPayable,
   fetchContractorPayablesByJobId,
   createJobProfitabilitySnapshot,
-  updateJobProfitabilitySnapshot,
+  // A15: updateJobProfitabilitySnapshot removed — profitability snapshots are append-only.
+  // Use createJobProfitabilitySnapshot each capture; load latest by MAX(snapshot_taken_at).
   fetchJobProfitabilitySnapshotByJobId,
 } from "./serviceosWave5FinanceClient.js";
 
@@ -547,12 +548,9 @@ export async function captureJobProfitabilitySnapshot(scope, invoiceRequest, opt
     .filter((p) => ["approved", "paid"].includes(p.payable_status))
     .reduce((sum, p) => sum + Number(p.computed_amount || 0), 0);
 
-  // Check for existing snapshot
-  const existing = await fetchJobProfitabilitySnapshotByJobId(
-    invoiceRequest.operational_job_id,
-    accessToken
-  );
-
+  // A15: Append-only — always INSERT a new snapshot row, never UPDATE.
+  // Latest snapshot is determined by MAX(snapshot_taken_at) per operational_job_id.
+  // Revenue basis is frozen from the accepted pricing snapshot.
   const snapshotData = {
     organizationId,
     businessUnitId,
@@ -574,20 +572,6 @@ export async function captureJobProfitabilitySnapshot(scope, invoiceRequest, opt
     metadata: { wave: "wave5", captured_at: new Date().toISOString() },
     createdByAppUserId: appUserId ?? null,
   };
-
-  if (existing) {
-    // Update direct_labor_cost and other_direct_cost (revenue is immutable per trigger)
-    return updateJobProfitabilitySnapshot(
-      existing.id,
-      {
-        direct_labor_cost: directLaborCost,
-        other_direct_cost: Number(otherDirectCost),
-        source_lineage: snapshotData.sourceLineage,
-        snapshot_taken_at: new Date().toISOString(),
-      },
-      accessToken
-    );
-  }
 
   const payload = buildJobProfitabilitySnapshotPayload(snapshotData);
   // Remove client-side preview field before persisting

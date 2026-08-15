@@ -461,7 +461,8 @@ CREATE TABLE public.job_profitability_snapshot (
   CONSTRAINT fk_jps_invoice_request
     FOREIGN KEY (invoice_request_id) REFERENCES public.invoice_request(id),
 
-  CONSTRAINT uq_jps_job UNIQUE (operational_job_id),
+  -- A15: append-only model — no UNIQUE(operational_job_id); multiple snapshots per job allowed.
+  -- Latest snapshot is determined by MAX(snapshot_taken_at) per operational_job_id.
 
   CONSTRAINT ck_jps_currency_nonempty   CHECK (currency_code <> ''),
   CONSTRAINT ck_jps_revenue_nonneg      CHECK (recognized_revenue_amount >= 0),
@@ -471,8 +472,11 @@ CREATE TABLE public.job_profitability_snapshot (
 );
 
 COMMENT ON TABLE public.job_profitability_snapshot IS
-  'Wave 5: Persisted job profitability snapshot. '
+  'Wave 5: Append-only persisted job profitability snapshot. '
   'Revenue basis from accepted pricing — NOT recalculated. '
+  'Multiple snapshots per operational_job_id are allowed (no UNIQUE constraint). '
+  'Latest snapshot is determined by MAX(snapshot_taken_at). '
+  'UPDATE and DELETE are prohibited by trigger (trg_jps_append_only). '
   'gross_contribution is a STORED GENERATED column. '
   'gross_margin_percent set by trigger (zero-revenue guard). '
   'SOURCE ONLY — not executed.';
@@ -505,6 +509,8 @@ CREATE INDEX idx_cp_job             ON public.contractor_payable (operational_jo
 CREATE INDEX idx_cp_status          ON public.contractor_payable (payable_status);
 
 CREATE INDEX idx_jps_org_bu         ON public.job_profitability_snapshot (organization_id, business_unit_id);
+-- A15: lookup latest snapshot per job (append-only model)
+CREATE INDEX idx_jps_job_taken_at    ON public.job_profitability_snapshot (operational_job_id, snapshot_taken_at DESC);
 
 -- ---------------------------------------------------------------------------
 -- SECTION 3: TRIGGER FUNCTIONS
@@ -798,6 +804,686 @@ CREATE TRIGGER trg_jps_immutability
   BEFORE UPDATE ON public.job_profitability_snapshot
   FOR EACH ROW EXECUTE FUNCTION public.trg_jps_immutability();
 
+-- ============================================================
+-- T8 (A15): job_profitability_snapshot — append-only (prohibit UPDATE/DELETE)
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_jps_append_only()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+BEGIN
+  IF TG_OP = 'UPDATE' THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: rows are append-only. '
+      'Create a new snapshot instead of updating the existing one. '
+      'Use MAX(snapshot_taken_at) per operational_job_id to find the latest.';
+  END IF;
+  IF TG_OP = 'DELETE' THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: rows are append-only and cannot be deleted. '
+      'Historical profitability snapshots are retained for audit.';
+  END IF;
+  RETURN NULL;
+END;
+$$;
+
+CREATE TRIGGER trg_jps_append_only
+  BEFORE UPDATE OR DELETE ON public.job_profitability_snapshot
+  FOR EACH ROW EXECUTE FUNCTION public.trg_jps_append_only();
+
+-- ============================================================
+-- T9 (A16): Reusable cross-scope scope validator
+--   Call: public.fn_assert_wave5_scope(label, org_id, bu_id, jur_id, expected_org, expected_bu, expected_jur)
+--   Raises EXCEPTION if org/BU/jurisdiction do not match.
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.fn_assert_wave5_scope(
+  p_label       text,
+  p_org_id      uuid,
+  p_bu_id       uuid,
+  p_jur_id      uuid,
+  p_exp_org_id  uuid,
+  p_exp_bu_id   uuid,
+  p_exp_jur_id  uuid
+) RETURNS void LANGUAGE plpgsql AS
+$$
+BEGIN
+  IF p_org_id IS DISTINCT FROM p_exp_org_id THEN
+    RAISE EXCEPTION '% scope violation: organization_id mismatch (% vs %)',
+      p_label, p_org_id, p_exp_org_id;
+  END IF;
+  IF p_bu_id IS DISTINCT FROM p_exp_bu_id THEN
+    RAISE EXCEPTION '% scope violation: business_unit_id mismatch (% vs %)',
+      p_label, p_bu_id, p_exp_bu_id;
+  END IF;
+  IF p_jur_id IS NOT NULL AND p_exp_jur_id IS NOT NULL
+     AND p_jur_id IS DISTINCT FROM p_exp_jur_id THEN
+    RAISE EXCEPTION '% scope violation: jurisdiction_id mismatch (% vs %)',
+      p_label, p_jur_id, p_exp_jur_id;
+  END IF;
+END;
+$$;
+
+-- ============================================================
+-- T10 (A1/A2): billing_readiness_gate — canonical lineage validation
+--   Fires BEFORE INSERT OR UPDATE.
+--   When NEW.gate_status = 'ready':
+--     - operational_handoff_id must be non-null (A2)
+--     - operational_job must match org/BU/jurisdiction and pricing/quote lineage
+--     - work_order must belong to same job/org/BU/jurisdiction and be QA-complete
+--     - operational_handoff must belong to same job/work_order with matching lineage
+--     - quote_version must be accepted and reference the same pricing_snapshot
+--     - at least one passed/waived qa_inspection must exist
+--     - no open blocking corrective_actions
+--     - cancelled jobs/work_orders cannot become ready
+--     - Wave 4 enrolled work_orders must have applicability record
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_billing_readiness_gate_canonical_lineage()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+DECLARE
+  v_job         record;
+  v_wo          record;
+  v_oh          record;
+  v_qv          record;
+  v_qa_count    integer;
+  v_ca_count    integer;
+  v_w4_count    integer;
+BEGIN
+  -- Only validate canonical lineage when gate_status transitions to or is inserted as 'ready'
+  IF NEW.gate_status <> 'ready' THEN
+    RETURN NEW;
+  END IF;
+
+  -- A2: operational_handoff_id is required for a ready gate
+  IF NEW.operational_handoff_id IS NULL THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff_id must be non-null when gate_status = ready. '
+      'The handoff represents the canonical Wave 4 → Wave 5 boundary.';
+  END IF;
+
+  -- Validate operational_job
+  SELECT oj.organization_id, oj.business_unit_id, oj.jurisdiction_id,
+         oj.operational_status, oj.pricing_snapshot_id, oj.quote_version_id
+  INTO v_job
+  FROM public.operational_job oj
+  WHERE oj.id = NEW.operational_job_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'billing_readiness_gate: operational_job % not found', NEW.operational_job_id;
+  END IF;
+
+  -- A1: org/BU/jurisdiction must match job
+  PERFORM public.fn_assert_wave5_scope(
+    'billing_readiness_gate vs operational_job',
+    NEW.organization_id, NEW.business_unit_id, NEW.jurisdiction_id,
+    v_job.organization_id, v_job.business_unit_id, v_job.jurisdiction_id
+  );
+
+  -- A1: cancelled job cannot become billing ready
+  IF v_job.operational_status = 'cancelled' THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: cancelled operational_job % cannot become billing ready',
+      NEW.operational_job_id;
+  END IF;
+
+  -- A1: pricing_snapshot_id must match job
+  IF v_job.pricing_snapshot_id IS DISTINCT FROM NEW.pricing_snapshot_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: pricing_snapshot_id mismatch — gate has %, operational_job has %',
+      NEW.pricing_snapshot_id, v_job.pricing_snapshot_id;
+  END IF;
+
+  -- A1: quote_version_id must match job
+  IF v_job.quote_version_id IS DISTINCT FROM NEW.quote_version_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: quote_version_id mismatch — gate has %, operational_job has %',
+      NEW.quote_version_id, v_job.quote_version_id;
+  END IF;
+
+  -- Validate work_order
+  SELECT wo.organization_id, wo.business_unit_id, wo.jurisdiction_id,
+         wo.operational_job_id, wo.work_order_status
+  INTO v_wo
+  FROM public.work_order wo
+  WHERE wo.id = NEW.work_order_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'billing_readiness_gate: work_order % not found', NEW.work_order_id;
+  END IF;
+
+  -- A1: work_order must belong to same operational_job
+  IF v_wo.operational_job_id IS DISTINCT FROM NEW.operational_job_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: work_order % belongs to operational_job %, not %',
+      NEW.work_order_id, v_wo.operational_job_id, NEW.operational_job_id;
+  END IF;
+
+  -- A1: work_order scope must match
+  PERFORM public.fn_assert_wave5_scope(
+    'billing_readiness_gate vs work_order',
+    NEW.organization_id, NEW.business_unit_id, NEW.jurisdiction_id,
+    v_wo.organization_id, v_wo.business_unit_id, v_wo.jurisdiction_id
+  );
+
+  -- A1: cancelled work_order cannot become billing ready
+  IF v_wo.work_order_status = 'cancelled' THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: cancelled work_order % cannot become billing ready',
+      NEW.work_order_id;
+  END IF;
+
+  -- A1: work_order must have completed QA
+  IF v_wo.work_order_status NOT IN ('qa_complete', 'closed') THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: work_order % must be qa_complete or closed for billing ready (is: %)',
+      NEW.work_order_id, v_wo.work_order_status;
+  END IF;
+
+  -- Validate operational_handoff (A2: required, A1: lineage)
+  SELECT oh.organization_id, oh.business_unit_id,
+         oh.operational_job_id, oh.work_order_id,
+         oh.pricing_snapshot_id, oh.quote_version_id, oh.handoff_status
+  INTO v_oh
+  FROM public.operational_handoff oh
+  WHERE oh.id = NEW.operational_handoff_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'billing_readiness_gate: operational_handoff % not found', NEW.operational_handoff_id;
+  END IF;
+
+  -- A1: handoff must belong to same operational_job
+  IF v_oh.operational_job_id IS DISTINCT FROM NEW.operational_job_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff % belongs to job %, not %',
+      NEW.operational_handoff_id, v_oh.operational_job_id, NEW.operational_job_id;
+  END IF;
+
+  -- A1: handoff must belong to same work_order
+  IF v_oh.work_order_id IS DISTINCT FROM NEW.work_order_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff % belongs to work_order %, not %',
+      NEW.operational_handoff_id, v_oh.work_order_id, NEW.work_order_id;
+  END IF;
+
+  -- A1: handoff pricing/quote lineage must match gate
+  IF v_oh.pricing_snapshot_id IS DISTINCT FROM NEW.pricing_snapshot_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff pricing_snapshot_id mismatch (% vs gate %)',
+      v_oh.pricing_snapshot_id, NEW.pricing_snapshot_id;
+  END IF;
+
+  IF v_oh.quote_version_id IS DISTINCT FROM NEW.quote_version_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff quote_version_id mismatch (% vs gate %)',
+      v_oh.quote_version_id, NEW.quote_version_id;
+  END IF;
+
+  -- A1: cancelled handoff cannot close a billing gate
+  IF v_oh.handoff_status = 'cancelled' THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: operational_handoff % is cancelled and cannot anchor a ready billing gate',
+      NEW.operational_handoff_id;
+  END IF;
+
+  -- A1: Validate quote_version is accepted
+  SELECT qv.lifecycle_status, qv.pricing_snapshot_id
+  INTO v_qv
+  FROM public.quote_version qv
+  WHERE qv.id = NEW.quote_version_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'billing_readiness_gate: quote_version % not found', NEW.quote_version_id;
+  END IF;
+
+  IF v_qv.lifecycle_status IS DISTINCT FROM 'accepted' THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: quote_version % must be accepted (lifecycle_status = %), not %',
+      NEW.quote_version_id, v_qv.lifecycle_status, v_qv.lifecycle_status;
+  END IF;
+
+  -- A1: pricing_snapshot must be the one referenced by the accepted quote_version
+  IF v_qv.pricing_snapshot_id IS DISTINCT FROM NEW.pricing_snapshot_id THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: quote_version.pricing_snapshot_id (%) does not match gate.pricing_snapshot_id (%)',
+      v_qv.pricing_snapshot_id, NEW.pricing_snapshot_id;
+  END IF;
+
+  -- A1: At least one passed or waived QA inspection must exist for this job/work_order
+  --     Failed QA history is allowed when a later distinct passed/waived reinspection exists.
+  SELECT COUNT(*) INTO v_qa_count
+  FROM public.qa_inspection qi
+  WHERE qi.operational_job_id = NEW.operational_job_id
+    AND qi.work_order_id = NEW.work_order_id
+    AND qi.inspection_status IN ('passed', 'waived');
+
+  IF v_qa_count = 0 THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: at least one passed or waived qa_inspection must exist '
+      'for operational_job % / work_order % before billing ready',
+      NEW.operational_job_id, NEW.work_order_id;
+  END IF;
+
+  -- A1: No open blocking corrective_actions
+  SELECT COUNT(*) INTO v_ca_count
+  FROM public.corrective_action ca
+  WHERE ca.operational_job_id = NEW.operational_job_id
+    AND ca.action_status NOT IN ('resolved', 'verified', 'cancelled');
+
+  IF v_ca_count > 0 THEN
+    RAISE EXCEPTION
+      'billing_readiness_gate: % open/unresolved corrective_action(s) exist for operational_job %. '
+      'All corrective actions must be resolved, verified, or cancelled before billing ready.',
+      v_ca_count, NEW.operational_job_id;
+  END IF;
+
+  -- A1: Wave 4 enrolled work_orders — applicability must be present and enrolled
+  SELECT COUNT(*) INTO v_w4_count
+  FROM public.work_order_wave4_applicability woa
+  WHERE woa.work_order_id = NEW.work_order_id;
+
+  IF v_w4_count > 0 THEN
+    -- Wave 4 enrolled: verify the enrollment is in the expected enrolled state
+    -- (applicability_status CHECK constraint already enforces this is only 'enrolled')
+    -- Additional: verify org/BU/jurisdiction scope matches
+    PERFORM 1
+    FROM public.work_order_wave4_applicability woa
+    WHERE woa.work_order_id = NEW.work_order_id
+      AND woa.operational_job_id = NEW.operational_job_id
+      AND woa.organization_id = NEW.organization_id
+      AND woa.business_unit_id = NEW.business_unit_id;
+
+    IF NOT FOUND THEN
+      RAISE EXCEPTION
+        'billing_readiness_gate: Wave 4 applicability record for work_order % does not match '
+        'expected operational_job/org/BU scope. '
+        'Wave 4 enrollment/governance close requirements not satisfied.',
+        NEW.work_order_id;
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_brg_canonical_lineage
+  BEFORE INSERT OR UPDATE ON public.billing_readiness_gate
+  FOR EACH ROW EXECUTE FUNCTION public.trg_billing_readiness_gate_canonical_lineage();
+
+-- ============================================================
+-- T11 (A3): invoice_request — extended lineage + monetary validation
+--   Extends the existing trg_invoice_request_gate_check to also verify:
+--     - invoice IDs match the gate (org/BU/jur/job/work_order/handoff)
+--     - pricing_snapshot_id and quote_version_id match the gate
+--     - pricing_snapshot monetary values match the frozen invoice values
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_invoice_request_lineage_and_monetary_check()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+DECLARE
+  v_gate  record;
+  v_ps    record;
+BEGIN
+  -- Load the gate
+  SELECT brg.gate_status,
+         brg.organization_id, brg.business_unit_id, brg.jurisdiction_id,
+         brg.operational_job_id, brg.work_order_id, brg.operational_handoff_id,
+         brg.pricing_snapshot_id, brg.quote_version_id
+  INTO v_gate
+  FROM public.billing_readiness_gate brg
+  WHERE brg.id = NEW.billing_readiness_gate_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'invoice_request: billing_readiness_gate % not found',
+      NEW.billing_readiness_gate_id;
+  END IF;
+
+  -- Gate must be ready
+  IF v_gate.gate_status IS DISTINCT FROM 'ready' THEN
+    RAISE EXCEPTION
+      'invoice_request: billing_readiness_gate must be ready before creating invoice_request (gate status: %)',
+      v_gate.gate_status;
+  END IF;
+
+  -- A3: Invoice IDs must match gate
+  IF NEW.organization_id IS DISTINCT FROM v_gate.organization_id THEN
+    RAISE EXCEPTION 'invoice_request: organization_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.business_unit_id IS DISTINCT FROM v_gate.business_unit_id THEN
+    RAISE EXCEPTION 'invoice_request: business_unit_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.jurisdiction_id IS NOT NULL AND v_gate.jurisdiction_id IS NOT NULL
+     AND NEW.jurisdiction_id IS DISTINCT FROM v_gate.jurisdiction_id THEN
+    RAISE EXCEPTION 'invoice_request: jurisdiction_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.operational_job_id IS DISTINCT FROM v_gate.operational_job_id THEN
+    RAISE EXCEPTION 'invoice_request: operational_job_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.work_order_id IS DISTINCT FROM v_gate.work_order_id THEN
+    RAISE EXCEPTION 'invoice_request: work_order_id does not match billing_readiness_gate';
+  END IF;
+  IF v_gate.operational_handoff_id IS NOT NULL
+     AND NEW.operational_handoff_id IS DISTINCT FROM v_gate.operational_handoff_id THEN
+    RAISE EXCEPTION 'invoice_request: operational_handoff_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.pricing_snapshot_id IS DISTINCT FROM v_gate.pricing_snapshot_id THEN
+    RAISE EXCEPTION 'invoice_request: pricing_snapshot_id does not match billing_readiness_gate';
+  END IF;
+  IF NEW.quote_version_id IS DISTINCT FROM v_gate.quote_version_id THEN
+    RAISE EXCEPTION 'invoice_request: quote_version_id does not match billing_readiness_gate';
+  END IF;
+
+  -- A3: Pricing snapshot monetary values must match frozen invoice values
+  SELECT ps.currency_code, ps.subtotal_amount, ps.tax_amount, ps.total_amount
+  INTO v_ps
+  FROM public.pricing_snapshot ps
+  WHERE ps.id = NEW.pricing_snapshot_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'invoice_request: pricing_snapshot % not found', NEW.pricing_snapshot_id;
+  END IF;
+
+  IF NEW.currency_code IS DISTINCT FROM v_ps.currency_code THEN
+    RAISE EXCEPTION
+      'invoice_request: currency_code % does not match pricing_snapshot currency_code %',
+      NEW.currency_code, v_ps.currency_code;
+  END IF;
+  IF NEW.subtotal_amount IS DISTINCT FROM v_ps.subtotal_amount THEN
+    RAISE EXCEPTION
+      'invoice_request: subtotal_amount % does not match pricing_snapshot subtotal_amount %',
+      NEW.subtotal_amount, v_ps.subtotal_amount;
+  END IF;
+  IF NEW.tax_amount IS DISTINCT FROM v_ps.tax_amount THEN
+    RAISE EXCEPTION
+      'invoice_request: tax_amount % does not match pricing_snapshot tax_amount %',
+      NEW.tax_amount, v_ps.tax_amount;
+  END IF;
+  IF NEW.total_amount IS DISTINCT FROM v_ps.total_amount THEN
+    RAISE EXCEPTION
+      'invoice_request: total_amount % does not match pricing_snapshot total_amount %',
+      NEW.total_amount, v_ps.total_amount;
+  END IF;
+
+  -- A3: Validate no duplicate active invoice for this job (exclude void/cancelled)
+  IF EXISTS (
+    SELECT 1 FROM public.invoice_request ir
+    WHERE ir.operational_job_id = NEW.operational_job_id
+      AND ir.id IS DISTINCT FROM NEW.id
+      AND ir.request_status NOT IN ('void', 'cancelled')
+  ) THEN
+    RAISE EXCEPTION
+      'invoice_request: duplicate active invoice_request for operational_job_id %',
+      NEW.operational_job_id;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_ir_lineage_and_monetary_check
+  BEFORE INSERT ON public.invoice_request
+  FOR EACH ROW EXECUTE FUNCTION public.trg_invoice_request_lineage_and_monetary_check();
+
+-- ============================================================
+-- T12 (A12): contractor_payable — DB eligibility validation
+--   Validates exact lineage and eligibility before INSERT.
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_contractor_payable_eligibility()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+DECLARE
+  v_wa    record;
+  v_oj    record;
+  v_wo    record;
+  v_ccv   record;
+  v_expected_amount numeric(12,2);
+BEGIN
+  -- Load worker_assignment
+  SELECT wa.worker_id, wa.operational_job_id, wa.organization_id,
+         wa.business_unit_id, wa.assignment_status,
+         wa.assigned_at, wa.acknowledged_at
+  INTO v_wa
+  FROM public.worker_assignment wa
+  WHERE wa.id = NEW.worker_assignment_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'contractor_payable: worker_assignment % not found', NEW.worker_assignment_id;
+  END IF;
+
+  -- A12: worker_assignment.worker_id must match payable.worker_id
+  IF v_wa.worker_id IS DISTINCT FROM NEW.worker_id THEN
+    RAISE EXCEPTION
+      'contractor_payable: worker_id % does not match worker_assignment.worker_id %',
+      NEW.worker_id, v_wa.worker_id;
+  END IF;
+
+  -- A12: worker_assignment.operational_job_id must match payable
+  IF v_wa.operational_job_id IS DISTINCT FROM NEW.operational_job_id THEN
+    RAISE EXCEPTION
+      'contractor_payable: operational_job_id % does not match worker_assignment.operational_job_id %',
+      NEW.operational_job_id, v_wa.operational_job_id;
+  END IF;
+
+  -- A12: org/BU must match
+  IF v_wa.organization_id IS DISTINCT FROM NEW.organization_id THEN
+    RAISE EXCEPTION 'contractor_payable: organization_id does not match worker_assignment';
+  END IF;
+  IF v_wa.business_unit_id IS DISTINCT FROM NEW.business_unit_id THEN
+    RAISE EXCEPTION 'contractor_payable: business_unit_id does not match worker_assignment';
+  END IF;
+
+  -- A12: assignment must be in eligible state (acknowledged or completed)
+  IF v_wa.assignment_status NOT IN ('acknowledged', 'completed', 'service_complete') THEN
+    RAISE EXCEPTION
+      'contractor_payable: worker_assignment % is not in an eligible state for payable (status: %)',
+      NEW.worker_assignment_id, v_wa.assignment_status;
+  END IF;
+
+  -- Load operational_job
+  SELECT oj.organization_id, oj.business_unit_id,
+         oj.operational_status
+  INTO v_oj
+  FROM public.operational_job oj
+  WHERE oj.id = NEW.operational_job_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'contractor_payable: operational_job % not found', NEW.operational_job_id;
+  END IF;
+
+  -- A12: job must be at required QA-complete state
+  IF v_oj.operational_status NOT IN ('service_complete', 'qa_pending', 'qa_passed', 'closed') THEN
+    RAISE EXCEPTION
+      'contractor_payable: operational_job % must be service_complete or later for payable (status: %)',
+      NEW.operational_job_id, v_oj.operational_status;
+  END IF;
+
+  -- Load work_order
+  SELECT wo.operational_job_id, wo.organization_id, wo.business_unit_id
+  INTO v_wo
+  FROM public.work_order wo
+  WHERE wo.id = NEW.work_order_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'contractor_payable: work_order % not found', NEW.work_order_id;
+  END IF;
+
+  -- A12: work_order must belong to same operational_job
+  IF v_wo.operational_job_id IS DISTINCT FROM NEW.operational_job_id THEN
+    RAISE EXCEPTION
+      'contractor_payable: work_order % belongs to job %, not %',
+      NEW.work_order_id, v_wo.operational_job_id, NEW.operational_job_id;
+  END IF;
+
+  -- Load contractor_compensation_version
+  SELECT ccv.worker_id, ccv.organization_id, ccv.business_unit_id,
+         ccv.compensation_status, ccv.compensation_method, ccv.currency_code,
+         ccv.rate_value, ccv.effective_from, ccv.effective_to
+  INTO v_ccv
+  FROM public.contractor_compensation_version ccv
+  WHERE ccv.id = NEW.contractor_compensation_version_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'contractor_payable: contractor_compensation_version % not found',
+      NEW.contractor_compensation_version_id;
+  END IF;
+
+  -- A12: compensation version must belong to same worker
+  IF v_ccv.worker_id IS DISTINCT FROM NEW.worker_id THEN
+    RAISE EXCEPTION
+      'contractor_payable: contractor_compensation_version worker_id % does not match payable worker_id %',
+      v_ccv.worker_id, NEW.worker_id;
+  END IF;
+
+  -- A12: compensation version must belong to same org/BU
+  IF v_ccv.organization_id IS DISTINCT FROM NEW.organization_id THEN
+    RAISE EXCEPTION 'contractor_payable: contractor_compensation_version organization_id mismatch';
+  END IF;
+  IF v_ccv.business_unit_id IS DISTINCT FROM NEW.business_unit_id THEN
+    RAISE EXCEPTION 'contractor_payable: contractor_compensation_version business_unit_id mismatch';
+  END IF;
+
+  -- A12: compensation version must be approved or active
+  IF v_ccv.compensation_status NOT IN ('approved', 'active') THEN
+    RAISE EXCEPTION
+      'contractor_payable: contractor_compensation_version % must be approved or active (is: %)',
+      NEW.contractor_compensation_version_id, v_ccv.compensation_status;
+  END IF;
+
+  -- A12: currency and method must match compensation version
+  IF NEW.currency_code IS DISTINCT FROM v_ccv.currency_code THEN
+    RAISE EXCEPTION
+      'contractor_payable: currency_code % does not match compensation_version currency_code %',
+      NEW.currency_code, v_ccv.currency_code;
+  END IF;
+  IF NEW.compensation_method IS DISTINCT FROM v_ccv.compensation_method THEN
+    RAISE EXCEPTION
+      'contractor_payable: compensation_method % does not match compensation_version compensation_method %',
+      NEW.compensation_method, v_ccv.compensation_method;
+  END IF;
+
+  -- A12: No open blocking corrective_actions
+  IF EXISTS (
+    SELECT 1 FROM public.corrective_action ca
+    WHERE ca.operational_job_id = NEW.operational_job_id
+      AND ca.action_status NOT IN ('resolved', 'verified', 'cancelled')
+  ) THEN
+    RAISE EXCEPTION
+      'contractor_payable: open corrective_action(s) exist for operational_job % — '
+      'contractor pay is held pending resolution',
+      NEW.operational_job_id;
+  END IF;
+
+  -- A12: Validate computed_amount is derived from frozen compensation version
+  --   flat_amount: computed_amount = rate_value
+  --   hourly:      computed_amount = round(rate_value * basis_value, 2)
+  --   percentage:  computed_amount = round(rate_value * basis_value, 2)
+  IF v_ccv.compensation_method = 'flat_amount' THEN
+    v_expected_amount := ROUND(v_ccv.rate_value, 2);
+  ELSE
+    v_expected_amount := ROUND(v_ccv.rate_value * NEW.basis_value, 2);
+  END IF;
+
+  IF NEW.computed_amount IS DISTINCT FROM v_expected_amount THEN
+    RAISE EXCEPTION
+      'contractor_payable: computed_amount % does not match DB-authoritative calculation % '
+      '(method=%, rate=%, basis=%)',
+      NEW.computed_amount, v_expected_amount,
+      v_ccv.compensation_method, v_ccv.rate_value, NEW.basis_value;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_cp_eligibility
+  BEFORE INSERT ON public.contractor_payable
+  FOR EACH ROW EXECUTE FUNCTION public.trg_contractor_payable_eligibility();
+
+-- ============================================================
+-- T13 (A13): contractor_compensation_version — self-approval prevention
+--   Mirrors the contractor_payable self-approval guard.
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_ccv_self_approval_guard()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+DECLARE
+  v_worker_app_user_id uuid;
+BEGIN
+  IF NEW.approved_by_app_user_id IS NOT NULL
+     AND (OLD.approved_by_app_user_id IS NULL
+          OR OLD.approved_by_app_user_id IS DISTINCT FROM NEW.approved_by_app_user_id)
+  THEN
+    SELECT w.app_user_id INTO v_worker_app_user_id
+    FROM public.worker w
+    WHERE w.id = NEW.worker_id;
+
+    IF v_worker_app_user_id IS NOT NULL
+       AND v_worker_app_user_id = NEW.approved_by_app_user_id THEN
+      RAISE EXCEPTION
+        'contractor_compensation_version: worker may not approve their own compensation version '
+        '(worker_id=%, approved_by_app_user_id=%)',
+        NEW.worker_id, NEW.approved_by_app_user_id;
+    END IF;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_ccv_self_approval_guard
+  BEFORE UPDATE ON public.contractor_compensation_version
+  FOR EACH ROW EXECUTE FUNCTION public.trg_ccv_self_approval_guard();
+
+-- ============================================================
+-- T14 (A14): contractor_payable — status lifecycle transition guard
+--   Enforces allowed transitions in DB:
+--     pending  → approved | voided     (not directly to paid)
+--     approved → paid     | voided
+--     paid     → (terminal, no further transitions)
+--     voided   → (terminal, no further transitions)
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_contractor_payable_status_lifecycle()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+BEGIN
+  IF OLD.payable_status = NEW.payable_status THEN
+    RETURN NEW; -- no change
+  END IF;
+
+  CASE OLD.payable_status
+    WHEN 'pending' THEN
+      IF NEW.payable_status NOT IN ('approved', 'voided') THEN
+        RAISE EXCEPTION
+          'contractor_payable: invalid status transition pending → % '
+          '(allowed: approved, voided)',
+          NEW.payable_status;
+      END IF;
+    WHEN 'approved' THEN
+      IF NEW.payable_status NOT IN ('paid', 'voided') THEN
+        RAISE EXCEPTION
+          'contractor_payable: invalid status transition approved → % '
+          '(allowed: paid, voided)',
+          NEW.payable_status;
+      END IF;
+    WHEN 'paid' THEN
+      RAISE EXCEPTION
+        'contractor_payable: paid is a terminal status — no further transitions allowed';
+    WHEN 'voided' THEN
+      RAISE EXCEPTION
+        'contractor_payable: voided is a terminal status — no further transitions allowed';
+    ELSE
+      RAISE EXCEPTION
+        'contractor_payable: unknown payable_status % in transition guard',
+        OLD.payable_status;
+  END CASE;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_cp_status_lifecycle
+  BEFORE UPDATE ON public.contractor_payable
+  FOR EACH ROW EXECUTE FUNCTION public.trg_contractor_payable_status_lifecycle();
+
 -- ---------------------------------------------------------------------------
 -- SECTION 4: ROW LEVEL SECURITY
 -- ---------------------------------------------------------------------------
@@ -828,8 +1514,10 @@ REVOKE ALL ON public.job_profitability_snapshot      FROM anon;
 
 GRANT SELECT, INSERT, UPDATE ON public.billing_readiness_gate          TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.invoice_request                 TO authenticated;
-GRANT SELECT, INSERT, UPDATE ON public.accounting_sync_outbox          TO authenticated;
-GRANT SELECT, INSERT         ON public.payment_observation             TO authenticated;
+-- A5: accounting_sync_outbox — SELECT only for authenticated; INSERT/UPDATE is service_role only via server API
+GRANT SELECT                 ON public.accounting_sync_outbox          TO authenticated;
+-- A11: payment_observation — SELECT only for authenticated; INSERT is service_role only (Stripe webhook)
+GRANT SELECT                 ON public.payment_observation             TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.contractor_compensation_version TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.contractor_payable              TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.job_profitability_snapshot      TO authenticated;
@@ -871,17 +1559,24 @@ CREATE POLICY pol_ir_office_ops_insert ON public.invoice_request
 -- ── accounting_sync_outbox ────────────────────────────────────────────────────
 -- Server-side only; no RLS policy for worker or qa.
 
-CREATE POLICY pol_aso_owner_admin_all ON public.accounting_sync_outbox
-  FOR ALL TO authenticated
-  USING  (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']))
-  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
+-- A5: accounting_sync_outbox — SELECT only for authenticated roles.
+-- INSERT/UPDATE is exclusively via service_role through the governed server API.
+
+CREATE POLICY pol_aso_owner_admin_select ON public.accounting_sync_outbox
+  FOR SELECT TO authenticated
+  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
+
+CREATE POLICY pol_aso_office_ops_select ON public.accounting_sync_outbox
+  FOR SELECT TO authenticated
+  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
 
 -- ── payment_observation ────────────────────────────────────────────────────────
+-- A11: payment_observation — SELECT only for authenticated roles.
+-- INSERT is exclusively via service_role through the Stripe webhook server handler.
 
-CREATE POLICY pol_po_owner_admin_all ON public.payment_observation
-  FOR ALL TO authenticated
-  USING  (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']))
-  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
+CREATE POLICY pol_po_owner_admin_select ON public.payment_observation
+  FOR SELECT TO authenticated
+  USING  (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
 
 CREATE POLICY pol_po_office_ops_select ON public.payment_observation
   FOR SELECT TO authenticated
@@ -1003,15 +1698,21 @@ BEGIN
   FOR v_trigger_name IN
     SELECT t FROM unnest(ARRAY[
       'trg_brg_immutability',
+      'trg_brg_canonical_lineage',
       'trg_ir_immutability',
       'trg_ir_gate_check',
+      'trg_ir_lineage_and_monetary_check',
       'trg_aso_production_guard',
       'trg_aso_immutability',
       'trg_po_immutability',
       'trg_ccv_immutability',
+      'trg_ccv_self_approval_guard',
       'trg_cp_approval_guard',
+      'trg_cp_eligibility',
+      'trg_cp_status_lifecycle',
       'trg_jps_margin',
-      'trg_jps_immutability'
+      'trg_jps_immutability',
+      'trg_jps_append_only'
     ]) t
   LOOP
     SELECT COUNT(*) INTO v_count
@@ -1044,13 +1745,13 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- [SV-6] owner_admin policies exist for all tables
+  -- [SV-6] owner_admin/select policies exist for all tables
   FOR v_policy_name IN
     SELECT p FROM unnest(ARRAY[
       'pol_brg_owner_admin_all',
       'pol_ir_owner_admin_all',
-      'pol_aso_owner_admin_all',
-      'pol_po_owner_admin_all',
+      'pol_aso_owner_admin_select',
+      'pol_po_owner_admin_select',
       'pol_ccv_owner_admin_all',
       'pol_cp_owner_admin_all',
       'pol_jps_owner_admin_all'
@@ -1121,6 +1822,101 @@ BEGIN
     AND kcu.column_name = 'billing_readiness_gate_id';
   IF v_count = 0 THEN
     RAISE EXCEPTION 'M012 SV-10 FAIL: FK from invoice_request.billing_readiness_gate_id not found';
+  END IF;
+
+  -- [SV-11] billing_readiness_gate canonical lineage trigger function exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'trg_billing_readiness_gate_canonical_lineage'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-11 FAIL: trg_billing_readiness_gate_canonical_lineage() function not found — A1/A2 canonical lineage guard missing';
+  END IF;
+
+  -- [SV-12] invoice_request lineage+monetary trigger function exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'trg_invoice_request_lineage_and_monetary_check'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-12 FAIL: trg_invoice_request_lineage_and_monetary_check() function not found — A3 invoice lineage guard missing';
+  END IF;
+
+  -- [SV-13] accounting_sync_outbox has no INSERT/UPDATE grant for authenticated
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name   = 'accounting_sync_outbox'
+    AND grantee      = 'authenticated'
+    AND privilege_type IN ('INSERT', 'UPDATE');
+  IF v_count > 0 THEN
+    RAISE EXCEPTION 'M012 SV-13 FAIL: authenticated role has INSERT/UPDATE on accounting_sync_outbox — A5 server-only boundary violation';
+  END IF;
+
+  -- [SV-14] payment_observation has no INSERT grant for authenticated
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name   = 'payment_observation'
+    AND grantee      = 'authenticated'
+    AND privilege_type IN ('INSERT', 'UPDATE');
+  IF v_count > 0 THEN
+    RAISE EXCEPTION 'M012 SV-14 FAIL: authenticated role has INSERT/UPDATE on payment_observation — A11 server-only boundary violation';
+  END IF;
+
+  -- [SV-15] contractor_payable eligibility trigger function exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'trg_contractor_payable_eligibility'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-15 FAIL: trg_contractor_payable_eligibility() function not found — A12 payable DB eligibility guard missing';
+  END IF;
+
+  -- [SV-16] contractor_compensation_version self-approval guard exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'trg_ccv_self_approval_guard'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-16 FAIL: trg_ccv_self_approval_guard() function not found — A13 compensation self-approval guard missing';
+  END IF;
+
+  -- [SV-17] contractor_payable status lifecycle trigger exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'trg_contractor_payable_status_lifecycle'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-17 FAIL: trg_contractor_payable_status_lifecycle() function not found — A14 payable status lifecycle guard missing';
+  END IF;
+
+  -- [SV-18] job_profitability_snapshot has NO UNIQUE(operational_job_id) constraint (append-only)
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.table_constraints
+  WHERE table_schema     = 'public'
+    AND table_name       = 'job_profitability_snapshot'
+    AND constraint_name  = 'uq_jps_job'
+    AND constraint_type  = 'UNIQUE';
+  IF v_count > 0 THEN
+    RAISE EXCEPTION 'M012 SV-18 FAIL: uq_jps_job UNIQUE constraint still exists — A15 append-only model requires its removal';
+  END IF;
+
+  -- [SV-19] append-only trigger on job_profitability_snapshot exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_trigger
+  WHERE tgname = 'trg_jps_append_only';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-19 FAIL: trg_jps_append_only trigger not found — A15 append-only enforcement missing';
+  END IF;
+
+  -- [SV-20] cross-scope helper function fn_assert_wave5_scope exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc
+  WHERE proname = 'fn_assert_wave5_scope'
+    AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-20 FAIL: fn_assert_wave5_scope() function not found — A16 cross-scope integrity helper missing';
   END IF;
 
 END;

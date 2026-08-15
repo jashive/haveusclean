@@ -178,8 +178,9 @@ test("30. owner_admin policies exist for all 7 tables", () => {
   const policies = [
     "pol_brg_owner_admin_all",
     "pol_ir_owner_admin_all",
-    "pol_aso_owner_admin_all",
-    "pol_po_owner_admin_all",
+    // A5: aso and po are SELECT-only for owner_admin (server-only mutation)
+    "pol_aso_owner_admin_select",
+    "pol_po_owner_admin_select",
     "pol_ccv_owner_admin_all",
     "pol_cp_owner_admin_all",
     "pol_jps_owner_admin_all",

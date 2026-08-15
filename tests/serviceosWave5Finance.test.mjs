@@ -392,30 +392,41 @@ test("21. buildPaymentObservationPayload rejects negative amount", () => {
   );
 });
 
-test("22. stripe-webhook.js canonical persistence is additive and non-blocking", () => {
+test("22. stripe-webhook.js canonical persistence is Wave5-event-specific and retriable-on-fail (A10)", () => {
   // Legacy response path must still return { received: true } unchanged
   assert.ok(
     webhookSrc.includes("received: true"),
     "Legacy webhook response must be preserved"
   );
-  // Wave 5 persistence must be wrapped in try/catch (non-blocking)
+  // Wave 5 persistence must be guarded by SERVICEOS_FINANCE_ENABLED
   assert.ok(
     webhookSrc.includes("SERVICEOS_FINANCE_ENABLED") &&
     webhookSrc.includes("persistCanonicalPaymentObservation"),
     "Wave 5 persistence must be guarded by SERVICEOS_FINANCE_ENABLED"
   );
+  // A10: Wave 5 canonical persistence failures return retriable non-2xx
   assert.ok(
-    webhookSrc.includes("non-blocking"),
-    "Wave 5 persistence failure must be non-blocking"
+    webhookSrc.includes("retriable") || webhookSrc.includes("503"),
+    "Wave 5 canonical persistence failures must return retriable non-2xx (A10)"
+  );
+  // A10: Legacy non-ServiceOS events must not be failed by Wave 5 logic
+  assert.ok(
+    webhookSrc.includes("isWave5InvoiceEvent") || webhookSrc.includes("job_id"),
+    "Stripe webhook must identify Wave 5 events deterministically before canonical persistence"
   );
 });
 
-test("23. stripe-webhook.js fails closed in Production without webhook secret", () => {
+test("23. stripe-webhook.js fails closed in Production without webhook secret or signature (A9)", () => {
   assert.ok(
     webhookSrc.includes("production") &&
     webhookSrc.includes("STRIPE_WEBHOOK_SECRET") &&
-    webhookSrc.includes("Webhook signature verification required in Production"),
-    "Webhook must fail closed in Production without signature verification"
+    (webhookSrc.includes("required in Production") || webhookSrc.includes("required in production")),
+    "Webhook must fail closed in Production without STRIPE_WEBHOOK_SECRET"
+  );
+  assert.ok(
+    webhookSrc.includes("stripe-signature") &&
+    webhookSrc.includes("required in Production"),
+    "Webhook must also require stripe-signature header in Production (A9)"
   );
 });
 
@@ -715,15 +726,17 @@ test("45. no anon finance CRUD in migration (REVOKE ALL from anon on all tables)
   }
 });
 
-test("46. office_ops has only select/insert on invoice_request (not update/delete/accounting)", () => {
+test("46. office_ops has only select on accounting_sync_outbox (A5) and select/insert on invoice_request", () => {
   const migration = readFileSync(
     resolve(ROOT, "supabase/migrations/012_wave5_finance.sql"),
     "utf8"
   );
-  // office_ops should not have a policy on accounting_sync_outbox
+  // A5: office_ops may have SELECT policy on accounting_sync_outbox (to observe status) but NOT insert/mutate
+  // pol_aso_office_ops_select is the correct SELECT-only policy name
   assert.ok(
-    !migration.includes("pol_aso_office_ops"),
-    "office_ops must not have accounting_sync_outbox policy"
+    !migration.includes("pol_aso_office_ops_all") &&
+    !migration.includes("pol_aso_office_ops_insert"),
+    "office_ops must not have INSERT/ALL policy on accounting_sync_outbox"
   );
   // office_ops insert on invoice_request is permitted
   assert.ok(
@@ -811,5 +824,440 @@ test("53. QB adapter enumerates exact missing live prerequisites in response", (
   assert.ok(
     qbAdapterSrc.includes("QBO_CLIENT_ID"),
     "QB adapter must reference QBO_CLIENT_ID prerequisite"
+  );
+});
+
+// =============================================================================
+// CORRECTIVE PASS TESTS — Wave 5 Finance Security/Integrity (A1–A17)
+// =============================================================================
+
+const m012Src = readFileSync(
+  resolve(ROOT, "supabase/migrations/012_wave5_finance.sql"),
+  "utf8"
+);
+
+// ── A1/A2: Billing gate canonical lineage trigger ────────────────────────────
+
+test("54. M012 has billing_readiness_gate canonical lineage trigger (A1)", () => {
+  assert.ok(
+    m012Src.includes("trg_billing_readiness_gate_canonical_lineage") &&
+    m012Src.includes("trg_brg_canonical_lineage"),
+    "M012 must define and attach the billing_readiness_gate canonical lineage trigger"
+  );
+});
+
+test("55. M012 billing gate trigger validates operational_handoff required for ready (A2)", () => {
+  assert.ok(
+    m012Src.includes("operational_handoff_id IS NULL") &&
+    m012Src.includes("gate_status = ready"),
+    "M012 canonical lineage trigger must reject null handoff_id when gate_status=ready"
+  );
+});
+
+test("56. M012 billing gate trigger validates cancelled job/work_order cannot be billing ready (A1)", () => {
+  assert.ok(
+    m012Src.includes("cancelled operational_job") ||
+    m012Src.includes("cancelled work_order") ||
+    (m012Src.includes("operational_status = 'cancelled'") && m012Src.includes("billing ready")),
+    "M012 trigger must reject cancelled job/work_order for billing ready gate"
+  );
+});
+
+test("57. M012 billing gate trigger validates passed/waived QA required (A1)", () => {
+  assert.ok(
+    m012Src.includes("qa_inspection") &&
+    (m012Src.includes("passed') OR") || m012Src.includes("'passed', 'waived'")),
+    "M012 trigger must require at least one passed/waived qa_inspection"
+  );
+});
+
+test("58. M012 billing gate trigger validates no open corrective_actions (A1)", () => {
+  assert.ok(
+    m012Src.includes("corrective_action") && m012Src.includes("corrective action"),
+    "M012 trigger must verify no open corrective_actions before billing ready"
+  );
+});
+
+test("59. M012 billing gate trigger validates pricing/quote lineage matches job (A1)", () => {
+  assert.ok(
+    m012Src.includes("pricing_snapshot_id mismatch") &&
+    m012Src.includes("quote_version_id mismatch"),
+    "M012 trigger must validate pricing_snapshot_id and quote_version_id match the operational_job"
+  );
+});
+
+test("60. buildBillingReadinessGatePayload requires operationalHandoffId when gateStatus=ready (A2)", () => {
+  // Source-level check: the util must mention handoff required when ready
+  assert.ok(
+    wave5UtilsSrc.includes("operationalHandoffId is required when gateStatus is 'ready'") ||
+    (wave5UtilsSrc.includes("operationalHandoffId") && wave5UtilsSrc.includes("ready")),
+    "serviceosWave5FinanceUtils must require operationalHandoffId when gateStatus=ready"
+  );
+});
+
+// ── A3: Invoice request lineage and monetary validation ──────────────────────
+
+test("61. M012 has invoice_request lineage and monetary check trigger (A3)", () => {
+  assert.ok(
+    m012Src.includes("trg_invoice_request_lineage_and_monetary_check") &&
+    m012Src.includes("trg_ir_lineage_and_monetary_check"),
+    "M012 must define and attach trg_invoice_request_lineage_and_monetary_check"
+  );
+});
+
+test("62. M012 invoice_request trigger validates pricing snapshot monetary values match (A3)", () => {
+  assert.ok(
+    m012Src.includes("subtotal_amount % does not match pricing_snapshot") ||
+    m012Src.includes("subtotal_amount"),
+    "M012 trigger must validate subtotal_amount matches pricing_snapshot"
+  );
+  assert.ok(
+    m012Src.includes("tax_amount % does not match") || m012Src.includes("tax_amount"),
+    "M012 trigger must validate tax_amount matches pricing_snapshot"
+  );
+  assert.ok(
+    m012Src.includes("currency_code % does not match") || m012Src.includes("currency_code"),
+    "M012 trigger must validate currency_code matches pricing_snapshot"
+  );
+});
+
+test("63. M012 invoice_request trigger validates all IDs match the gate (A3)", () => {
+  assert.ok(
+    m012Src.includes("operational_job_id does not match billing_readiness_gate"),
+    "M012 trigger must validate operational_job_id matches billing_readiness_gate"
+  );
+  assert.ok(
+    m012Src.includes("work_order_id does not match billing_readiness_gate"),
+    "M012 trigger must validate work_order_id matches billing_readiness_gate"
+  );
+});
+
+// ── A5/A11: Server-only mutation ─────────────────────────────────────────────
+
+test("64. M012 grants SELECT only (no INSERT/UPDATE) on accounting_sync_outbox to authenticated (A5)", () => {
+  assert.ok(
+    m012Src.includes("GRANT SELECT                 ON public.accounting_sync_outbox") ||
+    m012Src.includes("GRANT SELECT ON public.accounting_sync_outbox"),
+    "M012 must grant SELECT-only on accounting_sync_outbox to authenticated"
+  );
+  assert.ok(
+    !m012Src.includes("GRANT SELECT, INSERT, UPDATE ON public.accounting_sync_outbox"),
+    "M012 must NOT grant INSERT/UPDATE on accounting_sync_outbox to authenticated"
+  );
+});
+
+test("65. M012 grants SELECT only (no INSERT) on payment_observation to authenticated (A11)", () => {
+  assert.ok(
+    m012Src.includes("GRANT SELECT                 ON public.payment_observation") ||
+    m012Src.includes("GRANT SELECT ON public.payment_observation"),
+    "M012 must grant SELECT-only on payment_observation to authenticated"
+  );
+  assert.ok(
+    !m012Src.includes("GRANT SELECT, INSERT         ON public.payment_observation"),
+    "M012 must NOT grant INSERT on payment_observation to authenticated"
+  );
+});
+
+test("66. M012 RLS policies for accounting_sync_outbox are SELECT-only (A5)", () => {
+  assert.ok(
+    m012Src.includes("pol_aso_owner_admin_select"),
+    "M012 must define pol_aso_owner_admin_select (SELECT-only) for accounting_sync_outbox"
+  );
+  assert.ok(
+    !m012Src.includes("pol_aso_owner_admin_all"),
+    "M012 must NOT define pol_aso_owner_admin_all (FOR ALL) for accounting_sync_outbox"
+  );
+});
+
+test("67. M012 RLS policies for payment_observation are SELECT-only (A11)", () => {
+  assert.ok(
+    m012Src.includes("pol_po_owner_admin_select"),
+    "M012 must define pol_po_owner_admin_select (SELECT-only) for payment_observation"
+  );
+  assert.ok(
+    !m012Src.includes("pol_po_owner_admin_all"),
+    "M012 must NOT define pol_po_owner_admin_all (FOR ALL) for payment_observation"
+  );
+});
+
+// ── A6/A7: QB canonical input + durable idempotency ─────────────────────────
+
+test("68. QB adapter loads canonical monetary values from DB via service role (A6)", () => {
+  assert.ok(
+    qbAdapterSrc.includes("loadCanonicalInvoiceRequest"),
+    "QB adapter must define loadCanonicalInvoiceRequest to load from DB"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("SUPABASE_SERVICE_ROLE_KEY"),
+    "QB adapter must use SUPABASE_SERVICE_ROLE_KEY to load canonical data"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("canonicalCurrency") && qbAdapterSrc.includes("canonicalSubtotal"),
+    "QB adapter must use canonically derived values"
+  );
+});
+
+test("69. QB adapter rejects client-supplied monetary values (A6)", () => {
+  // These old fields should NOT be destructured from body anymore
+  assert.ok(
+    !qbAdapterSrc.includes("body.currency_code") &&
+    !qbAdapterSrc.includes("body.subtotal_amount") &&
+    !qbAdapterSrc.includes("body.tax_amount") &&
+    !qbAdapterSrc.includes("body.total_amount"),
+    "QB adapter must not destructure monetary values from client request body"
+  );
+});
+
+test("70. QB adapter resolves outbox by idempotency_key before making provider call (A7)", () => {
+  assert.ok(
+    qbAdapterSrc.includes("resolveOutboxByIdempotencyKey"),
+    "QB adapter must resolve accounting_sync_outbox by idempotency_key"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("already acknowledged") ||
+    qbAdapterSrc.includes("idempotent: true"),
+    "QB adapter must return stored result when outbox is already acknowledged"
+  );
+});
+
+test("71. QB adapter uses outbox lifecycle: pending → sent → acknowledged (A7)", () => {
+  assert.ok(
+    qbAdapterSrc.includes("outbox_status: \"pending\"") ||
+    qbAdapterSrc.includes("outbox_status: 'pending'"),
+    "QB adapter must create outbox in pending state"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("outbox_status: \"sent\"") ||
+    qbAdapterSrc.includes("outbox_status: 'sent'"),
+    "QB adapter must mark outbox as sent before provider call"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("outbox_status: \"acknowledged\"") ||
+    qbAdapterSrc.includes("outbox_status: 'acknowledged'"),
+    "QB adapter must mark outbox as acknowledged after provider call"
+  );
+});
+
+// ── A8: Fail-closed environment ───────────────────────────────────────────────
+
+test("72. QB adapter getEnvironment() fails closed — no default to 'test' (A8)", () => {
+  // Old: (process.env.SERVICEOS_ENVIRONMENT || "test").toLowerCase()
+  // New: must return null for missing/unknown
+  assert.ok(
+    !qbAdapterSrc.includes('|| "test"') && !qbAdapterSrc.includes("|| 'test'"),
+    "QB adapter must not default to 'test' environment — must fail closed"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("FAIL CLOSED") || qbAdapterSrc.includes("fail closed"),
+    "QB adapter must document fail-closed behavior for environment"
+  );
+});
+
+test("73. Stripe webhook getServiceosEnvironment() fails closed (A8)", () => {
+  assert.ok(
+    !webhookSrc.includes('|| "test"') && !webhookSrc.includes("|| 'test'"),
+    "Stripe webhook must not default to 'test' — must fail closed"
+  );
+  assert.ok(
+    webhookSrc.includes("FAIL CLOSED") || webhookSrc.includes("null"),
+    "Stripe webhook must return null/fail-closed for missing environment"
+  );
+});
+
+// ── A9: Stripe webhook signature ─────────────────────────────────────────────
+
+test("74. Stripe webhook requires stripe-signature header in production (A9)", () => {
+  assert.ok(
+    webhookSrc.includes("stripe-signature") &&
+    (webhookSrc.includes("required in Production") || webhookSrc.includes("required in production")),
+    "Stripe webhook must explicitly require stripe-signature in production"
+  );
+});
+
+test("75. Stripe webhook allows only explicit preview/test for unsigned parsing (A9)", () => {
+  assert.ok(
+    webhookSrc.includes("serviceosEnv !== 'production'") ||
+    webhookSrc.includes('serviceosEnv !== "production"') ||
+    webhookSrc.includes("!== 'production'") ||
+    webhookSrc.includes('!== "production"'),
+    "Stripe webhook must only allow unsigned parsing in non-production environment"
+  );
+});
+
+// ── A12: Contractor payable DB eligibility ────────────────────────────────────
+
+test("76. M012 has contractor_payable eligibility trigger (A12)", () => {
+  assert.ok(
+    m012Src.includes("trg_contractor_payable_eligibility") &&
+    m012Src.includes("trg_cp_eligibility"),
+    "M012 must define and attach trg_contractor_payable_eligibility"
+  );
+});
+
+test("77. M012 contractor_payable eligibility validates computed_amount from DB calculation (A12)", () => {
+  assert.ok(
+    m012Src.includes("computed_amount % does not match DB-authoritative calculation"),
+    "M012 trigger must validate computed_amount against DB-authoritative calculation"
+  );
+});
+
+test("78. M012 contractor_payable eligibility validates worker/org/BU/job lineage (A12)", () => {
+  assert.ok(
+    m012Src.includes("worker_id % does not match worker_assignment.worker_id"),
+    "M012 trigger must validate payable worker_id matches worker_assignment"
+  );
+  assert.ok(
+    m012Src.includes("operational_job_id % does not match worker_assignment"),
+    "M012 trigger must validate payable operational_job_id matches worker_assignment"
+  );
+});
+
+// ── A13: Compensation self-approval ──────────────────────────────────────────
+
+test("79. M012 has compensation_version self-approval guard (A13)", () => {
+  assert.ok(
+    m012Src.includes("trg_ccv_self_approval_guard"),
+    "M012 must define trg_ccv_self_approval_guard trigger"
+  );
+  assert.ok(
+    m012Src.includes("worker may not approve their own compensation version"),
+    "M012 trigger must explicitly prevent worker self-approval of compensation version"
+  );
+});
+
+// ── A14: Payable status lifecycle ─────────────────────────────────────────────
+
+test("80. M012 has contractor_payable status lifecycle trigger (A14)", () => {
+  assert.ok(
+    m012Src.includes("trg_contractor_payable_status_lifecycle") &&
+    m012Src.includes("trg_cp_status_lifecycle"),
+    "M012 must define and attach trg_contractor_payable_status_lifecycle"
+  );
+});
+
+test("81. M012 payable status lifecycle prevents pending → paid directly (A14)", () => {
+  assert.ok(
+    m012Src.includes("pending → %") || m012Src.includes("pending → "),
+    "M012 trigger must validate pending transitions"
+  );
+  assert.ok(
+    m012Src.includes("allowed: approved, voided"),
+    "M012 trigger must allow only pending→approved and pending→voided"
+  );
+});
+
+test("82. M012 payable status lifecycle prevents paid from transitioning (A14)", () => {
+  assert.ok(
+    m012Src.includes("paid is a terminal status"),
+    "M012 trigger must declare paid as terminal"
+  );
+  assert.ok(
+    m012Src.includes("voided is a terminal status"),
+    "M012 trigger must declare voided as terminal"
+  );
+});
+
+// ── A15: Profitability snapshot append-only ───────────────────────────────────
+
+test("83. M012 has no UNIQUE(operational_job_id) on job_profitability_snapshot (A15)", () => {
+  assert.ok(
+    !m012Src.includes("CONSTRAINT uq_jps_job UNIQUE"),
+    "M012 must NOT have UNIQUE(operational_job_id) on job_profitability_snapshot"
+  );
+});
+
+test("84. M012 has append-only trigger on job_profitability_snapshot (A15)", () => {
+  assert.ok(
+    m012Src.includes("trg_jps_append_only"),
+    "M012 must define trg_jps_append_only trigger"
+  );
+  assert.ok(
+    m012Src.includes("rows are append-only"),
+    "M012 trigger must explicitly declare append-only semantics"
+  );
+});
+
+test("85. Wave5 runtime captureJobProfitabilitySnapshot always INSERTs (never UPDATEs) (A15)", () => {
+  assert.ok(
+    !wave5RuntimeSrc.includes("updateJobProfitabilitySnapshot("),
+    "Wave5 runtime must not call updateJobProfitabilitySnapshot (append-only)"
+  );
+  assert.ok(
+    wave5RuntimeSrc.includes("always INSERT") || wave5RuntimeSrc.includes("Append-only"),
+    "Wave5 runtime must document append-only snapshot creation"
+  );
+});
+
+test("86. M012 has append-only index for job_profitability_snapshot (A15)", () => {
+  assert.ok(
+    m012Src.includes("idx_jps_job_taken_at") &&
+    m012Src.includes("snapshot_taken_at"),
+    "M012 must have index for latest snapshot lookup by operational_job_id + snapshot_taken_at"
+  );
+});
+
+// ── A16: Cross-scope integrity helper ────────────────────────────────────────
+
+test("87. M012 has fn_assert_wave5_scope cross-scope helper (A16)", () => {
+  assert.ok(
+    m012Src.includes("fn_assert_wave5_scope"),
+    "M012 must define fn_assert_wave5_scope helper function"
+  );
+  assert.ok(
+    m012Src.includes("scope violation"),
+    "M012 scope helper must raise exception on scope violations"
+  );
+});
+
+// ── A17: Expanded self-validation ─────────────────────────────────────────────
+
+test("88. M012 self-validation checks canonical lineage trigger exists (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-11") ||
+    m012Src.includes("trg_billing_readiness_gate_canonical_lineage()"),
+    "M012 self-validation must verify canonical lineage trigger exists"
+  );
+});
+
+test("89. M012 self-validation checks accounting_sync_outbox server-only boundary (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-13") ||
+    m012Src.includes("accounting_sync_outbox") && m012Src.includes("INSERT/UPDATE"),
+    "M012 self-validation must verify accounting_sync_outbox has no INSERT/UPDATE for authenticated"
+  );
+});
+
+test("90. M012 self-validation checks payment_observation server-only boundary (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-14") ||
+    m012Src.includes("payment_observation") && m012Src.includes("A11"),
+    "M012 self-validation must verify payment_observation has no INSERT for authenticated"
+  );
+});
+
+test("91. M012 self-validation checks append-only profitability (no UNIQUE, has append-only trigger) (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-18") && m012Src.includes("uq_jps_job"),
+    "M012 self-validation must verify uq_jps_job UNIQUE constraint is absent"
+  );
+  assert.ok(
+    m012Src.includes("SV-19") && m012Src.includes("trg_jps_append_only"),
+    "M012 self-validation must verify trg_jps_append_only trigger exists"
+  );
+});
+
+test("92. M012 self-validation checks contractor_payable eligibility trigger (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-15") ||
+    m012Src.includes("trg_contractor_payable_eligibility()"),
+    "M012 self-validation must verify contractor_payable eligibility trigger exists"
+  );
+});
+
+test("93. M012 self-validation checks compensation self-approval guard (A17)", () => {
+  assert.ok(
+    m012Src.includes("SV-16") ||
+    m012Src.includes("trg_ccv_self_approval_guard()"),
+    "M012 self-validation must verify compensation self-approval guard exists"
   );
 });

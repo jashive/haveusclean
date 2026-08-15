@@ -51,6 +51,14 @@ export function buildBillingReadinessGatePayload({
     throw new Error(`buildBillingReadinessGatePayload: invalid gateStatus '${gateStatus}'`);
   }
 
+  // A2: operational_handoff_id is required when gate_status = 'ready'
+  if (gateStatus === "ready" && !operationalHandoffId) {
+    throw new Error(
+      "buildBillingReadinessGatePayload: operationalHandoffId is required when gateStatus is 'ready' — " +
+      "the handoff is the canonical Wave 4 → Wave 5 boundary"
+    );
+  }
+
   return {
     organization_id: organizationId,
     business_unit_id: businessUnitId,
