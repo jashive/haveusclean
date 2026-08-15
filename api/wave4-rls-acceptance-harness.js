@@ -321,7 +321,16 @@ function buildAllowSelectProbe({ role, operation, table, result, mandatory = tru
   });
 }
 
-function classifyDenyMutationProbe({ role, operation, table, result, mandatory = true, expected_scope, allowNote = null }) {
+function classifyDenyMutationProbe({
+  role,
+  operation,
+  table,
+  result,
+  mandatory = true,
+  expected_scope,
+  allowNote = null,
+  allowEmptyRepresentationDeny = false,
+}) {
   if (isTransportFailure(result)) {
     return buildProbe({
       role,
@@ -337,6 +346,22 @@ function classifyDenyMutationProbe({ role, operation, table, result, mandatory =
   }
 
   if (result.ok) {
+    const rows = Array.isArray(result.body) ? result.body : null;
+    if (allowEmptyRepresentationDeny && rows && rows.length === 0) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        mandatory,
+        classification: CLASSIFICATION.PROVEN_RLS_DENY,
+        result,
+        expected_scope,
+        actual_row_count: 0,
+        note: "Known retained row stayed SELECT-visible but was filtered from the PATCH representation, proving update denial",
+      });
+    }
+
     return buildProbe({
       role,
       operation,
@@ -547,7 +572,7 @@ async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
       prefer: "return=representation",
     }),
     restProbe(supabaseUrl, anonKey, accessToken, "GET", "worker_assignment", {
-      filter: `?id=eq.${FIXTURE_SCOPE.worker_assignment_id}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,worker_id,assignment_status&limit=1`,
+      filter: `?id=eq.${FIXTURE_SCOPE.worker_assignment_id}&select=id,organization_id,business_unit_id,operational_job_id,schedule_window_id,worker_id,assignment_role,assignment_status&limit=1`,
       prefer: "return=representation",
     }),
     restProbe(supabaseUrl, anonKey, accessToken, "GET", "qa_inspection", {
@@ -597,7 +622,13 @@ async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
     evidenceRequirementRows: Array.isArray(evidenceRequirements.body)
       ? evidenceRequirements.body.filter((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id)
       : [],
-    workerAssignmentRow: pick(workerAssignment, (row) => row.id === FIXTURE_SCOPE.worker_assignment_id),
+    workerAssignmentRow: pick(
+      workerAssignment,
+      (row) =>
+        row.id === FIXTURE_SCOPE.worker_assignment_id &&
+        row.worker_id === FIXTURE_SCOPE.worker_id &&
+        row.operational_job_id === FIXTURE_SCOPE.operational_job_id
+    ),
     qaInspectionRow: pick(qaInspection, (row) => row.id === FIXTURE_SCOPE.failed_qa_inspection_id),
     completionEvidenceRow: pick(completionEvidence, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id),
     workOrderEventRow: pick(workOrderEvent, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id),
@@ -795,6 +826,7 @@ async function probeOfficeOps(supabaseUrl, anonKey, token) {
       result: governancePatch,
       expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
       allowNote: "office_ops unexpectedly received update authority on retained governance scope",
+      allowEmptyRepresentationDeny: true,
     }));
   }
 
@@ -810,9 +842,20 @@ async function probeWorker(supabaseUrl, anonKey, token) {
     operation: "SELECT worker_assignment (own retained fixture row)",
     table: "worker_assignment",
     result: scope.workerAssignment,
-    expected_scope: { id: FIXTURE_SCOPE.worker_assignment_id, worker_id: FIXTURE_SCOPE.worker_id },
-    verifier: (rows) => rows.some((row) => row.id === FIXTURE_SCOPE.worker_assignment_id && row.worker_id === FIXTURE_SCOPE.worker_id),
-    noteIfMissing: "Allow proof requires worker_assignment_id=e1100000-0000-0000-0000-000000000010 for the signed-in worker",
+    expected_scope: {
+      id: FIXTURE_SCOPE.worker_assignment_id,
+      worker_id: FIXTURE_SCOPE.worker_id,
+      operational_job_id: FIXTURE_SCOPE.operational_job_id,
+    },
+    verifier: (rows) =>
+      rows.some(
+        (row) =>
+          row.id === FIXTURE_SCOPE.worker_assignment_id &&
+          row.worker_id === FIXTURE_SCOPE.worker_id &&
+          row.operational_job_id === FIXTURE_SCOPE.operational_job_id
+      ),
+    noteIfMissing:
+      "Allow proof requires worker_assignment_id=e1100000-0000-0000-0000-000000000010 for worker_id=1b3a6903-0c50-4a95-afc3-280628c10508 on operational_job_id=e1100000-0000-0000-0000-00000000000e",
   }));
 
   probes.push(buildAllowSelectProbe({
@@ -848,6 +891,7 @@ async function probeWorker(supabaseUrl, anonKey, token) {
       result: governancePatch,
       expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
       allowNote: "worker unexpectedly received governance update authority on retained scope",
+      allowEmptyRepresentationDeny: true,
     }));
   }
 
@@ -961,6 +1005,7 @@ async function probeQa(supabaseUrl, anonKey, token) {
       result: governancePatch,
       expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
       allowNote: "qa unexpectedly received governance update authority on retained scope",
+      allowEmptyRepresentationDeny: true,
     }));
   }
 
