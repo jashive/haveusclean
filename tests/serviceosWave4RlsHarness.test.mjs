@@ -102,14 +102,8 @@ test("W4H-6. Each role uses its own authenticated access token (no service_role 
     "Harness must authenticate each role with password-based Supabase auth"
   );
   assert.ok(
-    !harnessSrc.includes("SUPABASE_SERVICE_ROLE_KEY") ||
-      harnessSrc.includes("SUPABASE_SERVICE_ROLE_KEY") === false,
-    "Harness role probes must use user access tokens, not service role key"
-  );
-  // Explicitly: the service_role key is NOT referenced in the harness (probes use user tokens)
-  assert.ok(
     !harnessSrc.includes("SUPABASE_SERVICE_ROLE_KEY"),
-    "Harness must not use SUPABASE_SERVICE_ROLE_KEY for role probes"
+    "Harness role probes must use user access tokens, not service role key"
   );
 });
 

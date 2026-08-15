@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test tests/pricing.test.mjs tests/validateLead.test.mjs tests/validationEngine.test.mjs tests/serviceosRevenue.test.mjs tests/serviceosWave3Schema.test.mjs tests/serviceosWave3OperationsUtils.test.mjs tests/serviceosWave3OperationsClient.test.mjs tests/serviceosWave3WorkerBootstrap.test.mjs tests/serviceosWave4Schema.test.mjs tests/serviceosWave4Runtime.test.mjs tests/serviceosWave4AcceptanceFixture.test.mjs tests/serviceosWave5Schema.test.mjs tests/serviceosWave5Finance.test.mjs"
+    "test": "node --test tests/pricing.test.mjs tests/validateLead.test.mjs tests/validationEngine.test.mjs tests/serviceosRevenue.test.mjs tests/serviceosWave3Schema.test.mjs tests/serviceosWave3OperationsUtils.test.mjs tests/serviceosWave3OperationsClient.test.mjs tests/serviceosWave3WorkerBootstrap.test.mjs tests/serviceosWave4Schema.test.mjs tests/serviceosWave4Runtime.test.mjs tests/serviceosWave4AcceptanceFixture.test.mjs tests/serviceosWave5Schema.test.mjs tests/serviceosWave5Finance.test.mjs tests/serviceosWave4RlsHarness.test.mjs"
   },
   "dependencies": {
     "nodemailer": "^7.0.5",
