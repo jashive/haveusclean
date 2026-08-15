@@ -121,7 +121,7 @@ async function restProbe(supabaseUrl, anonKey, accessToken, method, table, optio
     Prefer: prefer,
   };
   if (accessToken) {
-    headers.Authorization = `******;
+    headers.Authorization = "Bearer " + accessToken;
   }
 
   const reqInit = { method, headers };
