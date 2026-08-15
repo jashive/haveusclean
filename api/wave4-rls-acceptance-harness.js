@@ -502,7 +502,6 @@ async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
     serviceException,
     correctiveAction,
     customerOutcome,
-    crossScopeCandidate,
   ] = await Promise.all([
     restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order_governance_link", {
       filter: `${scopeFilter}&select=id,organization_id,business_unit_id,jurisdiction_id,configuration_version_id,work_order_id,operational_job_id,checklist_version_reference,task_definition_reference,sop_reference_snapshot,governance_snapshot,metadata&limit=2`,
@@ -544,10 +543,6 @@ async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
       filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,outcome_status,outcome_type&limit=20`,
       prefer: "return=representation",
     }),
-    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order", {
-      filter: `?select=id,organization_id,operational_job_id&organization_id=neq.00000000-0000-0000-0000-000000000000&limit=5`,
-      prefer: "return=representation",
-    }),
   ]);
 
   const pick = (result, predicate = () => true) => {
@@ -566,7 +561,6 @@ async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
     serviceException,
     correctiveAction,
     customerOutcome,
-    crossScopeCandidate,
     governanceLinkRow: pick(governanceLink, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
     applicabilityRow: pick(applicability, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
     evidenceRequirementRows: Array.isArray(evidenceRequirements.body)

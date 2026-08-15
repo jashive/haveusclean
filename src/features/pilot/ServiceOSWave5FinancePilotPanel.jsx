@@ -237,7 +237,8 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `******        },
+          Authorization: "Bearer " + accessToken,
+        },
         body: JSON.stringify({
           invoice_request_id: invoiceRequestId,
           idempotency_key: idempotencyKey,
@@ -246,7 +247,7 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
 
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(payload?.detail || payload?.error || `Accounting sync request failed: HTTP ${response.status}`);
+        throw new Error(payload?.detail || payload?.error || "Accounting sync request failed: HTTP " + response.status);
       }
 
       setSyncResult(payload);

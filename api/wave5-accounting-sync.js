@@ -79,7 +79,8 @@ async function loadAuthenticatedAuthUser(accessToken) {
   const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
     headers: {
       apikey: anonKey,
-      Authorization: `******      "Content-Type": "application/json",
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json",
     },
   });
 
