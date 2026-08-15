@@ -4,25 +4,26 @@
 //
 // PURPOSE:
 //   Closes Wave 4 RLS acceptance without requiring another SQL migration.
-//   Authenticates as office_ops, worker, and qa independently using
-//   environment-supplied credentials, then probes the deployed Wave 4 RLS policies.
+//   Authenticates as office_ops, worker, qa, and anon independently, then probes
+//   the deployed Wave 4 RLS policies against retained acceptance evidence.
 //
 // DESIGN PRINCIPLES:
 //   - Preview/test ONLY. Fails hard in production (SERVICEOS_ENVIRONMENT=production).
 //   - No test passwords stored in source. Credentials come exclusively from env vars.
 //   - Each role uses its own authenticated Supabase access token (not service_role).
 //   - No service_role bypass for role probes.
-//   - No cleanup or deletion of Wave 3/4 retained evidence.
-//   - No fixture rerun. Uses existing Wave 4 acceptance artifacts.
-//   - Feature flag: SERVICEOS_W4_RLS_HARNESS_ENABLED must be explicitly "true".
-//   - Deny assertions treat HTTP 401/403/RLS denial as PASS (expected deny).
-//   - Successful unauthorized mutation is a hard FAIL for the harness.
+//   - No SQL execution. No fixture rerun. No cleanup. No auth user creation.
+//   - No destructive mutation of retained evidence/history.
+//   - Anonymous boundary is explicitly probed with apikey only and NO bearer token.
+//   - contract_version = wave4-rls-acceptance-v2.
+//   - passed=true only when every mandatory probe is proven and no mandatory probe
+//     is left in not_proven state.
 //
 // REQUIRED ENVIRONMENT VARIABLES (Preview/test only — never VITE_* or NEXT_PUBLIC_*):
 //   SERVICEOS_ENVIRONMENT               – must be "preview" or "test"
-//   SERVICEOS_W4_RLS_HARNESS_ENABLED    – must be "true" to activate
+//   SERVICEOS_W4_RLS_HARNESS_ENABLED    – must be explicitly "true"
 //   SUPABASE_URL                        – Supabase project URL
-//   SUPABASE_ANON_KEY                   – server-only Preview/test anon key (never VITE_* or NEXT_PUBLIC_*)
+//   SUPABASE_ANON_KEY                   – server-only Preview/test anon key
 //   SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL   – office_ops test identity email
 //   SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD
 //   SERVICEOS_W4_RLS_WORKER_EMAIL       – worker test identity email
@@ -32,14 +33,18 @@
 //
 // OUTPUT CONTRACT:
 //   {
-//     "contract_version": "wave4-rls-acceptance-v1",
-//     "office_ops": { probes: [...], allow_pass: bool, deny_pass: bool },
-//     "worker":     { probes: [...], allow_pass: bool, deny_pass: bool },
-//     "qa":         { probes: [...], allow_pass: bool, deny_pass: bool },
-//     "passed": true|false,
-//     "missing_identities": [...],
-//     "environment": "preview"|"test",
-//     "run_at": "<ISO timestamp>"
+//     contract_version: "wave4-rls-acceptance-v2",
+//     office_ops: {...},
+//     worker: {...},
+//     qa: {...},
+//     anon: {...},
+//     passed: boolean,
+//     proven_count: number,
+//     failed_count: number,
+//     not_proven_count: number,
+//     missing_identities: [],
+//     environment: "preview"|"test",
+//     run_at: "<ISO timestamp>"
 //   }
 //
 // RUNTIME ACCEPTANCE EXECUTION:
@@ -47,9 +52,24 @@
 //   DO NOT execute M012. DO NOT create auth users.
 //   The harness reports which identities are missing if they do not yet exist.
 
-const CONTRACT_VERSION = "wave4-rls-acceptance-v1";
+const CONTRACT_VERSION = "wave4-rls-acceptance-v2";
 
-// ── Environment guards ────────────────────────────────────────────────────────
+const FIXTURE_SCOPE = Object.freeze({
+  operational_job_id: "e1100000-0000-0000-0000-00000000000e",
+  work_order_id: "e1100000-0000-0000-0000-000000000011",
+  worker_assignment_id: "e1100000-0000-0000-0000-000000000010",
+  worker_id: "1b3a6903-0c50-4a95-afc3-280628c10508",
+  failed_qa_inspection_id: "e1100000-0000-0000-0000-000000000012",
+});
+
+const CLASSIFICATION = Object.freeze({
+  PROVEN_ALLOW: "proven_allow",
+  PROVEN_RLS_DENY: "proven_rls_deny",
+  UNEXPECTED_ALLOW: "unexpected_allow",
+  VALIDATION_FAILURE: "validation_failure",
+  NOT_PROVEN: "not_proven",
+  TRANSPORT_FAILURE: "transport_failure",
+});
 
 function getEnvironment() {
   const raw = (process.env.SERVICEOS_ENVIRONMENT || "").trim().toLowerCase();
@@ -61,7 +81,6 @@ function isHarnessEnabled() {
   return process.env.SERVICEOS_W4_RLS_HARNESS_ENABLED === "true";
 }
 
-// ── Supabase auth: sign in with email/password to get an access token ─────────
 async function signInWithPassword(supabaseUrl, anonKey, email, password) {
   const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
     method: "POST",
@@ -88,16 +107,18 @@ async function signInWithPassword(supabaseUrl, anonKey, email, password) {
   return data.access_token;
 }
 
-// ── Authenticated REST probe ───────────────────────────────────────────────────
-async function restProbe(supabaseUrl, anonKey, accessToken, method, table, body = null, filter = "") {
+async function restProbe(supabaseUrl, anonKey, accessToken, method, table, options = {}) {
+  const { body = null, filter = "", prefer = "return=representation" } = options;
   const url = `${supabaseUrl}/rest/v1/${table}${filter}`;
   const headers = {
-    Authorization: `******
     apikey: anonKey,
     "Content-Type": "application/json",
     Accept: "application/json",
-    Prefer: "return=representation",
+    Prefer: prefer,
   };
+  if (accessToken) {
+    headers.Authorization = `******;
+  }
 
   const reqInit = { method, headers };
   if (body !== null && method !== "GET" && method !== "DELETE") {
@@ -107,289 +128,877 @@ async function restProbe(supabaseUrl, anonKey, accessToken, method, table, body 
   try {
     const res = await fetch(url, reqInit);
     const status = res.status;
+    const rawText = await res.text().catch(() => "");
     let responseBody = null;
-    try { responseBody = await res.json(); } catch { /* ignore */ }
-    return { ok: res.ok, status, body: responseBody };
+    if (rawText) {
+      try {
+        responseBody = JSON.parse(rawText);
+      } catch {
+        responseBody = rawText;
+      }
+    }
+    return { ok: res.ok, status, body: responseBody, raw_text: rawText, method, table, url };
   } catch (err) {
-    return { ok: false, status: 0, body: null, error: err.message };
+    return {
+      ok: false,
+      status: 0,
+      body: null,
+      raw_text: "",
+      error: err.message,
+      method,
+      table,
+      url,
+    };
   }
 }
 
-// ── Probe result builder ──────────────────────────────────────────────────────
-function probe(role, operation, table, expected, actual_status, actual_ok) {
-  const expectedAllow = expected === "allow";
-  let pass;
-  if (expectedAllow) {
-    // Allow: HTTP 2xx is PASS
-    pass = actual_ok;
-  } else {
-    // Deny: HTTP 401/403/404-due-to-RLS is PASS (RLS denial may appear as 200 with empty array for SELECT)
-    // For SELECT: empty result or 401/403 = PASS deny
-    // For INSERT/UPDATE/DELETE: non-2xx = PASS deny; 2xx with data = FAIL
-    pass = !actual_ok || actual_status === 401 || actual_status === 403;
+function bodyText(body) {
+  if (body == null) return "";
+  if (typeof body === "string") return body;
+  try {
+    return JSON.stringify(body);
+  } catch {
+    return String(body);
   }
+}
 
+function isTransportFailure(result) {
+  return result.status === 0 || !!result.error;
+}
+
+function isRlsDeniedResponse(result) {
+  if (result.status === 401 || result.status === 403) return true;
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return (
+    text.includes("row-level security") ||
+    text.includes("permission denied") ||
+    text.includes("insufficient_privilege") ||
+    text.includes('"code":"42501"') ||
+    text.includes("permission denied for table")
+  );
+}
+
+function isValidationFailureResponse(result) {
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return (
+    result.status === 400 ||
+    result.status === 409 ||
+    result.status === 422 ||
+    text.includes("violates check constraint") ||
+    text.includes("violates foreign key constraint") ||
+    text.includes("violates unique constraint") ||
+    text.includes("duplicate key") ||
+    text.includes("null value") ||
+    text.includes("invalid input syntax") ||
+    text.includes("failed to parse") ||
+    text.includes("not-null")
+  );
+}
+
+function isDbImmutabilityResponse(result) {
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return text.includes("append-only") || text.includes("immutable");
+}
+
+function buildProbe({
+  role,
+  operation,
+  table,
+  expected,
+  mandatory = true,
+  classification,
+  result = null,
+  note = null,
+  proof_detail = null,
+  expected_scope = null,
+  actual_row_count = null,
+}) {
+  const pass = classification === CLASSIFICATION.PROVEN_ALLOW || classification === CLASSIFICATION.PROVEN_RLS_DENY;
   return {
     role,
     operation,
     table,
     expected,
-    actual_status,
-    actual_ok,
+    mandatory,
+    classification,
     pass,
+    actual_status: result?.status ?? null,
+    actual_ok: result?.ok ?? null,
+    actual_row_count,
+    expected_scope,
+    proof_detail,
+    note,
   };
 }
 
-// ── Build structured deny probe from SELECT returning empty array ──────────────
-// RLS denies via empty result set (not HTTP error) for SELECT operations.
-// A deny is PASSED if the result is empty (RLS filtered to zero rows).
-function selectDenyProbe(role, operation, table, expected, result) {
-  const isRlsDeny = result.ok && Array.isArray(result.body) && result.body.length === 0;
-  const isHttpDeny = !result.ok && (result.status === 401 || result.status === 403);
-  const pass = isRlsDeny || isHttpDeny;
-  return {
+function buildManualNotProvenProbe({ role, operation, table, expected, mandatory = true, note, expected_scope = null, proof_detail = null }) {
+  return buildProbe({
     role,
     operation,
     table,
     expected,
-    actual_status: result.status,
-    actual_ok: result.ok,
-    rls_deny_empty_result: isRlsDeny,
-    pass,
-  };
+    mandatory,
+    classification: CLASSIFICATION.NOT_PROVEN,
+    note,
+    expected_scope,
+    proof_detail,
+  });
 }
 
-// ── Wave 4 tables to probe (additive list) ────────────────────────────────────
-const WAVE4_READ_TABLES = [
-  "work_order_governance_link",
-  "work_order_wave4_applicability",
-  "work_order_evidence_requirement",
-  "service_exception",
-  "customer_outcome",
-];
-
-const WAVE3_APPEND_ONLY_TABLES = [
-  "completion_evidence",
-  "work_order_event",
-];
-
-// ── OFFICE_OPS probes ─────────────────────────────────────────────────────────
-async function probeOfficeOps(supabaseUrl, anonKey, token) {
-  const results = [];
-
-  // ALLOW: read in-scope Wave 4 governed records
-  for (const table of WAVE4_READ_TABLES) {
-    const r = await restProbe(supabaseUrl, anonKey, token, "GET", table, null, "?limit=5");
-    results.push({
-      role: "office_ops",
-      operation: `SELECT ${table}`,
+function buildAllowSelectProbe({ role, operation, table, result, mandatory = true, expected_scope, verifier, noteIfMissing }) {
+  if (isTransportFailure(result)) {
+    return buildProbe({
+      role,
+      operation,
       table,
       expected: "allow",
-      actual_status: r.status,
-      actual_ok: r.ok,
-      pass: r.ok,
+      mandatory,
+      classification: CLASSIFICATION.TRANSPORT_FAILURE,
+      result,
+      expected_scope,
+      note: result.error || "Transport failure",
     });
   }
 
-  // ALLOW: read qa_inspection (governance/exception triage)
-  const qaRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null, "?limit=5");
-  results.push({
-    role: "office_ops", operation: "SELECT qa_inspection", table: "qa_inspection",
-    expected: "allow", actual_status: qaRead.status, actual_ok: qaRead.ok, pass: qaRead.ok,
-  });
-
-  // ALLOW: read service_exception for triage
-  const seRead = await restProbe(supabaseUrl, anonKey, token, "GET", "service_exception", null, "?limit=5");
-  results.push({
-    role: "office_ops", operation: "SELECT service_exception", table: "service_exception",
-    expected: "allow", actual_status: seRead.status, actual_ok: seRead.ok, pass: seRead.ok,
-  });
-
-  // DENY: QA impersonation — office_ops must not INSERT qa_inspection with passing status
-  const qaInsertDeny = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
-    inspection_status: "passed",
-    inspection_type: "standard",
-    _harness_label: "wave4-rls-office_ops-qa-impersonation-deny",
-  });
-  const qaDenyPass = !qaInsertDeny.ok || qaInsertDeny.status === 401 || qaInsertDeny.status === 403;
-  results.push({
-    role: "office_ops", operation: "INSERT qa_inspection (QA impersonation — DENY)",
-    table: "qa_inspection", expected: "deny",
-    actual_status: qaInsertDeny.status, actual_ok: qaInsertDeny.ok,
-    pass: qaDenyPass,
-  });
-
-  // DENY: destructive mutation on append-only evidence
-  for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
-    const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
-    results.push({
-      role: "office_ops", operation: `DELETE ${table} (append-only — DENY)`,
-      table, expected: "deny",
-      actual_status: delResult.status, actual_ok: delResult.ok,
-      pass: denyPass,
+  if (!result.ok) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "allow",
+      mandatory,
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      note: `Expected 2xx plus retained fixture row visibility, received HTTP ${result.status}`,
     });
   }
 
-  return results;
+  const rows = Array.isArray(result.body) ? result.body : [];
+  if (verifier(rows)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "allow",
+      mandatory,
+      classification: CLASSIFICATION.PROVEN_ALLOW,
+      result,
+      expected_scope,
+      actual_row_count: rows.length,
+      note: "2xx response returned the retained expected fixture row/scope",
+    });
+  }
+
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "allow",
+    mandatory,
+    classification: CLASSIFICATION.NOT_PROVEN,
+    result,
+    expected_scope,
+    actual_row_count: rows.length,
+    note: noteIfMissing || "2xx response did not prove the retained expected fixture row/scope",
+  });
 }
 
-// ── WORKER probes ─────────────────────────────────────────────────────────────
-async function probeWorker(supabaseUrl, anonKey, token) {
-  const results = [];
-
-  // ALLOW: read own worker_assignment (RLS scopes to current worker)
-  const waRead = await restProbe(supabaseUrl, anonKey, token, "GET", "worker_assignment", null, "?limit=5");
-  results.push({
-    role: "worker", operation: "SELECT worker_assignment (own)", table: "worker_assignment",
-    expected: "allow", actual_status: waRead.status, actual_ok: waRead.ok, pass: waRead.ok,
-  });
-
-  // DENY: read other worker's assignment data — RLS should filter to own records only
-  // (RLS returns empty set if worker can only see own, which is a deny of cross-scope)
-  const otherWorkerRead = await restProbe(
-    supabaseUrl, anonKey, token, "GET", "worker_assignment", null,
-    "?worker_id=eq.00000000-0000-0000-0000-000000000099&limit=5"
-  );
-  results.push(selectDenyProbe(
-    "worker", "SELECT worker_assignment (other worker — DENY)", "worker_assignment", "deny", otherWorkerRead
-  ));
-
-  // DENY: QA pass/waive — worker must not INSERT qa_inspection
-  const qaInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
-    inspection_status: "passed",
-    _harness_label: "wave4-rls-worker-qa-impersonation-deny",
-  });
-  const qaDenyPass = !qaInsert.ok || qaInsert.status === 401 || qaInsert.status === 403;
-  results.push({
-    role: "worker", operation: "INSERT qa_inspection (QA pass — DENY)", table: "qa_inspection",
-    expected: "deny", actual_status: qaInsert.status, actual_ok: qaInsert.ok, pass: qaDenyPass,
-  });
-
-  // DENY: governance/admin mutation — worker must not INSERT work_order_governance_link
-  const govInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
-    _harness_label: "wave4-rls-worker-governance-deny",
-  });
-  const govDenyPass = !govInsert.ok || govInsert.status === 401 || govInsert.status === 403;
-  results.push({
-    role: "worker", operation: "INSERT work_order_governance_link (governance — DENY)",
-    table: "work_order_governance_link", expected: "deny",
-    actual_status: govInsert.status, actual_ok: govInsert.ok, pass: govDenyPass,
-  });
-
-  // DENY: UPDATE/DELETE on append-only evidence
-  for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
-    const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
-    results.push({
-      role: "worker", operation: `DELETE ${table} (append-only — DENY)`,
-      table, expected: "deny",
-      actual_status: delResult.status, actual_ok: delResult.ok, pass: denyPass,
+function classifyDenyMutationProbe({ role, operation, table, result, mandatory = true, expected_scope, allowNote = null }) {
+  if (isTransportFailure(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.TRANSPORT_FAILURE,
+      result,
+      expected_scope,
+      note: result.error || "Transport failure",
     });
   }
 
-  return results;
-}
-
-// ── QA probes ─────────────────────────────────────────────────────────────────
-async function probeQa(supabaseUrl, anonKey, token) {
-  const results = [];
-
-  // ALLOW: read qa_inspection records in scope
-  const qaRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null, "?limit=5");
-  results.push({
-    role: "qa", operation: "SELECT qa_inspection", table: "qa_inspection",
-    expected: "allow", actual_status: qaRead.status, actual_ok: qaRead.ok, pass: qaRead.ok,
-  });
-
-  // ALLOW: read corrective_action in scope
-  const caRead = await restProbe(supabaseUrl, anonKey, token, "GET", "corrective_action", null, "?limit=5");
-  results.push({
-    role: "qa", operation: "SELECT corrective_action", table: "corrective_action",
-    expected: "allow", actual_status: caRead.status, actual_ok: caRead.ok, pass: caRead.ok,
-  });
-
-  // DENY: worker impersonation — QA must not UPDATE worker_assignment
-  const waUpdate = await restProbe(supabaseUrl, anonKey, token, "PATCH", "worker_assignment",
-    { _harness_label: "wave4-rls-qa-worker-impersonation-deny" },
-    "?id=eq.00000000-0000-0000-0000-000000000000"
-  );
-  const waUpdateDenyPass = !waUpdate.ok || waUpdate.status === 401 || waUpdate.status === 403;
-  results.push({
-    role: "qa", operation: "PATCH worker_assignment (worker impersonation — DENY)",
-    table: "worker_assignment", expected: "deny",
-    actual_status: waUpdate.status, actual_ok: waUpdate.ok, pass: waUpdateDenyPass,
-  });
-
-  // DENY: governance/admin mutation not granted
-  const govInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
-    _harness_label: "wave4-rls-qa-governance-deny",
-  });
-  const govDenyPass = !govInsert.ok || govInsert.status === 401 || govInsert.status === 403;
-  results.push({
-    role: "qa", operation: "INSERT work_order_governance_link (governance — DENY)",
-    table: "work_order_governance_link", expected: "deny",
-    actual_status: govInsert.status, actual_ok: govInsert.ok, pass: govDenyPass,
-  });
-
-  // DENY: destructive mutation on append-only evidence
-  for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
-    const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
-    results.push({
-      role: "qa", operation: `DELETE ${table} (append-only — DENY)`,
-      table, expected: "deny",
-      actual_status: delResult.status, actual_ok: delResult.ok, pass: denyPass,
+  if (result.ok) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      note: allowNote || "Mutation returned 2xx; this is an unexpected allow",
     });
   }
 
-  // DENY: cross-scope records — qa must not see records outside their org
-  const crossOrgRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null,
-    "?organization_id=eq.00000000-0000-0000-0000-000000000099&limit=5"
-  );
-  results.push(selectDenyProbe(
-    "qa", "SELECT qa_inspection (cross-org — DENY)", "qa_inspection", "deny", crossOrgRead
-  ));
+  if (isRlsDeniedResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.PROVEN_RLS_DENY,
+      result,
+      expected_scope,
+      note: "Authorization/RLS denial proven",
+    });
+  }
 
-  return results;
+  if (isDbImmutabilityResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      note: "DB immutability/append-only guard blocked the mutation; this is not proof of an RLS policy",
+      proof_detail: "db_immutability_proof",
+    });
+  }
+
+  if (isValidationFailureResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.VALIDATION_FAILURE,
+      result,
+      expected_scope,
+      note: "Schema/FK/check/unique failure does not prove authorization/RLS denial",
+    });
+  }
+
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "deny",
+    mandatory,
+    classification: CLASSIFICATION.NOT_PROVEN,
+    result,
+    expected_scope,
+    note: `HTTP ${result.status} did not prove authorization/RLS denial`,
+  });
 }
 
-// ── Summarize probes ──────────────────────────────────────────────────────────
-function summarizeProbes(probes) {
-  const allowProbes = probes.filter((p) => p.expected === "allow");
-  const denyProbes = probes.filter((p) => p.expected === "deny");
+function classifyKnownRowVisibilityDenyProbe({ role, operation, table, result, mandatory = true, expected_scope, knownTargetExists, notProvenNote }) {
+  if (!knownTargetExists) {
+    return buildManualNotProvenProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      expected_scope,
+      note: notProvenNote,
+    });
+  }
+
+  if (isTransportFailure(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.TRANSPORT_FAILURE,
+      result,
+      expected_scope,
+      note: result.error || "Transport failure",
+    });
+  }
+
+  if (!result.ok) {
+    if (isRlsDeniedResponse(result)) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        mandatory,
+        classification: CLASSIFICATION.PROVEN_RLS_DENY,
+        result,
+        expected_scope,
+        note: "Authorization/RLS denial proven",
+      });
+    }
+
+    if (isValidationFailureResponse(result)) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        mandatory,
+        classification: CLASSIFICATION.VALIDATION_FAILURE,
+        result,
+        expected_scope,
+        note: "Validation/schema failure does not prove visibility denial",
+      });
+    }
+
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      note: `HTTP ${result.status} did not prove visibility denial`,
+    });
+  }
+
+  const rows = Array.isArray(result.body) ? result.body : [];
+  if (rows.length === 0) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.PROVEN_RLS_DENY,
+      result,
+      expected_scope,
+      actual_row_count: 0,
+      note: "Known retained row was filtered from the result set",
+    });
+  }
+
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "deny",
+    mandatory,
+    classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+    result,
+    expected_scope,
+    actual_row_count: rows.length,
+    note: "Known retained row remained visible across the denied boundary",
+  });
+}
+
+async function discoverScopeRows(supabaseUrl, anonKey, accessToken) {
+  const scopeFilter = `?work_order_id=eq.${FIXTURE_SCOPE.work_order_id}&operational_job_id=eq.${FIXTURE_SCOPE.operational_job_id}`;
+
+  const [
+    governanceLink,
+    applicability,
+    evidenceRequirements,
+    workerAssignment,
+    qaInspection,
+    completionEvidence,
+    workOrderEvent,
+    serviceException,
+    correctiveAction,
+    customerOutcome,
+    crossScopeCandidate,
+  ] = await Promise.all([
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order_governance_link", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,jurisdiction_id,configuration_version_id,work_order_id,operational_job_id,checklist_version_reference,task_definition_reference,sop_reference_snapshot,governance_snapshot,metadata&limit=2`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order_wave4_applicability", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,jurisdiction_id,work_order_id,operational_job_id,applicability_status,enrollment_source,metadata&limit=2`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order_evidence_requirement", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,work_order_governance_link_id,work_order_id,operational_job_id,requirement_key,evidence_type,required_count,is_mandatory,requires_external_reference&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "worker_assignment", {
+      filter: `?id=eq.${FIXTURE_SCOPE.worker_assignment_id}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,worker_id,assignment_status&limit=1`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "qa_inspection", {
+      filter: `?id=eq.${FIXTURE_SCOPE.failed_qa_inspection_id}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,inspection_status,inspection_type&limit=1`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "completion_evidence", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,worker_assignment_id,evidence_type,storage_system,storage_reference&order=created_at.asc&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order_event", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,worker_assignment_id,event_type,event_payload&order=created_at.asc&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "service_exception", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,qa_inspection_id,corrective_action_id,triage_status&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "corrective_action", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,qa_inspection_id,action_status,action_type&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "customer_outcome", {
+      filter: `${scopeFilter}&select=id,organization_id,business_unit_id,operational_job_id,work_order_id,outcome_status,outcome_type&limit=20`,
+      prefer: "return=representation",
+    }),
+    restProbe(supabaseUrl, anonKey, accessToken, "GET", "work_order", {
+      filter: `?select=id,organization_id,operational_job_id&organization_id=neq.00000000-0000-0000-0000-000000000000&limit=5`,
+      prefer: "return=representation",
+    }),
+  ]);
+
+  const pick = (result, predicate = () => true) => {
+    const rows = Array.isArray(result.body) ? result.body : [];
+    return rows.find(predicate) ?? null;
+  };
+
   return {
-    probes,
-    allow_pass: allowProbes.every((p) => p.pass),
-    deny_pass: denyProbes.every((p) => p.pass),
-    allow_failures: allowProbes.filter((p) => !p.pass).map((p) => p.operation),
-    deny_failures: denyProbes.filter((p) => !p.pass).map((p) => p.operation),
+    governanceLink,
+    applicability,
+    evidenceRequirements,
+    workerAssignment,
+    qaInspection,
+    completionEvidence,
+    workOrderEvent,
+    serviceException,
+    correctiveAction,
+    customerOutcome,
+    crossScopeCandidate,
+    governanceLinkRow: pick(governanceLink, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
+    applicabilityRow: pick(applicability, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
+    evidenceRequirementRows: Array.isArray(evidenceRequirements.body)
+      ? evidenceRequirements.body.filter((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id)
+      : [],
+    workerAssignmentRow: pick(workerAssignment, (row) => row.id === FIXTURE_SCOPE.worker_assignment_id),
+    qaInspectionRow: pick(qaInspection, (row) => row.id === FIXTURE_SCOPE.failed_qa_inspection_id),
+    completionEvidenceRow: pick(completionEvidence, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id),
+    workOrderEventRow: pick(workOrderEvent, (row) => row.work_order_id === FIXTURE_SCOPE.work_order_id),
+    serviceExceptionRows: Array.isArray(serviceException.body)
+      ? serviceException.body.filter((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id)
+      : [],
+    correctiveActionRows: Array.isArray(correctiveAction.body)
+      ? correctiveAction.body.filter((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id)
+      : [],
+    customerOutcomeRows: Array.isArray(customerOutcome.body)
+      ? customerOutcome.body.filter((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id)
+      : [],
   };
 }
 
-// ── Main handler ──────────────────────────────────────────────────────────────
+function buildDuplicateGovernancePayload(scope) {
+  if (!scope.governanceLinkRow) return null;
+  const row = scope.governanceLinkRow;
+  return {
+    organization_id: row.organization_id,
+    business_unit_id: row.business_unit_id,
+    jurisdiction_id: row.jurisdiction_id,
+    operational_job_id: row.operational_job_id,
+    work_order_id: row.work_order_id,
+    configuration_version_id: row.configuration_version_id,
+    checklist_version_reference: row.checklist_version_reference ?? null,
+    task_definition_reference: row.task_definition_reference ?? null,
+    sop_reference_snapshot: Array.isArray(row.sop_reference_snapshot) ? row.sop_reference_snapshot : [],
+    governance_snapshot: row.governance_snapshot ?? {},
+    metadata: {
+      ...(row.metadata ?? {}),
+      harness_probe: "duplicate_governance_insert",
+      retained_scope: true,
+    },
+  };
+}
+
+function buildQaImpersonationPayload(scope, label) {
+  const qaRow = scope.qaInspectionRow;
+  if (!qaRow) return null;
+  return {
+    organization_id: qaRow.organization_id,
+    business_unit_id: qaRow.business_unit_id,
+    operational_job_id: qaRow.operational_job_id,
+    work_order_id: qaRow.work_order_id,
+    inspection_status: "passed",
+    inspection_type: "standard",
+    findings: { harness_probe: label, retained_scope: true },
+    inspected_at: new Date().toISOString(),
+    metadata: { harness_probe: label, retained_scope: true },
+  };
+}
+
+async function probeOfficeOps(supabaseUrl, anonKey, token) {
+  const scope = await discoverScopeRows(supabaseUrl, anonKey, token);
+  const probes = [];
+
+  probes.push(buildAllowSelectProbe({
+    role: "office_ops",
+    operation: "SELECT work_order_governance_link (retained scope)",
+    table: "work_order_governance_link",
+    result: scope.governanceLink,
+    expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    verifier: (rows) => rows.some((row) => row.id === scope.governanceLinkRow?.id && row.work_order_id === FIXTURE_SCOPE.work_order_id),
+    noteIfMissing: "Allow proof requires the retained governance_link row for the exact work_order/job scope",
+  }));
+
+  probes.push(buildAllowSelectProbe({
+    role: "office_ops",
+    operation: "SELECT work_order_wave4_applicability (retained scope)",
+    table: "work_order_wave4_applicability",
+    result: scope.applicability,
+    expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    verifier: (rows) => rows.some((row) => row.id === scope.applicabilityRow?.id && row.work_order_id === FIXTURE_SCOPE.work_order_id),
+    noteIfMissing: "Allow proof requires the retained applicability row for the exact work_order/job scope",
+  }));
+
+  probes.push(buildAllowSelectProbe({
+    role: "office_ops",
+    operation: "SELECT work_order_evidence_requirement (retained scope)",
+    table: "work_order_evidence_requirement",
+    result: scope.evidenceRequirements,
+    expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    verifier: (rows) => rows.some((row) => scope.evidenceRequirementRows.some((known) => known.id === row.id)),
+    noteIfMissing: "Allow proof requires at least one retained governed evidence requirement in the exact work_order/job scope",
+  }));
+
+  probes.push(buildAllowSelectProbe({
+    role: "office_ops",
+    operation: "SELECT qa_inspection (retained failed QA fixture)",
+    table: "qa_inspection",
+    result: scope.qaInspection,
+    expected_scope: { id: FIXTURE_SCOPE.failed_qa_inspection_id },
+    verifier: (rows) => rows.some((row) => row.id === FIXTURE_SCOPE.failed_qa_inspection_id),
+    noteIfMissing: "Allow proof requires the retained failed qa_inspection fixture row",
+  }));
+
+  const duplicateQaPayload = buildQaImpersonationPayload(scope, "office_ops_qa_impersonation");
+  if (!duplicateQaPayload) {
+    probes.push(buildManualNotProvenProbe({
+      role: "office_ops",
+      operation: "INSERT qa_inspection (QA impersonation — retained scope)",
+      table: "qa_inspection",
+      expected: "deny",
+      note: "Safe schema-valid retained-scope payload could not be resolved; unsafe insert was not executed to avoid mutating retained evidence/history",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  } else {
+    probes.push(buildManualNotProvenProbe({
+      role: "office_ops",
+      operation: "INSERT qa_inspection (QA impersonation — retained scope)",
+      table: "qa_inspection",
+      expected: "deny",
+      note: "Schema-valid retained-scope payload was resolved, but this insert remains intentionally unexecuted because an unexpected allow would create a new retained QA row",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  }
+
+  if (!scope.completionEvidenceRow) {
+    probes.push(buildManualNotProvenProbe({
+      role: "office_ops",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      expected: "deny",
+      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
+      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "office_ops",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      result: deleteEvidence,
+      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "DELETE unexpectedly succeeded against a real retained completion_evidence row",
+    }));
+  }
+
+  if (!scope.workOrderEventRow) {
+    probes.push(buildManualNotProvenProbe({
+      role: "office_ops",
+      operation: "DELETE work_order_event (real retained row)",
+      table: "work_order_event",
+      expected: "deny",
+      note: "No retained work_order_event row was discoverable for the exact work_order scope",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const deleteEvent = await restProbe(supabaseUrl, anonKey, token, "DELETE", "work_order_event", {
+      filter: `?id=eq.${scope.workOrderEventRow.id}`,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "office_ops",
+      operation: "DELETE work_order_event (real retained row)",
+      table: "work_order_event",
+      result: deleteEvent,
+      expected_scope: { id: scope.workOrderEventRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "DELETE unexpectedly succeeded against a real retained work_order_event row",
+    }));
+  }
+
+  return probes;
+}
+
+async function probeWorker(supabaseUrl, anonKey, token) {
+  const scope = await discoverScopeRows(supabaseUrl, anonKey, token);
+  const probes = [];
+
+  probes.push(buildAllowSelectProbe({
+    role: "worker",
+    operation: "SELECT worker_assignment (own retained fixture row)",
+    table: "worker_assignment",
+    result: scope.workerAssignment,
+    expected_scope: { id: FIXTURE_SCOPE.worker_assignment_id, worker_id: FIXTURE_SCOPE.worker_id },
+    verifier: (rows) => rows.some((row) => row.id === FIXTURE_SCOPE.worker_assignment_id && row.worker_id === FIXTURE_SCOPE.worker_id),
+    noteIfMissing: "Allow proof requires worker_assignment_id=e1100000-0000-0000-0000-000000000010 for the signed-in worker",
+  }));
+
+  probes.push(buildAllowSelectProbe({
+    role: "worker",
+    operation: "SELECT work_order_governance_link (retained scope)",
+    table: "work_order_governance_link",
+    result: scope.governanceLink,
+    expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    verifier: (rows) => rows.some((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
+    noteIfMissing: "Allow proof requires the worker to see the retained governance link for the assigned scope",
+  }));
+
+  const duplicateGovernancePayload = buildDuplicateGovernancePayload(scope);
+  if (!duplicateGovernancePayload) {
+    probes.push(buildManualNotProvenProbe({
+      role: "worker",
+      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      table: "work_order_governance_link",
+      expected: "deny",
+      note: "Schema-valid retained-scope governance payload could not be resolved",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  } else {
+    const governanceInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
+      body: duplicateGovernancePayload,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "worker",
+      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      table: "work_order_governance_link",
+      result: governanceInsert,
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  }
+
+  if (!scope.completionEvidenceRow) {
+    probes.push(buildManualNotProvenProbe({
+      role: "worker",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      expected: "deny",
+      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
+      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "worker",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      result: deleteEvidence,
+      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  }
+
+  const duplicateQaPayload = buildQaImpersonationPayload(scope, "worker_qa_impersonation");
+  if (!duplicateQaPayload) {
+    probes.push(buildManualNotProvenProbe({
+      role: "worker",
+      operation: "INSERT qa_inspection (worker QA impersonation)",
+      table: "qa_inspection",
+      expected: "deny",
+      note: "Safe schema-valid retained-scope payload could not be resolved",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  } else {
+    probes.push(buildManualNotProvenProbe({
+      role: "worker",
+      operation: "INSERT qa_inspection (worker QA impersonation)",
+      table: "qa_inspection",
+      expected: "deny",
+      note: "Schema-valid retained-scope payload was resolved, but this insert remains intentionally unexecuted because an unexpected allow would create a new retained QA row",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  }
+
+  probes.push(buildManualNotProvenProbe({
+    role: "worker",
+    operation: "SELECT worker_assignment (cross-scope retained row)",
+    table: "worker_assignment",
+    expected: "deny",
+    note: "No real second-org retained worker_assignment fixture was discoverable via role-authorized reads; invented UUIDs are forbidden",
+    expected_scope: { second_org_fixture_required: true },
+  }));
+
+  return probes;
+}
+
+async function probeQa(supabaseUrl, anonKey, token) {
+  const scope = await discoverScopeRows(supabaseUrl, anonKey, token);
+  const probes = [];
+
+  probes.push(buildAllowSelectProbe({
+    role: "qa",
+    operation: "SELECT qa_inspection (retained failed QA fixture)",
+    table: "qa_inspection",
+    result: scope.qaInspection,
+    expected_scope: { id: FIXTURE_SCOPE.failed_qa_inspection_id },
+    verifier: (rows) => rows.some((row) => row.id === FIXTURE_SCOPE.failed_qa_inspection_id),
+    noteIfMissing: "Allow proof requires the retained failed qa_inspection fixture row",
+  }));
+
+  probes.push(buildAllowSelectProbe({
+    role: "qa",
+    operation: "SELECT work_order_governance_link (retained scope)",
+    table: "work_order_governance_link",
+    result: scope.governanceLink,
+    expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    verifier: (rows) => rows.some((row) => row.work_order_id === FIXTURE_SCOPE.work_order_id && row.operational_job_id === FIXTURE_SCOPE.operational_job_id),
+    noteIfMissing: "Allow proof requires the QA role to see the retained governance link for the exact scope",
+  }));
+
+  const duplicateGovernancePayload = buildDuplicateGovernancePayload(scope);
+  if (!duplicateGovernancePayload) {
+    probes.push(buildManualNotProvenProbe({
+      role: "qa",
+      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      table: "work_order_governance_link",
+      expected: "deny",
+      note: "Schema-valid retained-scope governance payload could not be resolved",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  } else {
+    const governanceInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
+      body: duplicateGovernancePayload,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "qa",
+      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      table: "work_order_governance_link",
+      result: governanceInsert,
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+    }));
+  }
+
+  if (!scope.completionEvidenceRow) {
+    probes.push(buildManualNotProvenProbe({
+      role: "qa",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      expected: "deny",
+      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
+      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "qa",
+      operation: "DELETE completion_evidence (real retained row)",
+      table: "completion_evidence",
+      result: deleteEvidence,
+      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  }
+
+  probes.push(buildManualNotProvenProbe({
+    role: "qa",
+    operation: "PATCH worker_assignment (worker impersonation)",
+    table: "worker_assignment",
+    expected: "deny",
+    note: "Real retained worker_assignment mutation was intentionally not executed because an unexpected allow would mutate retained assignment history",
+    expected_scope: { id: FIXTURE_SCOPE.worker_assignment_id },
+  }));
+
+  probes.push(buildManualNotProvenProbe({
+    role: "qa",
+    operation: "SELECT qa_inspection (cross-scope retained row)",
+    table: "qa_inspection",
+    expected: "deny",
+    note: "No real second-org retained QA fixture was discoverable via role-authorized reads; invented UUIDs are forbidden",
+    expected_scope: { second_org_fixture_required: true },
+  }));
+
+  return probes;
+}
+
+async function probeAnon(supabaseUrl, anonKey) {
+  const result = await restProbe(supabaseUrl, anonKey, null, "GET", "work_order", {
+    filter: `?id=eq.${FIXTURE_SCOPE.work_order_id}&select=id,operational_job_id,organization_id,work_order_status&limit=1`,
+    prefer: "return=representation",
+  });
+
+  return [
+    classifyKnownRowVisibilityDenyProbe({
+      role: "anon",
+      operation: "SELECT work_order (retained canonical row, no bearer token)",
+      table: "work_order",
+      result,
+      expected_scope: { id: FIXTURE_SCOPE.work_order_id },
+      knownTargetExists: true,
+      notProvenNote: "The retained work_order fixture must already exist for anon boundary proof",
+    }),
+  ];
+}
+
+function summarizeProbes(role, probes) {
+  const mandatory = probes.filter((probe) => probe.mandatory);
+  const allowMandatory = mandatory.filter((probe) => probe.expected === "allow");
+  const denyMandatory = mandatory.filter((probe) => probe.expected === "deny");
+  const provenCount = probes.filter((probe) => probe.pass).length;
+  const failedCount = probes.filter((probe) => !probe.pass && probe.classification !== CLASSIFICATION.NOT_PROVEN).length;
+  const notProvenCount = probes.filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN).length;
+
+  return {
+    role,
+    probes,
+    allow_pass: allowMandatory.every((probe) => probe.pass),
+    deny_pass: denyMandatory.every((probe) => probe.pass),
+    passed: mandatory.every((probe) => probe.pass),
+    proven_count: provenCount,
+    failed_count: failedCount,
+    not_proven_count: notProvenCount,
+    mandatory_failures: mandatory
+      .filter((probe) => !probe.pass && probe.classification !== CLASSIFICATION.NOT_PROVEN)
+      .map((probe) => probe.operation),
+    mandatory_not_proven: mandatory
+      .filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN)
+      .map((probe) => probe.operation),
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }
 
-  const env = getEnvironment();
-
-  // Feature flag — default OFF
   if (!isHarnessEnabled()) {
     return res.status(403).json({
-      error: "Wave 4 RLS acceptance harness is disabled. "
-        + "Set SERVICEOS_W4_RLS_HARNESS_ENABLED=true in Preview/test environment to enable.",
+      error: "Wave 4 RLS acceptance harness is disabled. Set SERVICEOS_W4_RLS_HARNESS_ENABLED=true in Preview/test environment to enable.",
       contract_version: CONTRACT_VERSION,
     });
   }
 
-  // HARD FAIL in production
+  const env = getEnvironment();
   if (!env) {
     return res.status(403).json({
-      error: "Wave 4 RLS acceptance harness is PROHIBITED in Production or when "
-        + "SERVICEOS_ENVIRONMENT is missing/unknown. "
-        + "This harness requires SERVICEOS_ENVIRONMENT=preview or SERVICEOS_ENVIRONMENT=test.",
+      error: "Wave 4 RLS acceptance harness is PROHIBITED in Production or when SERVICEOS_ENVIRONMENT is missing/unknown. This harness requires SERVICEOS_ENVIRONMENT=preview or SERVICEOS_ENVIRONMENT=test.",
       contract_version: CONTRACT_VERSION,
     });
   }
@@ -399,19 +1008,15 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "SUPABASE_URL is required", contract_version: CONTRACT_VERSION });
   }
 
-  // SUPABASE_ANON_KEY is required for all auth and REST probe requests (never VITE_* or NEXT_PUBLIC_*).
   const anonKey = process.env.SUPABASE_ANON_KEY;
   if (!anonKey) {
     return res.status(503).json({
-      error: "SUPABASE_ANON_KEY is required — provide a server-only Preview/test anon key. "
-        + "Do not use VITE_* or NEXT_PUBLIC_* keys for harness credentials.",
+      error: "SUPABASE_ANON_KEY is required — provide a server-only Preview/test anon key. Do not use VITE_* or NEXT_PUBLIC_* keys for harness credentials.",
       contract_version: CONTRACT_VERSION,
     });
   }
 
   const runAt = new Date().toISOString();
-
-  // Check which identities are configured (do not attempt auth if creds are missing)
   const identityConfig = {
     office_ops: {
       email: process.env.SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL,
@@ -427,34 +1032,28 @@ export default async function handler(req, res) {
     },
   };
 
-  // Identify which identities have credentials configured
   const missingIdentities = Object.entries(identityConfig)
     .filter(([, cfg]) => !cfg.email || !cfg.password)
     .map(([role]) => role);
 
   if (missingIdentities.length > 0) {
-    // Report missing identities without attempting any auth
     return res.status(424).json({
       contract_version: CONTRACT_VERSION,
-      error: "Required Wave 4 role identity credentials are not configured. "
-        + "Configure the environment variables for all roles before running acceptance.",
+      error: "Required Wave 4 role identity credentials are not configured. Configure the environment variables for all roles before running acceptance.",
       missing_identities: missingIdentities,
       required_env_vars: [
         "SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL", "SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD",
         "SERVICEOS_W4_RLS_WORKER_EMAIL", "SERVICEOS_W4_RLS_WORKER_PASSWORD",
         "SERVICEOS_W4_RLS_QA_EMAIL", "SERVICEOS_W4_RLS_QA_PASSWORD",
       ],
-      note: "Runtime acceptance still must determine whether these identities exist in the Preview Supabase project. "
-        + "DO NOT create auth users automatically without explicit authorization.",
+      note: "Runtime acceptance still must determine whether these identities exist in the Preview Supabase project. DO NOT create auth users automatically without explicit authorization.",
       environment: env,
       run_at: runAt,
     });
   }
 
-  // Authenticate each role independently — each uses its own access token (no service_role bypass)
   const tokens = {};
   const authErrors = {};
-
   for (const [role, cfg] of Object.entries(identityConfig)) {
     try {
       tokens[role] = await signInWithPassword(supabaseUrl, anonKey, cfg.email, cfg.password);
@@ -468,34 +1067,40 @@ export default async function handler(req, res) {
       contract_version: CONTRACT_VERSION,
       error: "Authentication failed for one or more Wave 4 role identities.",
       auth_errors: authErrors,
-      note: "Runtime acceptance still must determine whether these identities exist in the Preview Supabase project. "
-        + "DO NOT create auth users automatically without explicit authorization.",
+      note: "Runtime acceptance still must determine whether these identities exist in the Preview Supabase project. DO NOT create auth users automatically without explicit authorization.",
       environment: env,
       run_at: runAt,
     });
   }
 
-  // Run probes for each role using authenticated tokens
-  const [officeOpsProbes, workerProbes, qaProbes] = await Promise.all([
+  const [officeOpsProbes, workerProbes, qaProbes, anonProbes] = await Promise.all([
     probeOfficeOps(supabaseUrl, anonKey, tokens.office_ops),
     probeWorker(supabaseUrl, anonKey, tokens.worker),
     probeQa(supabaseUrl, anonKey, tokens.qa),
+    probeAnon(supabaseUrl, anonKey),
   ]);
 
-  const officeOpsSummary = summarizeProbes(officeOpsProbes);
-  const workerSummary = summarizeProbes(workerProbes);
-  const qaSummary = summarizeProbes(qaProbes);
+  const officeOps = summarizeProbes("office_ops", officeOpsProbes);
+  const worker = summarizeProbes("worker", workerProbes);
+  const qa = summarizeProbes("qa", qaProbes);
+  const anon = summarizeProbes("anon", anonProbes);
 
-  const passed = officeOpsSummary.allow_pass && officeOpsSummary.deny_pass
-    && workerSummary.allow_pass && workerSummary.deny_pass
-    && qaSummary.allow_pass && qaSummary.deny_pass;
+  const sections = [officeOps, worker, qa, anon];
+  const provenCount = sections.reduce((sum, section) => sum + section.proven_count, 0);
+  const failedCount = sections.reduce((sum, section) => sum + section.failed_count, 0);
+  const notProvenCount = sections.reduce((sum, section) => sum + section.not_proven_count, 0);
+  const passed = sections.every((section) => section.passed) && anon.passed && notProvenCount === 0;
 
   const contract = {
     contract_version: CONTRACT_VERSION,
-    office_ops: officeOpsSummary,
-    worker: workerSummary,
-    qa: qaSummary,
+    office_ops: officeOps,
+    worker,
+    qa,
+    anon,
     passed,
+    proven_count: provenCount,
+    failed_count: failedCount,
+    not_proven_count: notProvenCount,
     missing_identities: [],
     environment: env,
     run_at: runAt,
@@ -503,7 +1108,7 @@ export default async function handler(req, res) {
       "No cleanup or deletion of Wave 3/4 retained evidence was performed.",
       "No fixture rerun occurred.",
       "No SQL migration was executed.",
-      "All probes used role-specific authenticated Supabase sessions (no service_role bypass).",
+      "All authenticated probes used role-specific Supabase sessions; anon probes used apikey only and no bearer token.",
     ],
   };
 

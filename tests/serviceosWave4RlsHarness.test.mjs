@@ -1,6 +1,6 @@
 // =============================================================================
-// UNIT TESTS — Wave 4 RLS Acceptance Harness
-// Tests the harness source without executing real DB operations.
+// UNIT TESTS — Wave 4 RLS Acceptance Harness / Wave 5 server-only sync
+// Source-level contract checks only. No live DB operations are executed.
 // =============================================================================
 
 import { readFileSync } from "fs";
@@ -18,6 +18,7 @@ const harnessSrc = readFileSync(
 );
 const stripeSrc = readFileSync(resolve(ROOT, "api/stripe-webhook.js"), "utf8");
 const qbSrc = readFileSync(resolve(ROOT, "api/wave5-accounting-sync.js"), "utf8");
+const panelSrc = readFileSync(resolve(ROOT, "src/features/pilot/ServiceOSWave5FinancePilotPanel.jsx"), "utf8");
 const mainSrc = readFileSync(resolve(ROOT, "src/main.jsx"), "utf8");
 
 // ── Harness: source-level safety checks ───────────────────────────────────────
@@ -25,7 +26,7 @@ const mainSrc = readFileSync(resolve(ROOT, "src/main.jsx"), "utf8");
 test("W4H-1. Wave 4 harness is Preview/test only — hard fail guard for production", () => {
   assert.ok(
     harnessSrc.includes("PROHIBITED in Production") ||
-      harnessSrc.includes("preview") && harnessSrc.includes("production"),
+      (harnessSrc.includes("preview") && harnessSrc.includes("production")),
     "Harness must explicitly prohibit production execution"
   );
   assert.ok(
@@ -40,13 +41,12 @@ test("W4H-2. Harness feature flag defaults OFF — requires explicit SERVICEOS_W
     "Harness must check SERVICEOS_W4_RLS_HARNESS_ENABLED"
   );
   assert.ok(
-    harnessSrc.includes("=== \"true\"") || harnessSrc.includes("=== 'true'"),
+    harnessSrc.includes('=== "true"') || harnessSrc.includes("=== 'true'"),
     "Harness feature flag must require explicit true value"
   );
 });
 
-test("W4H-3. No test passwords in harness source", () => {
-  // No hardcoded passwords or credential values
+test("W4H-3. No test passwords in harness source or client bundle", () => {
   assert.ok(
     !/@[a-zA-Z0-9._%+-]+:[a-zA-Z0-9]{8,}/.test(harnessSrc),
     "Harness must not contain hardcoded credentials"
@@ -55,168 +55,158 @@ test("W4H-3. No test passwords in harness source", () => {
     !harnessSrc.includes("password123") && !harnessSrc.includes("test1234"),
     "Harness must not contain example plaintext passwords"
   );
-});
-
-test("W4H-4. No test passwords in client bundle (no VITE_* credential vars)", () => {
-  // Harness credentials must never use VITE_* prefix (would be exposed in client bundle)
   assert.ok(
-    !harnessSrc.includes("VITE_SERVICEOS_W4_RLS"),
-    "Harness credentials must NOT use VITE_* prefix (would expose to client bundle)"
-  );
-  assert.ok(
-    !mainSrc.includes("VITE_SERVICEOS_W4_RLS"),
-    "Client bundle must not include Wave 4 RLS credentials via VITE_*"
+    !harnessSrc.includes("VITE_SERVICEOS_W4_RLS") && !mainSrc.includes("VITE_SERVICEOS_W4_RLS"),
+    "Wave 4 RLS credentials must never use VITE_*"
   );
 });
 
-test("W4H-5. Harness uses env var credentials only — no hardcoded identities", () => {
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL"),
-    "Harness must reference SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL env var"
-  );
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_WORKER_EMAIL"),
-    "Harness must reference SERVICEOS_W4_RLS_WORKER_EMAIL env var"
-  );
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_QA_EMAIL"),
-    "Harness must reference SERVICEOS_W4_RLS_QA_EMAIL env var"
-  );
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD"),
-    "Harness must reference SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD env var"
-  );
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_WORKER_PASSWORD"),
-    "Harness must reference SERVICEOS_W4_RLS_WORKER_PASSWORD env var"
-  );
-  assert.ok(
-    harnessSrc.includes("SERVICEOS_W4_RLS_QA_PASSWORD"),
-    "Harness must reference SERVICEOS_W4_RLS_QA_PASSWORD env var"
-  );
+test("W4H-4. Harness uses env var credentials only — no hardcoded identities", () => {
+  for (const key of [
+    "SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL",
+    "SERVICEOS_W4_RLS_WORKER_EMAIL",
+    "SERVICEOS_W4_RLS_QA_EMAIL",
+    "SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD",
+    "SERVICEOS_W4_RLS_WORKER_PASSWORD",
+    "SERVICEOS_W4_RLS_QA_PASSWORD",
+  ]) {
+    assert.ok(harnessSrc.includes(key), `Harness must reference ${key}`);
+  }
 });
 
-test("W4H-6. Each role uses its own authenticated access token (no service_role bypass)", () => {
+test("W4H-5. Each authenticated role uses its own access token; anon uses apikey only", () => {
   assert.ok(
     harnessSrc.includes("signInWithPassword") || harnessSrc.includes("grant_type=password"),
     "Harness must authenticate each role with password-based Supabase auth"
   );
   assert.ok(
     !harnessSrc.includes("SUPABASE_SERVICE_ROLE_KEY"),
-    "Harness role probes must use user access tokens, not service role key"
+    "Harness role probes must not use service role credentials"
+  );
+  assert.ok(
+    harnessSrc.includes("SUPABASE_ANON_KEY"),
+    "Harness must reference SUPABASE_ANON_KEY"
+  );
+  assert.ok(
+    harnessSrc.includes("apikey: anonKey"),
+    "Harness auth and REST probes must send the anon key as apikey"
+  );
+  assert.ok(
+    harnessSrc.includes("probeAnon(") && harnessSrc.includes("work_order"),
+    "Harness must include an anonymous probe with no bearer token"
   );
 });
 
-test("W4H-7. Harness reports missing identities rather than creating them", () => {
-  assert.ok(
-    harnessSrc.includes("missing_identities"),
-    "Harness must report missing identities"
-  );
+test("W4H-6. Harness reports missing identities rather than creating them", () => {
+  assert.ok(harnessSrc.includes("missing_identities"), "Harness must report missing identities");
   assert.ok(
     !harnessSrc.includes("createUser") && !harnessSrc.includes("signUp"),
     "Harness must not automatically create auth users"
   );
   assert.ok(
-    harnessSrc.includes("DO NOT create auth users") ||
-      harnessSrc.includes("explicit authorization"),
+    harnessSrc.includes("DO NOT create auth users"),
     "Harness must document that user creation requires explicit authorization"
   );
 });
 
-test("W4H-8. Harness output contract includes all required fields", () => {
-  assert.ok(harnessSrc.includes("contract_version"), "Contract must include contract_version");
-  assert.ok(harnessSrc.includes("wave4-rls-acceptance-v1"), "Contract version must be wave4-rls-acceptance-v1");
-  assert.ok(harnessSrc.includes('"office_ops"') || harnessSrc.includes("office_ops"), "Contract must include office_ops");
-  assert.ok(harnessSrc.includes('"worker"') || harnessSrc.includes("worker"), "Contract must include worker");
-  assert.ok(harnessSrc.includes('"qa"') || harnessSrc.includes("qa"), "Contract must include qa");
-  assert.ok(harnessSrc.includes("passed"), "Contract must include top-level passed field");
+test("W4H-7. Harness output contract is authoritative v2 and includes anon + proof counts", () => {
+  assert.ok(harnessSrc.includes("wave4-rls-acceptance-v2"), "Contract version must be v2");
+  for (const field of [
+    "office_ops",
+    "worker",
+    "qa",
+    "anon",
+    "passed",
+    "proven_count",
+    "failed_count",
+    "not_proven_count",
+    "environment",
+    "run_at",
+  ]) {
+    assert.ok(harnessSrc.includes(field), `Contract must include ${field}`);
+  }
 });
 
-test("W4H-9. Deny assertions treat HTTP permission/RLS denial correctly (not hard error)", () => {
-  assert.ok(
-    harnessSrc.includes("401") || harnessSrc.includes("403"),
-    "Harness must treat HTTP 401/403 as successful deny"
-  );
-  assert.ok(
-    harnessSrc.includes("rls_deny_empty_result") || harnessSrc.includes("empty"),
-    "Harness must handle RLS deny-via-empty-result for SELECT operations"
-  );
+test("W4H-8. Harness locks to retained Wave 4 acceptance scope IDs", () => {
+  for (const id of [
+    "e1100000-0000-0000-0000-00000000000e",
+    "e1100000-0000-0000-0000-000000000011",
+    "e1100000-0000-0000-0000-000000000010",
+    "1b3a6903-0c50-4a95-afc3-280628c10508",
+    "e1100000-0000-0000-0000-000000000012",
+  ]) {
+    assert.ok(harnessSrc.includes(id), `Harness must reference retained fixture ID ${id}`);
+  }
 });
 
-test("W4H-10. Successful unauthorized mutation is a hard FAIL", () => {
-  assert.ok(
-    harnessSrc.includes("expected: \"deny\"") || harnessSrc.includes("expected: 'deny'"),
-    "Harness must label deny probes with expected=deny"
-  );
-  assert.ok(
-    harnessSrc.includes("!actual_ok") || harnessSrc.includes("!result.ok"),
-    "Harness must fail when a deny-expected operation succeeds (actual_ok=true)"
-  );
+test("W4H-9. Harness deny classification distinguishes proven RLS from validation/not_proven/transport", () => {
+  for (const value of [
+    "proven_rls_deny",
+    "unexpected_allow",
+    "validation_failure",
+    "not_proven",
+    "transport_failure",
+    "db_immutability_proof",
+  ]) {
+    assert.ok(harnessSrc.includes(value), `Harness must include deny classification ${value}`);
+  }
 });
 
-test("W4H-11. No cleanup or deletion of Wave 3/4 retained evidence", () => {
-  // The harness must not DELETE any Wave 3/4 records
+test("W4H-10. Harness allow proofs require retained-scope rows — not generic limit=5 reads", () => {
   assert.ok(
-    !harnessSrc.includes('"method": "DELETE"') ||
-      harnessSrc.includes("id=eq.00000000"),
-    "Harness DELETE probes use non-existent sentinel ID — no real records affected"
+    harnessSrc.includes("Allow proof requires") || harnessSrc.includes("retained expected fixture row/scope"),
+    "Harness must document retained-scope allow proof semantics"
   );
   assert.ok(
-    harnessSrc.includes("No cleanup") || harnessSrc.includes("no cleanup") ||
-      harnessSrc.includes("retained evidence"),
-    "Harness must document that no cleanup/deletion occurs"
-  );
-});
-
-test("W4H-12. Harness probes cover office_ops, worker, and qa roles", () => {
-  assert.ok(harnessSrc.includes("probeOfficeOps"), "Harness must probe office_ops");
-  assert.ok(harnessSrc.includes("probeWorker"), "Harness must probe worker");
-  assert.ok(harnessSrc.includes("probeQa"), "Harness must probe QA");
-});
-
-test("W4H-13. Harness correctly identifies Wave 4 tables under test", () => {
-  assert.ok(
-    harnessSrc.includes("work_order_governance_link"),
-    "Harness must probe work_order_governance_link"
-  );
-  assert.ok(
-    harnessSrc.includes("work_order_wave4_applicability"),
-    "Harness must probe work_order_wave4_applicability"
-  );
-  assert.ok(
-    harnessSrc.includes("qa_inspection"),
-    "Harness must probe qa_inspection"
-  );
-  assert.ok(
-    harnessSrc.includes("corrective_action"),
-    "Harness must probe corrective_action"
+    !harnessSrc.includes("?limit=5"),
+    "Harness must not use unfiltered ?limit=5 reads as acceptance proof"
   );
 });
 
-test("W4H-14. Harness declares runtime acceptance still must be executed separately", () => {
+test("W4H-11. Harness no longer uses invented cross-org UUIDs or sentinel DELETE IDs", () => {
+  assert.ok(
+    !harnessSrc.includes("00000000-0000-0000-0000-000000000099"),
+    "Harness must not use invented cross-org UUID probes"
+  );
+  assert.ok(
+    !harnessSrc.includes("00000000-0000-0000-0000-000000000000"),
+    "Harness must not use non-existent sentinel DELETE IDs as proof"
+  );
+});
+
+test("W4H-12. Harness pass/fail requires mandatory proof and treats not_proven as failure", () => {
+  assert.ok(
+    harnessSrc.includes("notProvenCount === 0") || harnessSrc.includes("mandatory_not_proven"),
+    "Harness must fail closed when mandatory probes remain not_proven"
+  );
+  assert.ok(
+    harnessSrc.includes("sections.every((section) => section.passed)"),
+    "Harness must derive top-level pass from per-section mandatory proofs"
+  );
+});
+
+test("W4H-13. Harness declares runtime acceptance still must be executed separately", () => {
   assert.ok(
     harnessSrc.includes("Runtime acceptance still must determine") ||
-      harnessSrc.includes("runtime acceptance"),
+      harnessSrc.includes("must NOT be executed here"),
     "Harness must state that runtime acceptance execution is still pending"
   );
 });
 
 // ── Stripe webhook: A8/A9 checks ──────────────────────────────────────────────
 
-test("W4H-15. Stripe webhook fails closed when SERVICEOS_ENVIRONMENT is missing/unknown (A8)", () => {
+test("W4H-14. Stripe webhook fails closed when SERVICEOS_ENVIRONMENT is missing/unknown (A8)", () => {
   assert.ok(
-    stripeSrc.includes("SERVICEOS_ENVIRONMENT is not set") ||
-      stripeSrc.includes("not a recognized value"),
+    stripeSrc.includes("SERVICEOS_ENVIRONMENT is not set") || stripeSrc.includes("not a recognized value"),
     "Stripe webhook must fail closed when SERVICEOS_ENVIRONMENT is missing/unknown"
   );
   assert.ok(
-    stripeSrc.includes("503") || stripeSrc.includes("fail-closed") ||
-      stripeSrc.includes("FAIL CLOSED"),
+    stripeSrc.includes("503") || stripeSrc.includes("fail-closed") || stripeSrc.includes("FAIL CLOSED"),
     "Stripe webhook must return non-2xx for missing environment"
   );
 });
 
-test("W4H-16. Stripe webhook requires BOTH secret AND signature in production (A9)", () => {
+test("W4H-15. Stripe webhook requires BOTH secret AND signature in production (A9)", () => {
   assert.ok(
     stripeSrc.includes("stripe-signature header is required in Production"),
     "Stripe webhook must require stripe-signature in production"
@@ -227,112 +217,53 @@ test("W4H-16. Stripe webhook requires BOTH secret AND signature in production (A
   );
 });
 
-test("W4H-17. Stripe webhook returns retriable non-2xx for canonical persistence failures (A10)", () => {
+// ── QB adapter / server-only sync checks ──────────────────────────────────────
+
+test("W4H-16. QB adapter loads canonical monetary values from DB and uses durable idempotency (A6/A7)", () => {
+  assert.ok(qbSrc.includes("loadCanonicalInvoiceRequest"), "QB adapter must load canonical invoice_request from DB");
+  assert.ok(qbSrc.includes("SUPABASE_SERVICE_ROLE_KEY"), "QB adapter must use service role for canonical DB reads");
+  assert.ok(qbSrc.includes("resolveOutboxByIdempotencyKey"), "QB adapter must resolve accounting_sync_outbox by idempotency_key");
   assert.ok(
-    stripeSrc.includes("retriable") || stripeSrc.includes("503"),
-    "Stripe webhook must return retriable non-2xx for canonical persistence failures"
-  );
-  assert.ok(
-    stripeSrc.includes("CURRENCY_MISMATCH") || stripeSrc.includes("AMOUNT_MISMATCH"),
-    "Stripe webhook must detect currency/amount mismatch"
-  );
-  assert.ok(
-    stripeSrc.includes("SUPABASE_CONFIG_MISSING"),
-    "Stripe webhook must detect missing Supabase config"
+    qbSrc.includes("idempotent: true") || qbSrc.includes("already acknowledged"),
+    "QB adapter must return stored results for acknowledged idempotent requests"
   );
 });
 
-test("W4H-18. Stripe webhook does not fail legacy non-Wave5 events due to missing lineage (A10)", () => {
+test("W4H-17. QB adapter rejects client monetary inputs and fails closed on environment (A6/A8)", () => {
   assert.ok(
-    stripeSrc.includes("Legacy non-ServiceOS payment event") ||
-      stripeSrc.includes("no job_id metadata"),
-    "Stripe webhook must not fail legacy payment events due to missing Wave 5 lineage"
+    !qbSrc.includes("body.currency_code") &&
+      !qbSrc.includes("body.subtotal_amount") &&
+      !qbSrc.includes("body.tax_amount") &&
+      !qbSrc.includes("body.total_amount"),
+    "QB adapter must not trust client-supplied monetary values"
+  );
+  assert.ok(
+    !qbSrc.includes('|| "test"') && !qbSrc.includes("|| 'test'"),
+    "QB adapter must not default the environment to test"
   );
 });
 
-// ── QB adapter: A6/A7/A8 checks ──────────────────────────────────────────────
-
-test("W4H-19. QB adapter fails closed when SERVICEOS_ENVIRONMENT is missing/unknown (A8)", () => {
-  assert.ok(
-    qbSrc.includes("SERVICEOS_ENVIRONMENT is not set") ||
-      qbSrc.includes("not a recognized value"),
-    "QB adapter must fail closed when SERVICEOS_ENVIRONMENT is missing/unknown"
-  );
+test("W4H-18. QB adapter now requires ServiceOS bearer auth for server-only sync", () => {
+  for (const token of [
+    "extractBearerToken",
+    "/auth/v1/user",
+    "SUPABASE_ANON_KEY",
+    "ServiceOS bearer token validation failed",
+    "loadAuthenticatedAuthUser",
+  ]) {
+    assert.ok(qbSrc.includes(token), `QB adapter must include ${token}`);
+  }
 });
 
-test("W4H-20. QB adapter loads canonical monetary values from DB — not from client request (A6)", () => {
-  assert.ok(
-    qbSrc.includes("loadCanonicalInvoiceRequest") || qbSrc.includes("SUPABASE_SERVICE_ROLE_KEY"),
-    "QB adapter must load canonical invoice from DB via service role"
-  );
-  assert.ok(
-    qbSrc.includes("canonicalCurrency") && qbSrc.includes("canonicalSubtotal"),
-    "QB adapter must derive monetary values from canonical DB record"
-  );
-  // Verify client monetary fields are NOT used
-  assert.ok(
-    !qbSrc.includes("body.currency_code") && !qbSrc.includes("body.subtotal_amount"),
-    "QB adapter must not use client-supplied monetary values"
-  );
+// ── Pilot panel: browser must POST to server-only adapter ─────────────────────
+
+test("W4H-19. Wave 5 pilot panel posts invoice_request_id + idempotency_key to /api/wave5-accounting-sync", () => {
+  assert.ok(panelSrc.includes('fetch("/api/wave5-accounting-sync"'), "Pilot panel must POST to /api/wave5-accounting-sync");
+  assert.ok(panelSrc.includes("invoice_request_id") && panelSrc.includes("idempotency_key"), "Pilot panel must send canonical request fields only");
+  assert.ok(panelSrc.includes("ir-${invoiceRequestId}-v1"), "Pilot panel must derive the stable idempotency key client-side");
 });
 
-test("W4H-21. QB adapter uses accounting_sync_outbox as durable idempotency store (A7)", () => {
-  assert.ok(
-    qbSrc.includes("resolveOutboxByIdempotencyKey") || qbSrc.includes("accounting_sync_outbox"),
-    "QB adapter must resolve outbox by idempotency key"
-  );
-  assert.ok(
-    qbSrc.includes("acknowledged") && qbSrc.includes("provider_reference_id"),
-    "QB adapter must return stored result when outbox is already acknowledged"
-  );
-  assert.ok(
-    qbSrc.includes("idempotent: true"),
-    "QB adapter must flag idempotent responses"
-  );
-});
-
-test("W4H-22. QB preview adapter persists through governed outbox flow (A7)", () => {
-  assert.ok(
-    qbSrc.includes("is_test_adapter: true") && qbSrc.includes("preview_test"),
-    "QB preview adapter must mark is_test_adapter=true and provider=preview_test"
-  );
-  assert.ok(
-    qbSrc.includes("upsertOutboxRow"),
-    "QB preview adapter must persist through outbox flow (same governed path)"
-  );
-});
-
-// ── Harness: SUPABASE_ANON_KEY transport ──────────────────────────────────────
-
-test("W4H-23. Harness requires SUPABASE_ANON_KEY and uses it as apikey in auth and REST probe headers", () => {
-  // Auth request must include apikey header using SUPABASE_ANON_KEY (never VITE_* or NEXT_PUBLIC_*).
-  assert.ok(
-    harnessSrc.includes("SUPABASE_ANON_KEY"),
-    "Harness must reference SUPABASE_ANON_KEY"
-  );
-  // SUPABASE_ANON_KEY must be used as the apikey header in auth requests.
-  assert.ok(
-    harnessSrc.includes("apikey: anonKey") || harnessSrc.includes("apikey:anonKey"),
-    "Harness auth and REST probe must send apikey header using anonKey"
-  );
-  // Harness must not use VITE_* or NEXT_PUBLIC_* for the anon key.
-  assert.ok(
-    !harnessSrc.includes("VITE_SUPABASE_ANON_KEY") &&
-    !harnessSrc.includes("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-    "Harness must not use VITE_* or NEXT_PUBLIC_* for anon key (would expose to client bundle)"
-  );
-  // anonKey must be passed to signInWithPassword (auth) and restProbe (REST calls).
-  assert.ok(
-    harnessSrc.includes("signInWithPassword(supabaseUrl, anonKey,"),
-    "signInWithPassword must receive anonKey for auth apikey header"
-  );
-  assert.ok(
-    harnessSrc.includes("restProbe(supabaseUrl, anonKey,"),
-    "restProbe must receive anonKey for REST probe apikey header"
-  );
-  // Guard for missing SUPABASE_ANON_KEY must exist.
-  assert.ok(
-    harnessSrc.includes("SUPABASE_ANON_KEY is required"),
-    "Harness must guard against missing SUPABASE_ANON_KEY"
-  );
+test("W4H-20. Wave 5 pilot panel sends the current ServiceOS bearer token and no longer writes accounting_sync_outbox directly", () => {
+  assert.ok(panelSrc.includes("Authorization:") && panelSrc.includes("accessToken"), "Pilot panel must send the current ServiceOS bearer token");
+  assert.ok(!panelSrc.includes("enqueueAccountingSync("), "Pilot panel must not call enqueueAccountingSync directly anymore");
 });

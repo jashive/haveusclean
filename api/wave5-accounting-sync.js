@@ -62,6 +62,40 @@ function hasSupabaseServiceCredentials() {
   return !!(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY);
 }
 
+function hasSupabaseAnonCredentials() {
+  return !!(process.env.SUPABASE_URL && process.env.SUPABASE_ANON_KEY);
+}
+
+function extractBearerToken(req) {
+  const header = req.headers?.authorization || req.headers?.Authorization || "";
+  const match = /^Bearer\s+(.+)$/i.exec(String(header).trim());
+  return match ? match[1].trim() : null;
+}
+
+async function loadAuthenticatedAuthUser(accessToken) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  const res = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: `******      "Content-Type": "application/json",
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Failed to validate ServiceOS bearer token: HTTP ${res.status} ${text}`);
+  }
+
+  const user = await res.json();
+  if (!user?.id) {
+    throw new Error("ServiceOS bearer token did not resolve to an auth user");
+  }
+
+  return user;
+}
+
 // ── A6: Load canonical invoice_request from DB via service role ───────────────
 async function loadCanonicalInvoiceRequest(invoiceRequestId) {
   const supabaseUrl = process.env.SUPABASE_URL;
@@ -234,6 +268,33 @@ export default async function handler(req, res) {
   const isProduction = env === "production";
   const isPreviewOrTest = env === "preview" || env === "test";
 
+  if (!hasSupabaseAnonCredentials()) {
+    return res.status(503).json({
+      success: false,
+      error: "SUPABASE_URL and SUPABASE_ANON_KEY are required to validate the ServiceOS bearer token.",
+      missing_prerequisites: ["SUPABASE_URL", "SUPABASE_ANON_KEY"].filter((k) => !process.env[k]),
+    });
+  }
+
+  const bearerToken = extractBearerToken(req);
+  if (!bearerToken) {
+    return res.status(401).json({
+      success: false,
+      error: "Authorization: ****** is required",
+    });
+  }
+
+  let authUser;
+  try {
+    authUser = await loadAuthenticatedAuthUser(bearerToken);
+  } catch (authErr) {
+    return res.status(401).json({
+      success: false,
+      error: "ServiceOS bearer token validation failed",
+      detail: authErr.message,
+    });
+  }
+
   const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
 
   // A6: Accept ONLY invoice_request_id and idempotency_key from client
@@ -357,7 +418,7 @@ export default async function handler(req, res) {
             tax_amount: canonicalTax,
             total_amount: canonicalTotal,
           },
-          metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync" },
+          metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync", requested_by_auth_user_id: authUser.id },
         });
       } catch (persistErr) {
         // Non-blocking for test path: log but continue
@@ -417,7 +478,7 @@ export default async function handler(req, res) {
           tax_amount: canonicalTax,
           total_amount: canonicalTotal,
         },
-        metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync" },
+        metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync", requested_by_auth_user_id: authUser.id },
       });
       outboxId = newOutbox?.id ?? null;
     } catch (outboxErr) {

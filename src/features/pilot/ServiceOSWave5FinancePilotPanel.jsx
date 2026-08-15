@@ -19,7 +19,6 @@ import React, { useState, useCallback } from "react";
 import {
   assessBillingReadiness,
   createAndFreezeInvoiceRequest,
-  enqueueAccountingSync,
   observePayment,
   createCompensationVersion,
   approveCompensationVersion,
@@ -229,25 +228,34 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
 
   const handleEnqueueAccountingSync = useCallback(async () => {
     if (!irId3.trim()) { setSyncErr("invoice_request_id required"); return; }
+    if (!accessToken) { setSyncErr("ServiceOS access token required"); return; }
     setSyncLoading(true); setSyncErr(null); setSyncResult(null);
     try {
-      const { fetchInvoiceRequestById } = await import("../../lib/serviceosWave5FinanceClient.js");
-      const ir = await fetchInvoiceRequestById(irId3.trim(), accessToken);
-      if (!ir) throw new Error(`invoice_request ${irId3.trim()} not found`);
-
-      const outbox = await enqueueAccountingSync(ir, "v1", {
-        accessToken,
-        appUserId,
-        isTestAdapter: true,
-        provider: "preview_test",
+      const invoiceRequestId = irId3.trim();
+      const idempotencyKey = `ir-${invoiceRequestId}-v1`;
+      const response = await fetch("/api/wave5-accounting-sync", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `******        },
+        body: JSON.stringify({
+          invoice_request_id: invoiceRequestId,
+          idempotency_key: idempotencyKey,
+        }),
       });
-      setSyncResult(outbox);
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.detail || payload?.error || `Accounting sync request failed: HTTP ${response.status}`);
+      }
+
+      setSyncResult(payload);
     } catch (e) {
       setSyncErr(e.message);
     } finally {
       setSyncLoading(false);
     }
-  }, [irId3, accessToken, appUserId]);
+  }, [irId3, accessToken]);
 
   // ── Step 4: Observe Payment ───────────────────────────────────────────────
   const [irId4, setIrId4] = useState("");
