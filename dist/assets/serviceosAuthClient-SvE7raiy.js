@@ -1,0 +1,1 @@
+import{g as i}from"./index-BGTTg-hR.js";const p={};function c(){return i(typeof import.meta<"u"?p:{})}async function _(e,t,n={}){const{url:a,anon:o}=c(),{headers:r,...s}=n;return await fetch(`${a}/rest/v1/${e}`,{...s,headers:{apikey:o,Authorization:`Bearer ${t}`,"Content-Type":"application/json",...r??{}}})}export{_ as a};
