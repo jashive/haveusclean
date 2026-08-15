@@ -517,7 +517,9 @@ test("Wave 4 client exports narrow REST contract scaffolding only", () => {
     "fetchEvidenceRequirementsForWorkOrder",
     "fetchServiceExceptionsForJob",
     "fetchCustomerOutcomesForJob",
+    "fetchServiceExceptionById",
     "updateServiceExceptionStatus",
+    "linkServiceExceptionCorrectiveAction",
     "updateCustomerOutcomeStatus",
   ].forEach((name) => assert.ok(clientSrc.includes(`export async function ${name}`), `client missing ${name}`));
   assert.ok(!clientSrc.includes("preview write"), "client must remain source-only scaffolding");

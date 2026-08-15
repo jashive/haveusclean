@@ -696,9 +696,41 @@ export async function updateServiceExceptionStatus(
   const patch = {
     triage_status: newStatus,
     updated_at: now,
-    ...(newStatus !== "reported" ? { triaged_at: now } : {}),
+    // triaged_at is set ONLY on the "triaged" transition; later transitions must
+    // not overwrite the original triage timestamp.
+    ...(newStatus === "triaged" ? { triaged_at: now } : {}),
     ...(newStatus === "resolved" ? { resolved_at: now } : {}),
     ...(newStatus === "closed" ? { closed_at: now } : {}),
+    ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
+  };
+  return updateById("service_exception", id, patch, accessToken);
+}
+
+export async function fetchServiceExceptionById(id, accessToken) {
+  assertEnabled();
+  return fetchOneById("service_exception", id, accessToken);
+}
+
+// Establishes the canonical corrective_action_id link on a service_exception.
+// ONLY patches the link fields. Must not modify identity, category, severity,
+// description, timestamps other than updated_at, or org/job/work-order IDs.
+export async function linkServiceExceptionCorrectiveAction(
+  id,
+  correctiveActionId,
+  accessToken,
+  appUserId
+) {
+  assertEnabled();
+  if (!id) throw new Error("linkServiceExceptionCorrectiveAction: id required");
+  if (!correctiveActionId)
+    throw new Error(
+      "linkServiceExceptionCorrectiveAction: correctiveActionId required"
+    );
+  const now = new Date().toISOString();
+  const patch = {
+    corrective_action_id: correctiveActionId,
+    corrective_action_required: true,
+    updated_at: now,
     ...(appUserId ? { updated_by_app_user_id: appUserId } : {}),
   };
   return updateById("service_exception", id, patch, accessToken);
