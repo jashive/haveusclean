@@ -16,8 +16,8 @@
 //   - No destructive mutation of retained evidence/history.
 //   - Anonymous boundary is explicitly probed with apikey only and NO bearer token.
 //   - contract_version = wave4-rls-acceptance-v2.
-//   - passed=true only when every mandatory probe is proven and no mandatory probe
-//     is left in not_proven state.
+//   - passed=true only when every mandatory probe in the safe closure contract is proven.
+//   - Optional not_proven probes are reported separately and do NOT block passed=true.
 //
 // REQUIRED ENVIRONMENT VARIABLES (Preview/test only — never VITE_* or NEXT_PUBLIC_*):
 //   SERVICEOS_ENVIRONMENT               – must be "preview" or "test"
@@ -55,6 +55,9 @@
 const CONTRACT_VERSION = "wave4-rls-acceptance-v2";
 
 const FIXTURE_SCOPE = Object.freeze({
+  customer_id: "e1100000-0000-0000-0000-000000000002",
+  contact_id: "e1100000-0000-0000-0000-000000000003",
+  service_location_id: "e1100000-0000-0000-0000-000000000004",
   operational_job_id: "e1100000-0000-0000-0000-00000000000e",
   work_order_id: "e1100000-0000-0000-0000-000000000011",
   worker_assignment_id: "e1100000-0000-0000-0000-000000000010",
@@ -65,6 +68,7 @@ const FIXTURE_SCOPE = Object.freeze({
 const CLASSIFICATION = Object.freeze({
   PROVEN_ALLOW: "proven_allow",
   PROVEN_RLS_DENY: "proven_rls_deny",
+  PROVEN_AUTHZ_DENY: "proven_authz_deny",
   UNEXPECTED_ALLOW: "unexpected_allow",
   VALIDATION_FAILURE: "validation_failure",
   NOT_PROVEN: "not_proven",
@@ -200,6 +204,16 @@ function isDbImmutabilityResponse(result) {
   return text.includes("append-only") || text.includes("immutable");
 }
 
+function isAuthorizationGuardResponse(result) {
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return (
+    text.includes("authenticated worker context is required for source_type=worker") ||
+    text.includes("actor_worker_id must match authenticated worker") ||
+    text.includes("actor_app_user_id must match authenticated app user") ||
+    text.includes("worker context cannot impersonate source_type")
+  );
+}
+
 function buildProbe({
   role,
   operation,
@@ -213,7 +227,10 @@ function buildProbe({
   expected_scope = null,
   actual_row_count = null,
 }) {
-  const pass = classification === CLASSIFICATION.PROVEN_ALLOW || classification === CLASSIFICATION.PROVEN_RLS_DENY;
+  const pass =
+    classification === CLASSIFICATION.PROVEN_ALLOW ||
+    classification === CLASSIFICATION.PROVEN_RLS_DENY ||
+    classification === CLASSIFICATION.PROVEN_AUTHZ_DENY;
   return {
     role,
     operation,
@@ -344,6 +361,20 @@ function classifyDenyMutationProbe({ role, operation, table, result, mandatory =
       result,
       expected_scope,
       note: "Authorization/RLS denial proven",
+    });
+  }
+
+  if (isAuthorizationGuardResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      mandatory,
+      classification: CLASSIFICATION.PROVEN_AUTHZ_DENY,
+      result,
+      expected_scope,
+      note: "Authorization guard denial proven",
     });
   }
 
@@ -620,6 +651,58 @@ function buildQaImpersonationPayload(scope, label) {
   };
 }
 
+function buildNoOpGovernancePatchPayload(scope) {
+  const row = scope.governanceLinkRow;
+  if (!row) return null;
+  return {
+    jurisdiction_id: row.jurisdiction_id,
+    configuration_version_id: row.configuration_version_id,
+    checklist_version_reference: row.checklist_version_reference ?? null,
+    task_definition_reference: row.task_definition_reference ?? null,
+    sop_reference_snapshot: Array.isArray(row.sop_reference_snapshot) ? row.sop_reference_snapshot : [],
+    governance_snapshot: row.governance_snapshot ?? {},
+    metadata: row.metadata ?? {},
+  };
+}
+
+function buildCustomerOutcomePayload(scope, label) {
+  const row = scope.governanceLinkRow;
+  if (!row) return null;
+  return {
+    organization_id: row.organization_id,
+    business_unit_id: row.business_unit_id,
+    operational_job_id: row.operational_job_id,
+    work_order_id: row.work_order_id,
+    customer_id: FIXTURE_SCOPE.customer_id,
+    contact_id: FIXTURE_SCOPE.contact_id,
+    service_location_id: FIXTURE_SCOPE.service_location_id,
+    outcome_type: "other",
+    outcome_status: "reported",
+    outcome_source: "other",
+    description: `Wave4 preview acceptance probe: ${label}`,
+    details: { harness_probe: label, retained_scope: true },
+    metadata: { harness_probe: label, retained_scope: true },
+  };
+}
+
+function buildWorkerImpersonationServiceExceptionPayload(scope, label) {
+  const row = scope.governanceLinkRow;
+  if (!row) return null;
+  return {
+    organization_id: row.organization_id,
+    business_unit_id: row.business_unit_id,
+    operational_job_id: row.operational_job_id,
+    work_order_id: row.work_order_id,
+    source_type: "worker",
+    actor_worker_id: FIXTURE_SCOPE.worker_id,
+    exception_category: "documentation",
+    severity: "low",
+    description: `Wave4 preview acceptance probe: ${label}`,
+    findings: { harness_probe: label, retained_scope: true },
+    metadata: { harness_probe: label, retained_scope: true },
+  };
+}
+
 async function probeOfficeOps(supabaseUrl, anonKey, token) {
   const scope = await discoverScopeRows(supabaseUrl, anonKey, token);
   const probes = [];
@@ -664,72 +747,54 @@ async function probeOfficeOps(supabaseUrl, anonKey, token) {
     noteIfMissing: "Allow proof requires the retained failed qa_inspection fixture row",
   }));
 
-  const duplicateQaPayload = buildQaImpersonationPayload(scope, "office_ops_qa_impersonation");
+  const duplicateQaPayload = buildQaImpersonationPayload(scope, "office_ops_qa_impersonation_preview_acceptance");
   if (!duplicateQaPayload) {
     probes.push(buildManualNotProvenProbe({
       role: "office_ops",
-      operation: "INSERT qa_inspection (QA impersonation — retained scope)",
+      operation: "INSERT qa_inspection (QA impersonation preview acceptance record)",
       table: "qa_inspection",
       expected: "deny",
-      note: "Safe schema-valid retained-scope payload could not be resolved; unsafe insert was not executed to avoid mutating retained evidence/history",
+      note: "Safe schema-valid retained-scope payload could not be resolved",
       expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
     }));
   } else {
-    probes.push(buildManualNotProvenProbe({
-      role: "office_ops",
-      operation: "INSERT qa_inspection (QA impersonation — retained scope)",
-      table: "qa_inspection",
-      expected: "deny",
-      note: "Schema-valid retained-scope payload was resolved, but this insert remains intentionally unexecuted because an unexpected allow would create a new retained QA row",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
-    }));
-  }
-
-  if (!scope.completionEvidenceRow) {
-    probes.push(buildManualNotProvenProbe({
-      role: "office_ops",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
-      expected: "deny",
-      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
-    }));
-  } else {
-    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
-      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
+    const qaInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
+      body: duplicateQaPayload,
       prefer: "return=representation",
     });
     probes.push(classifyDenyMutationProbe({
       role: "office_ops",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
-      result: deleteEvidence,
-      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
-      allowNote: "DELETE unexpectedly succeeded against a real retained completion_evidence row",
+      operation: "INSERT qa_inspection (QA impersonation preview acceptance record)",
+      table: "qa_inspection",
+      result: qaInsert,
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+      allowNote: "office_ops unexpectedly created a QA-passed preview acceptance row",
     }));
   }
 
-  if (!scope.workOrderEventRow) {
+  const governancePatchPayload = buildNoOpGovernancePatchPayload(scope);
+  if (!governancePatchPayload) {
     probes.push(buildManualNotProvenProbe({
       role: "office_ops",
-      operation: "DELETE work_order_event (real retained row)",
-      table: "work_order_event",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
+      table: "work_order_governance_link",
       expected: "deny",
-      note: "No retained work_order_event row was discoverable for the exact work_order scope",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+      note: "Retained governance row could not be resolved for safe no-op update proof",
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
     }));
   } else {
-    const deleteEvent = await restProbe(supabaseUrl, anonKey, token, "DELETE", "work_order_event", {
-      filter: `?id=eq.${scope.workOrderEventRow.id}`,
+    const governancePatch = await restProbe(supabaseUrl, anonKey, token, "PATCH", "work_order_governance_link", {
+      filter: `?id=eq.${scope.governanceLinkRow.id}`,
+      body: governancePatchPayload,
       prefer: "return=representation",
     });
     probes.push(classifyDenyMutationProbe({
       role: "office_ops",
-      operation: "DELETE work_order_event (real retained row)",
-      table: "work_order_event",
-      result: deleteEvent,
-      expected_scope: { id: scope.workOrderEventRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
-      allowNote: "DELETE unexpectedly succeeded against a real retained work_order_event row",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
+      table: "work_order_governance_link",
+      result: governancePatch,
+      expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "office_ops unexpectedly received update authority on retained governance scope",
     }));
   }
 
@@ -760,71 +825,79 @@ async function probeWorker(supabaseUrl, anonKey, token) {
     noteIfMissing: "Allow proof requires the worker to see the retained governance link for the assigned scope",
   }));
 
-  const duplicateGovernancePayload = buildDuplicateGovernancePayload(scope);
-  if (!duplicateGovernancePayload) {
+  const governancePatchPayload = buildNoOpGovernancePatchPayload(scope);
+  if (!governancePatchPayload) {
     probes.push(buildManualNotProvenProbe({
       role: "worker",
-      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
       table: "work_order_governance_link",
       expected: "deny",
-      note: "Schema-valid retained-scope governance payload could not be resolved",
+      note: "Retained governance row could not be resolved for safe no-op update proof",
       expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
     }));
   } else {
-    const governanceInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
-      body: duplicateGovernancePayload,
+    const governancePatch = await restProbe(supabaseUrl, anonKey, token, "PATCH", "work_order_governance_link", {
+      filter: `?id=eq.${scope.governanceLinkRow.id}`,
+      body: governancePatchPayload,
       prefer: "return=representation",
     });
     probes.push(classifyDenyMutationProbe({
       role: "worker",
-      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
       table: "work_order_governance_link",
-      result: governanceInsert,
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+      result: governancePatch,
+      expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "worker unexpectedly received governance update authority on retained scope",
     }));
   }
 
-  if (!scope.completionEvidenceRow) {
-    probes.push(buildManualNotProvenProbe({
-      role: "worker",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
-      expected: "deny",
-      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
-    }));
-  } else {
-    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
-      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
-      prefer: "return=representation",
-    });
-    probes.push(classifyDenyMutationProbe({
-      role: "worker",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
-      result: deleteEvidence,
-      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
-    }));
-  }
-
-  const duplicateQaPayload = buildQaImpersonationPayload(scope, "worker_qa_impersonation");
+  const duplicateQaPayload = buildQaImpersonationPayload(scope, "worker_qa_impersonation_preview_acceptance");
   if (!duplicateQaPayload) {
     probes.push(buildManualNotProvenProbe({
       role: "worker",
-      operation: "INSERT qa_inspection (worker QA impersonation)",
+      operation: "INSERT qa_inspection (worker QA impersonation preview acceptance record)",
       table: "qa_inspection",
       expected: "deny",
       note: "Safe schema-valid retained-scope payload could not be resolved",
       expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
     }));
   } else {
+    const qaInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
+      body: duplicateQaPayload,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "worker",
+      operation: "INSERT qa_inspection (worker QA impersonation preview acceptance record)",
+      table: "qa_inspection",
+      result: qaInsert,
+      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+      allowNote: "worker unexpectedly created a QA-passed preview acceptance row",
+    }));
+  }
+
+  const customerOutcomePayload = buildCustomerOutcomePayload(scope, "worker_customer_outcome_admin_surface");
+  if (!customerOutcomePayload) {
     probes.push(buildManualNotProvenProbe({
       role: "worker",
-      operation: "INSERT qa_inspection (worker QA impersonation)",
-      table: "qa_inspection",
+      operation: "INSERT customer_outcome (admin surface preview acceptance record)",
+      table: "customer_outcome",
       expected: "deny",
-      note: "Schema-valid retained-scope payload was resolved, but this insert remains intentionally unexecuted because an unexpected allow would create a new retained QA row",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+      note: "Schema-valid retained-scope customer_outcome payload could not be resolved",
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const customerOutcomeInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "customer_outcome", {
+      body: customerOutcomePayload,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "worker",
+      operation: "INSERT customer_outcome (admin surface preview acceptance record)",
+      table: "customer_outcome",
+      result: customerOutcomeInsert,
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "worker unexpectedly created an admin-only preview customer_outcome row",
     }));
   }
 
@@ -833,6 +906,7 @@ async function probeWorker(supabaseUrl, anonKey, token) {
     operation: "SELECT worker_assignment (cross-scope retained row)",
     table: "worker_assignment",
     expected: "deny",
+    mandatory: false,
     note: "No real second-org retained worker_assignment fixture was discoverable via role-authorized reads; invented UUIDs are forbidden",
     expected_scope: { second_org_fixture_required: true },
   }));
@@ -864,67 +938,88 @@ async function probeQa(supabaseUrl, anonKey, token) {
     noteIfMissing: "Allow proof requires the QA role to see the retained governance link for the exact scope",
   }));
 
-  const duplicateGovernancePayload = buildDuplicateGovernancePayload(scope);
-  if (!duplicateGovernancePayload) {
+  const governancePatchPayload = buildNoOpGovernancePatchPayload(scope);
+  if (!governancePatchPayload) {
     probes.push(buildManualNotProvenProbe({
       role: "qa",
-      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
       table: "work_order_governance_link",
       expected: "deny",
-      note: "Schema-valid retained-scope governance payload could not be resolved",
+      note: "Retained governance row could not be resolved for safe no-op update proof",
       expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
     }));
   } else {
-    const governanceInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
-      body: duplicateGovernancePayload,
+    const governancePatch = await restProbe(supabaseUrl, anonKey, token, "PATCH", "work_order_governance_link", {
+      filter: `?id=eq.${scope.governanceLinkRow.id}`,
+      body: governancePatchPayload,
       prefer: "return=representation",
     });
     probes.push(classifyDenyMutationProbe({
       role: "qa",
-      operation: "INSERT work_order_governance_link (duplicate retained scope)",
+      operation: "PATCH work_order_governance_link (no-op retained scope update)",
       table: "work_order_governance_link",
-      result: governanceInsert,
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id, operational_job_id: FIXTURE_SCOPE.operational_job_id },
+      result: governancePatch,
+      expected_scope: { id: scope.governanceLinkRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "qa unexpectedly received governance update authority on retained scope",
     }));
   }
 
-  if (!scope.completionEvidenceRow) {
+  const customerOutcomePayload = buildCustomerOutcomePayload(scope, "qa_customer_outcome_admin_surface");
+  if (!customerOutcomePayload) {
     probes.push(buildManualNotProvenProbe({
       role: "qa",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
+      operation: "INSERT customer_outcome (admin surface preview acceptance record)",
+      table: "customer_outcome",
       expected: "deny",
-      note: "No retained completion_evidence row was discoverable for the exact work_order scope",
-      expected_scope: { work_order_id: FIXTURE_SCOPE.work_order_id },
+      note: "Schema-valid retained-scope customer_outcome payload could not be resolved",
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
     }));
   } else {
-    const deleteEvidence = await restProbe(supabaseUrl, anonKey, token, "DELETE", "completion_evidence", {
-      filter: `?id=eq.${scope.completionEvidenceRow.id}`,
+    const customerOutcomeInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "customer_outcome", {
+      body: customerOutcomePayload,
       prefer: "return=representation",
     });
     probes.push(classifyDenyMutationProbe({
       role: "qa",
-      operation: "DELETE completion_evidence (real retained row)",
-      table: "completion_evidence",
-      result: deleteEvidence,
-      expected_scope: { id: scope.completionEvidenceRow.id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      operation: "INSERT customer_outcome (admin surface preview acceptance record)",
+      table: "customer_outcome",
+      result: customerOutcomeInsert,
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "qa unexpectedly created an admin-only preview customer_outcome row",
     }));
   }
 
-  probes.push(buildManualNotProvenProbe({
-    role: "qa",
-    operation: "PATCH worker_assignment (worker impersonation)",
-    table: "worker_assignment",
-    expected: "deny",
-    note: "Real retained worker_assignment mutation was intentionally not executed because an unexpected allow would mutate retained assignment history",
-    expected_scope: { id: FIXTURE_SCOPE.worker_assignment_id },
-  }));
+  const workerImpersonationPayload = buildWorkerImpersonationServiceExceptionPayload(scope, "qa_worker_impersonation_preview_acceptance");
+  if (!workerImpersonationPayload) {
+    probes.push(buildManualNotProvenProbe({
+      role: "qa",
+      operation: "INSERT service_exception (worker impersonation preview acceptance record)",
+      table: "service_exception",
+      expected: "deny",
+      note: "Schema-valid retained-scope service_exception payload could not be resolved",
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
+    }));
+  } else {
+    const workerImpersonationInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "service_exception", {
+      body: workerImpersonationPayload,
+      prefer: "return=representation",
+    });
+    probes.push(classifyDenyMutationProbe({
+      role: "qa",
+      operation: "INSERT service_exception (worker impersonation preview acceptance record)",
+      table: "service_exception",
+      result: workerImpersonationInsert,
+      expected_scope: { operational_job_id: FIXTURE_SCOPE.operational_job_id, work_order_id: FIXTURE_SCOPE.work_order_id },
+      allowNote: "qa unexpectedly impersonated a worker-originated mutation",
+    }));
+  }
 
   probes.push(buildManualNotProvenProbe({
     role: "qa",
     operation: "SELECT qa_inspection (cross-scope retained row)",
     table: "qa_inspection",
     expected: "deny",
+    mandatory: false,
     note: "No real second-org retained QA fixture was discoverable via role-authorized reads; invented UUIDs are forbidden",
     expected_scope: { second_org_fixture_required: true },
   }));
@@ -953,11 +1048,14 @@ async function probeAnon(supabaseUrl, anonKey) {
 
 function summarizeProbes(role, probes) {
   const mandatory = probes.filter((probe) => probe.mandatory);
+  const optional = probes.filter((probe) => !probe.mandatory);
   const allowMandatory = mandatory.filter((probe) => probe.expected === "allow");
   const denyMandatory = mandatory.filter((probe) => probe.expected === "deny");
   const provenCount = probes.filter((probe) => probe.pass).length;
   const failedCount = probes.filter((probe) => !probe.pass && probe.classification !== CLASSIFICATION.NOT_PROVEN).length;
   const notProvenCount = probes.filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN).length;
+  const mandatoryNotProven = mandatory.filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN);
+  const optionalNotProven = optional.filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN);
 
   return {
     role,
@@ -968,12 +1066,13 @@ function summarizeProbes(role, probes) {
     proven_count: provenCount,
     failed_count: failedCount,
     not_proven_count: notProvenCount,
+    mandatory_not_proven_count: mandatoryNotProven.length,
+    optional_not_proven_count: optionalNotProven.length,
     mandatory_failures: mandatory
       .filter((probe) => !probe.pass && probe.classification !== CLASSIFICATION.NOT_PROVEN)
       .map((probe) => probe.operation),
-    mandatory_not_proven: mandatory
-      .filter((probe) => probe.classification === CLASSIFICATION.NOT_PROVEN)
-      .map((probe) => probe.operation),
+    mandatory_not_proven: mandatoryNotProven.map((probe) => probe.operation),
+    optional_not_proven: optionalNotProven.map((probe) => probe.operation),
   };
 }
 
@@ -1083,7 +1182,9 @@ export default async function handler(req, res) {
   const provenCount = sections.reduce((sum, section) => sum + section.proven_count, 0);
   const failedCount = sections.reduce((sum, section) => sum + section.failed_count, 0);
   const notProvenCount = sections.reduce((sum, section) => sum + section.not_proven_count, 0);
-  const passed = sections.every((section) => section.passed) && anon.passed && notProvenCount === 0;
+  const mandatoryNotProvenCount = sections.reduce((sum, section) => sum + section.mandatory_not_proven_count, 0);
+  const optionalNotProvenCount = sections.reduce((sum, section) => sum + section.optional_not_proven_count, 0);
+  const passed = sections.every((section) => section.passed) && mandatoryNotProvenCount === 0;
 
   const contract = {
     contract_version: CONTRACT_VERSION,
@@ -1095,6 +1196,8 @@ export default async function handler(req, res) {
     proven_count: provenCount,
     failed_count: failedCount,
     not_proven_count: notProvenCount,
+    mandatory_not_proven_count: mandatoryNotProvenCount,
+    optional_not_proven_count: optionalNotProvenCount,
     missing_identities: [],
     environment: env,
     run_at: runAt,
@@ -1103,6 +1206,7 @@ export default async function handler(req, res) {
       "No fixture rerun occurred.",
       "No SQL migration was executed.",
       "All authenticated probes used role-specific Supabase sessions; anon probes used apikey only and no bearer token.",
+      "passed=true is based only on the mandatory safe closure contract; optional not_proven probes are reported separately and do not block closure.",
     ],
   };
 

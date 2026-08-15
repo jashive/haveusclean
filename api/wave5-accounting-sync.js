@@ -38,6 +38,8 @@
 // That file fabricates synthetic QB IDs at runtime and must not be used for
 // canonical accounting.
 
+import { createHash } from "node:crypto";
+
 const QB_TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const QBO_SANDBOX_BASE = "https://sandbox-quickbooks.api.intuit.com/v3/company";
 const QBO_PRODUCTION_BASE = "https://quickbooks.api.intuit.com/v3/company";
@@ -95,6 +97,118 @@ async function loadAuthenticatedAuthUser(accessToken) {
   }
 
   return user;
+}
+
+async function authenticatedRestFetchPath(accessToken, path) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  return fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: {
+      apikey: anonKey,
+      Authorization: "Bearer " + accessToken,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+  });
+}
+
+async function loadAuthorizedAppUser(accessToken, authUserId) {
+  const res = await authenticatedRestFetchPath(
+    accessToken,
+    `app_user?select=id,auth_user_id,status,email&auth_user_id=eq.${encodeURIComponent(authUserId)}`
+  );
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw Object.assign(new Error(`app_user lookup failed: HTTP ${res.status} ${text}`), { status: 403 });
+  }
+
+  const rows = await res.json();
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw Object.assign(new Error("expected exactly one app_user for authenticated auth user"), { status: 403 });
+  }
+
+  const appUser = rows[0];
+  if (appUser.auth_user_id !== authUserId) {
+    throw Object.assign(new Error("app_user auth_user_id mismatch"), { status: 403 });
+  }
+  if (appUser.status !== "active") {
+    throw Object.assign(new Error("app_user is not active"), { status: 403 });
+  }
+
+  return appUser;
+}
+
+async function loadAuthorizedMembershipContext(accessToken, appUserId, invoiceRequestId) {
+  const roleRes = await authenticatedRestFetchPath(
+    accessToken,
+    "app_role?select=id,code&code=in.(owner_admin,office_ops)"
+  );
+  if (!roleRes.ok) {
+    const text = await roleRes.text().catch(() => "");
+    throw Object.assign(new Error(`role lookup failed: HTTP ${roleRes.status} ${text}`), { status: 403 });
+  }
+
+  const roles = await roleRes.json();
+  const roleById = new Map(
+    (Array.isArray(roles) ? roles : [])
+      .filter((row) => row?.id && row?.code)
+      .map((row) => [row.id, row.code])
+  );
+  const allowedRoleIds = [...roleById.keys()];
+  if (allowedRoleIds.length === 0) {
+    throw Object.assign(new Error("authorized finance roles are not visible"), { status: 403 });
+  }
+
+  const membershipsRes = await authenticatedRestFetchPath(
+    accessToken,
+    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&status=eq.active&role_id=in.(${allowedRoleIds.map((id) => encodeURIComponent(id)).join(",")})`
+  );
+  if (!membershipsRes.ok) {
+    const text = await membershipsRes.text().catch(() => "");
+    throw Object.assign(new Error(`user_membership lookup failed: HTTP ${membershipsRes.status} ${text}`), { status: 403 });
+  }
+
+  const memberships = await membershipsRes.json();
+  const invoiceRes = await authenticatedRestFetchPath(
+    accessToken,
+    `invoice_request?select=id,organization_id,business_unit_id,request_status&id=eq.${encodeURIComponent(invoiceRequestId)}&limit=1`
+  );
+  if (!invoiceRes.ok) {
+    const text = await invoiceRes.text().catch(() => "");
+    throw Object.assign(new Error(`authorized invoice_request lookup failed: HTTP ${invoiceRes.status} ${text}`), { status: 403 });
+  }
+
+  const invoiceRows = await invoiceRes.json();
+  const invoiceSummary = Array.isArray(invoiceRows) ? invoiceRows[0] ?? null : null;
+  if (!invoiceSummary) {
+    throw Object.assign(
+      new Error("canonical invoice_request is not visible to an active owner_admin/office_ops membership in the same organization/business unit"),
+      { status: 403 }
+    );
+  }
+
+  const activeMemberships = Array.isArray(memberships) ? memberships : [];
+  const matchingMembership = activeMemberships.find(
+    (membership) =>
+      membership.organization_id === invoiceSummary.organization_id &&
+      membership.business_unit_id === invoiceSummary.business_unit_id &&
+      roleById.has(membership.role_id)
+  );
+
+  if (!matchingMembership) {
+    throw Object.assign(
+      new Error("active owner_admin/office_ops membership for the canonical invoice_request organization/business unit was not found"),
+      { status: 403 }
+    );
+  }
+
+  return {
+    invoiceSummary,
+    membership: matchingMembership,
+    roleCode: roleById.get(matchingMembership.role_id) ?? null,
+  };
 }
 
 // ── A6: Load canonical invoice_request from DB via service role ───────────────
@@ -198,6 +312,13 @@ async function updateOutboxRow(id, patch) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+function deriveQboRequestId(idempotencyKey) {
+  const normalizedKey = String(idempotencyKey || "").trim();
+  if (!normalizedKey) throw new Error("deriveQboRequestId: idempotencyKey required");
+  const digest = createHash("sha256").update(normalizedKey).digest("hex");
+  return `serviceos-${digest.slice(0, 32)}`;
+}
+
 // ── QBO token refresh ─────────────────────────────────────────────────────────
 async function refreshQBOAccessToken() {
   const clientId = process.env.QBO_CLIENT_ID;
@@ -228,11 +349,14 @@ async function refreshQBOAccessToken() {
 }
 
 // ── QBO invoice creation ──────────────────────────────────────────────────────
-async function createQBOInvoice(accessToken, realmId, invoicePayload, isSandbox) {
+async function createQBOInvoice(accessToken, realmId, invoicePayload, isSandbox, requestId) {
   const base = isSandbox ? QBO_SANDBOX_BASE : QBO_PRODUCTION_BASE;
-  const url = `${base}/${realmId}/invoice`;
+  const url = new URL(`${base}/${realmId}/invoice`);
+  // Intuit requestid provides provider-side duplicate-request protection for invoice creation.
+  // This improves duplicate suppression, but does not eliminate the remaining provider/durability boundary.
+  url.searchParams.set("requestid", requestId);
 
-  const res = await fetch(url, {
+  const res = await fetch(url.toString(), {
     method: "POST",
     headers: {
       Authorization: `******
@@ -296,7 +420,16 @@ export default async function handler(req, res) {
     });
   }
 
-  const body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+  let body;
+  try {
+   body = typeof req.body === "string" ? JSON.parse(req.body) : req.body || {};
+  } catch (parseErr) {
+   return res.status(400).json({
+     success: false,
+     error: "Request body must be valid JSON",
+     detail: parseErr.message,
+   });
+  }
 
   // A6: Accept ONLY invoice_request_id and idempotency_key from client
   const { idempotency_key, invoice_request_id } = body;
@@ -310,6 +443,20 @@ export default async function handler(req, res) {
 
   const canonicalKey = String(idempotency_key).trim();
 
+  let appUser;
+  let membershipContext;
+  try {
+    appUser = await loadAuthorizedAppUser(bearerToken, authUser.id);
+    membershipContext = await loadAuthorizedMembershipContext(bearerToken, appUser.id, invoice_request_id);
+  } catch (authzErr) {
+    return res.status(authzErr.status === 403 ? 403 : 500).json({
+      success: false,
+      error: "ServiceOS finance authorization failed",
+      detail: authzErr.message,
+      invoice_request_id,
+    });
+  }
+
   // Supabase service credentials required to load canonical data
   if (!hasSupabaseServiceCredentials()) {
     return res.status(503).json({
@@ -322,6 +469,17 @@ export default async function handler(req, res) {
   // A7: Resolve outbox by idempotency_key — return stored result if already acknowledged
   let outboxRow = await resolveOutboxByIdempotencyKey(canonicalKey).catch(() => null);
 
+  if (outboxRow && String(outboxRow.invoice_request_id) !== String(invoice_request_id)) {
+    return res.status(409).json({
+      success: false,
+      error: "idempotency_key is already bound to a different invoice_request_id",
+      idempotency_key: canonicalKey,
+      invoice_request_id,
+      existing_invoice_request_id: outboxRow.invoice_request_id,
+      outbox_id: outboxRow.id ?? null,
+    });
+  }
+
   if (outboxRow && outboxRow.outbox_status === "acknowledged" && outboxRow.provider_reference_id) {
     // A7: Already acknowledged — return stored result without issuing another provider request
     return res.status(200).json({
@@ -331,7 +489,7 @@ export default async function handler(req, res) {
       is_test_adapter: outboxRow.is_test_adapter,
       provider: outboxRow.provider,
       provider_reference_id: outboxRow.provider_reference_id,
-      provider_reference_type: "qbo_invoice_id",
+      provider_reference_type: outboxRow.provider_reference_type ?? null,
       idempotency_key: canonicalKey,
       invoice_request_id,
       acknowledged_at: outboxRow.acknowledged_at,
@@ -348,6 +506,17 @@ export default async function handler(req, res) {
       success: false,
       error: "Cannot load canonical invoice_request from DB",
       detail: loadErr.message,
+      invoice_request_id,
+    });
+  }
+
+  if (
+    invoiceRequest.organization_id !== membershipContext.invoiceSummary.organization_id ||
+    invoiceRequest.business_unit_id !== membershipContext.invoiceSummary.business_unit_id
+  ) {
+    return res.status(403).json({
+      success: false,
+      error: "Canonical invoice_request authorization scope changed during resolution",
       invoice_request_id,
     });
   }
@@ -419,12 +588,57 @@ export default async function handler(req, res) {
             tax_amount: canonicalTax,
             total_amount: canonicalTotal,
           },
-          metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync", requested_by_auth_user_id: authUser.id },
+          metadata: {
+            wave: "wave5",
+            environment: env,
+            source: "wave5-accounting-sync",
+            requested_by_auth_user_id: authUser.id,
+            requested_by_app_user_id: appUser.id,
+            authorized_role: membershipContext.roleCode,
+            authorized_membership_id: membershipContext.membership.id,
+          },
         });
       } catch (persistErr) {
-        // Non-blocking for test path: log but continue
-        console.warn("Preview outbox persist failed (non-blocking):", persistErr.message);
+        return res.status(500).json({
+          success: false,
+          error: "Preview accounting sync could not persist accounting_sync_outbox",
+          detail: persistErr.message,
+          idempotency_key: canonicalKey,
+          invoice_request_id,
+        });
       }
+    } else if (persistedOutbox.outbox_status !== "acknowledged" || !persistedOutbox.provider_reference_id) {
+      try {
+        persistedOutbox = await updateOutboxRow(persistedOutbox.id, {
+          outbox_status: "acknowledged",
+          is_test_adapter: true,
+          provider: "preview_test",
+          provider_reference_id: testReference,
+          provider_reference_type: "test_invoice_ref",
+          response_payload: { adapter: "preview_test", reference: testReference },
+          acknowledged_at: acknowledgedAt,
+          last_attempted_at: acknowledgedAt,
+          attempt_count: Math.max(Number(persistedOutbox.attempt_count ?? 0), 0) + 1,
+        });
+      } catch (persistErr) {
+        return res.status(500).json({
+          success: false,
+          error: "Preview accounting sync could not persist acknowledged outbox state",
+          detail: persistErr.message,
+          outbox_id: persistedOutbox.id ?? null,
+          idempotency_key: canonicalKey,
+          invoice_request_id,
+        });
+      }
+    }
+
+    if (!persistedOutbox?.id) {
+      return res.status(500).json({
+        success: false,
+        error: "Preview accounting sync did not produce a persisted outbox_id",
+        idempotency_key: canonicalKey,
+        invoice_request_id,
+      });
     }
 
     return res.status(200).json({
@@ -444,7 +658,7 @@ export default async function handler(req, res) {
       total_amount: canonicalTotal,
       acknowledged_at: acknowledgedAt,
       environment: env,
-      outbox_id: persistedOutbox?.id ?? null,
+      outbox_id: persistedOutbox.id,
       missing_live_prerequisites: [
         "QBO_CLIENT_ID",
         "QBO_CLIENT_SECRET",
@@ -479,7 +693,15 @@ export default async function handler(req, res) {
           tax_amount: canonicalTax,
           total_amount: canonicalTotal,
         },
-        metadata: { wave: "wave5", environment: env, source: "wave5-accounting-sync", requested_by_auth_user_id: authUser.id },
+        metadata: {
+          wave: "wave5",
+          environment: env,
+          source: "wave5-accounting-sync",
+          requested_by_auth_user_id: authUser.id,
+          requested_by_app_user_id: appUser.id,
+          authorized_role: membershipContext.roleCode,
+          authorized_membership_id: membershipContext.membership.id,
+        },
       });
       outboxId = newOutbox?.id ?? null;
     } catch (outboxErr) {
@@ -496,14 +718,15 @@ export default async function handler(req, res) {
   try {
     const isSandbox = process.env.QBO_SANDBOX !== "false";
     const realmId = process.env.QBO_REALM_ID;
+    const qboRequestId = deriveQboRequestId(canonicalKey);
 
     // Mark as sent
     if (outboxId) {
-      await updateOutboxRow(outboxId, {
+      outboxRow = await updateOutboxRow(outboxId, {
         outbox_status: "sent",
         last_attempted_at: nowIso,
         attempt_count: (outboxRow?.attempt_count ?? 0) + 1,
-      }).catch(() => {});
+      });
     }
 
     const tokenData = await refreshQBOAccessToken();
@@ -536,7 +759,7 @@ export default async function handler(req, res) {
       qboInvoice.TxnTaxDetail = { TotalTax: canonicalTax };
     }
 
-    const qboResponse = await createQBOInvoice(accessToken, realmId, { Invoice: qboInvoice }, isSandbox);
+    const qboResponse = await createQBOInvoice(accessToken, realmId, { Invoice: qboInvoice }, isSandbox, qboRequestId);
     const qboInvoiceId = qboResponse?.Invoice?.Id;
 
     if (!qboInvoiceId) {
@@ -546,14 +769,30 @@ export default async function handler(req, res) {
     // A7: Mark acknowledged with real provider_reference_id from QBO response
     const acknowledgedAt = new Date().toISOString();
     if (outboxId) {
-      await updateOutboxRow(outboxId, {
-        outbox_status: "acknowledged",
-        provider_reference_id: String(qboInvoiceId),
-        provider_reference_type: "qbo_invoice_id",
-        response_payload: qboResponse,
-        acknowledged_at: acknowledgedAt,
-        last_attempted_at: acknowledgedAt,
-      }).catch(() => {});
+      try {
+        await updateOutboxRow(outboxId, {
+          outbox_status: "acknowledged",
+          provider_reference_id: String(qboInvoiceId),
+          provider_reference_type: "qbo_invoice_id",
+          response_payload: qboResponse,
+          acknowledged_at: acknowledgedAt,
+          last_attempted_at: acknowledgedAt,
+        });
+      } catch (ackPersistErr) {
+        return res.status(502).json({
+          success: false,
+          error: "QuickBooks invoice was created but acknowledgment persistence failed",
+          detail: ackPersistErr.message,
+          synchronization_durability_error: true,
+          provider: "quickbooks",
+          provider_reference_id: String(qboInvoiceId),
+          provider_reference_type: "qbo_invoice_id",
+          qbo_request_id: qboRequestId,
+          idempotency_key: canonicalKey,
+          invoice_request_id,
+          outbox_id: outboxId,
+        });
+      }
     }
 
     return res.status(200).json({
@@ -571,16 +810,24 @@ export default async function handler(req, res) {
       acknowledged_at: acknowledgedAt,
       environment: env,
       outbox_id: outboxId,
+      qbo_request_id: qboRequestId,
       qbo_sync_token: qboResponse?.Invoice?.SyncToken ?? null,
     });
   } catch (err) {
     // Mark failed in outbox
+    let failureStatePersistenceFailed = false;
+    let failureStatePersistenceError = null;
     if (outboxId) {
-      await updateOutboxRow(outboxId, {
-        outbox_status: "failed",
-        response_payload: { error: err.message },
-        last_attempted_at: new Date().toISOString(),
-      }).catch(() => {});
+      try {
+        await updateOutboxRow(outboxId, {
+          outbox_status: "failed",
+          response_payload: { error: err.message },
+          last_attempted_at: new Date().toISOString(),
+        });
+      } catch (failurePersistErr) {
+        failureStatePersistenceFailed = true;
+        failureStatePersistenceError = failurePersistErr.message;
+      }
     }
 
     return res.status(500).json({
@@ -589,6 +836,8 @@ export default async function handler(req, res) {
       detail: err.message,
       idempotency_key: canonicalKey,
       invoice_request_id,
+      failure_state_persistence_failed: failureStatePersistenceFailed,
+      failure_state_persistence_error: failureStatePersistenceError,
     });
   }
 }
@@ -620,4 +869,3 @@ export default async function handler(req, res) {
 // IMPORTANT: This handler does NOT use the legacy placeholder accounting file.
 // That file fabricates synthetic QB IDs at runtime and must not be used for canonical accounting.
 // It must NOT be used as canonical proof of QuickBooks synchronization.
-

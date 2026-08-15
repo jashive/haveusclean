@@ -19,7 +19,6 @@ import React, { useState, useCallback } from "react";
 import {
   assessBillingReadiness,
   createAndFreezeInvoiceRequest,
-  observePayment,
   createCompensationVersion,
   approveCompensationVersion,
   createPayableForAssignment,
@@ -260,42 +259,44 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
 
   // ── Step 4: Observe Payment ───────────────────────────────────────────────
   const [irId4, setIrId4] = useState("");
-  const [payAmount4, setPayAmount4] = useState("");
-  const [payCurrency4, setPayCurrency4] = useState("CAD");
+  const [providerEventId4, setProviderEventId4] = useState("");
   const [payResult, setPayResult] = useState(null);
   const [payErr, setPayErr] = useState(null);
   const [payLoading, setPayLoading] = useState(false);
 
   const handleObservePayment = useCallback(async () => {
-    if (!irId4.trim() || !payAmount4) { setPayErr("invoice_request_id and amount required"); return; }
+    if (!irId4.trim()) { setPayErr("invoice_request_id required"); return; }
+    if (!accessToken) { setPayErr("ServiceOS access token required"); return; }
     setPayLoading(true); setPayErr(null); setPayResult(null);
     try {
-      const { fetchInvoiceRequestById } = await import("../../lib/serviceosWave5FinanceClient.js");
-      const ir = await fetchInvoiceRequestById(irId4.trim(), accessToken);
-      if (!ir) throw new Error(`invoice_request ${irId4.trim()} not found`);
-
-      const previewEventId = `preview-test-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
-      const result = await observePayment(
-        ir,
-        {
-          provider: "preview_test",
-          providerEventId: previewEventId,
-          providerEventType: "preview.payment.observed",
-          currencyCode: payCurrency4.trim() || ir.currency_code,
-          amountObserved: Number(payAmount4),
-          observedAt: new Date().toISOString(),
-          isTestProvider: true,
-          eventPayloadSnapshot: { preview_only: true, note: "Wave 5 Preview Pilot Panel" },
+      const invoiceRequestId = irId4.trim();
+      const providerEventId =
+        providerEventId4.trim() ||
+        `preview-payment-${invoiceRequestId}-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
+      const response = await fetch("/api/wave5-preview-payment", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + accessToken,
         },
-        { accessToken, appUserId }
-      );
-      setPayResult(result);
+        body: JSON.stringify({
+          invoice_request_id: invoiceRequestId,
+          provider_event_id: providerEventId,
+        }),
+      });
+
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.detail || payload?.error || "Preview payment request failed: HTTP " + response.status);
+      }
+
+      setPayResult(payload);
     } catch (e) {
       setPayErr(e.message);
     } finally {
       setPayLoading(false);
     }
-  }, [irId4, payAmount4, payCurrency4, accessToken, appUserId]);
+  }, [irId4, providerEventId4, accessToken]);
 
   // ── Step 5: Job Profitability ─────────────────────────────────────────────
   const [irId5, setIrId5] = useState("");
@@ -390,8 +391,7 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
       <div style={styles.section}>
         <div style={styles.sectionLabel}>4 · Observe Payment (Preview)</div>
         <input style={styles.input} placeholder="invoice_request_id" value={irId4} onChange={(e) => setIrId4(e.target.value)} />
-        <input style={styles.input} placeholder="amount" value={payAmount4} onChange={(e) => setPayAmount4(e.target.value)} />
-        <input style={styles.input} placeholder="currency (CAD)" value={payCurrency4} onChange={(e) => setPayCurrency4(e.target.value)} />
+        <input style={styles.input} placeholder="provider_event_id (optional)" value={providerEventId4} onChange={(e) => setProviderEventId4(e.target.value)} />
         <button style={styles.btn} onClick={handleObservePayment} disabled={payLoading}>
           {payLoading ? "…" : "Observe Payment"}
         </button>

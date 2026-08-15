@@ -36,9 +36,12 @@ function getServiceosEnvironment() {
 }
 
 // ── A10: Classify whether a Stripe session is a ServiceOS Wave 5 event ───────
-// Deterministic: Wave 5 invoice events carry job_id metadata and SERVICEOS_FINANCE_ENABLED.
+// Deterministic: legacy checkout may carry job_id, so Wave 5 requires explicit metadata.
 function isWave5InvoiceEvent(session) {
-  return !!(session?.metadata?.job_id);
+  return (
+    session?.metadata?.serviceos_finance_version === 'wave5' &&
+    !!String(session?.metadata?.serviceos_invoice_request_id || '').trim()
+  );
 }
 
 // ── A10/A11: Persist canonical payment_observation via service role ──────────
@@ -54,15 +57,15 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
     );
   }
 
-  const jobId = session.metadata?.job_id;
-  if (!jobId) {
+  const invoiceRequestId = String(session.metadata?.serviceos_invoice_request_id || '').trim();
+  if (!invoiceRequestId) {
     // Not a ServiceOS Wave 5 event — skip (non-retriable)
     return null;
   }
 
-  // Look up active invoice_request by operational_job_id
+  // Look up the exact canonical invoice_request referenced by Wave 5 metadata
   const irRes = await fetch(
-    `${supabaseUrl}/rest/v1/invoice_request?operational_job_id=eq.${encodeURIComponent(jobId)}&request_status=not.in.(void,cancelled)&order=created_at.desc&limit=1`,
+    `${supabaseUrl}/rest/v1/invoice_request?id=eq.${encodeURIComponent(invoiceRequestId)}&request_status=not.in.(void,cancelled)&limit=1`,
     {
       headers: {
         apikey: serviceKey,
@@ -85,7 +88,7 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
   // A10: invoice_request cannot be resolved → retriable non-2xx
   if (!invoiceRequest) {
     throw Object.assign(
-      new Error(`No active invoice_request found for operational_job_id ${jobId}`),
+      new Error(`No active invoice_request found for serviceos_invoice_request_id ${invoiceRequestId}`),
       { retriable: true, code: 'IR_NOT_FOUND' }
     );
   }
@@ -259,8 +262,8 @@ export default async function handler(req, res) {
         console.warn('Wave5 canonical payment observation skipped (non-retriable):', persistErr.message);
       }
     } else if (process.env.SERVICEOS_FINANCE_ENABLED === 'true' && !isWave5InvoiceEvent(session)) {
-      // Legacy non-ServiceOS payment event — do NOT fail because of missing Wave 5 lineage
-      console.log('Non-Wave5 payment event received (no job_id metadata) — legacy path, no canonical persistence');
+      // Legacy non-ServiceOS payment event — do NOT fail because of missing explicit Wave 5 metadata
+      console.log('Non-Wave5 payment event received (missing explicit wave5 metadata) — legacy path, no canonical persistence');
     }
 
     return res.status(200).json({ received: true, jobId, clientName, amount });
@@ -268,4 +271,3 @@ export default async function handler(req, res) {
 
   return res.status(200).json({ received: true });
 }
-

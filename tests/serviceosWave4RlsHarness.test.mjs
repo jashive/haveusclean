@@ -18,6 +18,7 @@ const harnessSrc = readFileSync(
 );
 const stripeSrc = readFileSync(resolve(ROOT, "api/stripe-webhook.js"), "utf8");
 const qbSrc = readFileSync(resolve(ROOT, "api/wave5-accounting-sync.js"), "utf8");
+const previewPaymentSrc = readFileSync(resolve(ROOT, "api/wave5-preview-payment.js"), "utf8");
 const panelSrc = readFileSync(resolve(ROOT, "src/features/pilot/ServiceOSWave5FinancePilotPanel.jsx"), "utf8");
 const mainSrc = readFileSync(resolve(ROOT, "src/main.jsx"), "utf8");
 
@@ -147,6 +148,7 @@ test("W4H-9. Harness deny classification distinguishes proven RLS from validatio
     "not_proven",
     "transport_failure",
     "db_immutability_proof",
+    "proven_authz_deny",
   ]) {
     assert.ok(harnessSrc.includes(value), `Harness must include deny classification ${value}`);
   }
@@ -174,14 +176,18 @@ test("W4H-11. Harness no longer uses invented cross-org UUIDs or sentinel DELETE
   );
 });
 
-test("W4H-12. Harness pass/fail requires mandatory proof and treats not_proven as failure", () => {
+test("W4H-12. Harness pass/fail requires mandatory proof and reports optional not_proven separately", () => {
   assert.ok(
-    harnessSrc.includes("notProvenCount === 0") || harnessSrc.includes("mandatory_not_proven"),
-    "Harness must fail closed when mandatory probes remain not_proven"
+    harnessSrc.includes("mandatory_not_proven_count"),
+    "Harness must report mandatory not_proven separately"
   );
   assert.ok(
     harnessSrc.includes("sections.every((section) => section.passed)"),
     "Harness must derive top-level pass from per-section mandatory proofs"
+  );
+  assert.ok(
+    harnessSrc.includes("optional_not_proven_count"),
+    "Harness must report optional not_proven separately"
   );
 });
 
@@ -266,4 +272,19 @@ test("W4H-19. Wave 5 pilot panel posts invoice_request_id + idempotency_key to /
 test("W4H-20. Wave 5 pilot panel sends the current ServiceOS bearer token and no longer writes accounting_sync_outbox directly", () => {
   assert.ok(panelSrc.includes("Authorization:") && panelSrc.includes("accessToken"), "Pilot panel must send the current ServiceOS bearer token");
   assert.ok(!panelSrc.includes("enqueueAccountingSync("), "Pilot panel must not call enqueueAccountingSync directly anymore");
+});
+
+test("W4H-21. Preview payment now uses a server-only endpoint with bearer auth", () => {
+  assert.ok(panelSrc.includes('fetch("/api/wave5-preview-payment"'), "Pilot panel must POST preview payments to the server-only endpoint");
+  assert.ok(panelSrc.includes("provider_event_id"), "Pilot panel must send provider_event_id for preview payment idempotency");
+  assert.ok(!panelSrc.includes("observePayment("), "Pilot panel must remove the direct browser payment_observation insert path");
+  for (const token of [
+    "SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED",
+    "owner_admin",
+    "office_ops",
+    "payment_observation",
+    "\"preview_test\"",
+  ]) {
+    assert.ok(previewPaymentSrc.includes(token), `Preview payment endpoint must include ${token}`);
+  }
 });

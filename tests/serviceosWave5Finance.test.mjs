@@ -45,6 +45,14 @@ const webhookSrc = readFileSync(
   resolve(ROOT, "api/stripe-webhook.js"),
   "utf8"
 );
+const previewPaymentSrc = readFileSync(
+  resolve(ROOT, "api/wave5-preview-payment.js"),
+  "utf8"
+);
+const panelSrc = readFileSync(
+  resolve(ROOT, "src/features/pilot/ServiceOSWave5FinancePilotPanel.jsx"),
+  "utf8"
+);
 const mainSrc = readFileSync(resolve(ROOT, "src/main.jsx"), "utf8");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1081,6 +1089,96 @@ test("75. Stripe webhook allows only explicit preview/test for unsigned parsing 
     webhookSrc.includes("!== 'production'") ||
     webhookSrc.includes('!== "production"'),
     "Stripe webhook must only allow unsigned parsing in non-production environment"
+  );
+});
+
+test("75b. QB adapter requires active owner_admin/office_ops membership before service-role use", () => {
+  for (const token of [
+    "loadAuthorizedAppUser",
+    "loadAuthorizedMembershipContext",
+    "app_user",
+    "user_membership",
+    "owner_admin",
+    "office_ops",
+    "invoice_request?select=id,organization_id,business_unit_id",
+    "ServiceOS finance authorization failed",
+  ]) {
+    assert.ok(qbAdapterSrc.includes(token), `QB adapter must include ${token}`);
+  }
+});
+
+test("75c. QB adapter binds idempotency_key to invoice_request_id and returns 409 on mismatch", () => {
+  assert.ok(
+    qbAdapterSrc.includes("idempotency_key is already bound to a different invoice_request_id"),
+    "QB adapter must reject cross-invoice idempotency key reuse"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("status(409)"),
+    "QB adapter must return HTTP 409 for cross-invoice idempotency key reuse"
+  );
+});
+
+test("75d. QB adapter preview path now fails closed on outbox persistence", () => {
+  assert.ok(
+    !qbAdapterSrc.includes("Preview outbox persist failed (non-blocking)"),
+    "Preview path must not keep non-blocking outbox persistence"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("Preview accounting sync could not persist accounting_sync_outbox") &&
+      qbAdapterSrc.includes("did not produce a persisted outbox_id"),
+    "Preview path must fail closed when outbox persistence is missing"
+  );
+});
+
+test("75e. QB adapter live path fails closed on sent/ack durability and uses Intuit requestid", () => {
+  assert.ok(
+    qbAdapterSrc.includes("deriveQboRequestId") &&
+      qbAdapterSrc.includes("requestid") &&
+      qbAdapterSrc.includes("duplicate-request protection"),
+    "QB adapter must use Intuit requestid for duplicate-request protection"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("QuickBooks invoice was created but acknowledgment persistence failed") &&
+      qbAdapterSrc.includes("synchronization_durability_error"),
+    "QB adapter must surface explicit durability failure after provider success"
+  );
+  assert.ok(
+    qbAdapterSrc.includes("failure_state_persistence_failed"),
+    "QB adapter must surface failure-state persistence status"
+  );
+});
+
+test("75f. Stripe webhook Wave5 classification requires explicit Wave5 metadata, not job_id alone", () => {
+  assert.ok(
+    webhookSrc.includes("serviceos_finance_version === 'wave5'") &&
+      webhookSrc.includes("serviceos_invoice_request_id"),
+    "Stripe webhook must require explicit Wave5 metadata"
+  );
+  assert.ok(
+    !/return !!\(session\?\.metadata\?\.job_id\)/.test(webhookSrc),
+    "job_id alone must not classify a Stripe event as Wave5"
+  );
+});
+
+test("75g. Preview payment endpoint is server-only and panel no longer inserts payment_observation directly", () => {
+  for (const token of [
+    "SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED",
+    "owner_admin",
+    "office_ops",
+    "payment_observation",
+    "provider_event_id",
+    "\"preview_test\"",
+  ]) {
+    assert.ok(previewPaymentSrc.includes(token), `Preview payment endpoint must include ${token}`);
+  }
+  assert.ok(
+    panelSrc.includes('fetch("/api/wave5-preview-payment"') &&
+      panelSrc.includes("provider_event_id"),
+    "Preview panel step must call the server-only preview payment endpoint"
+  );
+  assert.ok(
+    !panelSrc.includes("observePayment("),
+    "Preview panel must remove the direct browser observePayment path"
   );
 });
 
