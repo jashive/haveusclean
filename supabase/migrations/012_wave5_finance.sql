@@ -880,13 +880,14 @@ CREATE OR REPLACE FUNCTION public.trg_billing_readiness_gate_canonical_lineage()
   RETURNS trigger LANGUAGE plpgsql AS
 $$
 DECLARE
-  v_job         record;
-  v_wo          record;
-  v_oh          record;
-  v_qv          record;
-  v_qa_count    integer;
-  v_ca_count    integer;
-  v_w4_count    integer;
+  v_job                 record;
+  v_wo                  record;
+  v_oh                  record;
+  v_qv                  record;
+  v_qa_count            integer;
+  v_ca_count            integer;
+  v_w4_count            integer;
+  v_missing_requirements integer;
 BEGIN
   -- Only validate canonical lineage when gate_status transitions to or is inserted as 'ready'
   IF NEW.gate_status <> 'ready' THEN
@@ -1062,41 +1063,105 @@ BEGIN
       NEW.operational_job_id, NEW.work_order_id;
   END IF;
 
-  -- A1: No open blocking corrective_actions
+  -- A1: No blocking corrective_actions.
+  --     Terminal/nonblocking statuses: verified, cancelled — matching the M009 Wave 4 close gate contract.
+  --     'resolved' is treated as still-blocking, consistent with the M009 close gate.
   SELECT COUNT(*) INTO v_ca_count
   FROM public.corrective_action ca
   WHERE ca.operational_job_id = NEW.operational_job_id
-    AND ca.action_status NOT IN ('resolved', 'verified', 'cancelled');
+    AND ca.action_status NOT IN ('verified', 'cancelled');
 
   IF v_ca_count > 0 THEN
     RAISE EXCEPTION
-      'billing_readiness_gate: % open/unresolved corrective_action(s) exist for operational_job %. '
-      'All corrective actions must be resolved, verified, or cancelled before billing ready.',
+      'billing_readiness_gate: % blocking corrective_action(s) exist for operational_job %. '
+      'All corrective actions must be verified or cancelled before billing ready (M009 close gate contract).',
       v_ca_count, NEW.operational_job_id;
   END IF;
 
-  -- A1: Wave 4 enrolled work_orders — applicability must be present and enrolled
+  -- A1: Wave 4 enrolled work_orders — must satisfy the same substantive prerequisites
+  --     as the M009 close gate before gate_status can be 'ready'.
   SELECT COUNT(*) INTO v_w4_count
   FROM public.work_order_wave4_applicability woa
-  WHERE woa.work_order_id = NEW.work_order_id;
+  WHERE woa.work_order_id = NEW.work_order_id
+    AND woa.operational_job_id = NEW.operational_job_id
+    AND woa.applicability_status = 'enrolled';
 
   IF v_w4_count > 0 THEN
-    -- Wave 4 enrolled: verify the enrollment is in the expected enrolled state
-    -- (applicability_status CHECK constraint already enforces this is only 'enrolled')
-    -- Additional: verify org/BU/jurisdiction scope matches
+    -- Wave 4 enrolled: verify org/BU scope matches and enrollment is 'enrolled'
     PERFORM 1
     FROM public.work_order_wave4_applicability woa
     WHERE woa.work_order_id = NEW.work_order_id
       AND woa.operational_job_id = NEW.operational_job_id
+      AND woa.applicability_status = 'enrolled'
       AND woa.organization_id = NEW.organization_id
       AND woa.business_unit_id = NEW.business_unit_id;
 
     IF NOT FOUND THEN
       RAISE EXCEPTION
         'billing_readiness_gate: Wave 4 applicability record for work_order % does not match '
-        'expected operational_job/org/BU scope. '
-        'Wave 4 enrollment/governance close requirements not satisfied.',
+        'expected operational_job/org/BU scope with applicability_status=enrolled.',
         NEW.work_order_id;
+    END IF;
+
+    -- Mirror M009: frozen governance linkage is required
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.work_order_governance_link wogl
+      WHERE wogl.work_order_id = NEW.work_order_id
+        AND wogl.operational_job_id = NEW.operational_job_id
+    ) THEN
+      RAISE EXCEPTION
+        'billing_readiness_gate: Wave 4 enrolled work_order % requires a frozen governance linkage '
+        'before billing ready (mirrors M009 close gate requirement).',
+        NEW.work_order_id;
+    END IF;
+
+    -- Mirror M009: frozen evidence requirements must exist
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.work_order_evidence_requirement woer
+      WHERE woer.work_order_id = NEW.work_order_id
+        AND woer.operational_job_id = NEW.operational_job_id
+    ) THEN
+      RAISE EXCEPTION
+        'billing_readiness_gate: Wave 4 enrolled work_order % requires frozen evidence requirements '
+        'before billing ready (mirrors M009 close gate requirement).',
+        NEW.work_order_id;
+    END IF;
+
+    -- Mirror M009: each mandatory evidence requirement must have required_count qualifying
+    --              completion_evidence rows matching job/work_order/evidence_type/requirement_key.
+    --              If requires_external_reference=true, storage_system and storage_reference must be
+    --              non-blank (matching the M009 close gate exactly).
+    SELECT COUNT(*) INTO v_missing_requirements
+    FROM public.work_order_evidence_requirement req
+    WHERE req.work_order_id = NEW.work_order_id
+      AND req.operational_job_id = NEW.operational_job_id
+      AND req.is_mandatory = true
+      AND (
+        SELECT COUNT(*)
+        FROM public.completion_evidence ce
+        WHERE ce.work_order_id = NEW.work_order_id
+          AND ce.operational_job_id = NEW.operational_job_id
+          AND ce.evidence_type = req.evidence_type
+          AND ce.evidence_payload ->> 'requirement_key' = req.requirement_key
+          AND (
+            req.requires_external_reference = false
+            OR (
+              ce.storage_system IS NOT NULL
+              AND btrim(ce.storage_system) <> ''
+              AND ce.storage_reference IS NOT NULL
+              AND btrim(ce.storage_reference) <> ''
+            )
+          )
+      ) < req.required_count;
+
+    IF v_missing_requirements > 0 THEN
+      RAISE EXCEPTION
+        'billing_readiness_gate: % mandatory evidence requirement(s) unsatisfied for Wave 4 enrolled '
+        'work_order % — billing ready blocked until all mandatory evidence is complete '
+        '(mirrors M009 close gate requirement).',
+        v_missing_requirements, NEW.work_order_id;
     END IF;
   END IF;
 
@@ -1231,16 +1296,18 @@ CREATE OR REPLACE FUNCTION public.trg_contractor_payable_eligibility()
   RETURNS trigger LANGUAGE plpgsql AS
 $$
 DECLARE
-  v_wa    record;
-  v_oj    record;
-  v_wo    record;
-  v_ccv   record;
+  v_wa              record;
+  v_oj              record;
+  v_wo              record;
+  v_ccv             record;
   v_expected_amount numeric(12,2);
+  v_applicable_date timestamptz;
+  v_qa_count        integer;
+  v_ca_count        integer;
 BEGIN
   -- Load worker_assignment
   SELECT wa.worker_id, wa.operational_job_id, wa.organization_id,
-         wa.business_unit_id, wa.assignment_status,
-         wa.assigned_at, wa.acknowledged_at
+         wa.business_unit_id, wa.assignment_status
   INTO v_wa
   FROM public.worker_assignment wa
   WHERE wa.id = NEW.worker_assignment_id;
@@ -1263,7 +1330,7 @@ BEGIN
       NEW.operational_job_id, v_wa.operational_job_id;
   END IF;
 
-  -- A12: org/BU must match
+  -- A12: assignment org/BU must match payable
   IF v_wa.organization_id IS DISTINCT FROM NEW.organization_id THEN
     RAISE EXCEPTION 'contractor_payable: organization_id does not match worker_assignment';
   END IF;
@@ -1271,10 +1338,12 @@ BEGIN
     RAISE EXCEPTION 'contractor_payable: business_unit_id does not match worker_assignment';
   END IF;
 
-  -- A12: assignment must be in eligible state (acknowledged or completed)
-  IF v_wa.assignment_status NOT IN ('acknowledged', 'completed', 'service_complete') THEN
+  -- A12: assignment must be 'completed' — the only Wave 3 lifecycle status that
+  --      proves service work is actually complete (Wave 3: proposed→acknowledged→completed).
+  --      'service_complete' is not a valid worker_assignment status.
+  IF v_wa.assignment_status <> 'completed' THEN
     RAISE EXCEPTION
-      'contractor_payable: worker_assignment % is not in an eligible state for payable (status: %)',
+      'contractor_payable: worker_assignment % must be completed for payable (status: %)',
       NEW.worker_assignment_id, v_wa.assignment_status;
   END IF;
 
@@ -1289,15 +1358,17 @@ BEGIN
     RAISE EXCEPTION 'contractor_payable: operational_job % not found', NEW.operational_job_id;
   END IF;
 
-  -- A12: job must be at required QA-complete state
-  IF v_oj.operational_status NOT IN ('service_complete', 'qa_pending', 'qa_passed', 'closed') THEN
+  -- A12: job must be qa_passed or closed — proven QA completion.
+  --      'service_complete' and 'qa_pending' are not accepted: real QA must have passed.
+  IF v_oj.operational_status NOT IN ('qa_passed', 'closed') THEN
     RAISE EXCEPTION
-      'contractor_payable: operational_job % must be service_complete or later for payable (status: %)',
+      'contractor_payable: operational_job % must be qa_passed or closed for payable (status: %)',
       NEW.operational_job_id, v_oj.operational_status;
   END IF;
 
-  -- Load work_order
-  SELECT wo.operational_job_id, wo.organization_id, wo.business_unit_id
+  -- Load work_order (including status and canonical service date)
+  SELECT wo.operational_job_id, wo.organization_id, wo.business_unit_id,
+         wo.work_order_status, wo.service_completed_at
   INTO v_wo
   FROM public.work_order wo
   WHERE wo.id = NEW.work_order_id;
@@ -1311,6 +1382,52 @@ BEGIN
     RAISE EXCEPTION
       'contractor_payable: work_order % belongs to job %, not %',
       NEW.work_order_id, v_wo.operational_job_id, NEW.operational_job_id;
+  END IF;
+
+  -- A12: work_order org/BU must match payable
+  IF v_wo.organization_id IS DISTINCT FROM NEW.organization_id THEN
+    RAISE EXCEPTION 'contractor_payable: work_order organization_id does not match payable';
+  END IF;
+  IF v_wo.business_unit_id IS DISTINCT FROM NEW.business_unit_id THEN
+    RAISE EXCEPTION 'contractor_payable: work_order business_unit_id does not match payable';
+  END IF;
+
+  -- A12: work_order must be qa_complete or closed
+  IF v_wo.work_order_status NOT IN ('qa_complete', 'closed') THEN
+    RAISE EXCEPTION
+      'contractor_payable: work_order % must be qa_complete or closed for payable (status: %)',
+      NEW.work_order_id, v_wo.work_order_status;
+  END IF;
+
+  -- A12: At least one passed or waived QA inspection must exist for same operational_job/work_order.
+  --      Failed QA history is allowed when a later distinct passed/waived reinspection exists.
+  SELECT COUNT(*) INTO v_qa_count
+  FROM public.qa_inspection qi
+  WHERE qi.operational_job_id = NEW.operational_job_id
+    AND qi.work_order_id = NEW.work_order_id
+    AND qi.inspection_status IN ('passed', 'waived');
+
+  IF v_qa_count = 0 THEN
+    RAISE EXCEPTION
+      'contractor_payable: at least one passed or waived qa_inspection must exist '
+      'for operational_job % / work_order % before contractor pay can be created',
+      NEW.operational_job_id, NEW.work_order_id;
+  END IF;
+
+  -- A12: No blocking corrective_actions for same job/work_order.
+  --      Terminal/nonblocking statuses: verified, cancelled (Wave 3/Wave 4 close gate contract).
+  --      'resolved' is treated as still-blocking, matching the M009 Wave 4 close gate.
+  SELECT COUNT(*) INTO v_ca_count
+  FROM public.corrective_action ca
+  WHERE ca.operational_job_id = NEW.operational_job_id
+    AND ca.work_order_id = NEW.work_order_id
+    AND ca.action_status NOT IN ('verified', 'cancelled');
+
+  IF v_ca_count > 0 THEN
+    RAISE EXCEPTION
+      'contractor_payable: % blocking corrective_action(s) exist for operational_job % / '
+      'work_order % — contractor pay is held until all corrective actions are verified or cancelled',
+      v_ca_count, NEW.operational_job_id, NEW.work_order_id;
   END IF;
 
   -- Load contractor_compensation_version
@@ -1349,6 +1466,33 @@ BEGIN
       NEW.contractor_compensation_version_id, v_ccv.compensation_status;
   END IF;
 
+  -- A12: Canonical applicable service date derived from work_order.service_completed_at.
+  --      Client-supplied dates are not trusted.
+  v_applicable_date := v_wo.service_completed_at;
+
+  IF v_applicable_date IS NULL THEN
+    RAISE EXCEPTION
+      'contractor_payable: work_order % has no service_completed_at — '
+      'cannot determine applicable service date for compensation version effectivity',
+      NEW.work_order_id;
+  END IF;
+
+  -- A12: compensation effective_from must be <= applicable service date
+  IF v_ccv.effective_from > v_applicable_date THEN
+    RAISE EXCEPTION
+      'contractor_payable: compensation_version effective_from % is after applicable service date % '
+      '(work_order.service_completed_at)',
+      v_ccv.effective_from, v_applicable_date;
+  END IF;
+
+  -- A12: compensation effective_to must be NULL or >= applicable service date
+  IF v_ccv.effective_to IS NOT NULL AND v_applicable_date > v_ccv.effective_to THEN
+    RAISE EXCEPTION
+      'contractor_payable: applicable service date % is after compensation_version effective_to % — '
+      'version expired before service was completed',
+      v_applicable_date, v_ccv.effective_to;
+  END IF;
+
   -- A12: currency and method must match compensation version
   IF NEW.currency_code IS DISTINCT FROM v_ccv.currency_code THEN
     RAISE EXCEPTION
@@ -1361,19 +1505,7 @@ BEGIN
       NEW.compensation_method, v_ccv.compensation_method;
   END IF;
 
-  -- A12: No open blocking corrective_actions
-  IF EXISTS (
-    SELECT 1 FROM public.corrective_action ca
-    WHERE ca.operational_job_id = NEW.operational_job_id
-      AND ca.action_status NOT IN ('resolved', 'verified', 'cancelled')
-  ) THEN
-    RAISE EXCEPTION
-      'contractor_payable: open corrective_action(s) exist for operational_job % — '
-      'contractor pay is held pending resolution',
-      NEW.operational_job_id;
-  END IF;
-
-  -- A12: Validate computed_amount is derived from frozen compensation version
+  -- A12: Validate computed_amount is derived from frozen compensation version (DB calculation).
   --   flat_amount: computed_amount = rate_value
   --   hourly:      computed_amount = round(rate_value * basis_value, 2)
   --   percentage:  computed_amount = round(rate_value * basis_value, 2)
@@ -1674,6 +1806,9 @@ BEGIN
   END LOOP;
 
   -- [SV-3] Critical UNIQUE constraints exist
+  -- NOTE: uq_jps_job is intentionally excluded from this list.
+  --       SV-18 requires uq_jps_job to be ABSENT (append-only profitability model; A15).
+  --       Including uq_jps_job here would create a mutually contradictory assertion with SV-18.
   FOR v_constraint_name IN
     SELECT c FROM unnest(ARRAY[
       'uq_brg_job',
@@ -1681,8 +1816,7 @@ BEGIN
       'uq_aso_idempotency',
       'uq_po_provider_event',
       'uq_ccv_worker_version',
-      'uq_cp_assignment_compensation',
-      'uq_jps_job'
+      'uq_cp_assignment_compensation'
     ]) c
   LOOP
     SELECT COUNT(*) INTO v_count

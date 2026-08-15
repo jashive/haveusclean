@@ -301,3 +301,38 @@ test("W4H-22. QB preview adapter persists through governed outbox flow (A7)", ()
     "QB preview adapter must persist through outbox flow (same governed path)"
   );
 });
+
+// ── Harness: SUPABASE_ANON_KEY transport ──────────────────────────────────────
+
+test("W4H-23. Harness requires SUPABASE_ANON_KEY and uses it as apikey in auth and REST probe headers", () => {
+  // Auth request must include apikey header using SUPABASE_ANON_KEY (never VITE_* or NEXT_PUBLIC_*).
+  assert.ok(
+    harnessSrc.includes("SUPABASE_ANON_KEY"),
+    "Harness must reference SUPABASE_ANON_KEY"
+  );
+  // SUPABASE_ANON_KEY must be used as the apikey header in auth requests.
+  assert.ok(
+    harnessSrc.includes("apikey: anonKey") || harnessSrc.includes("apikey:anonKey"),
+    "Harness auth and REST probe must send apikey header using anonKey"
+  );
+  // Harness must not use VITE_* or NEXT_PUBLIC_* for the anon key.
+  assert.ok(
+    !harnessSrc.includes("VITE_SUPABASE_ANON_KEY") &&
+    !harnessSrc.includes("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
+    "Harness must not use VITE_* or NEXT_PUBLIC_* for anon key (would expose to client bundle)"
+  );
+  // anonKey must be passed to signInWithPassword (auth) and restProbe (REST calls).
+  assert.ok(
+    harnessSrc.includes("signInWithPassword(supabaseUrl, anonKey,"),
+    "signInWithPassword must receive anonKey for auth apikey header"
+  );
+  assert.ok(
+    harnessSrc.includes("restProbe(supabaseUrl, anonKey,"),
+    "restProbe must receive anonKey for REST probe apikey header"
+  );
+  // Guard for missing SUPABASE_ANON_KEY must exist.
+  assert.ok(
+    harnessSrc.includes("SUPABASE_ANON_KEY is required"),
+    "Harness must guard against missing SUPABASE_ANON_KEY"
+  );
+});

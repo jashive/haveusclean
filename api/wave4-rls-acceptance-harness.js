@@ -18,10 +18,11 @@
 //   - Deny assertions treat HTTP 401/403/RLS denial as PASS (expected deny).
 //   - Successful unauthorized mutation is a hard FAIL for the harness.
 //
-// REQUIRED ENVIRONMENT VARIABLES (Preview/test only — never VITE_*):
+// REQUIRED ENVIRONMENT VARIABLES (Preview/test only — never VITE_* or NEXT_PUBLIC_*):
 //   SERVICEOS_ENVIRONMENT               – must be "preview" or "test"
 //   SERVICEOS_W4_RLS_HARNESS_ENABLED    – must be "true" to activate
 //   SUPABASE_URL                        – Supabase project URL
+//   SUPABASE_ANON_KEY                   – server-only Preview/test anon key (never VITE_* or NEXT_PUBLIC_*)
 //   SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL   – office_ops test identity email
 //   SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD
 //   SERVICEOS_W4_RLS_WORKER_EMAIL       – worker test identity email
@@ -61,10 +62,10 @@ function isHarnessEnabled() {
 }
 
 // ── Supabase auth: sign in with email/password to get an access token ─────────
-async function signInWithPassword(supabaseUrl, email, password) {
+async function signInWithPassword(supabaseUrl, anonKey, email, password) {
   const res = await fetch(`${supabaseUrl}/auth/v1/token?grant_type=password`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", apikey: anonKey },
     body: JSON.stringify({ email, password }),
   });
 
@@ -88,10 +89,11 @@ async function signInWithPassword(supabaseUrl, email, password) {
 }
 
 // ── Authenticated REST probe ───────────────────────────────────────────────────
-async function restProbe(supabaseUrl, accessToken, method, table, body = null, filter = "") {
+async function restProbe(supabaseUrl, anonKey, accessToken, method, table, body = null, filter = "") {
   const url = `${supabaseUrl}/rest/v1/${table}${filter}`;
   const headers = {
     Authorization: `******
+    apikey: anonKey,
     "Content-Type": "application/json",
     Accept: "application/json",
     Prefer: "return=representation",
@@ -172,12 +174,12 @@ const WAVE3_APPEND_ONLY_TABLES = [
 ];
 
 // ── OFFICE_OPS probes ─────────────────────────────────────────────────────────
-async function probeOfficeOps(supabaseUrl, token) {
+async function probeOfficeOps(supabaseUrl, anonKey, token) {
   const results = [];
 
   // ALLOW: read in-scope Wave 4 governed records
   for (const table of WAVE4_READ_TABLES) {
-    const r = await restProbe(supabaseUrl, token, "GET", table, null, "?limit=5");
+    const r = await restProbe(supabaseUrl, anonKey, token, "GET", table, null, "?limit=5");
     results.push({
       role: "office_ops",
       operation: `SELECT ${table}`,
@@ -190,21 +192,21 @@ async function probeOfficeOps(supabaseUrl, token) {
   }
 
   // ALLOW: read qa_inspection (governance/exception triage)
-  const qaRead = await restProbe(supabaseUrl, token, "GET", "qa_inspection", null, "?limit=5");
+  const qaRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null, "?limit=5");
   results.push({
     role: "office_ops", operation: "SELECT qa_inspection", table: "qa_inspection",
     expected: "allow", actual_status: qaRead.status, actual_ok: qaRead.ok, pass: qaRead.ok,
   });
 
   // ALLOW: read service_exception for triage
-  const seRead = await restProbe(supabaseUrl, token, "GET", "service_exception", null, "?limit=5");
+  const seRead = await restProbe(supabaseUrl, anonKey, token, "GET", "service_exception", null, "?limit=5");
   results.push({
     role: "office_ops", operation: "SELECT service_exception", table: "service_exception",
     expected: "allow", actual_status: seRead.status, actual_ok: seRead.ok, pass: seRead.ok,
   });
 
   // DENY: QA impersonation — office_ops must not INSERT qa_inspection with passing status
-  const qaInsertDeny = await restProbe(supabaseUrl, token, "POST", "qa_inspection", {
+  const qaInsertDeny = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
     inspection_status: "passed",
     inspection_type: "standard",
     _harness_label: "wave4-rls-office_ops-qa-impersonation-deny",
@@ -219,7 +221,7 @@ async function probeOfficeOps(supabaseUrl, token) {
 
   // DENY: destructive mutation on append-only evidence
   for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
+    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
     const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
     results.push({
       role: "office_ops", operation: `DELETE ${table} (append-only — DENY)`,
@@ -233,11 +235,11 @@ async function probeOfficeOps(supabaseUrl, token) {
 }
 
 // ── WORKER probes ─────────────────────────────────────────────────────────────
-async function probeWorker(supabaseUrl, token) {
+async function probeWorker(supabaseUrl, anonKey, token) {
   const results = [];
 
   // ALLOW: read own worker_assignment (RLS scopes to current worker)
-  const waRead = await restProbe(supabaseUrl, token, "GET", "worker_assignment", null, "?limit=5");
+  const waRead = await restProbe(supabaseUrl, anonKey, token, "GET", "worker_assignment", null, "?limit=5");
   results.push({
     role: "worker", operation: "SELECT worker_assignment (own)", table: "worker_assignment",
     expected: "allow", actual_status: waRead.status, actual_ok: waRead.ok, pass: waRead.ok,
@@ -246,7 +248,7 @@ async function probeWorker(supabaseUrl, token) {
   // DENY: read other worker's assignment data — RLS should filter to own records only
   // (RLS returns empty set if worker can only see own, which is a deny of cross-scope)
   const otherWorkerRead = await restProbe(
-    supabaseUrl, token, "GET", "worker_assignment", null,
+    supabaseUrl, anonKey, token, "GET", "worker_assignment", null,
     "?worker_id=eq.00000000-0000-0000-0000-000000000099&limit=5"
   );
   results.push(selectDenyProbe(
@@ -254,7 +256,7 @@ async function probeWorker(supabaseUrl, token) {
   ));
 
   // DENY: QA pass/waive — worker must not INSERT qa_inspection
-  const qaInsert = await restProbe(supabaseUrl, token, "POST", "qa_inspection", {
+  const qaInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "qa_inspection", {
     inspection_status: "passed",
     _harness_label: "wave4-rls-worker-qa-impersonation-deny",
   });
@@ -265,7 +267,7 @@ async function probeWorker(supabaseUrl, token) {
   });
 
   // DENY: governance/admin mutation — worker must not INSERT work_order_governance_link
-  const govInsert = await restProbe(supabaseUrl, token, "POST", "work_order_governance_link", {
+  const govInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
     _harness_label: "wave4-rls-worker-governance-deny",
   });
   const govDenyPass = !govInsert.ok || govInsert.status === 401 || govInsert.status === 403;
@@ -277,7 +279,7 @@ async function probeWorker(supabaseUrl, token) {
 
   // DENY: UPDATE/DELETE on append-only evidence
   for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
+    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
     const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
     results.push({
       role: "worker", operation: `DELETE ${table} (append-only — DENY)`,
@@ -290,25 +292,25 @@ async function probeWorker(supabaseUrl, token) {
 }
 
 // ── QA probes ─────────────────────────────────────────────────────────────────
-async function probeQa(supabaseUrl, token) {
+async function probeQa(supabaseUrl, anonKey, token) {
   const results = [];
 
   // ALLOW: read qa_inspection records in scope
-  const qaRead = await restProbe(supabaseUrl, token, "GET", "qa_inspection", null, "?limit=5");
+  const qaRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null, "?limit=5");
   results.push({
     role: "qa", operation: "SELECT qa_inspection", table: "qa_inspection",
     expected: "allow", actual_status: qaRead.status, actual_ok: qaRead.ok, pass: qaRead.ok,
   });
 
   // ALLOW: read corrective_action in scope
-  const caRead = await restProbe(supabaseUrl, token, "GET", "corrective_action", null, "?limit=5");
+  const caRead = await restProbe(supabaseUrl, anonKey, token, "GET", "corrective_action", null, "?limit=5");
   results.push({
     role: "qa", operation: "SELECT corrective_action", table: "corrective_action",
     expected: "allow", actual_status: caRead.status, actual_ok: caRead.ok, pass: caRead.ok,
   });
 
   // DENY: worker impersonation — QA must not UPDATE worker_assignment
-  const waUpdate = await restProbe(supabaseUrl, token, "PATCH", "worker_assignment",
+  const waUpdate = await restProbe(supabaseUrl, anonKey, token, "PATCH", "worker_assignment",
     { _harness_label: "wave4-rls-qa-worker-impersonation-deny" },
     "?id=eq.00000000-0000-0000-0000-000000000000"
   );
@@ -320,7 +322,7 @@ async function probeQa(supabaseUrl, token) {
   });
 
   // DENY: governance/admin mutation not granted
-  const govInsert = await restProbe(supabaseUrl, token, "POST", "work_order_governance_link", {
+  const govInsert = await restProbe(supabaseUrl, anonKey, token, "POST", "work_order_governance_link", {
     _harness_label: "wave4-rls-qa-governance-deny",
   });
   const govDenyPass = !govInsert.ok || govInsert.status === 401 || govInsert.status === 403;
@@ -332,7 +334,7 @@ async function probeQa(supabaseUrl, token) {
 
   // DENY: destructive mutation on append-only evidence
   for (const table of WAVE3_APPEND_ONLY_TABLES) {
-    const delResult = await restProbe(supabaseUrl, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
+    const delResult = await restProbe(supabaseUrl, anonKey, token, "DELETE", table, null, "?id=eq.00000000-0000-0000-0000-000000000000");
     const denyPass = !delResult.ok || delResult.status === 401 || delResult.status === 403;
     results.push({
       role: "qa", operation: `DELETE ${table} (append-only — DENY)`,
@@ -342,7 +344,7 @@ async function probeQa(supabaseUrl, token) {
   }
 
   // DENY: cross-scope records — qa must not see records outside their org
-  const crossOrgRead = await restProbe(supabaseUrl, token, "GET", "qa_inspection", null,
+  const crossOrgRead = await restProbe(supabaseUrl, anonKey, token, "GET", "qa_inspection", null,
     "?organization_id=eq.00000000-0000-0000-0000-000000000099&limit=5"
   );
   results.push(selectDenyProbe(
@@ -397,6 +399,16 @@ export default async function handler(req, res) {
     return res.status(503).json({ error: "SUPABASE_URL is required", contract_version: CONTRACT_VERSION });
   }
 
+  // SUPABASE_ANON_KEY is required for all auth and REST probe requests (never VITE_* or NEXT_PUBLIC_*).
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+  if (!anonKey) {
+    return res.status(503).json({
+      error: "SUPABASE_ANON_KEY is required — provide a server-only Preview/test anon key. "
+        + "Do not use VITE_* or NEXT_PUBLIC_* keys for harness credentials.",
+      contract_version: CONTRACT_VERSION,
+    });
+  }
+
   const runAt = new Date().toISOString();
 
   // Check which identities are configured (do not attempt auth if creds are missing)
@@ -445,7 +457,7 @@ export default async function handler(req, res) {
 
   for (const [role, cfg] of Object.entries(identityConfig)) {
     try {
-      tokens[role] = await signInWithPassword(supabaseUrl, cfg.email, cfg.password);
+      tokens[role] = await signInWithPassword(supabaseUrl, anonKey, cfg.email, cfg.password);
     } catch (err) {
       authErrors[role] = { code: err.code, message: err.message };
     }
@@ -465,9 +477,9 @@ export default async function handler(req, res) {
 
   // Run probes for each role using authenticated tokens
   const [officeOpsProbes, workerProbes, qaProbes] = await Promise.all([
-    probeOfficeOps(supabaseUrl, tokens.office_ops),
-    probeWorker(supabaseUrl, tokens.worker),
-    probeQa(supabaseUrl, tokens.qa),
+    probeOfficeOps(supabaseUrl, anonKey, tokens.office_ops),
+    probeWorker(supabaseUrl, anonKey, tokens.worker),
+    probeQa(supabaseUrl, anonKey, tokens.qa),
   ]);
 
   const officeOpsSummary = summarizeProbes(officeOpsProbes);
