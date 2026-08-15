@@ -73,9 +73,8 @@ function makeAssignment(overrides = {}) {
   return {
     id: "wa-1",
     worker_id: "worker-1",
-    assignment_status: "acknowledged",
+    assignment_status: "completed",
     assigned_at: new Date().toISOString(),
-    acknowledged_at: new Date().toISOString(),
     ...overrides,
   };
 }
@@ -864,9 +863,10 @@ test("56. M012 billing gate trigger validates cancelled job/work_order cannot be
 });
 
 test("57. M012 billing gate trigger validates passed/waived QA required (A1)", () => {
+  const hasQaInspection = m012Src.includes("qa_inspection");
+  const hasPassedWaived = m012Src.includes("passed') OR") || m012Src.includes("'passed', 'waived'");
   assert.ok(
-    m012Src.includes("qa_inspection") &&
-    (m012Src.includes("passed') OR") || m012Src.includes("'passed', 'waived'")),
+    hasQaInspection && hasPassedWaived,
     "M012 trigger must require at least one passed/waived qa_inspection"
   );
 });

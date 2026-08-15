@@ -554,32 +554,29 @@ export function assessPayableEligibility({
   if (!workerAssignment || !workerAssignment.id) {
     reasons.push("worker_assignment not provided");
   } else {
-    if (!["acknowledged", "completed"].includes(workerAssignment.assignment_status)) {
-      reasons.push(`worker_assignment status must be acknowledged or completed (is: ${workerAssignment.assignment_status})`);
+    if (!["completed"].includes(workerAssignment.assignment_status)) {
+      reasons.push(`worker_assignment status must be completed (is: ${workerAssignment.assignment_status})`);
     }
     if (!workerAssignment.assigned_at) {
       reasons.push("worker_assignment.assigned_at must be set");
-    }
-    if (!workerAssignment.acknowledged_at) {
-      reasons.push("worker_assignment.acknowledged_at must be set");
     }
   }
 
   if (!operationalJob || !operationalJob.id) {
     reasons.push("operational_job not provided");
   } else {
-    const eligibleJobStatuses = ["service_complete", "qa_pending", "qa_passed", "closed"];
+    const eligibleJobStatuses = ["qa_passed", "closed"];
     if (!eligibleJobStatuses.includes(operationalJob.operational_status)) {
-      reasons.push(`operational_job status must be service_complete, qa_pending, qa_passed, or closed (is: ${operationalJob.operational_status})`);
+      reasons.push(`operational_job status must be qa_passed or closed (is: ${operationalJob.operational_status})`);
     }
   }
 
   if (!workOrder || !workOrder.id) {
     reasons.push("work_order not provided");
   } else {
-    const eligibleWoStatuses = ["service_complete", "qa_complete", "closed"];
+    const eligibleWoStatuses = ["qa_complete", "closed"];
     if (!eligibleWoStatuses.includes(workOrder.work_order_status)) {
-      reasons.push(`work_order status must be service_complete, qa_complete, or closed (is: ${workOrder.work_order_status})`);
+      reasons.push(`work_order status must be qa_complete or closed (is: ${workOrder.work_order_status})`);
     }
   }
 
