@@ -173,11 +173,11 @@ function Field({ label, value, onChange, placeholder }) {
 
 // ── Main panel component ───────────────────────────────────────────────────────
 
-export default function ServiceOSWave4PilotPanel({ session }) {
+export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
   if (!WAVE4_PILOT_ENABLED) return null;
 
   const accessToken = session?.access_token ?? null;
-  const appUserId = session?.user?.id ?? null;
+  const appUserId = revenueContext?.appUserId ?? null;
 
   // ── Shared IDs (required for all sections) ────────────────────────────────
   const [jobId, setJobId] = useState("");

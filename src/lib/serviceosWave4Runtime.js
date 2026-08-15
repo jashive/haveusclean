@@ -322,6 +322,8 @@ export async function materializeWave4Governance({
  * @returns {object} Readiness assessment
  */
 export function assessWave4Readiness({
+  operationalJobId,
+  workOrderId,
   applicability,
   governanceLink,
   requirements,
@@ -329,6 +331,20 @@ export function assessWave4Readiness({
   qaInspections,
   correctiveActions,
 } = {}) {
+  // Resolve canonical IDs — fail closed if scope cannot be determined
+  const resolvedWorkOrderId =
+    workOrderId ??
+    applicability?.work_order_id ??
+    governanceLink?.work_order_id ??
+    null;
+  const resolvedJobId =
+    operationalJobId ??
+    applicability?.operational_job_id ??
+    governanceLink?.operational_job_id ??
+    null;
+
+  const scopeResolved = !!resolvedWorkOrderId && !!resolvedJobId;
+
   const enrolled =
     !!applicability && applicability.applicability_status === "enrolled";
 
@@ -341,56 +357,58 @@ export function assessWave4Readiness({
   const missingRequirementKeys = [];
 
   let mandatoryEvidenceSatisfied = true;
-  for (const req of reqList) {
-    if (!req.is_mandatory) continue;
-    const count = evidenceList.filter(
-      (e) => e.work_order_id === (applicability?.work_order_id ?? governanceLink?.work_order_id) ||
-             reqList.length > 0 // accept if same work order scope
-    ).filter(
-      (e) =>
-        e.evidence_payload?.requirement_key === req.requirement_key ||
-        e.evidence_type === req.evidence_type
-    ).length;
 
-    if (count < (req.required_count ?? 1)) {
-      mandatoryEvidenceSatisfied = false;
-      missingRequirementKeys.push(req.requirement_key);
-    }
+  if (!scopeResolved) {
+    mandatoryEvidenceSatisfied = false;
+  } else {
+    for (const req of reqList) {
+      if (!req.is_mandatory) continue;
 
-    // If requires_external_reference, also verify storage fields
-    if (req.requires_external_reference) {
-      const extOk = evidenceList.some(
-        (e) =>
-          (e.evidence_payload?.requirement_key === req.requirement_key ||
-            e.evidence_type === req.evidence_type) &&
-          e.storage_system &&
-          String(e.storage_system).trim() &&
-          e.storage_reference &&
-          String(e.storage_reference).trim()
-      );
-      if (!extOk) {
-        mandatoryEvidenceSatisfied = false;
-        if (!missingRequirementKeys.includes(req.requirement_key)) {
-          missingRequirementKeys.push(req.requirement_key);
+      const qualifying = evidenceList.filter((e) => {
+        // Predicate 1–4: scope + type + key
+        if (e.work_order_id !== resolvedWorkOrderId) return false;
+        if (e.operational_job_id !== resolvedJobId) return false;
+        if (e.evidence_type !== req.evidence_type) return false;
+        if (e.evidence_payload?.requirement_key !== req.requirement_key) return false;
+        // Predicates 5–6: external reference when required
+        if (req.requires_external_reference) {
+          if (!e.storage_system || !String(e.storage_system).trim()) return false;
+          if (!e.storage_reference || !String(e.storage_reference).trim()) return false;
         }
+        return true;
+      });
+
+      if (qualifying.length < (req.required_count ?? 1)) {
+        mandatoryEvidenceSatisfied = false;
+        missingRequirementKeys.push(req.requirement_key);
       }
     }
   }
 
   const qaList = Array.isArray(qaInspections) ? qaInspections : [];
   const qaSatisfied = qaList.some(
-    (q) => q.inspection_status === "passed" || q.inspection_status === "waived"
+    (q) =>
+      (q.inspection_status === "passed" || q.inspection_status === "waived") &&
+      (!scopeResolved ||
+        (q.operational_job_id === resolvedJobId &&
+          q.work_order_id === resolvedWorkOrderId))
   );
 
   const caList = Array.isArray(correctiveActions) ? correctiveActions : [];
   const blockingCorrectiveActionIds = caList
     .filter(
-      (ca) => ca.action_status !== "verified" && ca.action_status !== "cancelled"
+      (ca) =>
+        ca.action_status !== "verified" &&
+        ca.action_status !== "cancelled" &&
+        (!scopeResolved ||
+          (ca.operational_job_id === resolvedJobId &&
+            ca.work_order_id === resolvedWorkOrderId))
     )
     .map((ca) => ca.id);
   const correctiveActionsSatisfied = blockingCorrectiveActionIds.length === 0;
 
   const readyToClose =
+    scopeResolved &&
     enrolled &&
     hasGovernance &&
     hasRequirements &&
@@ -446,7 +464,7 @@ export async function runExceptionReworkFlow({
   failedQaInspectionId,
   exceptionDescription,
   correctiveDescription,
-  exceptionCategory = "quality",
+  exceptionCategory = "service_quality",
   severity = "medium",
   actionType = "rework",
   reinspectionFindings = null,
@@ -467,12 +485,13 @@ export async function runExceptionReworkFlow({
     operationalJobId,
     workOrderId,
     qaInspectionId: failedQaInspectionId,
-    sourceType: "qa_failure",
+    sourceType: "qa",
     exceptionCategory,
     severity,
     description: exceptionDescription,
     triageStatus: "reported",
     correctiveActionRequired: false,
+    actorAppUserId: appUserId,
     appUserId,
   });
   const exception = await createServiceException(exceptionPayload, accessToken);
@@ -538,7 +557,7 @@ export async function runExceptionReworkFlow({
     inspectionType: "reinspection",
     findings: reinspectionFindings ?? {},
     inspectedAt: null,
-    appUserId,
+    inspectorAppUserId: appUserId,
   });
   const reinspection = await createQaInspection(reinspectionPayload, accessToken);
   if (!reinspection || !reinspection.id) {

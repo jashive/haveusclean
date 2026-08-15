@@ -53,6 +53,7 @@ function PilotPanelMount() {
         <Suspense fallback={null}>
           <ServiceOSWave4PilotPanel
             session={ctx?.session ?? null}
+            revenueContext={ctx?.revenueContext ?? null}
           />
         </Suspense>
       )}
