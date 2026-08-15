@@ -17,6 +17,12 @@ const WAVE4_PILOT_UI =
   import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === 'true' &&
   import.meta.env?.VITE_SERVICEOS_WAVE4_PILOT_UI === 'true'
 
+// Wave 5: Finance pilot — defaults false; requires both flags
+const WAVE5_PILOT_UI =
+  typeof import.meta !== 'undefined' &&
+  import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === 'true' &&
+  import.meta.env?.VITE_SERVICEOS_WAVE5_PILOT_UI === 'true'
+
 const ServiceOSPilotPanel = REVENUE_PILOT_UI
   ? lazy(() => import('./features/pilot/ServiceOSPilotPanel'))
   : null
@@ -27,6 +33,10 @@ const ServiceOSOperationsPilotPanel = OPERATIONS_PILOT_UI
 
 const ServiceOSWave4PilotPanel = WAVE4_PILOT_UI
   ? lazy(() => import('./features/pilot/ServiceOSWave4PilotPanel'))
+  : null
+
+const ServiceOSWave5FinancePilotPanel = WAVE5_PILOT_UI
+  ? lazy(() => import('./features/pilot/ServiceOSWave5FinancePilotPanel'))
   : null
 
 function PilotPanelMount() {
@@ -54,6 +64,13 @@ function PilotPanelMount() {
           <ServiceOSWave4PilotPanel
             session={ctx?.session ?? null}
             revenueContext={ctx?.revenueContext ?? null}
+          />
+        </Suspense>
+      )}
+      {ServiceOSWave5FinancePilotPanel && (
+        <Suspense fallback={null}>
+          <ServiceOSWave5FinancePilotPanel
+            session={ctx?.session ?? null}
           />
         </Suspense>
       )}
