@@ -204,20 +204,20 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
         outcomes,
         qualitySignals,
       ] = await Promise.all([
-        fetchWave4ApplicabilityForWorkOrder(workOrderId, accessToken).catch(() => null),
-        fetchGovernanceLinkForWorkOrder(workOrderId, accessToken).catch(() => null),
-        fetchEvidenceRequirementsForWorkOrder(workOrderId, accessToken).catch(() => []),
-        fetchEvidenceForWorkOrder(workOrderId, accessToken).catch(() => []),
-        fetchQaInspectionsForJob(jobId, accessToken).catch(() => []),
-        fetchCorrectiveActionsForJob(jobId, accessToken).catch(() => []),
-        fetchServiceExceptionsForJob(jobId, accessToken).catch(() => []),
-        fetchCustomerOutcomesForJob(jobId, accessToken).catch(() => []),
-        loadWave4QualitySignals({ operationalJobId: jobId, workOrderId, accessToken }).catch(
-          () => null
-        ),
+        fetchWave4ApplicabilityForWorkOrder(workOrderId, accessToken),
+        fetchGovernanceLinkForWorkOrder(workOrderId, accessToken),
+        fetchEvidenceRequirementsForWorkOrder(workOrderId, accessToken),
+        fetchEvidenceForWorkOrder(workOrderId, accessToken),
+        fetchQaInspectionsForJob(jobId, accessToken),
+        fetchCorrectiveActionsForJob(jobId, accessToken),
+        fetchServiceExceptionsForJob(jobId, accessToken),
+        fetchCustomerOutcomesForJob(jobId, accessToken),
+        loadWave4QualitySignals({ operationalJobId: jobId, workOrderId, accessToken }),
       ]);
 
       const readiness = assessWave4Readiness({
+        operationalJobId: jobId,
+        workOrderId,
         applicability,
         governanceLink,
         requirements,
@@ -249,6 +249,8 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
   const [configVersionId, setConfigVersionId] = useState("");
   const [checklistVersionRef, setChecklistVersionRef] = useState("");
   const [taskDefinitionRef, setTaskDefinitionRef] = useState("");
+  const [sopReferenceJson, setSopReferenceJson] = useState("");
+  const [governanceSnapshotJson, setGovernanceSnapshotJson] = useState("");
   const [loadingGov, setLoadingGov] = useState(false);
   const [govResult, setGovResult] = useState(null);
   const [govError, setGovError] = useState(null);
@@ -258,6 +260,33 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
     setGovResult(null);
     setLoadingGov(true);
     try {
+      // Parse and validate sopReferenceSnapshot
+      let sopReferenceSnapshot;
+      try {
+        sopReferenceSnapshot = JSON.parse(sopReferenceJson);
+      } catch {
+        throw new Error("SOP Reference Snapshot is not valid JSON");
+      }
+      if (!Array.isArray(sopReferenceSnapshot) || sopReferenceSnapshot.length === 0) {
+        throw new Error("SOP Reference Snapshot must be a non-empty array");
+      }
+
+      // Parse and validate governanceSnapshot
+      let governanceSnapshot;
+      try {
+        governanceSnapshot = JSON.parse(governanceSnapshotJson);
+      } catch {
+        throw new Error("Governance Snapshot is not valid JSON");
+      }
+      if (
+        !governanceSnapshot ||
+        typeof governanceSnapshot !== "object" ||
+        Array.isArray(governanceSnapshot) ||
+        Object.keys(governanceSnapshot).length === 0
+      ) {
+        throw new Error("Governance Snapshot must be a non-empty object");
+      }
+
       // Resolve org/bu/jurisdiction from operational_job
       const job = await fetchOperationalJobById(jobId, accessToken);
       if (!job) throw new Error("operational_job not found for id: " + jobId);
@@ -282,8 +311,8 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
         configurationVersionId: configVersionId,
         checklistVersionReference: checklistVersionRef || null,
         taskDefinitionReference: taskDefinitionRef || null,
-        sopReferenceSnapshot: [],
-        governanceSnapshot: {},
+        sopReferenceSnapshot,
+        governanceSnapshot,
         sourcePolicyRows: policyRows,
         accessToken,
         appUserId,
@@ -294,7 +323,7 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
     } finally {
       setLoadingGov(false);
     }
-  }, [jobId, workOrderId, configVersionId, checklistVersionRef, taskDefinitionRef, accessToken, appUserId]);
+  }, [jobId, workOrderId, configVersionId, checklistVersionRef, taskDefinitionRef, sopReferenceJson, governanceSnapshotJson, accessToken, appUserId]);
 
   // ── Section C: Attach Provider-Neutral Evidence ──────────────────────────
   const [evidenceProvider, setEvidenceProvider] = useState("");
@@ -442,6 +471,7 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
   }, [jobId, workOrderId, outcomeType, outcomeDesc, accessToken, appUserId]);
 
   const canAct = !!accessToken && !!jobId.trim() && !!workOrderId.trim();
+  const canMutate = canAct && !!appUserId;
 
   // ── Render ─────────────────────────────────────────────────────────────────
   return (
@@ -510,6 +540,20 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
           onChange={setTaskDefinitionRef}
           placeholder="e.g. task-residential-std-v1"
         />
+        <label style={styles.label}>SOP / HEMS Reference Snapshot JSON * (non-empty array)</label>
+        <textarea
+          style={{ ...styles.input, minHeight: "4rem", fontFamily: "monospace", fontSize: "0.72rem" }}
+          value={sopReferenceJson}
+          onChange={(e) => setSopReferenceJson(e.target.value)}
+          placeholder={'[{"hems_id":"HEMS-SOP-...","document_id":"...","version":"...","title":"..."}]'}
+        />
+        <label style={styles.label}>Governance Snapshot JSON * (non-empty object)</label>
+        <textarea
+          style={{ ...styles.input, minHeight: "4rem", fontFamily: "monospace", fontSize: "0.72rem" }}
+          value={governanceSnapshotJson}
+          onChange={(e) => setGovernanceSnapshotJson(e.target.value)}
+          placeholder={'{"authority":"HEMS","source_document_id":"...","source_version":"...","service_family":"residential"}'}
+        />
         <p style={{ fontSize: "0.72rem", color: "#8899AA", margin: "0 0 0.5rem" }}>
           Policy rows are loaded from the DB for the given configuration version.
           No policy rows are invented in the UI.
@@ -518,9 +562,9 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
           style={{
             ...styles.btn,
             ...styles.btnRun,
-            ...(!canAct || !configVersionId.trim() || loadingGov ? styles.btnDisabled : {}),
+            ...(!canMutate || !configVersionId.trim() || !sopReferenceJson.trim() || !governanceSnapshotJson.trim() || loadingGov ? styles.btnDisabled : {}),
           }}
-          disabled={!canAct || !configVersionId.trim() || loadingGov}
+          disabled={!canMutate || !configVersionId.trim() || !sopReferenceJson.trim() || !governanceSnapshotJson.trim() || loadingGov}
           onClick={handleMaterializeGovernance}
         >
           {loadingGov ? "Materializing…" : "Materialize Governance"}
@@ -570,12 +614,12 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
           style={{
             ...styles.btn,
             ...styles.btnRun,
-            ...(!canAct || !evidenceReqKey.trim() || !evidenceProvider.trim() || !evidenceReference.trim() || loadingEvidence
+            ...(!canMutate || !evidenceReqKey.trim() || !evidenceProvider.trim() || !evidenceReference.trim() || loadingEvidence
               ? styles.btnDisabled
               : {}),
           }}
           disabled={
-            !canAct || !evidenceReqKey.trim() || !evidenceProvider.trim() || !evidenceReference.trim() || loadingEvidence
+            !canMutate || !evidenceReqKey.trim() || !evidenceProvider.trim() || !evidenceReference.trim() || loadingEvidence
           }
           onClick={handleAttachEvidence}
         >
@@ -620,12 +664,12 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
           style={{
             ...styles.btn,
             ...styles.btnRun,
-            ...(!canAct || !failedQaId.trim() || !exceptionDesc.trim() || !correctiveDesc.trim() || loadingRework
+            ...(!canMutate || !failedQaId.trim() || !exceptionDesc.trim() || !correctiveDesc.trim() || loadingRework
               ? styles.btnDisabled
               : {}),
           }}
           disabled={
-            !canAct || !failedQaId.trim() || !exceptionDesc.trim() || !correctiveDesc.trim() || loadingRework
+            !canMutate || !failedQaId.trim() || !exceptionDesc.trim() || !correctiveDesc.trim() || loadingRework
           }
           onClick={handleRunRework}
         >
@@ -675,9 +719,9 @@ export default function ServiceOSWave4PilotPanel({ session, revenueContext }) {
           style={{
             ...styles.btn,
             ...styles.btnRun,
-            ...(!canAct || !outcomeDesc.trim() || loadingOutcome ? styles.btnDisabled : {}),
+            ...(!canMutate || !outcomeDesc.trim() || loadingOutcome ? styles.btnDisabled : {}),
           }}
-          disabled={!canAct || !outcomeDesc.trim() || loadingOutcome}
+          disabled={!canMutate || !outcomeDesc.trim() || loadingOutcome}
           onClick={handleCreateOutcome}
         >
           {loadingOutcome ? "Creating…" : "Create Customer Outcome"}

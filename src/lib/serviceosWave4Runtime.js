@@ -156,12 +156,23 @@ export async function attachProviderNeutralEvidence(scope, requirement, ref, opt
     throw new Error("attachProviderNeutralEvidence: evidence insert did not return a row");
   }
 
-  // Read back all evidence for the work order and verify the new row is present.
+  // Read back all evidence for the work order and verify the new row matches exactly.
   const allEvidence = await fetchEvidenceForWorkOrder(workOrderId, accessToken);
-  const found = Array.isArray(allEvidence) && allEvidence.some((e) => e.id === created.id);
-  if (!found) {
+  const verified =
+    Array.isArray(allEvidence) &&
+    allEvidence.some(
+      (e) =>
+        e.id === created.id &&
+        e.operational_job_id === operationalJobId &&
+        e.work_order_id === workOrderId &&
+        e.evidence_type === requirement.evidence_type &&
+        e.evidence_payload?.requirement_key === requirement.requirement_key &&
+        e.storage_system === ref.storageSystem &&
+        e.storage_reference === ref.storageReference
+    );
+  if (!verified) {
     throw new Error(
-      `attachProviderNeutralEvidence: retrieval verification failed for evidence id=${created.id}`
+      `attachProviderNeutralEvidence: exact-match readback verification failed for evidence id=${created.id}`
     );
   }
 
@@ -711,12 +722,12 @@ export async function loadWave4QualitySignals({
     qaInspections,
     correctiveActions,
   ] = await Promise.all([
-    fetchServiceExceptionsForJob(operationalJobId, accessToken).catch(() => []),
-    fetchCustomerOutcomesForJob(operationalJobId, accessToken).catch(() => []),
-    fetchEvidenceForWorkOrder(workOrderId, accessToken).catch(() => []),
-    fetchEvidenceRequirementsForWorkOrder(workOrderId, accessToken).catch(() => []),
-    fetchQaInspectionsForJob(operationalJobId, accessToken).catch(() => []),
-    fetchCorrectiveActionsForJob(operationalJobId, accessToken).catch(() => []),
+    fetchServiceExceptionsForJob(operationalJobId, accessToken),
+    fetchCustomerOutcomesForJob(operationalJobId, accessToken),
+    fetchEvidenceForWorkOrder(workOrderId, accessToken),
+    fetchEvidenceRequirementsForWorkOrder(workOrderId, accessToken),
+    fetchQaInspectionsForJob(operationalJobId, accessToken),
+    fetchCorrectiveActionsForJob(operationalJobId, accessToken),
   ]);
 
   const exList = Array.isArray(exceptions) ? exceptions : [];
