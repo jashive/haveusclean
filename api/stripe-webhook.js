@@ -93,6 +93,19 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
     );
   }
 
+  const metadataOperationalJobId = String(session.metadata?.operational_job_id || '').trim();
+  if (
+    metadataOperationalJobId &&
+    metadataOperationalJobId !== String(invoiceRequest.operational_job_id || '').trim()
+  ) {
+    throw Object.assign(
+      new Error(
+        `Stripe metadata operational_job_id ${metadataOperationalJobId} does not match canonical invoice_request operational_job_id ${invoiceRequest.operational_job_id}`
+      ),
+      { retriable: true, code: 'OPERATIONAL_JOB_ID_MISMATCH' }
+    );
+  }
+
   const amount = (session.amount_total || 0) / 100;
   const currency = (session.currency || '').toUpperCase();
 

@@ -6,7 +6,7 @@
 
 import { readFileSync } from "fs";
 import { resolve, dirname } from "path";
-import { fileURLToPath } from "url";
+import { fileURLToPath, pathToFileURL } from "url";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
@@ -95,6 +95,43 @@ function makeCompVersion(overrides = {}) {
     rate_value: 80,
     compensation_status: "approved",
     ...overrides,
+  };
+}
+
+async function importDefault(absPath) {
+  const mod = await import(`${pathToFileURL(absPath).href}?t=${Date.now()}-${Math.random()}`);
+  return mod.default;
+}
+
+function jsonResponse(status, payload) {
+  return {
+    ok: status >= 200 && status < 300,
+    status,
+    async json() {
+      return payload;
+    },
+    async text() {
+      return typeof payload === "string" ? payload : JSON.stringify(payload);
+    },
+  };
+}
+
+function createMockRes() {
+  return {
+    statusCode: 200,
+    body: undefined,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.body = payload;
+      return this;
+    },
+    end(payload) {
+      this.body = payload;
+      return this;
+    },
   };
 }
 
@@ -1182,6 +1219,356 @@ test("75g. Preview payment endpoint is server-only and panel no longer inserts p
   );
 });
 
+test("75h. Preview panel shows the final 9 finance steps and explicit runtime actions", () => {
+  for (const label of [
+    "1 · Billing readiness",
+    "2 · Invoice request",
+    "3 · Server accounting sync",
+    "4 · Server Preview payment",
+    "5 · Create contractor compensation version",
+    "6 · Approve contractor compensation version",
+    "7 · Create contractor payable",
+    "8 · Capture profitability snapshot",
+    "9 · Load finance status",
+  ]) {
+    assert.ok(panelSrc.includes(label), `Preview panel must include step label: ${label}`);
+  }
+  for (const token of [
+    "createCompensationVersion(",
+    "approveCompensationVersion(",
+    "createPayableForAssignment(",
+    "provider_event_id",
+    "idempotency_key",
+    "contractor_compensation_version_id",
+  ]) {
+    assert.ok(panelSrc.includes(token), `Preview panel must include explicit input/runtime token: ${token}`);
+  }
+});
+
+test("75i. preview payment rejects cross-invoice provider_event_id reuse with HTTP 409", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-preview-payment.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/auth/v1/user")) {
+      return jsonResponse(200, { id: "auth-user-1" });
+    }
+    if (href.includes("/rest/v1/app_user")) {
+      return jsonResponse(200, [{ id: "app-user-1", auth_user_id: "auth-user-1", status: "active" }]);
+    }
+    if (href.includes("/rest/v1/app_role")) {
+      return jsonResponse(200, [{ id: "role-1", code: "owner_admin" }]);
+    }
+    if (href.includes("/rest/v1/user_membership")) {
+      return jsonResponse(200, [{
+        id: "membership-1",
+        app_user_id: "app-user-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        role_id: "role-1",
+        status: "active",
+      }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?select=id,organization_id,business_unit_id")) {
+      return jsonResponse(200, [{ id: "ir-1", organization_id: "org-1", business_unit_id: "bu-1" }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1&limit=1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        operational_job_id: "job-1",
+        request_status: "submitted",
+        currency_code: "CAD",
+        total_amount: 113,
+      }]);
+    }
+    if (href.includes("/rest/v1/payment_observation?provider=eq.preview_test")) {
+      return jsonResponse(200, [{
+        id: "po-1",
+        invoice_request_id: "ir-2",
+        provider_event_id: "evt-1",
+      }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: { authorization: "******" },
+      body: { invoice_request_id: "ir-1", provider_event_id: "evt-1" },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 409);
+    assert.equal(res.body?.invoice_request_id, "ir-1");
+    assert.equal(res.body?.existing_invoice_request_id, "ir-2");
+  } finally {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+  }
+});
+
+test("75j. preview payment rejects void or cancelled invoice_request before persistence", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-preview-payment.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/auth/v1/user")) {
+      return jsonResponse(200, { id: "auth-user-1" });
+    }
+    if (href.includes("/rest/v1/app_user")) {
+      return jsonResponse(200, [{ id: "app-user-1", auth_user_id: "auth-user-1", status: "active" }]);
+    }
+    if (href.includes("/rest/v1/app_role")) {
+      return jsonResponse(200, [{ id: "role-1", code: "office_ops" }]);
+    }
+    if (href.includes("/rest/v1/user_membership")) {
+      return jsonResponse(200, [{
+        id: "membership-1",
+        app_user_id: "app-user-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        role_id: "role-1",
+        status: "active",
+      }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?select=id,organization_id,business_unit_id")) {
+      return jsonResponse(200, [{ id: "ir-1", organization_id: "org-1", business_unit_id: "bu-1" }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1&limit=1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        operational_job_id: "job-1",
+        request_status: "void",
+        currency_code: "CAD",
+        total_amount: 113,
+      }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: { authorization: "******" },
+      body: { invoice_request_id: "ir-1", provider_event_id: "evt-1" },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 409);
+    assert.match(res.body?.error || "", /terminal invoice_request status/i);
+  } finally {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+  }
+});
+
+test("75k. Stripe webhook allows explicit Wave5 events with matching operational_job_id metadata", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/stripe-webhook.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_FINANCE_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+
+  global.fetch = async (url, options = {}) => {
+    const href = String(url);
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        operational_job_id: "job-1",
+        currency_code: "CAD",
+        total_amount: 113,
+      }]);
+    }
+    if (href.includes("/rest/v1/payment_observation?provider=eq.stripe")) {
+      return jsonResponse(200, []);
+    }
+    if (href.endsWith("/rest/v1/payment_observation") && options.method === "POST") {
+      return jsonResponse(201, [{ id: "po-1", provider_event_id: "evt-1", invoice_request_id: "ir-1" }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: {},
+      body: JSON.stringify({
+        id: "evt-1",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: "cs_test_1",
+            amount_total: 11300,
+            currency: "cad",
+            customer_email: "customer@example.com",
+            metadata: {
+              serviceos_finance_version: "wave5",
+              serviceos_invoice_request_id: "ir-1",
+              operational_job_id: "job-1",
+            },
+          },
+        },
+      }),
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body?.received, true);
+  } finally {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+  }
+});
+
+test("75l. Stripe webhook retries explicit Wave5 events when operational_job_id metadata mismatches canonical invoice_request", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/stripe-webhook.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_FINANCE_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        operational_job_id: "job-1",
+        currency_code: "CAD",
+        total_amount: 113,
+      }]);
+    }
+    if (href.includes("/rest/v1/payment_observation?provider=eq.stripe")) {
+      return jsonResponse(200, []);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: {},
+      body: JSON.stringify({
+        id: "evt-2",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: "cs_test_2",
+            amount_total: 11300,
+            currency: "cad",
+            metadata: {
+              serviceos_finance_version: "wave5",
+              serviceos_invoice_request_id: "ir-1",
+              operational_job_id: "job-999",
+            },
+          },
+        },
+      }),
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 503);
+    assert.equal(res.body?.code, "OPERATIONAL_JOB_ID_MISMATCH");
+  } finally {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+  }
+});
+
+test("75m. Stripe webhook allows explicit Wave5 events without operational_job_id metadata because invoice_request_id is canonical", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/stripe-webhook.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_FINANCE_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+  delete process.env.STRIPE_WEBHOOK_SECRET;
+
+  global.fetch = async (url, options = {}) => {
+    const href = String(url);
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: "org-1",
+        business_unit_id: "bu-1",
+        operational_job_id: "job-1",
+        currency_code: "CAD",
+        total_amount: 113,
+      }]);
+    }
+    if (href.includes("/rest/v1/payment_observation?provider=eq.stripe")) {
+      return jsonResponse(200, []);
+    }
+    if (href.endsWith("/rest/v1/payment_observation") && options.method === "POST") {
+      return jsonResponse(201, [{ id: "po-2", provider_event_id: "evt-3", invoice_request_id: "ir-1" }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: {},
+      body: JSON.stringify({
+        id: "evt-3",
+        type: "checkout.session.completed",
+        data: {
+          object: {
+            id: "cs_test_3",
+            amount_total: 11300,
+            currency: "cad",
+            metadata: {
+              serviceos_finance_version: "wave5",
+              serviceos_invoice_request_id: "ir-1",
+            },
+          },
+        },
+      }),
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.body?.received, true);
+  } finally {
+    global.fetch = originalFetch;
+    process.env = originalEnv;
+  }
+});
+
 // ── A12: Contractor payable DB eligibility ────────────────────────────────────
 
 test("76. M012 has contractor_payable eligibility trigger (A12)", () => {
@@ -1294,6 +1681,55 @@ test("86. M012 has append-only index for job_profitability_snapshot (A15)", () =
   );
 });
 
+test("86b. M012 has profitability BEFORE INSERT validator trigger/function", () => {
+  assert.ok(
+    m012Src.includes("trg_jps_before_insert_validator") &&
+      m012Src.includes("BEFORE INSERT ON public.job_profitability_snapshot"),
+    "M012 must define and attach trg_jps_before_insert_validator before insert"
+  );
+});
+
+test("86c. M012 profitability validator requires canonical invoice_request and frozen monetary coherence", () => {
+  for (const token of [
+    "invoice_request_id is required",
+    "canonical invoice_request",
+    "operational_job_id % does not match invoice_request.operational_job_id",
+    "organization_id % does not match invoice_request.organization_id",
+    "business_unit_id % does not match invoice_request.business_unit_id",
+    "currency_code % does not match invoice_request.currency_code",
+    "recognized_revenue_amount % does not match invoice_request.subtotal_amount",
+    "tax_amount % does not match invoice_request.tax_amount",
+  ]) {
+    assert.ok(m012Src.includes(token), `M012 profitability validator must include: ${token}`);
+  }
+});
+
+test("86d. M012 profitability validator requires authoritative approved/paid labor total", () => {
+  assert.ok(
+    m012Src.includes("COALESCE(SUM(cp.computed_amount), 0)") &&
+      m012Src.includes("cp.payable_status IN ('approved', 'paid')"),
+    "M012 profitability validator must compute authoritative approved/paid contractor labor"
+  );
+  assert.ok(
+    m012Src.includes("direct_labor_cost % does not match authoritative approved/paid contractor_payable total %"),
+    "M012 profitability validator must reject mismatched direct_labor_cost"
+  );
+});
+
+test("86e. M012 profitability validator enforces required source_lineage keys and optional direct cost reference", () => {
+  for (const token of [
+    "source_lineage.invoice_request_id is required",
+    "source_lineage.pricing_snapshot_id is required",
+    "source_lineage.quote_version_id is required",
+    "source_lineage.invoice_request_id % does not match canonical invoice_request.id %",
+    "source_lineage.pricing_snapshot_id % does not match canonical invoice_request.pricing_snapshot_id %",
+    "source_lineage.quote_version_id % does not match canonical invoice_request.quote_version_id %",
+    "source_lineage.direct_cost_source_reference is required when other_direct_cost > 0",
+  ]) {
+    assert.ok(m012Src.includes(token), `M012 profitability validator must include: ${token}`);
+  }
+});
+
 // ── A16: Cross-scope integrity helper ────────────────────────────────────────
 
 test("87. M012 has fn_assert_wave5_scope cross-scope helper (A16)", () => {
@@ -1357,5 +1793,13 @@ test("93. M012 self-validation checks compensation self-approval guard (A17)", (
     m012Src.includes("SV-16") ||
     m012Src.includes("trg_ccv_self_approval_guard()"),
     "M012 self-validation must verify compensation self-approval guard exists"
+  );
+});
+
+test("94. M012 self-validation checks profitability BEFORE INSERT validator trigger/function", () => {
+  assert.ok(
+    m012Src.includes("SV-21") &&
+      m012Src.includes("trg_jps_before_insert_validator trigger/function not found on job_profitability_snapshot"),
+    "M012 self-validation must verify trg_jps_before_insert_validator trigger/function exists"
   );
 });

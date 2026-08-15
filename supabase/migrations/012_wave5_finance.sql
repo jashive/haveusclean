@@ -786,6 +786,136 @@ CREATE TRIGGER trg_jps_margin
   BEFORE INSERT OR UPDATE ON public.job_profitability_snapshot
   FOR EACH ROW EXECUTE FUNCTION public.trg_jps_margin_percent();
 
+-- ============================================================
+-- T7b: job_profitability_snapshot — canonical BEFORE INSERT validation
+--      Validates frozen invoice_request lineage and authoritative direct labor.
+-- ============================================================
+CREATE OR REPLACE FUNCTION public.trg_jps_before_insert_validator()
+  RETURNS trigger LANGUAGE plpgsql AS
+$$
+DECLARE
+  v_invoice_request               public.invoice_request%ROWTYPE;
+  v_authoritative_direct_labor    numeric(12,2);
+  v_source_invoice_request_id     text;
+  v_source_pricing_snapshot_id    text;
+  v_source_quote_version_id       text;
+  v_direct_cost_source_reference  text;
+BEGIN
+  IF NEW.invoice_request_id IS NULL THEN
+    RAISE EXCEPTION 'job_profitability_snapshot: invoice_request_id is required';
+  END IF;
+
+  SELECT *
+  INTO v_invoice_request
+  FROM public.invoice_request
+  WHERE id = NEW.invoice_request_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: canonical invoice_request % not found',
+      NEW.invoice_request_id;
+  END IF;
+
+  IF NEW.operational_job_id IS DISTINCT FROM v_invoice_request.operational_job_id THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: operational_job_id % does not match invoice_request.operational_job_id %',
+      NEW.operational_job_id, v_invoice_request.operational_job_id;
+  END IF;
+
+  IF NEW.organization_id IS DISTINCT FROM v_invoice_request.organization_id THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: organization_id % does not match invoice_request.organization_id %',
+      NEW.organization_id, v_invoice_request.organization_id;
+  END IF;
+
+  IF NEW.business_unit_id IS DISTINCT FROM v_invoice_request.business_unit_id THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: business_unit_id % does not match invoice_request.business_unit_id %',
+      NEW.business_unit_id, v_invoice_request.business_unit_id;
+  END IF;
+
+  IF NEW.currency_code IS DISTINCT FROM v_invoice_request.currency_code THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: currency_code % does not match invoice_request.currency_code %',
+      NEW.currency_code, v_invoice_request.currency_code;
+  END IF;
+
+  IF NEW.recognized_revenue_amount IS DISTINCT FROM v_invoice_request.subtotal_amount THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: recognized_revenue_amount % does not match invoice_request.subtotal_amount %',
+      NEW.recognized_revenue_amount, v_invoice_request.subtotal_amount;
+  END IF;
+
+  IF NEW.tax_amount IS DISTINCT FROM v_invoice_request.tax_amount THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: tax_amount % does not match invoice_request.tax_amount %',
+      NEW.tax_amount, v_invoice_request.tax_amount;
+  END IF;
+
+  SELECT COALESCE(SUM(cp.computed_amount), 0)
+  INTO v_authoritative_direct_labor
+  FROM public.contractor_payable cp
+  WHERE cp.operational_job_id = NEW.operational_job_id
+    AND cp.payable_status IN ('approved', 'paid');
+
+  IF NEW.direct_labor_cost IS DISTINCT FROM v_authoritative_direct_labor THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: direct_labor_cost % does not match authoritative approved/paid contractor_payable total %',
+      NEW.direct_labor_cost, v_authoritative_direct_labor;
+  END IF;
+
+  IF jsonb_typeof(NEW.source_lineage) IS DISTINCT FROM 'object' THEN
+    RAISE EXCEPTION 'job_profitability_snapshot: source_lineage must be a JSON object';
+  END IF;
+
+  v_source_invoice_request_id := NULLIF(BTRIM(COALESCE(NEW.source_lineage->>'invoice_request_id', '')), '');
+  v_source_pricing_snapshot_id := NULLIF(BTRIM(COALESCE(NEW.source_lineage->>'pricing_snapshot_id', '')), '');
+  v_source_quote_version_id := NULLIF(BTRIM(COALESCE(NEW.source_lineage->>'quote_version_id', '')), '');
+
+  IF v_source_invoice_request_id IS NULL THEN
+    RAISE EXCEPTION 'job_profitability_snapshot: source_lineage.invoice_request_id is required';
+  END IF;
+  IF v_source_pricing_snapshot_id IS NULL THEN
+    RAISE EXCEPTION 'job_profitability_snapshot: source_lineage.pricing_snapshot_id is required';
+  END IF;
+  IF v_source_quote_version_id IS NULL THEN
+    RAISE EXCEPTION 'job_profitability_snapshot: source_lineage.quote_version_id is required';
+  END IF;
+
+  IF v_source_invoice_request_id IS DISTINCT FROM v_invoice_request.id::text THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: source_lineage.invoice_request_id % does not match canonical invoice_request.id %',
+      v_source_invoice_request_id, v_invoice_request.id;
+  END IF;
+
+  IF v_source_pricing_snapshot_id IS DISTINCT FROM v_invoice_request.pricing_snapshot_id::text THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: source_lineage.pricing_snapshot_id % does not match canonical invoice_request.pricing_snapshot_id %',
+      v_source_pricing_snapshot_id, v_invoice_request.pricing_snapshot_id;
+  END IF;
+
+  IF v_source_quote_version_id IS DISTINCT FROM v_invoice_request.quote_version_id::text THEN
+    RAISE EXCEPTION
+      'job_profitability_snapshot: source_lineage.quote_version_id % does not match canonical invoice_request.quote_version_id %',
+      v_source_quote_version_id, v_invoice_request.quote_version_id;
+  END IF;
+
+  IF NEW.other_direct_cost > 0 THEN
+    v_direct_cost_source_reference := NULLIF(BTRIM(COALESCE(NEW.source_lineage->>'direct_cost_source_reference', '')), '');
+    IF v_direct_cost_source_reference IS NULL THEN
+      RAISE EXCEPTION
+        'job_profitability_snapshot: source_lineage.direct_cost_source_reference is required when other_direct_cost > 0';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trg_jps_before_insert_validator
+  BEFORE INSERT ON public.job_profitability_snapshot
+  FOR EACH ROW EXECUTE FUNCTION public.trg_jps_before_insert_validator();
+
 -- Immutability: revenue basis and source lineage are frozen once set
 CREATE OR REPLACE FUNCTION public.trg_jps_immutability()
   RETURNS trigger LANGUAGE plpgsql AS
@@ -2051,6 +2181,26 @@ BEGIN
     AND pronamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public');
   IF v_count = 0 THEN
     RAISE EXCEPTION 'M012 SV-20 FAIL: fn_assert_wave5_scope() function not found — A16 cross-scope integrity helper missing';
+  END IF;
+
+  -- [SV-21] profitability BEFORE INSERT validator trigger/function exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_trigger t
+  JOIN pg_class c
+    ON c.oid = t.tgrelid
+  JOIN pg_namespace n
+    ON n.oid = c.relnamespace
+  JOIN pg_proc p
+    ON p.oid = t.tgfoid
+  JOIN pg_namespace pn
+    ON pn.oid = p.pronamespace
+  WHERE t.tgname = 'trg_jps_before_insert_validator'
+    AND n.nspname = 'public'
+    AND c.relname = 'job_profitability_snapshot'
+    AND pn.nspname = 'public'
+    AND p.proname = 'trg_jps_before_insert_validator';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-21 FAIL: trg_jps_before_insert_validator trigger/function not found on job_profitability_snapshot — M012 profitability insert validation missing';
   END IF;
 
 END;

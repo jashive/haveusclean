@@ -533,7 +533,12 @@ export async function createPayableForAssignment(scope, workerAssignment, operat
  */
 export async function captureJobProfitabilitySnapshot(scope, invoiceRequest, opts = {}) {
   const { organizationId, businessUnitId } = scope;
-  const { accessToken, appUserId, otherDirectCost = 0 } = opts;
+  const {
+    accessToken,
+    appUserId,
+    otherDirectCost = 0,
+    directCostSourceReference = null,
+  } = opts;
 
   if (!invoiceRequest || !invoiceRequest.id) {
     throw new Error("captureJobProfitabilitySnapshot: invoiceRequest required");
@@ -551,6 +556,18 @@ export async function captureJobProfitabilitySnapshot(scope, invoiceRequest, opt
   // A15: Append-only — always INSERT a new snapshot row, never UPDATE.
   // Latest snapshot is determined by MAX(snapshot_taken_at) per operational_job_id.
   // Revenue basis is frozen from the accepted pricing snapshot.
+  const sourceLineage = {
+    invoice_request_id: invoiceRequest.id,
+    pricing_snapshot_id: invoiceRequest.pricing_snapshot_id,
+    quote_version_id: invoiceRequest.quote_version_id,
+    payable_ids: (payables || [])
+      .filter((p) => ["approved", "paid"].includes(p.payable_status))
+      .map((p) => p.id),
+  };
+  if (String(directCostSourceReference ?? "").trim()) {
+    sourceLineage.direct_cost_source_reference = String(directCostSourceReference).trim();
+  }
+
   const snapshotData = {
     organizationId,
     businessUnitId,
@@ -561,14 +578,7 @@ export async function captureJobProfitabilitySnapshot(scope, invoiceRequest, opt
     taxAmount: invoiceRequest.tax_amount,
     directLaborCost,
     otherDirectCost: Number(otherDirectCost),
-    sourceLineage: {
-      invoice_request_id: invoiceRequest.id,
-      pricing_snapshot_id: invoiceRequest.pricing_snapshot_id,
-      quote_version_id: invoiceRequest.quote_version_id,
-      payable_ids: (payables || [])
-        .filter((p) => ["approved", "paid"].includes(p.payable_status))
-        .map((p) => p.id),
-    },
+    sourceLineage,
     metadata: { wave: "wave5", captured_at: new Date().toISOString() },
     createdByAppUserId: appUserId ?? null,
   };

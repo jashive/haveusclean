@@ -229,6 +229,19 @@ async function createPaymentObservation(payload) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+function buildCrossInvoiceConflict(invoiceRequestId, providerEventId, existingInvoiceRequestId) {
+  return {
+    success: false,
+    error: "provider_event_id already belongs to a different invoice_request",
+    detail:
+      `provider_event_id ${providerEventId} is already linked to invoice_request ` +
+      `${existingInvoiceRequestId}, not ${invoiceRequestId}`,
+    invoice_request_id: invoiceRequestId,
+    provider_event_id: providerEventId,
+    existing_invoice_request_id: existingInvoiceRequestId,
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ success: false, error: "Method not allowed" });
@@ -340,9 +353,27 @@ export default async function handler(req, res) {
     });
   }
 
+  if (["void", "cancelled"].includes(String(invoiceRequest.request_status || "").trim().toLowerCase())) {
+    return res.status(409).json({
+      success: false,
+      error: "Preview payment is prohibited for terminal invoice_request status",
+      detail: `invoice_request ${invoiceRequestId} is ${invoiceRequest.request_status}`,
+      invoice_request_id: invoiceRequestId,
+    });
+  }
+
   try {
     const existing = await loadPaymentObservationByProviderEvent("preview_test", providerEventId);
     if (existing) {
+      if (existing.invoice_request_id !== invoiceRequestId) {
+        return res.status(409).json(
+          buildCrossInvoiceConflict(
+            invoiceRequestId,
+            providerEventId,
+            existing.invoice_request_id
+          )
+        );
+      }
       return res.status(200).json({
         success: true,
         idempotent: true,
@@ -388,6 +419,15 @@ export default async function handler(req, res) {
       try {
         const existing = await loadPaymentObservationByProviderEvent("preview_test", providerEventId);
         if (existing) {
+          if (existing.invoice_request_id !== invoiceRequestId) {
+            return res.status(409).json(
+              buildCrossInvoiceConflict(
+                invoiceRequestId,
+                providerEventId,
+                existing.invoice_request_id
+              )
+            );
+          }
           return res.status(200).json({
             success: true,
             idempotent: true,
