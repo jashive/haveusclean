@@ -160,7 +160,7 @@ async function loadCanonicalInvoiceRequest(invoiceRequestId) {
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: "Bearer " + serviceKey,
         "Content-Type": "application/json",
       },
     }
@@ -186,7 +186,7 @@ async function loadPaymentObservationByProviderEvent(provider, providerEventId) 
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: "Bearer " + serviceKey,
         "Content-Type": "application/json",
         Accept: "application/json",
       },
@@ -210,7 +210,7 @@ async function createPaymentObservation(payload) {
     method: "POST",
     headers: {
       apikey: serviceKey,
-      Authorization: `******
+      Authorization: "Bearer " + serviceKey,
       "Content-Type": "application/json",
       Prefer: "return=representation",
     },

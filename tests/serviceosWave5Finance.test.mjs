@@ -1304,7 +1304,7 @@ test("75i. preview payment rejects cross-invoice provider_event_id reuse with HT
   try {
     const req = {
       method: "POST",
-      headers: { authorization: "******" },
+      headers: { authorization: "Bearer " + "preview-token" },
       body: { invoice_request_id: "ir-1", provider_event_id: "evt-1" },
     };
     const res = createMockRes();
@@ -1370,7 +1370,7 @@ test("75j. preview payment rejects void or cancelled invoice_request before pers
   try {
     const req = {
       method: "POST",
-      headers: { authorization: "******" },
+      headers: { authorization: "Bearer " + "preview-token" },
       body: { invoice_request_id: "ir-1", provider_event_id: "evt-1" },
     };
     const res = createMockRes();

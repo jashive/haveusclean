@@ -266,7 +266,7 @@ test("W4H-18. QB adapter now requires ServiceOS bearer auth for server-only sync
 test("W4H-19. Wave 5 pilot panel posts invoice_request_id + idempotency_key to /api/wave5-accounting-sync", () => {
   assert.ok(panelSrc.includes('fetch("/api/wave5-accounting-sync"'), "Pilot panel must POST to /api/wave5-accounting-sync");
   assert.ok(panelSrc.includes("invoice_request_id") && panelSrc.includes("idempotency_key"), "Pilot panel must send canonical request fields only");
-  assert.ok(panelSrc.includes("ir-${invoiceRequestId}-v1"), "Pilot panel must derive the stable idempotency key client-side");
+  assert.ok(!panelSrc.includes("ir-${invoiceRequestId}-v1"), "Pilot panel must require an explicit idempotency_key input");
 });
 
 test("W4H-20. Wave 5 pilot panel sends the current ServiceOS bearer token and no longer writes accounting_sync_outbox directly", () => {

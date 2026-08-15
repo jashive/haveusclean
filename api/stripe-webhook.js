@@ -69,7 +69,7 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: 'Bearer ' + serviceKey,
         'Content-Type': 'application/json',
       },
     }
@@ -133,7 +133,7 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: 'Bearer ' + serviceKey,
         'Content-Type': 'application/json',
       },
     }
@@ -173,7 +173,7 @@ async function persistCanonicalPaymentObservation(session, eventId, env) {
     method: 'POST',
     headers: {
       apikey: serviceKey,
-      Authorization: `******
+      Authorization: 'Bearer ' + serviceKey,
       'Content-Type': 'application/json',
       Prefer: 'return=representation',
     },
