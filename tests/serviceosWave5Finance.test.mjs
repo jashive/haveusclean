@@ -135,6 +135,13 @@ function createMockRes() {
   };
 }
 
+function restoreEnv(originalEnv) {
+  for (const key of Object.keys(process.env)) {
+    if (!(key in originalEnv)) delete process.env[key];
+  }
+  Object.assign(process.env, originalEnv);
+}
+
 // ── Historical Wave 1–4 no change ─────────────────────────────────────────────
 
 test("1. Wave 5 migration does not modify Wave 1-4 migration files", () => {
@@ -1314,7 +1321,7 @@ test("75i. preview payment rejects cross-invoice provider_event_id reuse with HT
     assert.equal(res.body?.existing_invoice_request_id, "ir-2");
   } finally {
     global.fetch = originalFetch;
-    process.env = originalEnv;
+    restoreEnv(originalEnv);
   }
 });
 
@@ -1379,7 +1386,7 @@ test("75j. preview payment rejects void or cancelled invoice_request before pers
     assert.match(res.body?.error || "", /terminal invoice_request status/i);
   } finally {
     global.fetch = originalFetch;
-    process.env = originalEnv;
+    restoreEnv(originalEnv);
   }
 });
 
@@ -1443,7 +1450,7 @@ test("75k. Stripe webhook allows explicit Wave5 events with matching operational
     assert.equal(res.body?.received, true);
   } finally {
     global.fetch = originalFetch;
-    process.env = originalEnv;
+    restoreEnv(originalEnv);
   }
 });
 
@@ -1503,7 +1510,7 @@ test("75l. Stripe webhook retries explicit Wave5 events when operational_job_id 
     assert.equal(res.body?.code, "OPERATIONAL_JOB_ID_MISMATCH");
   } finally {
     global.fetch = originalFetch;
-    process.env = originalEnv;
+    restoreEnv(originalEnv);
   }
 });
 
@@ -1565,7 +1572,7 @@ test("75m. Stripe webhook allows explicit Wave5 events without operational_job_i
     assert.equal(res.body?.received, true);
   } finally {
     global.fetch = originalFetch;
-    process.env = originalEnv;
+    restoreEnv(originalEnv);
   }
 });
 
