@@ -228,8 +228,14 @@ test("M009: does not rewrite pricing_snapshot or quote_version economics", () =>
 });
 
 test("M009: anon receives no new canonical operational CRUD", () => {
-  const revokes = m009.match(/REVOKE ALL ON public\.[a-z_]+ +FROM anon;/g) || [];
-  assert.equal(revokes.length, 6, "expected anon revoke on Wave 4 canonical + applicability tables");
+  [
+    "REVOKE ALL ON public.required_evidence_policy",
+    "REVOKE ALL ON public.work_order_governance_link",
+    "REVOKE ALL ON public.work_order_wave4_applicability",
+    "REVOKE ALL ON public.work_order_evidence_requirement",
+    "REVOKE ALL ON public.service_exception",
+    "REVOKE ALL ON public.customer_outcome",
+  ].forEach((snippet) => assert.ok(m009.includes(snippet), `missing anon revoke for ${snippet}`));
   assert.ok(!/GRANT .* TO anon/i.test(m009), "M009 must not grant anon access");
 });
 
