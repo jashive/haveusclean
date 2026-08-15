@@ -265,7 +265,7 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
       const ir = await fetchInvoiceRequestById(irId4.trim(), accessToken);
       if (!ir) throw new Error(`invoice_request ${irId4.trim()} not found`);
 
-      const previewEventId = `preview-test-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+      const previewEventId = `preview-test-${Date.now()}-${crypto.randomUUID().replace(/-/g, "").slice(0, 8)}`;
       const result = await observePayment(
         ir,
         {
