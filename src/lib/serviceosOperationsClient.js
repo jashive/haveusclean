@@ -200,6 +200,11 @@ export async function createWorkOrderGovernanceLink(payload, accessToken) {
   return insertOne("work_order_governance_link", payload, accessToken);
 }
 
+export async function createWorkOrderWave4Applicability(payload, accessToken) {
+  assertEnabled();
+  return insertOne("work_order_wave4_applicability", payload, accessToken);
+}
+
 export async function createWorkOrderEvidenceRequirement(payload, accessToken) {
   assertEnabled();
   return insertOne("work_order_evidence_requirement", payload, accessToken);
@@ -336,6 +341,16 @@ export async function fetchGovernanceLinkForWorkOrder(workOrderId, accessToken) 
   assertEnabled();
   const rows = await fetchMany(
     "work_order_governance_link",
+    `work_order_id=eq.${encodeURIComponent(workOrderId)}&limit=1`,
+    accessToken
+  );
+  return Array.isArray(rows) ? rows[0] ?? null : null;
+}
+
+export async function fetchWave4ApplicabilityForWorkOrder(workOrderId, accessToken) {
+  assertEnabled();
+  const rows = await fetchMany(
+    "work_order_wave4_applicability",
     `work_order_id=eq.${encodeURIComponent(workOrderId)}&limit=1`,
     accessToken
   );

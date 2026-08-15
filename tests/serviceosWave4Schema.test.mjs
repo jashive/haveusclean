@@ -7,6 +7,7 @@ import assert from "node:assert/strict";
 import {
   buildRequiredEvidencePolicyPayload,
   buildWorkOrderGovernanceLinkPayload,
+  buildWorkOrderWave4ApplicabilityPayload,
   buildWorkOrderEvidenceRequirementPayload,
   buildServiceExceptionPayload,
   buildCustomerOutcomePayload,
@@ -45,6 +46,28 @@ test("M009: wrapped in a single BEGIN/COMMIT transaction", () => {
   assert.ok(/^\s*COMMIT\s*;/m.test(m009), "M009 missing COMMIT;");
 });
 
+test("buildWorkOrderWave4ApplicabilityPayload produces explicit enrollment boundary fields", () => {
+  const payload = buildWorkOrderWave4ApplicabilityPayload({
+    organizationId: "org-1",
+    businessUnitId: "bu-1",
+    jurisdictionId: "jur-1",
+    operationalJobId: "oj-1",
+    workOrderId: "wo-1",
+  });
+  assert.deepEqual(Object.keys(payload), [
+    "organization_id",
+    "business_unit_id",
+    "jurisdiction_id",
+    "operational_job_id",
+    "work_order_id",
+    "applicability_status",
+    "enrollment_source",
+    "metadata",
+  ]);
+  assert.equal(payload.applicability_status, "enrolled");
+  assert.equal(payload.enrollment_source, "governance_link_required");
+});
+
 test("M009: additive only and does not touch huc_*", () => {
   assert.ok(!/DROP\s+TABLE/i.test(m009), "M009 must not drop tables");
   assert.ok(!/ALTER TABLE public\.huc_/i.test(m009), "M009 must not alter huc_*");
@@ -69,11 +92,19 @@ test("M009: preserves existing append-only controls and validates them in self-c
 test("M009: defines required-evidence policy authority and frozen work-order requirements", () => {
   assert.ok(m009.includes("CREATE TABLE public.required_evidence_policy"));
   assert.ok(m009.includes("configuration_version_id"));
+  assert.ok(m009.includes("requires_external_reference"));
   assert.ok(m009.includes("CREATE TABLE public.work_order_evidence_requirement"));
   assert.ok(m009.includes("work_order_governance_link_id"));
   assert.ok(m009.includes("required_evidence_policy_id"));
   assert.ok(m009.includes("source_configuration_version_id"));
   assert.ok(m009.includes("UNIQUE (work_order_id, requirement_key)"));
+});
+
+test("M009: defines explicit immutable Wave 4 governance applicability enrollment", () => {
+  assert.ok(m009.includes("CREATE TABLE public.work_order_wave4_applicability"));
+  assert.ok(m009.includes("applicability_status"));
+  assert.ok(m009.includes("enrollment_source"));
+  assert.ok(m009.includes("wave4_guard_work_order_wave4_applicability_no_delete"));
 });
 
 test("M009: defines work-order governance linkage for config/checklist/task/SOP references", () => {
@@ -93,13 +124,35 @@ test("M009: closure enforcement fails closed for missing required evidence", () 
   );
   assert.ok(fnMatch, "work_order closure guard function missing");
   const fn = fnMatch[0];
+  assert.ok(fn.includes("work_order_wave4_applicability"));
   assert.ok(fn.includes("frozen governance linkage is required before close"));
   assert.ok(fn.includes("frozen evidence requirements are required before close"));
   assert.ok(fn.includes("mandatory evidence requirement"), "missing required-evidence close gate");
   assert.ok(fn.includes("completion_evidence"), "close gate must inspect completion_evidence");
+  assert.ok(fn.includes("storage_system"), "close gate must enforce storage_system when required");
+  assert.ok(fn.includes("storage_reference"), "close gate must enforce storage_reference when required");
   assert.ok(fn.includes("qa_inspection"), "close gate must inspect qa_inspection");
   assert.ok(fn.includes("corrective_action"), "close gate must inspect corrective_action");
   assert.ok(m009.includes("CREATE TRIGGER trg_wo_wave4_close_gate"));
+});
+
+test("M009: frozen evidence requirements enforce governance lineage and anti-weakening checks", () => {
+  const fnMatch = m009.match(
+    /CREATE OR REPLACE FUNCTION public\.wave4_validate_work_order_evidence_requirement_scope[\s\S]*?\$\$;/
+  );
+  assert.ok(fnMatch, "work_order_evidence_requirement scope validator missing");
+  const fn = fnMatch[0];
+  assert.ok(
+    fn.includes("source_configuration_version_id must equal governance link configuration_version_id"),
+    "must bind frozen source config to governance link config"
+  );
+  assert.ok(fn.includes("policy required_count mismatch"));
+  assert.ok(fn.includes("policy is_mandatory mismatch"));
+  assert.ok(fn.includes("policy evidence_type mismatch"));
+  assert.ok(fn.includes("policy service_task_key mismatch"));
+  assert.ok(fn.includes("policy service_module_key mismatch"));
+  assert.ok(fn.includes("policy requires_external_reference mismatch"));
+  assert.ok(fn.includes("policy storage_rule_payload mismatch"));
 });
 
 test("M009: existing QA and corrective-action gates remain present", () => {
@@ -176,15 +229,15 @@ test("M009: does not rewrite pricing_snapshot or quote_version economics", () =>
 
 test("M009: anon receives no new canonical operational CRUD", () => {
   const revokes = m009.match(/REVOKE ALL ON public\.[a-z_]+ +FROM anon;/g) || [];
-  assert.equal(revokes.length, 5, "expected anon revoke on all 5 Wave 4 tables");
+  assert.equal(revokes.length, 6, "expected anon revoke on Wave 4 canonical + applicability tables");
   assert.ok(!/GRANT .* TO anon/i.test(m009), "M009 must not grant anon access");
 });
 
 test("M009: self-validation is locked to deterministic Wave 4 controls", () => {
   assert.ok(m009.includes("M009_PASS"), "M009 self-validation marker missing");
   assert.ok(
-    /v_expected_policy_count\s+integer\s*:=\s*20/.test(m009),
-    "M009 expected policy count must be locked to 20"
+    /v_expected_policy_count\s+integer\s*:=\s*28/.test(m009),
+    "M009 expected policy count must be locked to 28"
   );
   [
     "wave4_tables_found",
@@ -198,7 +251,31 @@ test("M009: self-validation is locked to deterministic Wave 4 controls", () => {
     "legacy_huc_touch_count",
     "append_only_guards_present",
     "work_order_close_gate_present",
+    "wave4_applicability_control_present",
+    "worker_exception_security_controls_present",
   ].forEach((field) => assert.ok(m009.includes(field), `M009 self-validation missing ${field}`));
+});
+
+test("M009: office_ops rights are scoped to operational governance and triage", () => {
+  assert.ok(m009.includes("CREATE POLICY pol_wogl_office_ops_insert"));
+  assert.ok(m009.includes("CREATE POLICY pol_woer_office_ops_insert"));
+  assert.ok(m009.includes("CREATE POLICY pol_se_office_ops_all"));
+  assert.ok(m009.includes("CREATE POLICY pol_rep_office_ops_select"));
+  assert.ok(!m009.includes("pol_rep_office_ops_all"), "office_ops must not get required_evidence_policy write access");
+});
+
+test("M009: worker exception inserts are bound to authenticated worker identity", () => {
+  const fnMatch = m009.match(
+    /CREATE OR REPLACE FUNCTION public\.wave4_validate_service_exception_scope[\s\S]*?\$\$;/
+  );
+  assert.ok(fnMatch, "service_exception scope validator missing");
+  const fn = fnMatch[0];
+  assert.ok(fn.includes("source_type = 'worker'"));
+  assert.ok(fn.includes("actor_worker_id must match authenticated worker for source_type=worker"));
+  assert.ok(fn.includes("actor_app_user_id must match authenticated app user for source_type=worker"));
+  assert.ok(fn.includes("worker context cannot impersonate source_type"));
+  assert.ok(m009.includes("CREATE POLICY pol_se_worker_insert"));
+  assert.ok(m009.includes("source_type = 'worker'"));
 });
 
 test("M010: rollback-only rehearsal with zero-artifact verification", () => {
@@ -212,6 +289,8 @@ test("M010: rollback-only rehearsal with zero-artifact verification", () => {
 test("M010: covers required-evidence rejection/success and exception lifecycle", () => {
   [
     "INSERT INTO public.required_evidence_policy",
+    "INSERT INTO public.work_order_wave4_applicability",
+    "M010 expected missing governance close failure did not occur",
     "INSERT INTO public.work_order_governance_link",
     "INSERT INTO public.work_order_evidence_requirement",
     "M010 expected missing evidence close failure did not occur",
@@ -221,6 +300,82 @@ test("M010: covers required-evidence rejection/success and exception lifecycle",
     "INSERT INTO public.customer_outcome",
     "CREATE TEMP TABLE pg_temp.m010_scope",
   ].forEach((snippet) => assert.ok(m010.includes(snippet), `M010 missing ${snippet}`));
+});
+
+test("M010: restores Wave 2 quote lifecycle through draft -> sent -> accepted", () => {
+  assert.ok(m010.includes("INSERT INTO public.quote_version"));
+  assert.ok(m010.includes("'draft'"));
+  assert.ok(m010.includes("SET lifecycle_status = 'sent'"));
+  assert.ok(m010.includes("INSERT INTO public.quote_response"));
+  assert.ok(m010.includes("response_type, response_channel, responded_by_name"));
+  assert.ok(m010.includes("SET lifecycle_status = 'accepted'"));
+  assert.ok(m010.indexOf("INSERT INTO public.quote_response") < m010.indexOf("SET lifecycle_status = 'accepted'"));
+});
+
+test("M010: conversion_record carries canonical M008 lineage fields", () => {
+  assert.ok(m010.includes("INSERT INTO public.conversion_record"));
+  [
+    "service_request_id",
+    "opportunity_id",
+    "estimate_id",
+    "quote_id",
+    "quote_version_id",
+    "quote_response_id",
+    "customer_id",
+    "contact_id",
+    "service_location_id",
+  ].forEach((field) => assert.ok(m010.includes(field), `M010 conversion_record missing ${field}`));
+});
+
+test("M010: worker_assignment uses proposed -> assigned -> acknowledged lifecycle", () => {
+  assert.ok(m010.includes("'proposed'"));
+  assert.ok(m010.includes("SET assignment_status = 'assigned'"));
+  assert.ok(m010.includes("SET assignment_status = 'acknowledged'"));
+  assert.ok(m010.includes("worker_assignment must begin at proposed"));
+  assert.ok(m010.includes("worker_assignment lifecycle proposed->assigned->acknowledged not satisfied"));
+});
+
+test("M010: original failed QA remains immutable and reinspection provides pass", () => {
+  assert.ok(m010.includes("inspection_type = 'reinspection'") || m010.includes("'reinspection'"));
+  assert.ok(m010.includes("original failed QA inspection must remain failed"));
+  assert.ok(m010.includes("reinspection QA inspection must be passed"));
+  assert.ok(
+    !m010.includes("WHERE id = 'd1000000-0000-0000-0000-000000000010'::uuid;\n\nUPDATE public.qa_inspection\nSET inspection_status = 'passed'"),
+    "M010 must not update original failed QA row to passed"
+  );
+});
+
+test("M010: rollback verification covers full synthetic Wave1/2/3/4 chain", () => {
+  [
+    "FROM public.customer",
+    "FROM public.contact",
+    "FROM public.service_location",
+    "FROM public.service_request",
+    "FROM public.opportunity",
+    "FROM public.estimate",
+    "FROM public.quote",
+    "FROM public.pricing_snapshot",
+    "FROM public.quote_version",
+    "FROM public.quote_response",
+    "FROM public.conversion_record",
+    "FROM public.job_handoff",
+    "FROM public.operational_job",
+    "FROM public.schedule_window",
+    "FROM public.worker_assignment",
+    "FROM public.work_order",
+    "FROM public.work_order_event",
+    "FROM public.completion_evidence",
+    "FROM public.service_checklist_result",
+    "FROM public.qa_inspection",
+    "FROM public.corrective_action",
+    "FROM public.operational_handoff",
+    "FROM public.required_evidence_policy",
+    "FROM public.work_order_wave4_applicability",
+    "FROM public.work_order_governance_link",
+    "FROM public.work_order_evidence_requirement",
+    "FROM public.service_exception",
+    "FROM public.customer_outcome",
+  ].forEach((snippet) => assert.ok(m010.includes(snippet), `M010 rollback verification missing ${snippet}`));
 });
 
 test("Wave 4 app scaffolding does not introduce @supabase/supabase-js", () => {
@@ -265,11 +420,13 @@ test("buildRequiredEvidencePolicyPayload produces exact M009 field names", () =>
     "evidence_type",
     "required_count",
     "is_mandatory",
+    "requires_external_reference",
     "storage_rule_payload",
     "metadata",
   ]);
   assert.equal(payload.required_count, 1);
   assert.equal(payload.is_mandatory, true);
+  assert.equal(payload.requires_external_reference, false);
 });
 
 test("buildWorkOrderGovernanceLinkPayload preserves config/checklist/task/SOP references", () => {
@@ -307,6 +464,7 @@ test("buildWorkOrderEvidenceRequirementPayload freezes requirement linkage", () 
   assert.equal(payload.source_configuration_version_id, "cfg-1");
   assert.equal(payload.required_count, 1);
   assert.equal(payload.is_mandatory, true);
+  assert.equal(payload.requires_external_reference, false);
 });
 
 test("buildServiceExceptionPayload defaults to reported and uses governed fields", () => {
@@ -343,11 +501,13 @@ test("Wave 4 client exports narrow REST contract scaffolding only", () => {
   [
     "createRequiredEvidencePolicy",
     "createWorkOrderGovernanceLink",
+    "createWorkOrderWave4Applicability",
     "createWorkOrderEvidenceRequirement",
     "createServiceException",
     "createCustomerOutcome",
     "fetchRequiredEvidencePoliciesByConfigurationVersion",
     "fetchGovernanceLinkForWorkOrder",
+    "fetchWave4ApplicabilityForWorkOrder",
     "fetchEvidenceRequirementsForWorkOrder",
     "fetchServiceExceptionsForJob",
     "fetchCustomerOutcomesForJob",

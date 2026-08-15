@@ -30,6 +30,7 @@ CREATE TABLE public.required_evidence_policy (
   evidence_type               text        NOT NULL,
   required_count              integer     NOT NULL DEFAULT 1,
   is_mandatory                boolean     NOT NULL DEFAULT true,
+  requires_external_reference boolean     NOT NULL DEFAULT false,
 
   storage_rule_payload        jsonb       NOT NULL DEFAULT '{}'::jsonb,
   metadata                    jsonb       NOT NULL DEFAULT '{}'::jsonb,
@@ -104,6 +105,47 @@ CREATE TABLE public.work_order_governance_link (
 -- 3. work_order_evidence_requirement
 -- Frozen per-work-order evidence rules used for closure decisions.
 -- ============================================================
+
+
+-- ============================================================
+-- 3. work_order_wave4_applicability
+-- Explicit enrollment boundary for Wave 4-governed work orders.
+-- ============================================================
+CREATE TABLE public.work_order_wave4_applicability (
+  id                          uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
+
+  organization_id             uuid        NOT NULL,
+  business_unit_id            uuid        NOT NULL,
+  jurisdiction_id             uuid        NOT NULL,
+
+  operational_job_id          uuid        NOT NULL UNIQUE,
+  work_order_id               uuid        NOT NULL UNIQUE,
+
+  applicability_status        text        NOT NULL DEFAULT 'enrolled',
+  enrollment_source           text        NOT NULL DEFAULT 'governance_link_required',
+  metadata                    jsonb       NOT NULL DEFAULT '{}'::jsonb,
+
+  created_by_app_user_id      uuid        NULL,
+  created_at                  timestamptz NOT NULL DEFAULT now(),
+
+  CONSTRAINT fk_woa_org
+    FOREIGN KEY (organization_id)
+    REFERENCES public.organization(id),
+
+  CONSTRAINT fk_woa_operational_job
+    FOREIGN KEY (operational_job_id)
+    REFERENCES public.operational_job(id),
+
+  CONSTRAINT fk_woa_work_order
+    FOREIGN KEY (work_order_id)
+    REFERENCES public.work_order(id),
+
+  CONSTRAINT ck_woa_status CHECK (applicability_status = 'enrolled'),
+  CONSTRAINT ck_woa_enrollment_source CHECK (
+    enrollment_source IN ('owner_admin', 'office_ops', 'qa', 'system', 'governance_link_required')
+  )
+);
+
 CREATE TABLE public.work_order_evidence_requirement (
   id                              uuid        PRIMARY KEY DEFAULT gen_random_uuid(),
 
@@ -123,6 +165,7 @@ CREATE TABLE public.work_order_evidence_requirement (
   evidence_type                   text        NOT NULL,
   required_count                  integer     NOT NULL DEFAULT 1,
   is_mandatory                    boolean     NOT NULL DEFAULT true,
+  requires_external_reference     boolean     NOT NULL DEFAULT false,
 
   storage_rule_payload            jsonb       NOT NULL DEFAULT '{}'::jsonb,
   quality_signal_payload          jsonb       NOT NULL DEFAULT '{}'::jsonb,
@@ -338,6 +381,8 @@ CREATE INDEX idx_rep_service_family   ON public.required_evidence_policy (servic
 CREATE INDEX idx_wogl_work_order      ON public.work_order_governance_link (work_order_id);
 CREATE INDEX idx_wogl_configuration   ON public.work_order_governance_link (configuration_version_id);
 
+CREATE INDEX idx_woa_work_order       ON public.work_order_wave4_applicability (work_order_id);
+
 CREATE INDEX idx_woer_work_order      ON public.work_order_evidence_requirement (work_order_id);
 CREATE INDEX idx_woer_job             ON public.work_order_evidence_requirement (operational_job_id);
 
@@ -396,6 +441,7 @@ BEGIN
   IF NEW.required_count           <> OLD.required_count           THEN RAISE EXCEPTION 'required_evidence_policy: required_count is immutable'; END IF;
   IF NEW.is_mandatory             <> OLD.is_mandatory             THEN RAISE EXCEPTION 'required_evidence_policy: is_mandatory is immutable'; END IF;
   IF NEW.storage_rule_payload     <> OLD.storage_rule_payload     THEN RAISE EXCEPTION 'required_evidence_policy: storage_rule_payload is immutable'; END IF;
+  IF NEW.requires_external_reference <> OLD.requires_external_reference THEN RAISE EXCEPTION 'required_evidence_policy: requires_external_reference is immutable'; END IF;
   RETURN NEW;
 END;
 $$;
@@ -453,6 +499,70 @@ BEGIN
 END;
 $$;
 
+
+
+CREATE OR REPLACE FUNCTION public.wave4_validate_work_order_wave4_applicability_scope()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+DECLARE
+  v_oj public.operational_job%ROWTYPE;
+  v_wo public.work_order%ROWTYPE;
+BEGIN
+  SELECT * INTO v_oj FROM public.operational_job WHERE id = NEW.operational_job_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'work_order_wave4_applicability: operational_job % not found', NEW.operational_job_id; END IF;
+
+  SELECT * INTO v_wo FROM public.work_order WHERE id = NEW.work_order_id;
+  IF NOT FOUND THEN RAISE EXCEPTION 'work_order_wave4_applicability: work_order % not found', NEW.work_order_id; END IF;
+
+  IF v_wo.operational_job_id <> NEW.operational_job_id THEN
+    RAISE EXCEPTION 'work_order_wave4_applicability: work_order does not belong to declared operational_job';
+  END IF;
+
+  IF v_oj.organization_id <> NEW.organization_id OR v_wo.organization_id <> NEW.organization_id THEN
+    RAISE EXCEPTION 'work_order_wave4_applicability: organization_id mismatch';
+  END IF;
+
+  IF v_oj.business_unit_id <> NEW.business_unit_id OR v_wo.business_unit_id <> NEW.business_unit_id THEN
+    RAISE EXCEPTION 'work_order_wave4_applicability: business_unit_id mismatch';
+  END IF;
+
+  IF v_oj.jurisdiction_id <> NEW.jurisdiction_id OR v_wo.jurisdiction_id <> NEW.jurisdiction_id THEN
+    RAISE EXCEPTION 'work_order_wave4_applicability: jurisdiction_id mismatch';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.wave4_guard_work_order_wave4_applicability_immutable()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+BEGIN
+  IF NEW.organization_id      <> OLD.organization_id      THEN RAISE EXCEPTION 'work_order_wave4_applicability: organization_id is immutable'; END IF;
+  IF NEW.business_unit_id     <> OLD.business_unit_id     THEN RAISE EXCEPTION 'work_order_wave4_applicability: business_unit_id is immutable'; END IF;
+  IF NEW.jurisdiction_id      <> OLD.jurisdiction_id      THEN RAISE EXCEPTION 'work_order_wave4_applicability: jurisdiction_id is immutable'; END IF;
+  IF NEW.operational_job_id   <> OLD.operational_job_id   THEN RAISE EXCEPTION 'work_order_wave4_applicability: operational_job_id is immutable'; END IF;
+  IF NEW.work_order_id        <> OLD.work_order_id        THEN RAISE EXCEPTION 'work_order_wave4_applicability: work_order_id is immutable'; END IF;
+  IF NEW.applicability_status <> OLD.applicability_status THEN RAISE EXCEPTION 'work_order_wave4_applicability: applicability_status is immutable'; END IF;
+  IF NEW.enrollment_source    <> OLD.enrollment_source    THEN RAISE EXCEPTION 'work_order_wave4_applicability: enrollment_source is immutable'; END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.wave4_guard_work_order_wave4_applicability_no_delete()
+  RETURNS trigger
+  LANGUAGE plpgsql
+  SET search_path = public
+AS $$
+BEGIN
+  RAISE EXCEPTION 'work_order_wave4_applicability: enrollment rows are append-only and cannot be deleted';
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION public.wave4_validate_work_order_evidence_requirement_scope()
   RETURNS trigger
   LANGUAGE plpgsql
@@ -475,6 +585,9 @@ BEGIN
   IF v_wogl.operational_job_id <> NEW.operational_job_id OR v_wogl.work_order_id <> NEW.work_order_id THEN
     RAISE EXCEPTION 'work_order_evidence_requirement: governance link does not belong to declared operational chain';
   END IF;
+  IF v_wogl.configuration_version_id <> NEW.source_configuration_version_id THEN
+    RAISE EXCEPTION 'work_order_evidence_requirement: source_configuration_version_id must equal governance link configuration_version_id';
+  END IF;
 
   SELECT * INTO v_cfg FROM public.configuration_version WHERE id = NEW.source_configuration_version_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'work_order_evidence_requirement: source configuration_version % not found', NEW.source_configuration_version_id; END IF;
@@ -493,6 +606,24 @@ BEGIN
     END IF;
     IF v_rep.evidence_type <> NEW.evidence_type THEN
       RAISE EXCEPTION 'work_order_evidence_requirement: policy evidence_type mismatch';
+    END IF;
+    IF v_rep.required_count <> NEW.required_count THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy required_count mismatch';
+    END IF;
+    IF v_rep.is_mandatory <> NEW.is_mandatory THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy is_mandatory mismatch';
+    END IF;
+    IF v_rep.service_task_key IS DISTINCT FROM NEW.service_task_key THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy service_task_key mismatch';
+    END IF;
+    IF v_rep.service_module_key IS DISTINCT FROM NEW.service_module_key THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy service_module_key mismatch';
+    END IF;
+    IF v_rep.requires_external_reference <> NEW.requires_external_reference THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy requires_external_reference mismatch';
+    END IF;
+    IF v_rep.storage_rule_payload <> NEW.storage_rule_payload THEN
+      RAISE EXCEPTION 'work_order_evidence_requirement: policy storage_rule_payload mismatch';
     END IF;
   END IF;
 
@@ -523,6 +654,7 @@ BEGIN
   IF NEW.required_count                  <> OLD.required_count                  THEN RAISE EXCEPTION 'work_order_evidence_requirement: required_count is immutable'; END IF;
   IF NEW.is_mandatory                    <> OLD.is_mandatory                    THEN RAISE EXCEPTION 'work_order_evidence_requirement: is_mandatory is immutable'; END IF;
   IF NEW.storage_rule_payload            <> OLD.storage_rule_payload            THEN RAISE EXCEPTION 'work_order_evidence_requirement: storage_rule_payload is immutable'; END IF;
+  IF NEW.requires_external_reference      <> OLD.requires_external_reference      THEN RAISE EXCEPTION 'work_order_evidence_requirement: requires_external_reference is immutable'; END IF;
   RETURN NEW;
 END;
 $$;
@@ -538,6 +670,8 @@ DECLARE
   v_qi public.qa_inspection%ROWTYPE;
   v_ca public.corrective_action%ROWTYPE;
   v_aw public.worker%ROWTYPE;
+  v_current_worker_id uuid;
+  v_current_app_user_id uuid;
 BEGIN
   SELECT * INTO v_oj FROM public.operational_job WHERE id = NEW.operational_job_id;
   IF NOT FOUND THEN RAISE EXCEPTION 'service_exception: operational_job % not found', NEW.operational_job_id; END IF;
@@ -552,6 +686,30 @@ BEGIN
   END IF;
   IF v_oj.business_unit_id <> NEW.business_unit_id OR v_wo.business_unit_id <> NEW.business_unit_id THEN
     RAISE EXCEPTION 'service_exception: business_unit_id mismatch';
+  END IF;
+
+  v_current_app_user_id := public.current_app_user_id();
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.source_type = 'worker' THEN
+      SELECT public.current_worker_id(NEW.organization_id) INTO v_current_worker_id;
+      IF v_current_worker_id IS NULL THEN
+        RAISE EXCEPTION 'service_exception: authenticated worker context is required for source_type=worker';
+      END IF;
+
+      IF NEW.actor_worker_id IS NOT NULL AND NEW.actor_worker_id <> v_current_worker_id THEN
+        RAISE EXCEPTION 'service_exception: actor_worker_id must match authenticated worker for source_type=worker';
+      END IF;
+      NEW.actor_worker_id := v_current_worker_id;
+
+      IF NEW.actor_app_user_id IS NOT NULL AND NEW.actor_app_user_id <> v_current_app_user_id THEN
+        RAISE EXCEPTION 'service_exception: actor_app_user_id must match authenticated app user for source_type=worker';
+      END IF;
+      NEW.actor_app_user_id := COALESCE(NEW.actor_app_user_id, v_current_app_user_id);
+    ELSIF public.worker_has_active_assignment(NEW.operational_job_id)
+       AND NOT public.has_bu_role(NEW.organization_id, NEW.business_unit_id, ARRAY['owner_admin', 'qa', 'office_ops']) THEN
+      RAISE EXCEPTION 'service_exception: worker context cannot impersonate source_type=%', NEW.source_type;
+    END IF;
   END IF;
 
   IF NEW.qa_inspection_id IS NOT NULL THEN
@@ -758,7 +916,7 @@ CREATE OR REPLACE FUNCTION public.wave4_guard_wo_closure_requirements()
   SET search_path = public
 AS $$
 DECLARE
-  v_has_wave4_contract     boolean;
+  v_is_wave4_governed      boolean;
   v_missing_requirements   integer;
   v_passing_qa             integer;
   v_blocking_correctives   integer;
@@ -773,19 +931,14 @@ BEGIN
 
   SELECT EXISTS (
            SELECT 1
-           FROM public.work_order_governance_link wogl
-           WHERE wogl.work_order_id = NEW.id
-             AND wogl.operational_job_id = NEW.operational_job_id
+           FROM public.work_order_wave4_applicability woa
+           WHERE woa.work_order_id = NEW.id
+             AND woa.operational_job_id = NEW.operational_job_id
+             AND woa.applicability_status = 'enrolled'
          )
-         OR EXISTS (
-           SELECT 1
-           FROM public.work_order_evidence_requirement woer
-           WHERE woer.work_order_id = NEW.id
-             AND woer.operational_job_id = NEW.operational_job_id
-         )
-  INTO v_has_wave4_contract;
+  INTO v_is_wave4_governed;
 
-  IF NOT v_has_wave4_contract THEN
+  IF NOT v_is_wave4_governed THEN
     RETURN NEW;
   END IF;
 
@@ -819,6 +972,15 @@ BEGIN
         AND ce.operational_job_id = NEW.operational_job_id
         AND ce.evidence_type = req.evidence_type
         AND ce.evidence_payload ->> 'requirement_key' = req.requirement_key
+        AND (
+          req.requires_external_reference = false
+          OR (
+            ce.storage_system IS NOT NULL
+            AND btrim(ce.storage_system) <> ''
+            AND ce.storage_reference IS NOT NULL
+            AND btrim(ce.storage_reference) <> ''
+          )
+        )
     ) < req.required_count;
 
   IF v_missing_requirements > 0 THEN
@@ -869,6 +1031,18 @@ CREATE TRIGGER trg_wogl_immutable
   BEFORE UPDATE ON public.work_order_governance_link
   FOR EACH ROW EXECUTE FUNCTION public.wave4_guard_work_order_governance_link_immutable();
 
+CREATE TRIGGER trg_woa_scope_validate
+  BEFORE INSERT OR UPDATE ON public.work_order_wave4_applicability
+  FOR EACH ROW EXECUTE FUNCTION public.wave4_validate_work_order_wave4_applicability_scope();
+
+CREATE TRIGGER trg_woa_immutable
+  BEFORE UPDATE ON public.work_order_wave4_applicability
+  FOR EACH ROW EXECUTE FUNCTION public.wave4_guard_work_order_wave4_applicability_immutable();
+
+CREATE TRIGGER trg_woa_no_delete
+  BEFORE DELETE ON public.work_order_wave4_applicability
+  FOR EACH ROW EXECUTE FUNCTION public.wave4_guard_work_order_wave4_applicability_no_delete();
+
 CREATE TRIGGER trg_woer_scope_validate
   BEFORE INSERT OR UPDATE ON public.work_order_evidence_requirement
   FOR EACH ROW EXECUTE FUNCTION public.wave4_validate_work_order_evidence_requirement_scope();
@@ -918,20 +1092,23 @@ CREATE TRIGGER trg_wo_wave4_close_gate
 -- ---------------------------------------------------------------------------
 
 ALTER TABLE public.required_evidence_policy      ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.work_order_governance_link    ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.work_order_evidence_requirement ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.work_order_governance_link      ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.work_order_wave4_applicability  ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.work_order_evidence_requirement   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.service_exception             ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.customer_outcome              ENABLE ROW LEVEL SECURITY;
 
 REVOKE ALL ON public.required_evidence_policy       FROM anon;
-REVOKE ALL ON public.work_order_governance_link     FROM anon;
-REVOKE ALL ON public.work_order_evidence_requirement FROM anon;
+REVOKE ALL ON public.work_order_governance_link       FROM anon;
+REVOKE ALL ON public.work_order_wave4_applicability   FROM anon;
+REVOKE ALL ON public.work_order_evidence_requirement   FROM anon;
 REVOKE ALL ON public.service_exception              FROM anon;
 REVOKE ALL ON public.customer_outcome               FROM anon;
 
 GRANT SELECT, INSERT, UPDATE ON public.required_evidence_policy        TO authenticated;
-GRANT SELECT, INSERT         ON public.work_order_governance_link      TO authenticated;
-GRANT SELECT, INSERT         ON public.work_order_evidence_requirement TO authenticated;
+GRANT SELECT, INSERT         ON public.work_order_governance_link        TO authenticated;
+GRANT SELECT, INSERT         ON public.work_order_wave4_applicability    TO authenticated;
+GRANT SELECT, INSERT         ON public.work_order_evidence_requirement    TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.service_exception               TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.customer_outcome                TO authenticated;
 
@@ -957,11 +1134,41 @@ CREATE POLICY pol_wogl_office_ops_select ON public.work_order_governance_link
   FOR SELECT TO authenticated
   USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
 
+CREATE POLICY pol_wogl_office_ops_insert ON public.work_order_governance_link
+  FOR INSERT TO authenticated
+  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
+
 CREATE POLICY pol_wogl_qa_select ON public.work_order_governance_link
   FOR SELECT TO authenticated
   USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['qa']));
 
 CREATE POLICY pol_wogl_worker_select ON public.work_order_governance_link
+  FOR SELECT TO authenticated
+  USING (public.worker_has_active_assignment(operational_job_id));
+
+
+
+CREATE POLICY pol_woa_owner_admin_select ON public.work_order_wave4_applicability
+  FOR SELECT TO authenticated
+  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
+
+CREATE POLICY pol_woa_owner_admin_insert ON public.work_order_wave4_applicability
+  FOR INSERT TO authenticated
+  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin']));
+
+CREATE POLICY pol_woa_office_ops_select ON public.work_order_wave4_applicability
+  FOR SELECT TO authenticated
+  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
+
+CREATE POLICY pol_woa_office_ops_insert ON public.work_order_wave4_applicability
+  FOR INSERT TO authenticated
+  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
+
+CREATE POLICY pol_woa_qa_select ON public.work_order_wave4_applicability
+  FOR SELECT TO authenticated
+  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['qa']));
+
+CREATE POLICY pol_woa_worker_select ON public.work_order_wave4_applicability
   FOR SELECT TO authenticated
   USING (public.worker_has_active_assignment(operational_job_id));
 
@@ -973,6 +1180,10 @@ CREATE POLICY pol_woer_owner_admin_all ON public.work_order_evidence_requirement
 CREATE POLICY pol_woer_office_ops_select ON public.work_order_evidence_requirement
   FOR SELECT TO authenticated
   USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
+
+CREATE POLICY pol_woer_office_ops_insert ON public.work_order_evidence_requirement
+  FOR INSERT TO authenticated
+  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
 
 CREATE POLICY pol_woer_qa_select ON public.work_order_evidence_requirement
   FOR SELECT TO authenticated
@@ -992,9 +1203,10 @@ CREATE POLICY pol_se_qa_all ON public.service_exception
   USING  (public.has_bu_role(organization_id, business_unit_id, ARRAY['qa']))
   WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['qa']));
 
-CREATE POLICY pol_se_office_ops_select ON public.service_exception
-  FOR SELECT TO authenticated
-  USING (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
+CREATE POLICY pol_se_office_ops_all ON public.service_exception
+  FOR ALL TO authenticated
+  USING  (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']))
+  WITH CHECK (public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops']));
 
 CREATE POLICY pol_se_worker_select ON public.service_exception
   FOR SELECT TO authenticated
@@ -1002,7 +1214,18 @@ CREATE POLICY pol_se_worker_select ON public.service_exception
 
 CREATE POLICY pol_se_worker_insert ON public.service_exception
   FOR INSERT TO authenticated
-  WITH CHECK (public.worker_has_active_assignment(operational_job_id));
+  WITH CHECK (
+    public.worker_has_active_assignment(operational_job_id)
+    AND source_type = 'worker'
+    AND (
+      actor_worker_id IS NULL
+      OR actor_worker_id = public.current_worker_id(organization_id)
+    )
+    AND (
+      actor_app_user_id IS NULL
+      OR actor_app_user_id = public.current_app_user_id()
+    )
+  );
 
 CREATE POLICY pol_co_owner_admin_all ON public.customer_outcome
   FOR ALL TO authenticated
@@ -1029,7 +1252,7 @@ CREATE POLICY pol_co_worker_select ON public.customer_outcome
 DO $$
 DECLARE
   v_wave4_tables_found          integer;
-  v_expected_tables             integer := 5;
+  v_expected_tables             integer := 6;
   v_rls_enabled_count           integer;
   v_anon_priv_violations        integer;
   v_authenticated_table_count   integer;
@@ -1039,16 +1262,19 @@ DECLARE
   v_legacy_huc_touch_count      integer;
   v_append_only_guards_present  boolean;
   v_work_order_close_gate_ok    boolean;
+  v_wave4_applicability_control_ok boolean;
+  v_worker_exception_security_controls_ok boolean;
 
   v_expected_wave4_tables text[] := ARRAY[
     'required_evidence_policy',
     'work_order_governance_link',
+    'work_order_wave4_applicability',
     'work_order_evidence_requirement',
     'service_exception',
     'customer_outcome'
   ];
 
-  v_expected_policy_count integer := 20;
+  v_expected_policy_count integer := 28;
 BEGIN
   SELECT COUNT(*) INTO v_wave4_tables_found
   FROM   information_schema.tables
@@ -1129,6 +1355,9 @@ BEGIN
       ('required_evidence_policy', 'trg_rep_immutable'),
       ('work_order_governance_link', 'trg_wogl_scope_validate'),
       ('work_order_governance_link', 'trg_wogl_immutable'),
+      ('work_order_wave4_applicability', 'trg_woa_scope_validate'),
+      ('work_order_wave4_applicability', 'trg_woa_immutable'),
+      ('work_order_wave4_applicability', 'trg_woa_no_delete'),
       ('work_order_evidence_requirement', 'trg_woer_scope_validate'),
       ('work_order_evidence_requirement', 'trg_woer_immutable'),
       ('service_exception', 'trg_se_scope_validate'),
@@ -1206,7 +1435,39 @@ BEGIN
     RAISE EXCEPTION 'M009 FAIL: work_order close gate trigger missing';
   END IF;
 
-  RAISE NOTICE 'M009_PASS | wave4_tables_found=% | expected_tables=% | rls_enabled_count=% | anon_privilege_violation_count=% | authenticated_table_count=% | policy_count=% | missing_required_dependency_count=% | missing_guard_trigger_count=% | legacy_huc_touch_count=% | append_only_guards_present=% | work_order_close_gate_present=%',
+  SELECT EXISTS (
+    SELECT 1
+    FROM information_schema.tables
+    WHERE table_schema = 'public'
+      AND table_name = 'work_order_wave4_applicability'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.triggers
+    WHERE trigger_schema = 'public'
+      AND event_object_table = 'work_order_wave4_applicability'
+      AND trigger_name = 'trg_woa_no_delete'
+  ) INTO v_wave4_applicability_control_ok;
+
+  IF NOT v_wave4_applicability_control_ok THEN
+    RAISE EXCEPTION 'M009 FAIL: explicit wave4 applicability control missing';
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'service_exception'
+      AND policyname = 'pol_se_worker_insert'
+  ) AND EXISTS (
+    SELECT 1 FROM information_schema.triggers
+    WHERE trigger_schema = 'public'
+      AND event_object_table = 'service_exception'
+      AND trigger_name = 'trg_se_scope_validate'
+  ) INTO v_worker_exception_security_controls_ok;
+
+  IF NOT v_worker_exception_security_controls_ok THEN
+    RAISE EXCEPTION 'M009 FAIL: worker exception actor/security controls missing';
+  END IF;
+
+  RAISE NOTICE 'M009_PASS | wave4_tables_found=% | expected_tables=% | rls_enabled_count=% | anon_privilege_violation_count=% | authenticated_table_count=% | policy_count=% | missing_required_dependency_count=% | missing_guard_trigger_count=% | legacy_huc_touch_count=% | append_only_guards_present=% | work_order_close_gate_present=% | wave4_applicability_control_present=% | worker_exception_security_controls_present=%',
     v_wave4_tables_found,
     v_expected_tables,
     v_rls_enabled_count,
@@ -1217,7 +1478,9 @@ BEGIN
     v_missing_guard_trigger_count,
     v_legacy_huc_touch_count,
     v_append_only_guards_present,
-    v_work_order_close_gate_ok;
+    v_work_order_close_gate_ok,
+    v_wave4_applicability_control_ok,
+    v_worker_exception_security_controls_ok;
 END;
 $$;
 

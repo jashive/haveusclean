@@ -222,27 +222,65 @@ VALUES (
   'd1000000-0000-0000-0000-000000000006'::uuid,
   'd1000000-0000-0000-0000-000000000008'::uuid,
   1,
-  'accepted',
+  'draft',
   NULL,
   'Wave 4 Quote',
   NULL,
   '[{"key":"complete_deep_clean","amount":220.00}]'::jsonb,
   '{"total":248.60,"marker":"wave4_m010_rehearsal_v1"}'::jsonb,
-  now(),
+  NULL,
   '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
 );
 
+UPDATE public.quote_version
+SET lifecycle_status = 'sent',
+    sent_at = now()
+WHERE id = 'd1000000-0000-0000-0000-000000000009'::uuid;
+
+INSERT INTO public.quote_response (
+  id, organization_id, business_unit_id,
+  quote_version_id, idempotency_key_id,
+  response_type, response_channel, responded_by_name, responded_by_email,
+  responded_at, notes, metadata
+)
+VALUES (
+  'd1000000-0000-0000-0000-000000000019'::uuid,
+  (SELECT organization_id FROM pg_temp.m010_scope),
+  (SELECT business_unit_id FROM pg_temp.m010_scope),
+  'd1000000-0000-0000-0000-000000000009'::uuid,
+  NULL,
+  'accepted',
+  'm010_rehearsal',
+  'M010 Rehearsal',
+  NULL,
+  now(),
+  NULL,
+  '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
+);
+
+UPDATE public.quote_version
+SET lifecycle_status = 'accepted'
+WHERE id = 'd1000000-0000-0000-0000-000000000009'::uuid;
+
 INSERT INTO public.conversion_record (
   id, organization_id, business_unit_id,
-  quote_version_id, conversion_type, converted_at, metadata
+  service_request_id, opportunity_id, estimate_id,
+  quote_id, quote_version_id, quote_response_id,
+  customer_id, contact_id, service_location_id, metadata
 )
 VALUES (
   'd1000000-0000-0000-0000-00000000000a'::uuid,
   (SELECT organization_id FROM pg_temp.m010_scope),
   (SELECT business_unit_id FROM pg_temp.m010_scope),
+  'd1000000-0000-0000-0000-000000000004'::uuid,
+  'd1000000-0000-0000-0000-000000000005'::uuid,
+  'd1000000-0000-0000-0000-000000000006'::uuid,
+  'd1000000-0000-0000-0000-000000000007'::uuid,
   'd1000000-0000-0000-0000-000000000009'::uuid,
-  'accepted_quote',
-  now(),
+  'd1000000-0000-0000-0000-000000000019'::uuid,
+  'd1000000-0000-0000-0000-000000000001'::uuid,
+  'd1000000-0000-0000-0000-000000000002'::uuid,
+  'd1000000-0000-0000-0000-000000000003'::uuid,
   '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
 );
 
@@ -321,13 +359,54 @@ SELECT
   'd1000000-0000-0000-0000-00000000000d'::uuid,
   w.id,
   'service_worker',
-  'acknowledged',
+  'proposed',
   '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
 FROM public.worker w
 WHERE w.organization_id = (SELECT organization_id FROM pg_temp.m010_scope)
   AND w.status = 'active'
 ORDER BY w.id
 LIMIT 1;
+
+DO $$
+DECLARE
+  v_status text;
+BEGIN
+  SELECT assignment_status INTO v_status
+  FROM public.worker_assignment
+  WHERE id = 'd1000000-0000-0000-0000-00000000000e'::uuid;
+
+  IF v_status <> 'proposed' THEN
+    RAISE EXCEPTION 'M010 rehearsal assertion FAIL: worker_assignment must begin at proposed, got %', v_status;
+  END IF;
+END;
+$$;
+
+UPDATE public.worker_assignment
+SET assignment_status = 'assigned',
+    assigned_at = now()
+WHERE id = 'd1000000-0000-0000-0000-00000000000e'::uuid;
+
+UPDATE public.worker_assignment
+SET assignment_status = 'acknowledged',
+    acknowledged_at = now()
+WHERE id = 'd1000000-0000-0000-0000-00000000000e'::uuid;
+
+DO $$
+DECLARE
+  v_status text;
+  v_assigned_at timestamptz;
+  v_acknowledged_at timestamptz;
+BEGIN
+  SELECT assignment_status, assigned_at, acknowledged_at
+    INTO v_status, v_assigned_at, v_acknowledged_at
+  FROM public.worker_assignment
+  WHERE id = 'd1000000-0000-0000-0000-00000000000e'::uuid;
+
+  IF v_status <> 'acknowledged' OR v_assigned_at IS NULL OR v_acknowledged_at IS NULL THEN
+    RAISE EXCEPTION 'M010 rehearsal assertion FAIL: worker_assignment lifecycle proposed->assigned->acknowledged not satisfied';
+  END IF;
+END;
+$$;
 
 INSERT INTO public.work_order (
   id, organization_id, business_unit_id, jurisdiction_id, operational_job_id, schedule_window_id,
@@ -383,13 +462,13 @@ VALUES (
 );
 
 -- ---------------------------------------------------------------------------
--- STEP 4: Wave 4 authority + frozen transaction linkage
+-- STEP 4: Wave 4 authority + explicit governance applicability enrollment
 -- ---------------------------------------------------------------------------
 
 INSERT INTO public.required_evidence_policy (
   id, organization_id, business_unit_id, jurisdiction_id, configuration_version_id,
   service_family, service_task_key, service_module_key, requirement_key, evidence_type,
-  required_count, is_mandatory, storage_rule_payload, metadata
+  required_count, is_mandatory, requires_external_reference, storage_rule_payload, metadata
 )
 VALUES (
   'd1000000-0000-0000-0000-000000000011'::uuid,
@@ -404,9 +483,51 @@ VALUES (
   'photo_after',
   1,
   true,
-  '{"storage_systems":["provider_reference"],"marker":"wave4_m010_rehearsal_v1"}'::jsonb,
+  true,
+  '{"external_reference_required":true,"marker":"wave4_m010_rehearsal_v1"}'::jsonb,
   '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
 );
+
+INSERT INTO public.work_order_wave4_applicability (
+  id, organization_id, business_unit_id, jurisdiction_id,
+  operational_job_id, work_order_id,
+  applicability_status, enrollment_source, metadata
+)
+VALUES (
+  'd1000000-0000-0000-0000-00000000001a'::uuid,
+  (SELECT organization_id FROM pg_temp.m010_scope),
+  (SELECT business_unit_id FROM pg_temp.m010_scope),
+  (SELECT jurisdiction_id FROM pg_temp.m010_scope),
+  'd1000000-0000-0000-0000-00000000000c'::uuid,
+  'd1000000-0000-0000-0000-00000000000f'::uuid,
+  'enrolled',
+  'system',
+  '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
+);
+
+-- ---------------------------------------------------------------------------
+-- STEP 5: Enrolled Wave 4 work order cannot close without contract rows
+-- ---------------------------------------------------------------------------
+
+UPDATE public.work_order
+SET work_order_status = 'qa_complete'
+WHERE id = 'd1000000-0000-0000-0000-00000000000f'::uuid;
+
+DO $$
+BEGIN
+  BEGIN
+    UPDATE public.work_order
+    SET work_order_status = 'closed'
+    WHERE id = 'd1000000-0000-0000-0000-00000000000f'::uuid;
+    RAISE EXCEPTION 'M010 expected missing governance close failure did not occur';
+  EXCEPTION
+    WHEN OTHERS THEN
+      IF POSITION('frozen governance linkage is required before close' IN SQLERRM) = 0 THEN
+        RAISE;
+      END IF;
+  END;
+END;
+$$;
 
 INSERT INTO public.work_order_governance_link (
   id, organization_id, business_unit_id, jurisdiction_id,
@@ -433,7 +554,7 @@ INSERT INTO public.work_order_evidence_requirement (
   id, organization_id, business_unit_id, operational_job_id, work_order_id,
   work_order_governance_link_id, required_evidence_policy_id, source_configuration_version_id,
   service_task_key, service_module_key, requirement_key, evidence_type,
-  required_count, is_mandatory, storage_rule_payload, quality_signal_payload, metadata
+  required_count, is_mandatory, requires_external_reference, storage_rule_payload, quality_signal_payload, metadata
 )
 VALUES (
   'd1000000-0000-0000-0000-000000000013'::uuid,
@@ -450,18 +571,11 @@ VALUES (
   'photo_after',
   1,
   true,
-  '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb,
+  true,
+  '{"external_reference_required":true,"marker":"wave4_m010_rehearsal_v1"}'::jsonb,
   '{"signal":"required_evidence","marker":"wave4_m010_rehearsal_v1"}'::jsonb,
   '{"marker":"wave4_m010_rehearsal_v1"}'::jsonb
 );
-
--- ---------------------------------------------------------------------------
--- STEP 5: Required-evidence closure failure then success
--- ---------------------------------------------------------------------------
-
-UPDATE public.work_order
-SET work_order_status = 'qa_complete'
-WHERE id = 'd1000000-0000-0000-0000-00000000000f'::uuid;
 
 DO $$
 BEGIN
@@ -600,10 +714,28 @@ SET triage_status = 'closed',
     closed_at = now()
 WHERE id = 'd1000000-0000-0000-0000-000000000015'::uuid;
 
-UPDATE public.qa_inspection
-SET inspection_status = 'passed',
-    inspected_at = now()
-WHERE id = 'd1000000-0000-0000-0000-000000000010'::uuid;
+DO $$
+DECLARE
+  v_original_failed_status text;
+  v_reinspection_status text;
+BEGIN
+  SELECT inspection_status INTO v_original_failed_status
+  FROM public.qa_inspection
+  WHERE id = 'd1000000-0000-0000-0000-000000000010'::uuid;
+
+  SELECT inspection_status INTO v_reinspection_status
+  FROM public.qa_inspection
+  WHERE id = 'd1000000-0000-0000-0000-000000000017'::uuid;
+
+  IF v_original_failed_status <> 'failed' THEN
+    RAISE EXCEPTION 'M010 rehearsal assertion FAIL: original failed QA inspection must remain failed';
+  END IF;
+
+  IF v_reinspection_status <> 'passed' THEN
+    RAISE EXCEPTION 'M010 rehearsal assertion FAIL: reinspection QA inspection must be passed';
+  END IF;
+END;
+$$;
 
 -- ---------------------------------------------------------------------------
 -- STEP 7: Customer outcome / service issue lineage
@@ -676,21 +808,64 @@ ROLLBACK;
 WITH remaining AS (
   SELECT COUNT(*) AS remaining_artifact_count
   FROM (
-    SELECT 1 FROM public.required_evidence_policy WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.customer WHERE id = 'd1000000-0000-0000-0000-000000000001'::uuid
     UNION ALL
-    SELECT 1 FROM public.work_order_governance_link WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.contact WHERE id = 'd1000000-0000-0000-0000-000000000002'::uuid
     UNION ALL
-    SELECT 1 FROM public.work_order_evidence_requirement WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.service_location WHERE id = 'd1000000-0000-0000-0000-000000000003'::uuid
     UNION ALL
-    SELECT 1 FROM public.service_exception WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.service_request WHERE id = 'd1000000-0000-0000-0000-000000000004'::uuid
     UNION ALL
-    SELECT 1 FROM public.customer_outcome WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.opportunity WHERE id = 'd1000000-0000-0000-0000-000000000005'::uuid
     UNION ALL
-    SELECT 1 FROM public.operational_job WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.estimate WHERE id = 'd1000000-0000-0000-0000-000000000006'::uuid
     UNION ALL
-    SELECT 1 FROM public.work_order WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.quote WHERE id = 'd1000000-0000-0000-0000-000000000007'::uuid
     UNION ALL
-    SELECT 1 FROM public.completion_evidence WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    SELECT 1 FROM public.pricing_snapshot WHERE id = 'd1000000-0000-0000-0000-000000000008'::uuid
+    UNION ALL
+    SELECT 1 FROM public.quote_version WHERE id = 'd1000000-0000-0000-0000-000000000009'::uuid
+    UNION ALL
+    SELECT 1 FROM public.quote_response WHERE id = 'd1000000-0000-0000-0000-000000000019'::uuid
+    UNION ALL
+    SELECT 1 FROM public.conversion_record WHERE id = 'd1000000-0000-0000-0000-00000000000a'::uuid
+    UNION ALL
+    SELECT 1 FROM public.job_handoff WHERE id = 'd1000000-0000-0000-0000-00000000000b'::uuid
+    UNION ALL
+    SELECT 1 FROM public.operational_job WHERE id = 'd1000000-0000-0000-0000-00000000000c'::uuid
+    UNION ALL
+    SELECT 1 FROM public.schedule_window WHERE id = 'd1000000-0000-0000-0000-00000000000d'::uuid
+    UNION ALL
+    SELECT 1 FROM public.worker_assignment WHERE id = 'd1000000-0000-0000-0000-00000000000e'::uuid
+    UNION ALL
+    SELECT 1 FROM public.work_order WHERE id = 'd1000000-0000-0000-0000-00000000000f'::uuid
+    UNION ALL
+    SELECT 1 FROM public.work_order_event WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    UNION ALL
+    SELECT 1 FROM public.completion_evidence WHERE id = 'd1000000-0000-0000-0000-000000000014'::uuid
+    UNION ALL
+    SELECT 1 FROM public.service_checklist_result WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    UNION ALL
+    SELECT 1 FROM public.qa_inspection WHERE id IN (
+      'd1000000-0000-0000-0000-000000000010'::uuid,
+      'd1000000-0000-0000-0000-000000000017'::uuid
+    )
+    UNION ALL
+    SELECT 1 FROM public.corrective_action WHERE id = 'd1000000-0000-0000-0000-000000000016'::uuid
+    UNION ALL
+    SELECT 1 FROM public.operational_handoff WHERE metadata ->> 'marker' = 'wave4_m010_rehearsal_v1'
+    UNION ALL
+    SELECT 1 FROM public.required_evidence_policy WHERE id = 'd1000000-0000-0000-0000-000000000011'::uuid
+    UNION ALL
+    SELECT 1 FROM public.work_order_wave4_applicability WHERE id = 'd1000000-0000-0000-0000-00000000001a'::uuid
+    UNION ALL
+    SELECT 1 FROM public.work_order_governance_link WHERE id = 'd1000000-0000-0000-0000-000000000012'::uuid
+    UNION ALL
+    SELECT 1 FROM public.work_order_evidence_requirement WHERE id = 'd1000000-0000-0000-0000-000000000013'::uuid
+    UNION ALL
+    SELECT 1 FROM public.service_exception WHERE id = 'd1000000-0000-0000-0000-000000000015'::uuid
+    UNION ALL
+    SELECT 1 FROM public.customer_outcome WHERE id = 'd1000000-0000-0000-0000-000000000018'::uuid
   ) s
 )
 SELECT

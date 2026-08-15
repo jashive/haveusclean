@@ -743,6 +743,7 @@ export function buildRequiredEvidencePolicyPayload({
   evidenceType,
   requiredCount,
   isMandatory,
+  requiresExternalReference,
   storageRulePayload,
   metadata,
   appUserId,
@@ -767,6 +768,7 @@ export function buildRequiredEvidencePolicyPayload({
     evidence_type: evidenceType,
     required_count: requirePositiveInteger(requiredCount ?? 1, "requiredCount"),
     is_mandatory: isMandatory ?? true,
+    requires_external_reference: requiresExternalReference ?? false,
     storage_rule_payload: withJsonObject(storageRulePayload),
     metadata: withJsonObject(metadata),
     ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
@@ -814,6 +816,36 @@ export function buildWorkOrderGovernanceLinkPayload({
   };
 }
 
+export function buildWorkOrderWave4ApplicabilityPayload({
+  organizationId,
+  businessUnitId,
+  jurisdictionId,
+  operationalJobId,
+  workOrderId,
+  applicabilityStatus,
+  enrollmentSource,
+  metadata,
+  appUserId,
+}) {
+  requireField(organizationId, "organizationId");
+  requireField(businessUnitId, "businessUnitId");
+  requireField(jurisdictionId, "jurisdictionId");
+  requireField(operationalJobId, "operationalJobId");
+  requireField(workOrderId, "workOrderId");
+
+  return {
+    organization_id: organizationId,
+    business_unit_id: businessUnitId,
+    jurisdiction_id: jurisdictionId,
+    operational_job_id: operationalJobId,
+    work_order_id: workOrderId,
+    applicability_status: applicabilityStatus ?? "enrolled",
+    enrollment_source: enrollmentSource ?? "governance_link_required",
+    metadata: withJsonObject(metadata),
+    ...(appUserId ? { created_by_app_user_id: appUserId } : {}),
+  };
+}
+
 export function buildWorkOrderEvidenceRequirementPayload({
   organizationId,
   businessUnitId,
@@ -828,6 +860,7 @@ export function buildWorkOrderEvidenceRequirementPayload({
   evidenceType,
   requiredCount,
   isMandatory,
+  requiresExternalReference,
   storageRulePayload,
   qualitySignalPayload,
   metadata,
@@ -858,6 +891,7 @@ export function buildWorkOrderEvidenceRequirementPayload({
     evidence_type: evidenceType,
     required_count: requirePositiveInteger(requiredCount ?? 1, "requiredCount"),
     is_mandatory: isMandatory ?? true,
+    requires_external_reference: requiresExternalReference ?? false,
     storage_rule_payload: withJsonObject(storageRulePayload),
     quality_signal_payload: withJsonObject(qualitySignalPayload),
     metadata: withJsonObject(metadata),
