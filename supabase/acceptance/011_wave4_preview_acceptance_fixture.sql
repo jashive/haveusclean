@@ -23,6 +23,7 @@ DECLARE
   v_policy_count integer;
 
   v_scope_mismatch_count integer;
+  v_scope_row_count integer;
   v_failed_qa_status text;
 
   c_preview_cfg_id constant uuid := 'e1100000-0000-0000-0000-000000000001'::uuid;
@@ -670,32 +671,33 @@ BEGIN
     RAISE EXCEPTION 'W4 Preview fixture assertion FAIL: required_evidence_policy contract mismatch';
   END IF;
 
-  SELECT COUNT(*) INTO v_scope_mismatch_count
+  SELECT COUNT(*)::integer, COUNT(DISTINCT scope_tuple)::integer
+    INTO v_scope_row_count, v_scope_mismatch_count
   FROM (
-    SELECT oj.organization_id, oj.business_unit_id, oj.jurisdiction_id
+    SELECT (oj.organization_id::text || '|' || oj.business_unit_id::text || '|' || oj.jurisdiction_id::text) AS scope_tuple
     FROM public.operational_job oj
     WHERE oj.id = c_operational_job_id
 
-    EXCEPT
+    UNION ALL
 
-    SELECT wo.organization_id, wo.business_unit_id, wo.jurisdiction_id
+    SELECT (wo.organization_id::text || '|' || wo.business_unit_id::text || '|' || wo.jurisdiction_id::text) AS scope_tuple
     FROM public.work_order wo
     WHERE wo.id = c_work_order_id
 
-    EXCEPT
+    UNION ALL
 
-    SELECT wogl.organization_id, wogl.business_unit_id, wogl.jurisdiction_id
+    SELECT (wogl.organization_id::text || '|' || wogl.business_unit_id::text || '|' || wogl.jurisdiction_id::text) AS scope_tuple
     FROM public.work_order_governance_link wogl
     WHERE wogl.id = c_work_order_governance_link_id
 
-    EXCEPT
+    UNION ALL
 
-    SELECT woa.organization_id, woa.business_unit_id, woa.jurisdiction_id
+    SELECT (woa.organization_id::text || '|' || woa.business_unit_id::text || '|' || woa.jurisdiction_id::text) AS scope_tuple
     FROM public.work_order_wave4_applicability woa
     WHERE woa.id = c_work_order_wave4_applicability_id
-  ) mismatched_scope;
+  ) all_scopes;
 
-  IF v_scope_mismatch_count <> 0 THEN
+  IF v_scope_row_count <> 4 OR v_scope_mismatch_count <> 1 THEN
     RAISE EXCEPTION 'W4 Preview fixture assertion FAIL: operational fixture scope mismatch';
   END IF;
 
@@ -733,28 +735,28 @@ BEGIN
 END;
 $$;
 
+WITH preview_cfg AS (
+  SELECT
+    cv.id,
+    cv.organization_id,
+    cv.business_unit_id,
+    cv.jurisdiction_id
+  FROM public.configuration_version cv
+  WHERE cv.configuration_type = 'residential_pricing'
+    AND cv.version = 'W4-PREVIEW-ACCEPT-2026-08-v1'
+  ORDER BY cv.created_at DESC, cv.id DESC
+  LIMIT 1
+)
 SELECT
   'W4_PREVIEW_FIXTURE_READY'::text AS result,
-  'e1100000-0000-0000-0000-000000000001'::uuid AS configuration_version_id,
+  (SELECT id FROM preview_cfg) AS configuration_version_id,
   'e1100000-0000-0000-0000-000000000013'::uuid AS required_evidence_policy_id,
   'e1100000-0000-0000-0000-00000000000e'::uuid AS operational_job_id,
   'e1100000-0000-0000-0000-000000000011'::uuid AS work_order_id,
   'e1100000-0000-0000-0000-000000000012'::uuid AS failed_qa_inspection_id,
   '1b3a6903-0c50-4a95-afc3-280628c10508'::uuid AS worker_id,
-  (
-    SELECT cv.organization_id
-    FROM public.configuration_version cv
-    WHERE cv.id = 'e1100000-0000-0000-0000-000000000001'::uuid
-  ) AS organization_id,
-  (
-    SELECT cv.business_unit_id
-    FROM public.configuration_version cv
-    WHERE cv.id = 'e1100000-0000-0000-0000-000000000001'::uuid
-  ) AS business_unit_id,
-  (
-    SELECT cv.jurisdiction_id
-    FROM public.configuration_version cv
-    WHERE cv.id = 'e1100000-0000-0000-0000-000000000001'::uuid
-  ) AS jurisdiction_id;
+  (SELECT organization_id FROM preview_cfg) AS organization_id,
+  (SELECT business_unit_id FROM preview_cfg) AS business_unit_id,
+  (SELECT jurisdiction_id FROM preview_cfg) AS jurisdiction_id;
 
 COMMIT;
