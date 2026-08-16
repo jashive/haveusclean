@@ -2211,6 +2211,18 @@ test("112. preview payment denies non-null wrong BU membership in same organizat
   assert.match(res.body?.detail || "", /organization\/business unit/i);
 });
 
+test("113. preview payment denies membership from wrong organization even with null BU", async () => {
+  const res = await runPreviewPaymentAuthScenario({
+    roleCode: "owner_admin",
+    membershipOrganizationId: "org-wrong",
+    membershipBusinessUnitId: null,
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body?.detail || "", /organization\/business unit/i);
+});
+
 // ── Wave 5 Continuation: Auth Refresh, Payable Approval, Acceptance Runner ───
 
 // 114. Expired JWT — source confirms authenticatedRestFetchWithRefresh exists and refreshes on 401
@@ -2328,8 +2340,8 @@ test("119. runner resumes pending payable instead of recreating it", () => {
   );
 });
 
-// 120. Runner skips already completed earlier gates
-test("120. runner skips already completed earlier gates", () => {
+// 120. Runner skips complete-assignment gate when assignment is already completed
+test("120. runner skips complete-assignment gate when assignment is already completed", () => {
   assert.ok(
     acceptanceRunnerSrc.includes("assignment.assignment_status === \"acknowledged\""),
     "runner only completes assignment when it is still in acknowledged state"
