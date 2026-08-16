@@ -444,6 +444,212 @@ function resolveRoleCredential(roleKey, wave5Prefix, wave4Prefix) {
   };
 }
 
+// ── Identity resolution helpers ───────────────────────────────────────────────
+
+const CANONICAL_APP_USERS = Object.freeze({
+  office_ops: "e884d76e-d54d-4af3-93df-accf9bf34f44",
+  worker: "93338807-efa2-4ada-88a9-54c18813c336",
+  qa: "e04a824d-6b06-41fd-addf-14ce35d488b7",
+});
+
+const CANONICAL_WORKER_ID = "1b3a6903-0c50-4a95-afc3-280628c10508";
+
+function collectAllCredentialCandidates() {
+  const prefixes = [
+    { label: "SERVICEOS_W5_RLS_OFFICE_OPS", env_role: "office_ops" },
+    { label: "SERVICEOS_W4_RLS_OFFICE_OPS", env_role: "office_ops" },
+    { label: "SERVICEOS_W5_RLS_WORKER",     env_role: "worker"     },
+    { label: "SERVICEOS_W4_RLS_WORKER",     env_role: "worker"     },
+    { label: "SERVICEOS_W5_RLS_QA",         env_role: "qa"         },
+    { label: "SERVICEOS_W4_RLS_QA",         env_role: "qa"         },
+  ];
+  const seen = new Set();
+  const candidates = [];
+  for (const { label, env_role } of prefixes) {
+    const email    = process.env[`${label}_EMAIL`]    || "";
+    const password = process.env[`${label}_PASSWORD`] || "";
+    if (!email || !password) continue;
+    const key = `${email}::${password}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    candidates.push({ env_label: label, env_role, email, password });
+  }
+  return candidates;
+}
+
+async function resolveTokenIdentity(token, ownerToken) {
+  // Use the candidate's own token for auth-user lookup; use ownerToken for RLS-protected lookups
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const anonKey = process.env.SUPABASE_ANON_KEY;
+
+  // 1. Resolve auth user id
+  const authRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
+    headers: { apikey: anonKey, Authorization: "Bearer " + token },
+  });
+  if (!authRes.ok) {
+    throw new Error(`auth/v1/user failed: HTTP ${authRes.status}`);
+  }
+  const authUser = await authRes.json();
+  if (!authUser?.id) throw new Error("token did not resolve to an auth user");
+
+  // 2. Resolve app_user via owner token (for cross-account lookups)
+  const appUserRes = await authenticatedRestFetchPath(
+    ownerToken,
+    `app_user?select=id,auth_user_id,status&auth_user_id=eq.${encodeURIComponent(authUser.id)}&limit=1`
+  );
+  let appUserId = null;
+  if (appUserRes.ok) {
+    const rows = await appUserRes.json().catch(() => []);
+    appUserId = Array.isArray(rows) && rows.length === 1 ? rows[0].id : null;
+  }
+
+  // 3. Resolve active memberships
+  let activeRoleCodes = [];
+  if (appUserId) {
+    const memRes = await authenticatedRestFetchPath(
+      ownerToken,
+      `user_membership?select=role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(CANONICAL.organization_id)}&status=eq.active`
+    );
+    if (memRes.ok) {
+      const memRows = await memRes.json().catch(() => []);
+      const roleIds = Array.isArray(memRows) ? memRows.map((r) => r.role_id).filter(Boolean) : [];
+      if (roleIds.length > 0) {
+        const roleRes = await authenticatedRestFetchPath(
+          ownerToken,
+          `app_role?select=id,code&id=in.(${roleIds.join(",")})`
+        );
+        if (roleRes.ok) {
+          const roleRows = await roleRes.json().catch(() => []);
+          activeRoleCodes = Array.isArray(roleRows) ? roleRows.map((r) => r.code).filter(Boolean) : [];
+        }
+      }
+    }
+  }
+
+  // 4. Resolve worker row if one exists
+  let workerId = null;
+  if (appUserId) {
+    const workerRes = await authenticatedRestFetchPath(
+      ownerToken,
+      `worker?select=id,app_user_id,is_active,organization_id&app_user_id=eq.${encodeURIComponent(appUserId)}&limit=1`
+    );
+    if (workerRes.ok) {
+      const workerRows = await workerRes.json().catch(() => []);
+      workerId = Array.isArray(workerRows) && workerRows.length === 1 ? workerRows[0].id : null;
+    }
+  }
+
+  return { auth_user_id: authUser.id, app_user_id: appUserId, active_role_codes: activeRoleCodes, worker_id: workerId };
+}
+
+export function buildIdentityAudit({ candidates, identities, tokensByLabel }) {
+  // candidates: [{env_label, env_role, email, password}]
+  // identities: Map<token, {auth_user_id, app_user_id, active_role_codes, worker_id}>
+  // tokensByLabel: Map<env_label, token>
+
+  function auditRole(canonicalRole, expectedAppUserId) {
+    const matching = candidates.filter((c) => {
+      const t = tokensByLabel.get(c.env_label);
+      if (!t) return false;
+      const id = identities.get(t);
+      return id && id.app_user_id === expectedAppUserId;
+    });
+
+    if (matching.length === 0) {
+      return {
+        passed: false,
+        expected_app_user_id: expectedAppUserId,
+        actual_app_user_id: null,
+        expected_role: canonicalRole,
+        active_role_codes: [],
+        scope_valid: false,
+        credential_source: null,
+        credential_label_mismatch: false,
+        privilege_contamination: [],
+        error: "expected_identity_not_found",
+      };
+    }
+
+    const cred = matching[0];
+    const token = tokensByLabel.get(cred.env_label);
+    const identity = identities.get(token);
+    const labelMismatch = cred.env_role !== canonicalRole;
+    const contamination = [];
+
+    if (canonicalRole === "office_ops") {
+      if (identity.active_role_codes.includes("owner_admin")) contamination.push("owner_admin");
+    }
+    if (canonicalRole === "worker") {
+      if (identity.active_role_codes.includes("owner_admin")) contamination.push("owner_admin");
+      if (identity.active_role_codes.includes("office_ops"))  contamination.push("office_ops");
+    }
+    if (canonicalRole === "qa") {
+      if (identity.active_role_codes.includes("owner_admin")) contamination.push("owner_admin");
+      if (identity.active_role_codes.includes("office_ops"))  contamination.push("office_ops");
+    }
+
+    const hasExpectedRole = identity.active_role_codes.includes(canonicalRole) ||
+      (canonicalRole === "worker" && identity.worker_id != null);
+
+    const result = {
+      passed: hasExpectedRole && contamination.length === 0,
+      expected_app_user_id: expectedAppUserId,
+      actual_app_user_id: identity.app_user_id,
+      expected_role: canonicalRole,
+      active_role_codes: identity.active_role_codes,
+      credential_source: cred.env_label,
+      credential_label_mismatch: labelMismatch,
+      privilege_contamination: contamination,
+    };
+
+    if (canonicalRole === "worker") {
+      result.canonical_worker_id = CANONICAL_WORKER_ID;
+      result.actual_worker_id = identity.worker_id;
+      result.worker_link_valid = identity.worker_id === CANONICAL_WORKER_ID;
+      result.passed = result.passed && result.worker_link_valid;
+      delete result.scope_valid;
+    } else {
+      result.scope_valid = hasExpectedRole;
+    }
+
+    return result;
+  }
+
+  // Check for duplicate resolution (two credentials → same canonical app_user)
+  const appUserTokenCount = new Map();
+  for (const [token, id] of identities) {
+    if (!id.app_user_id) continue;
+    appUserTokenCount.set(id.app_user_id, (appUserTokenCount.get(id.app_user_id) || 0) + 1);
+  }
+  const duplicates = [...appUserTokenCount.entries()]
+    .filter(([, count]) => count > 1)
+    .map(([appUserId]) => appUserId);
+
+  return {
+    office_ops: auditRole("office_ops", CANONICAL_APP_USERS.office_ops),
+    worker: auditRole("worker", CANONICAL_APP_USERS.worker),
+    qa: auditRole("qa", CANONICAL_APP_USERS.qa),
+    duplicate_resolutions: duplicates,
+  };
+}
+
+export function resolveNormalizedTokenMap(candidates, identities, tokensByLabel) {
+  // For each canonical role, find the candidate whose token resolves to the expected app_user_id
+  const result = {};
+  for (const [canonicalRole, expectedAppUserId] of Object.entries(CANONICAL_APP_USERS)) {
+    for (const cred of candidates) {
+      const token = tokensByLabel.get(cred.env_label);
+      if (!token) continue;
+      const identity = identities.get(token);
+      if (identity && identity.app_user_id === expectedAppUserId) {
+        result[canonicalRole] = token;
+        break;
+      }
+    }
+  }
+  return result;
+}
+
 async function serviceRoleExactRow(table, id) {
   const supabaseUrl = process.env.SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -1593,6 +1799,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
     });
   }
 
+  // ── Verify requester is owner_admin ─────────────────────────────────────────
   let authUser;
   let appUser;
   let hucOrganization;
@@ -1613,85 +1820,269 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
     });
   }
 
-  const credentialConfig = {
-    office_ops: resolveRoleCredential(
-      "office_ops",
-      "SERVICEOS_W5_RLS_OFFICE_OPS",
-      "SERVICEOS_W4_RLS_OFFICE_OPS"
-    ),
-    worker: resolveRoleCredential(
-      "worker",
-      "SERVICEOS_W5_RLS_WORKER",
-      "SERVICEOS_W4_RLS_WORKER"
-    ),
-    qa: resolveRoleCredential(
-      "qa",
-      "SERVICEOS_W5_RLS_QA",
-      "SERVICEOS_W4_RLS_QA"
-    ),
-  };
+  // ── A: Collect all credential candidates ───────────────────────────────────
+  const candidates = collectAllCredentialCandidates();
 
-  const missingIdentities = Object.values(credentialConfig)
-    .filter((cfg) => !cfg.email || !cfg.password)
-    .map((cfg) => cfg.role);
-  if (missingIdentities.length > 0) {
+  if (candidates.length === 0) {
     return res.status(424).json({
       contract_version: CONTRACT_VERSION,
-      error: "Required Wave 5 role identity credentials are not configured. The harness will not create auth users automatically.",
-      missing_identities: missingIdentities,
-      required_env_vars: Object.values(credentialConfig).flatMap((cfg) => cfg.env_keys),
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: No non-owner role credentials found. Configure SERVICEOS_W5_RLS_* or SERVICEOS_W4_RLS_* env vars.",
+      missing_identities: ["office_ops", "worker", "qa"],
+      required_env_vars: [
+        "SERVICEOS_W5_RLS_OFFICE_OPS_EMAIL", "SERVICEOS_W5_RLS_OFFICE_OPS_PASSWORD",
+        "SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL", "SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD",
+        "SERVICEOS_W5_RLS_WORKER_EMAIL",     "SERVICEOS_W5_RLS_WORKER_PASSWORD",
+        "SERVICEOS_W4_RLS_WORKER_EMAIL",     "SERVICEOS_W4_RLS_WORKER_PASSWORD",
+        "SERVICEOS_W5_RLS_QA_EMAIL",         "SERVICEOS_W5_RLS_QA_PASSWORD",
+        "SERVICEOS_W4_RLS_QA_EMAIL",         "SERVICEOS_W4_RLS_QA_PASSWORD",
+      ],
       canonical_job_id: CANONICAL.operational_job_id,
       environment: env,
       run_at: runAt,
-      requester: {
-        auth_user_id: authUser.id,
-        app_user_id: appUser.id,
-        owner_admin_membership_id: membership.id,
-      },
     });
   }
 
-  const tokens = {};
+  // ── Authenticate each unique candidate ─────────────────────────────────────
+  const tokensByLabel = new Map(); // env_label → token
   const authErrors = {};
-  for (const [role, cfg] of Object.entries(credentialConfig)) {
+  for (const cred of candidates) {
     try {
-      tokens[role] = await signInWithPassword(
+      const token = await signInWithPassword(
         process.env.SUPABASE_URL,
         process.env.SUPABASE_ANON_KEY,
-        cfg.email,
-        cfg.password
+        cred.email,
+        cred.password
       );
+      tokensByLabel.set(cred.env_label, token);
     } catch (error) {
-      authErrors[role] = { code: error.code, message: error.message };
+      authErrors[cred.env_label] = { code: error.code, message: error.message };
     }
   }
   if (Object.keys(authErrors).length > 0) {
     return res.status(424).json({
       contract_version: CONTRACT_VERSION,
-      error: "Authentication failed for one or more Wave 5 role identities.",
-      auth_errors: authErrors,
-      missing_identities: [],
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: Authentication failed for one or more role credential candidates.",
+      auth_errors: Object.fromEntries(
+        Object.entries(authErrors).map(([label, err]) => [label, { code: err.code, message: err.message }])
+      ),
       canonical_job_id: CANONICAL.operational_job_id,
       environment: env,
       run_at: runAt,
-      note: "Do not create auth users automatically; configure the identities correctly and rerun.",
     });
   }
 
+  // ── B: Resolve actual identity of each authenticated token ──────────────────
+  const identities = new Map(); // token → {auth_user_id, app_user_id, active_role_codes, worker_id}
+  const identityErrors = {};
+  for (const cred of candidates) {
+    const token = tokensByLabel.get(cred.env_label);
+    if (!token) continue;
+    if (identities.has(token)) continue; // deduplicated tokens
+    try {
+      const identity = await resolveTokenIdentity(token, bearerToken);
+      identities.set(token, identity);
+    } catch (error) {
+      identityErrors[cred.env_label] = error.message;
+    }
+  }
+  if (Object.keys(identityErrors).length > 0) {
+    return res.status(424).json({
+      contract_version: CONTRACT_VERSION,
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: Failed to resolve identity for one or more authenticated candidates.",
+      identity_errors: identityErrors,
+      canonical_job_id: CANONICAL.operational_job_id,
+      environment: env,
+      run_at: runAt,
+    });
+  }
+
+  // ── C/D: Map tokens by canonical identity, fail-closed on duplicates/missing ─
+  const identityAudit = buildIdentityAudit({ candidates, identities, tokensByLabel });
+
+  if (identityAudit.duplicate_resolutions.length > 0) {
+    return res.status(424).json({
+      contract_version: CONTRACT_VERSION,
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: Two or more credential candidates resolve to the same canonical app_user.",
+      duplicate_app_user_ids: identityAudit.duplicate_resolutions,
+      identity_audit: identityAudit,
+      canonical_job_id: CANONICAL.operational_job_id,
+      environment: env,
+      run_at: runAt,
+    });
+  }
+
+  const missingCanonicalRoles = Object.entries(CANONICAL_APP_USERS)
+    .filter(([role]) => {
+      const audit = identityAudit[role];
+      return !audit || audit.actual_app_user_id == null;
+    })
+    .map(([role]) => role);
+
+  if (missingCanonicalRoles.length > 0) {
+    return res.status(424).json({
+      contract_version: CONTRACT_VERSION,
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: One or more expected canonical role identities could not be resolved from the provided credentials.",
+      missing_canonical_roles: missingCanonicalRoles,
+      identity_audit: identityAudit,
+      canonical_job_id: CANONICAL.operational_job_id,
+      environment: env,
+      run_at: runAt,
+    });
+  }
+
+  // ── E: Verify role/privilege requirements before probes ────────────────────
+  const identityAuditFailed = ["office_ops", "worker", "qa"].filter(
+    (role) => !identityAudit[role]?.passed
+  );
+  if (identityAuditFailed.length > 0) {
+    return res.status(424).json({
+      contract_version: CONTRACT_VERSION,
+      error: "ROLE_IDENTITY_CONFIGURATION_BLOCKER: Identity audit failed for one or more canonical roles. Check privilege_contamination and worker_link_valid fields.",
+      identity_audit_failed_roles: identityAuditFailed,
+      identity_audit: identityAudit,
+      canonical_job_id: CANONICAL.operational_job_id,
+      environment: env,
+      run_at: runAt,
+    });
+  }
+
+  // Build the normalized token map (tokens keyed by canonical role)
+  const normalizedTokens = resolveNormalizedTokenMap(candidates, identities, tokensByLabel);
+
+  // ── G: Sequential probe execution with per-role retained snapshot ───────────
   const beforeSnapshots = await captureRetainedSnapshots();
   const otherWorkerEvidence = await discoverOtherWorkerEvidence();
 
-  const [ownerAdminProbes, officeOpsProbes, workerProbes, qaProbes, anonProbes] = await Promise.all([
-    probeOwnerAdmin(bearerToken),
-    probeOfficeOps(tokens.office_ops),
-    probeWorker(tokens.worker, otherWorkerEvidence),
-    probeQa(tokens.qa),
-    probeAnon(),
-  ]);
+  // 1. owner_admin
+  const ownerAdminProbes = await probeOwnerAdmin(bearerToken);
+  const afterOwnerAdmin = await captureRetainedSnapshots();
+  const retainedAfterOwnerAdmin = compareRetainedSnapshots(beforeSnapshots, afterOwnerAdmin);
+  if (!retainedAfterOwnerAdmin.unchanged) {
+    const owner_admin = summarizeProbes("owner_admin", ownerAdminProbes);
+    const passed = false;
+    console.warn("wave5_rls_acceptance_failed", {
+      failed_roles: ["owner_admin"],
+      failed_count: owner_admin.failed_count,
+      not_proven_count: owner_admin.not_proven_count,
+      retained_data_unchanged: false,
+      identity_audit_summary: { office_ops: "pass", worker: "pass", qa: "pass" },
+      failed_probe_summary: [],
+    });
+    return res.status(422).json({
+      contract_version: CONTRACT_VERSION,
+      environment: env,
+      canonical_job_id: CANONICAL.operational_job_id,
+      error: "Retained data changed after owner_admin probes; aborting.",
+      retained_data_drift_tables: retainedAfterOwnerAdmin.drift_tables,
+      identity_audit: identityAudit,
+      owner_admin,
+      passed,
+      run_at: runAt,
+    });
+  }
 
-  const afterSnapshots = await captureRetainedSnapshots();
-  const retainedIntegrity = compareRetainedSnapshots(beforeSnapshots, afterSnapshots);
+  // 2. office_ops
+  const officeOpsProbes = await probeOfficeOps(normalizedTokens.office_ops);
+  const afterOfficeOps = await captureRetainedSnapshots();
+  const retainedAfterOfficeOps = compareRetainedSnapshots(beforeSnapshots, afterOfficeOps);
+  if (!retainedAfterOfficeOps.unchanged) {
+    const owner_admin = summarizeProbes("owner_admin", ownerAdminProbes);
+    const office_ops = summarizeProbes("office_ops", officeOpsProbes);
+    const passed = false;
+    console.warn("wave5_rls_acceptance_failed", {
+      failed_roles: ["office_ops"],
+      failed_count: office_ops.failed_count,
+      not_proven_count: office_ops.not_proven_count,
+      retained_data_unchanged: false,
+      identity_audit_summary: { office_ops: "pass", worker: "pass", qa: "pass" },
+      failed_probe_summary: [],
+    });
+    return res.status(422).json({
+      contract_version: CONTRACT_VERSION,
+      environment: env,
+      canonical_job_id: CANONICAL.operational_job_id,
+      error: "Retained data changed after office_ops probes; aborting.",
+      retained_data_drift_tables: retainedAfterOfficeOps.drift_tables,
+      identity_audit: identityAudit,
+      owner_admin,
+      office_ops,
+      passed,
+      run_at: runAt,
+    });
+  }
 
+  // 3. worker
+  const workerProbes = await probeWorker(normalizedTokens.worker, otherWorkerEvidence);
+  const afterWorker = await captureRetainedSnapshots();
+  const retainedAfterWorker = compareRetainedSnapshots(beforeSnapshots, afterWorker);
+  if (!retainedAfterWorker.unchanged) {
+    const owner_admin = summarizeProbes("owner_admin", ownerAdminProbes);
+    const office_ops = summarizeProbes("office_ops", officeOpsProbes);
+    const worker = summarizeProbes("worker", workerProbes);
+    const passed = false;
+    console.warn("wave5_rls_acceptance_failed", {
+      failed_roles: ["worker"],
+      failed_count: worker.failed_count,
+      not_proven_count: worker.not_proven_count,
+      retained_data_unchanged: false,
+      identity_audit_summary: { office_ops: "pass", worker: "pass", qa: "pass" },
+      failed_probe_summary: [],
+    });
+    return res.status(422).json({
+      contract_version: CONTRACT_VERSION,
+      environment: env,
+      canonical_job_id: CANONICAL.operational_job_id,
+      error: "Retained data changed after worker probes; aborting.",
+      retained_data_drift_tables: retainedAfterWorker.drift_tables,
+      identity_audit: identityAudit,
+      owner_admin,
+      office_ops,
+      worker,
+      passed,
+      run_at: runAt,
+    });
+  }
+
+  // 4. qa
+  const qaProbes = await probeQa(normalizedTokens.qa);
+  const afterQa = await captureRetainedSnapshots();
+  const retainedAfterQa = compareRetainedSnapshots(beforeSnapshots, afterQa);
+  if (!retainedAfterQa.unchanged) {
+    const owner_admin = summarizeProbes("owner_admin", ownerAdminProbes);
+    const office_ops = summarizeProbes("office_ops", officeOpsProbes);
+    const worker = summarizeProbes("worker", workerProbes);
+    const qa = summarizeProbes("qa", qaProbes);
+    const passed = false;
+    console.warn("wave5_rls_acceptance_failed", {
+      failed_roles: ["qa"],
+      failed_count: qa.failed_count,
+      not_proven_count: qa.not_proven_count,
+      retained_data_unchanged: false,
+      identity_audit_summary: { office_ops: "pass", worker: "pass", qa: "pass" },
+      failed_probe_summary: [],
+    });
+    return res.status(422).json({
+      contract_version: CONTRACT_VERSION,
+      environment: env,
+      canonical_job_id: CANONICAL.operational_job_id,
+      error: "Retained data changed after qa probes; aborting.",
+      retained_data_drift_tables: retainedAfterQa.drift_tables,
+      identity_audit: identityAudit,
+      owner_admin,
+      office_ops,
+      worker,
+      qa,
+      passed,
+      run_at: runAt,
+    });
+  }
+
+  // 5. anon
+  const anonProbes = await probeAnon();
+  const afterAnon = await captureRetainedSnapshots();
+  const retainedIntegrity = compareRetainedSnapshots(beforeSnapshots, afterAnon);
+
+  // ── Summarize ───────────────────────────────────────────────────────────────
   const owner_admin = summarizeProbes("owner_admin", ownerAdminProbes);
   const office_ops = summarizeProbes("office_ops", officeOpsProbes);
   const worker = summarizeProbes("worker", workerProbes);
@@ -1709,8 +2100,31 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   const passed =
     sections.every((section) => section.passed) &&
     retainedIntegrity.unchanged &&
-    missingIdentities.length === 0 &&
-    failedCount === 0;
+    failedCount === 0 &&
+    identityAudit.office_ops.passed &&
+    identityAudit.worker.passed &&
+    identityAudit.qa.passed;
+
+  // ── K: Concise failure summary ─────────────────────────────────────────────
+  const failedMandatoryProbes = sections.flatMap((section) =>
+    section.probes
+      .filter((probe) => probe.mandatory && !probe.pass)
+      .map((probe) => ({
+        role: probe.role,
+        operation: probe.operation,
+        table: probe.table,
+        expected: probe.expected,
+        classification: probe.classification,
+        actual_status: probe.actual_status,
+        note: probe.note || null,
+      }))
+  );
+
+  const identityAuditSummary = {
+    office_ops: identityAudit.office_ops.passed ? "pass" : "fail",
+    worker: identityAudit.worker.passed ? "pass" : "fail",
+    qa: identityAudit.qa.passed ? "pass" : "fail",
+  };
 
   if (!passed) {
     console.warn("wave5_rls_acceptance_failed", {
@@ -1718,6 +2132,15 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
       failed_count: failedCount,
       not_proven_count: notProvenCount,
       retained_data_unchanged: retainedIntegrity.unchanged,
+      identity_audit_summary: identityAuditSummary,
+      failed_probe_summary: failedMandatoryProbes.map((p) => ({
+        role: p.role,
+        operation: p.operation,
+        table: p.table,
+        expected: p.expected,
+        classification: p.classification,
+        actual_status: p.actual_status,
+      })),
     });
   }
 
@@ -1725,11 +2148,14 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
     contract_version: CONTRACT_VERSION,
     environment: env,
     canonical_job_id: CANONICAL.operational_job_id,
+    identity_audit: identityAudit,
+    identity_audit_summary: identityAuditSummary,
     owner_admin,
     office_ops,
     worker,
     qa,
     anon,
+    failed_mandatory_probes: failedMandatoryProbes,
     retained_data_unchanged: retainedIntegrity.unchanged,
     retained_data_drift_tables: retainedIntegrity.drift_tables,
     mandatory_probe_count: mandatoryProbeCount,
@@ -1744,17 +2170,18 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
       organization_id: hucOrganization.id,
     },
     credential_sources: {
-      office_ops: credentialConfig.office_ops.source,
-      worker: credentialConfig.worker.source,
-      qa: credentialConfig.qa.source,
+      office_ops: identityAudit.office_ops.credential_source,
+      worker: identityAudit.worker.credential_source,
+      qa: identityAudit.qa.credential_source,
     },
     passed,
     run_at: runAt,
     notes: [
       "No auth users were created.",
       "No retained Wave 5 evidence was intentionally mutated or cleaned up.",
-      "Owner_admin probes used the requesting browser bearer token; office_ops / worker / qa used role-specific preview identities.",
+      "Owner_admin probes used the requesting browser bearer token; office_ops / worker / qa tokens were resolved by canonical app_user_id.",
       "Service role was used only for authoritative before/after integrity verification and optional cross-worker discovery.",
+      "Role probes ran sequentially with retained-data integrity verification between each role.",
     ],
   });
 }
