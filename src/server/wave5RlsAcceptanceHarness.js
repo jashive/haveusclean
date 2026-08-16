@@ -303,6 +303,25 @@ async function authenticatedRestFetchPath(accessToken, path) {
   });
 }
 
+async function serviceRoleRestRows(path) {
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${supabaseUrl}/rest/v1/${path}`, {
+    headers: {
+      apikey: serviceKey,
+      Authorization: "Bearer " + serviceKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Service-role REST lookup failed: HTTP ${res.status} ${text}`);
+  }
+  const rows = await res.json().catch(() => []);
+  return Array.isArray(rows) ? rows : [];
+}
+
 async function loadActiveAppUser(accessToken, authUserId) {
   const res = await authenticatedRestFetchPath(
     accessToken,
@@ -477,8 +496,8 @@ function collectAllCredentialCandidates() {
   return candidates;
 }
 
-async function resolveTokenIdentity(token, ownerToken) {
-  // Use the candidate's own token for auth-user lookup; use ownerToken for RLS-protected lookups
+async function resolveTokenIdentity(token) {
+  // Use candidate token only to prove auth identity; use service-role for authoritative directory reads.
   const supabaseUrl = process.env.SUPABASE_URL;
   const anonKey = process.env.SUPABASE_ANON_KEY;
 
@@ -492,51 +511,33 @@ async function resolveTokenIdentity(token, ownerToken) {
   const authUser = await authRes.json();
   if (!authUser?.id) throw new Error("token did not resolve to an auth user");
 
-  // 2. Resolve app_user via owner token (for cross-account lookups)
-  const appUserRes = await authenticatedRestFetchPath(
-    ownerToken,
+  // 2. Resolve app_user via service-role (authoritative directory lookup)
+  const appUserRows = await serviceRoleRestRows(
     `app_user?select=id,auth_user_id,status&auth_user_id=eq.${encodeURIComponent(authUser.id)}&limit=1`
   );
   let appUserId = null;
-  if (appUserRes.ok) {
-    const rows = await appUserRes.json().catch(() => []);
-    appUserId = Array.isArray(rows) && rows.length === 1 ? rows[0].id : null;
-  }
+  appUserId = appUserRows.length === 1 ? appUserRows[0].id : null;
 
   // 3. Resolve active memberships
   let activeRoleCodes = [];
   if (appUserId) {
-    const memRes = await authenticatedRestFetchPath(
-      ownerToken,
+    const memRows = await serviceRoleRestRows(
       `user_membership?select=role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(CANONICAL.organization_id)}&status=eq.active`
     );
-    if (memRes.ok) {
-      const memRows = await memRes.json().catch(() => []);
-      const roleIds = Array.isArray(memRows) ? memRows.map((r) => r.role_id).filter(Boolean) : [];
-      if (roleIds.length > 0) {
-        const roleRes = await authenticatedRestFetchPath(
-          ownerToken,
-          `app_role?select=id,code&id=in.(${roleIds.join(",")})`
-        );
-        if (roleRes.ok) {
-          const roleRows = await roleRes.json().catch(() => []);
-          activeRoleCodes = Array.isArray(roleRows) ? roleRows.map((r) => r.code).filter(Boolean) : [];
-        }
-      }
+    const roleIds = memRows.map((r) => r.role_id).filter(Boolean);
+    if (roleIds.length > 0) {
+      const roleRows = await serviceRoleRestRows(`app_role?select=id,code&id=in.(${roleIds.join(",")})`);
+      activeRoleCodes = roleRows.map((r) => r.code).filter(Boolean);
     }
   }
 
   // 4. Resolve worker row if one exists
   let workerId = null;
   if (appUserId) {
-    const workerRes = await authenticatedRestFetchPath(
-      ownerToken,
+    const workerRows = await serviceRoleRestRows(
       `worker?select=id,app_user_id,status,organization_id,business_unit_id&app_user_id=eq.${encodeURIComponent(appUserId)}&status=eq.active&limit=1`
     );
-    if (workerRes.ok) {
-      const workerRows = await workerRes.json().catch(() => []);
-      workerId = Array.isArray(workerRows) && workerRows.length === 1 ? workerRows[0].id : null;
-    }
+    workerId = workerRows.length === 1 ? workerRows[0].id : null;
   }
 
   return { auth_user_id: authUser.id, app_user_id: appUserId, active_role_codes: activeRoleCodes, worker_id: workerId };
@@ -1879,7 +1880,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
     if (!token) continue;
     if (identities.has(token)) continue; // deduplicated tokens
     try {
-      const identity = await resolveTokenIdentity(token, bearerToken);
+      const identity = await resolveTokenIdentity(token);
       identities.set(token, identity);
     } catch (error) {
       identityErrors[cred.env_label] = error.message;
