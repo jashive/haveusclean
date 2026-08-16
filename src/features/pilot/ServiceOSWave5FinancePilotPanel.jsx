@@ -748,8 +748,11 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
   const [gaDirectCostRef, setGaDirectCostRef] = useState("");
   const [gaState, setGaState] = useState(null);
   const [gaGateResult, setGaGateResult] = useState(null);
+  const [gaRlsResult, setGaRlsResult] = useState(null);
+  const [gaRlsErr, setGaRlsErr] = useState(null);
   const [gaErr, setGaErr] = useState(null);
   const [gaLoading, setGaLoading] = useState(false);
+  const [gaRlsLoading, setGaRlsLoading] = useState(false);
 
   const handleGaLoad = useCallback(async () => {
     const jobId = gaJobId.trim();
@@ -759,6 +762,8 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
     setGaErr(null);
     setGaState(null);
     setGaGateResult(null);
+    setGaRlsResult(null);
+    setGaRlsErr(null);
     try {
       const state = await loadWave5AcceptanceState(jobId, accessToken);
       setGaState(state);
@@ -778,6 +783,8 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
     setGaLoading(true);
     setGaErr(null);
     setGaGateResult(null);
+    setGaRlsResult(null);
+    setGaRlsErr(null);
     try {
       const result = await runWave5NextGate({
         operationalJobId: jobId,
@@ -797,6 +804,40 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
       setGaLoading(false);
     }
   }, [gaJobId, gaBasisValue, gaOtherDirectCost, gaDirectCostRef, gaState, appUserId, accessToken, revenueContext]);
+
+  const handleGaRunRlsAcceptance = useCallback(async () => {
+    const jobId = gaJobId.trim();
+    if (!jobId) { setGaRlsErr("operational_job_id required"); return; }
+    if (!accessToken) { setGaRlsErr("No access token — please sign in"); return; }
+    if (gaState?.financeCoreStatus !== "pass") {
+      setGaRlsErr("FINANCE CORE PASS is required before running Wave 5 RLS Acceptance");
+      return;
+    }
+    setGaRlsLoading(true);
+    setGaRlsErr(null);
+    setGaRlsResult(null);
+    try {
+      const response = await fetch("/api/wave5-rls-acceptance-harness", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: "Bearer " + accessToken,
+        },
+        body: JSON.stringify({
+          operational_job_id: jobId,
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok) {
+        throw new Error(payload?.detail || payload?.error || "Wave 5 RLS acceptance failed: HTTP " + response.status);
+      }
+      setGaRlsResult(payload);
+    } catch (e) {
+      setGaRlsErr(e.message);
+    } finally {
+      setGaRlsLoading(false);
+    }
+  }, [gaJobId, gaState, accessToken]);
 
   return (
     <div style={styles.panel}>
@@ -1015,13 +1056,19 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
             {gaLoading ? "…" : "Run Next Gate"}
           </button>
           {gaState?.financeCoreStatus === "pass" && (
-            <button style={styles.btn} onClick={handleGaLoad} disabled={gaLoading}>
-              {gaLoading ? "…" : "Refresh Status"}
-            </button>
+            <>
+              <button style={styles.btn} onClick={handleGaLoad} disabled={gaLoading || gaRlsLoading}>
+                {gaLoading ? "…" : "Refresh Status"}
+              </button>
+              <button style={styles.btn} onClick={handleGaRunRlsAcceptance} disabled={gaLoading || gaRlsLoading}>
+                {gaRlsLoading ? "…" : "Run Wave 5 RLS Acceptance"}
+              </button>
+            </>
           )}
         </div>
 
         {gaErr && <div style={styles.error}>{gaErr}</div>}
+        {gaRlsErr && <div style={styles.error}>{gaRlsErr}</div>}
 
         {gaState && (
           <div style={styles.statusBlock}>
@@ -1057,6 +1104,15 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
               ✓ Gate executed: {gaGateResult.gate}
             </div>
             {JSON.stringify(gaGateResult.result, null, 2)}
+          </div>
+        )}
+
+        {gaRlsResult && (
+          <div style={{ ...styles.statusBlock, borderColor: gaRlsResult.passed ? "#166534" : "#7f1d1d", marginTop: 6 }}>
+            <div style={{ color: gaRlsResult.passed ? "#4ade80" : "#f87171", fontWeight: 700, marginBottom: 4 }}>
+              {gaRlsResult.passed ? "✓" : "✕"} Wave 5 RLS Acceptance
+            </div>
+            {JSON.stringify(gaRlsResult, null, 2)}
           </div>
         )}
       </div>

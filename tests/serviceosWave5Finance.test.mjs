@@ -57,6 +57,10 @@ const previewPaymentSrc = readFileSync(
   resolve(ROOT, "api/wave5-preview-payment.js"),
   "utf8"
 );
+const wave5RlsHarnessSrc = readFileSync(
+  resolve(ROOT, "api/wave5-rls-acceptance-harness.js"),
+  "utf8"
+);
 const panelSrc = readFileSync(
   resolve(ROOT, "src/features/pilot/ServiceOSWave5FinancePilotPanel.jsx"),
   "utf8"
@@ -2914,4 +2918,122 @@ test("145. gross_margin_percent 0.6364 renders as 63.64%", () => {
   const raw = 0.6364;
   const rendered = `${(raw * 100).toFixed(2)}%`;
   assert.equal(rendered, "63.64%", "0.6364 must render as 63.64%");
+});
+
+test("146. Wave5 RLS harness reports missing requester bearer auth before probing", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-rls-acceptance-harness.js"));
+  const originalEnv = { ...process.env };
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_W5_RLS_HARNESS_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+
+  try {
+    const req = { method: "POST", headers: {}, body: {} };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 401);
+    assert.equal(res.body?.contract_version, "wave5-rls-acceptance-v1");
+    assert.match(res.body?.error || "", /Authorization:/i);
+  } finally {
+    restoreEnv(originalEnv);
+  }
+});
+
+test("147. Wave5 RLS harness fails closed with missing identity env vars after validating requester", async () => {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-rls-acceptance-harness.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_W5_RLS_HARNESS_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+  delete process.env.SERVICEOS_W5_RLS_OFFICE_OPS_EMAIL;
+  delete process.env.SERVICEOS_W5_RLS_OFFICE_OPS_PASSWORD;
+  delete process.env.SERVICEOS_W5_RLS_WORKER_EMAIL;
+  delete process.env.SERVICEOS_W5_RLS_WORKER_PASSWORD;
+  delete process.env.SERVICEOS_W5_RLS_QA_EMAIL;
+  delete process.env.SERVICEOS_W5_RLS_QA_PASSWORD;
+  delete process.env.SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL;
+  delete process.env.SERVICEOS_W4_RLS_OFFICE_OPS_PASSWORD;
+  delete process.env.SERVICEOS_W4_RLS_WORKER_EMAIL;
+  delete process.env.SERVICEOS_W4_RLS_WORKER_PASSWORD;
+  delete process.env.SERVICEOS_W4_RLS_QA_EMAIL;
+  delete process.env.SERVICEOS_W4_RLS_QA_PASSWORD;
+
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/auth/v1/user")) {
+      return jsonResponse(200, { id: "auth-user-1" });
+    }
+    if (href.includes("/rest/v1/app_user")) {
+      return jsonResponse(200, [{ id: "app-user-1", auth_user_id: "auth-user-1", status: "active" }]);
+    }
+    if (href.includes("/rest/v1/organization?select=id,code,name&code=eq.HUC")) {
+      return jsonResponse(200, [{
+        id: "5614e474-7334-4c15-b430-52597c103e18",
+        code: "HUC",
+        name: "HaveUsClean",
+      }]);
+    }
+    if (href.includes("/rest/v1/app_role?select=id,code&code=in.(owner_admin)")) {
+      return jsonResponse(200, [{ id: "role-owner-admin", code: "owner_admin" }]);
+    }
+    if (href.includes("/rest/v1/user_membership")) {
+      return jsonResponse(200, [{
+        id: "membership-1",
+        app_user_id: "app-user-1",
+        organization_id: "5614e474-7334-4c15-b430-52597c103e18",
+        business_unit_id: null,
+        role_id: "role-owner-admin",
+        status: "active",
+      }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: { authorization: "Bearer " + "preview-token" },
+      body: { operational_job_id: "e1100000-0000-0000-0000-00000000000e" },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    assert.equal(res.statusCode, 424);
+    assert.equal(res.body?.contract_version, "wave5-rls-acceptance-v1");
+    assert.deepEqual(res.body?.missing_identities, ["office_ops", "worker", "qa"]);
+    assert.ok(
+      Array.isArray(res.body?.required_env_vars) &&
+        res.body.required_env_vars.includes("SERVICEOS_W5_RLS_OFFICE_OPS_EMAIL") &&
+        res.body.required_env_vars.includes("SERVICEOS_W4_RLS_OFFICE_OPS_EMAIL"),
+      "handler must report Wave 5 + Wave 4 fallback env vars"
+    );
+  } finally {
+    global.fetch = originalFetch;
+    restoreEnv(originalEnv);
+  }
+});
+
+test("148. Wave5 RLS harness source locks canonical Wave5 retained IDs and retained-data integrity output", () => {
+  for (const token of [
+    "5614e474-7334-4c15-b430-52597c103e18",
+    "1089e787-5316-437f-884e-adad3a907c81",
+    "c626972d-3d5f-411c-ba87-613a62f5a885",
+    "71fec2d6-a941-4644-901b-f35d2a29afdd",
+    "a2e69627-fb22-4017-a4e2-122f433430d5",
+    "50f67517-4d3d-4c06-b591-d8eb957c274f",
+    "311af2e2-b5b8-4a0d-a738-cb0eaf440284",
+    "23026a2e-13e9-4a0a-938a-95f4fc28761b",
+    "ccb119bb-a6cc-49da-8ede-72454404fb48",
+    "retained_data_unchanged",
+    "credential_sources",
+    "authorization_path_proven_no_row_persisted",
+  ]) {
+    assert.ok(wave5RlsHarnessSrc.includes(token), `Wave5 RLS harness must include ${token}`);
+  }
 });

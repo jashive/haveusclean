@@ -16,6 +16,10 @@ const harnessSrc = readFileSync(
   resolve(ROOT, "api/wave4-rls-acceptance-harness.js"),
   "utf8"
 );
+const wave5RlsHarnessSrc = readFileSync(
+  resolve(ROOT, "api/wave5-rls-acceptance-harness.js"),
+  "utf8"
+);
 const stripeSrc = readFileSync(resolve(ROOT, "api/stripe-webhook.js"), "utf8");
 const qbSrc = readFileSync(resolve(ROOT, "api/wave5-accounting-sync.js"), "utf8");
 const previewPaymentSrc = readFileSync(resolve(ROOT, "api/wave5-preview-payment.js"), "utf8");
@@ -287,4 +291,48 @@ test("W4H-21. Preview payment now uses a server-only endpoint with bearer auth",
   ]) {
     assert.ok(previewPaymentSrc.includes(token), `Preview payment endpoint must include ${token}`);
   }
+});
+
+test("W4H-22. Wave 5 RLS harness is preview/test only, requester-authenticated, and supports Wave 4 credential fallback", () => {
+  for (const token of [
+    "wave5-rls-acceptance-v1",
+    "SERVICEOS_W5_RLS_HARNESS_ENABLED",
+    "SERVICEOS_ENVIRONMENT",
+    "extractBearerToken",
+    "loadAuthenticatedAuthUser",
+    "loadActiveOwnerAdminMembership",
+    "SERVICEOS_W5_RLS_OFFICE_OPS",
+    "SERVICEOS_W5_RLS_WORKER",
+    "SERVICEOS_W5_RLS_QA",
+    "SERVICEOS_W4_RLS_OFFICE_OPS",
+    "SERVICEOS_W4_RLS_WORKER",
+    "SERVICEOS_W4_RLS_QA",
+    "missing_identities",
+  ]) {
+    assert.ok(wave5RlsHarnessSrc.includes(token), `Wave 5 RLS harness must include ${token}`);
+  }
+  assert.ok(
+    !wave5RlsHarnessSrc.includes("SERVICEOS_W5_RLS_OWNER_PASSWORD"),
+    "Wave 5 RLS harness must not require an owner password env var"
+  );
+});
+
+test("W4H-23. Wave 5 pilot panel exposes finance-core-pass-gated RLS acceptance button and posts bearer auth to server-only endpoint", () => {
+  assert.ok(
+    panelSrc.includes('fetch("/api/wave5-rls-acceptance-harness"'),
+    "Wave 5 pilot panel must POST to /api/wave5-rls-acceptance-harness"
+  );
+  assert.ok(
+    panelSrc.includes("Run Wave 5 RLS Acceptance"),
+    "Wave 5 pilot panel must expose the RLS acceptance button label"
+  );
+  assert.ok(
+    panelSrc.includes('gaState?.financeCoreStatus === "pass"') &&
+      panelSrc.includes("handleGaRunRlsAcceptance"),
+    "Wave 5 pilot panel must gate the RLS acceptance action on financeCoreStatus === 'pass'"
+  );
+  assert.ok(
+    panelSrc.includes("Authorization:") && panelSrc.includes("accessToken"),
+    "Wave 5 pilot panel must send the current ServiceOS bearer token"
+  );
 });
