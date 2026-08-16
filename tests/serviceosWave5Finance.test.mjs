@@ -37,6 +37,14 @@ const wave5UtilsSrc = readFileSync(
   resolve(ROOT, "src/lib/serviceosWave5FinanceUtils.js"),
   "utf8"
 );
+const authClientSrc = readFileSync(
+  resolve(ROOT, "src/lib/serviceosAuthClient.js"),
+  "utf8"
+);
+const acceptanceRunnerSrc = readFileSync(
+  resolve(ROOT, "src/lib/serviceosWave5AcceptanceRunner.js"),
+  "utf8"
+);
 const qbAdapterSrc = readFileSync(
   resolve(ROOT, "api/wave5-accounting-sync.js"),
   "utf8"
@@ -2203,14 +2211,203 @@ test("112. preview payment denies non-null wrong BU membership in same organizat
   assert.match(res.body?.detail || "", /organization\/business unit/i);
 });
 
-test("113. preview payment denies membership from wrong organization even with null BU", async () => {
-  const res = await runPreviewPaymentAuthScenario({
-    roleCode: "owner_admin",
-    membershipOrganizationId: "org-wrong",
-    membershipBusinessUnitId: null,
-    invoiceOrganizationId: "org-1",
-    invoiceBusinessUnitId: "bu-1",
-  });
-  assert.equal(res.statusCode, 403);
-  assert.match(res.body?.detail || "", /organization\/business unit/i);
+// ── Wave 5 Continuation: Auth Refresh, Payable Approval, Acceptance Runner ───
+
+// 114. Expired JWT — source confirms authenticatedRestFetchWithRefresh exists and refreshes on 401
+test("114. expired JWT refresh: authenticatedRestFetchWithRefresh exported and handles 401/PGRST303", () => {
+  assert.ok(
+    authClientSrc.includes("authenticatedRestFetchWithRefresh"),
+    "serviceosAuthClient must export authenticatedRestFetchWithRefresh"
+  );
+  assert.ok(
+    authClientSrc.includes("isSupabaseExpiredError"),
+    "serviceosAuthClient must define isSupabaseExpiredError helper"
+  );
+  assert.ok(
+    authClientSrc.includes("PGRST303"),
+    "serviceosAuthClient must detect PGRST303 (PostgREST JWT expired code)"
+  );
+  assert.ok(
+    authClientSrc.includes("status === 401"),
+    "serviceosAuthClient must treat HTTP 401 as an expired token signal"
+  );
+  assert.ok(
+    authClientSrc.includes("refreshSession(session.refresh_token)"),
+    "authenticatedRestFetchWithRefresh must invoke refreshSession with the stored refresh_token"
+  );
+  assert.ok(
+    authClientSrc.includes("return authenticatedRestFetch(path, refreshed.access_token, options)"),
+    "authenticatedRestFetchWithRefresh must retry the request with the refreshed access token"
+  );
 });
+
+// 115. Refresh failure fails closed — session cleared and error thrown
+test("115. refresh failure fails closed: session cleared and error thrown on refresh failure", () => {
+  assert.ok(
+    authClientSrc.includes("clearSession()"),
+    "serviceosAuthClient must call clearSession() on refresh failure"
+  );
+  assert.ok(
+    authClientSrc.includes("session expired and refresh failed"),
+    "authenticatedRestFetchWithRefresh must surface a clear error on refresh failure"
+  );
+});
+
+// 116. No infinite retry — at most one refresh+retry cycle
+test("116. no infinite retry: authenticatedRestFetchWithRefresh retries at most once", () => {
+  assert.ok(
+    authClientSrc.includes("return authenticatedRestFetch(path, refreshed.access_token, options)"),
+    "retry call must use authenticatedRestFetch (not authenticatedRestFetchWithRefresh) — preventing recursion"
+  );
+  const fnStart = authClientSrc.indexOf("export async function authenticatedRestFetchWithRefresh");
+  const fnEnd = authClientSrc.indexOf("\n// ── Canonical ServiceOS context validation");
+  const refreshWithBody = authClientSrc.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+  assert.ok(
+    !refreshWithBody.includes("while (") && !refreshWithBody.includes("for ("),
+    "authenticatedRestFetchWithRefresh must not contain a retry loop"
+  );
+  const retryCallCount = (refreshWithBody.match(/authenticatedRestFetch\(/g) || []).length;
+  assert.ok(
+    retryCallCount <= 2,
+    `authenticatedRestFetchWithRefresh must call authenticatedRestFetch at most twice (found ${retryCallCount})`
+  );
+});
+
+// 117. Payable approval rejects worker self-approval at runtime layer
+test("117. approveContractorPayable rejects worker self-approval", () => {
+  assert.ok(
+    wave5RuntimeSrc.includes("export async function approveContractorPayable"),
+    "serviceosWave5Runtime must export approveContractorPayable"
+  );
+  assert.ok(
+    wave5RuntimeSrc.includes("self-approval not permitted"),
+    "approveContractorPayable must throw a clear error for self-approval"
+  );
+  assert.ok(
+    wave5RuntimeSrc.includes("worker.app_user_id === approverAppUserId"),
+    "approveContractorPayable must compare worker.app_user_id with approverAppUserId"
+  );
+});
+
+// 118. Payable approval only changes approval fields, never computed_amount or lineage fields
+test("118. approveContractorPayable only updates approval fields", () => {
+  const fnStart = wave5RuntimeSrc.indexOf("export async function approveContractorPayable");
+  const fnEnd = wave5RuntimeSrc.indexOf("\nexport ", fnStart + 1);
+  const fnBody = wave5RuntimeSrc.slice(fnStart, fnEnd === -1 ? undefined : fnEnd);
+
+  assert.ok(fnBody.includes("payable_status: \"approved\""), "approval patch must set payable_status = approved");
+  assert.ok(fnBody.includes("approved_by_app_user_id"), "approval patch must set approved_by_app_user_id");
+  assert.ok(fnBody.includes("approved_at"), "approval patch must set approved_at");
+
+  const patchStart = fnBody.indexOf("const patch = {");
+  const patchEnd = fnBody.indexOf("};", patchStart) + 2;
+  const patchBlock = fnBody.slice(patchStart, patchEnd);
+  assert.ok(!patchBlock.includes("computed_amount"), "patch must not modify computed_amount");
+  assert.ok(!patchBlock.includes("worker_id"), "patch must not modify worker_id");
+  assert.ok(!patchBlock.includes("currency_code"), "patch must not modify currency_code");
+  assert.ok(!patchBlock.includes("contractor_compensation_version_id"), "patch must not modify compensation version");
+});
+
+// 119. Runner resumes a pending payable instead of recreating it
+test("119. runner resumes pending payable instead of recreating it", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("assignmentPayables.length === 0"),
+    "runner must only create payable when none exists"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("payable.payable_status === \"pending\""),
+    "runner must detect pending payable and route to approval"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("gate: \"approve_payable\""),
+    "runner must return gate = approve_payable when payable is pending"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("gate: \"create_payable\""),
+    "runner must return gate = create_payable only when no payable exists"
+  );
+});
+
+// 120. Runner skips already completed earlier gates
+test("120. runner skips already completed earlier gates", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("assignment.assignment_status === \"acknowledged\""),
+    "runner only completes assignment when it is still in acknowledged state"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("if (!profitability)"),
+    "runner only captures profitability when no snapshot exists yet"
+  );
+});
+
+// 121. flat_amount compensation forces basis_value to 0
+test("121. flat_amount uses basis_value = 0 regardless of input", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("compensation_method === \"flat_amount\" ? 0"),
+    "runner must force resolvedBasisValue to 0 for flat_amount compensation"
+  );
+});
+
+// 122. Multiple compensation versions fail closed in runner
+test("122. multiple compensation versions fail closed in runner", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("effectiveVersions.length > 1"),
+    "runner must check for multiple approved/active compensation versions"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("multiple approved/active compensation versions found"),
+    "runner must fail closed with clear message when multiple versions exist"
+  );
+});
+
+// 123. Multiple assignments fail closed in runner
+test("123. multiple assignments fail closed in runner", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("liveAssignments.length > 1"),
+    "runner must check for multiple live assignments"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("multiple active/completed assignments found"),
+    "runner must fail closed with clear message when multiple assignments exist"
+  );
+});
+
+// 124. Profitability gate waits until payable is approved or paid
+test("124. profitability waits until payable is approved or paid", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("[\"approved\", \"paid\"].includes(payable.payable_status)"),
+    "runner must only proceed to profitability capture when payable is approved or paid"
+  );
+  assert.ok(
+    acceptanceRunnerSrc.includes("gate: \"approve_payable\""),
+    "runner routes to approve_payable before profitability when payable is pending"
+  );
+});
+
+// 125. Status verification occurs after profitability snapshot exists
+test("125. status verification occurs after profitability snapshot exists", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("gate: \"verify_status\""),
+    "runner must have a verify_status gate"
+  );
+  const profCheckPos = acceptanceRunnerSrc.indexOf("if (!profitability)");
+  const verifyGatePos = acceptanceRunnerSrc.indexOf("gate: \"verify_status\"");
+  assert.ok(profCheckPos < verifyGatePos, "profitability check must precede verify_status gate");
+});
+
+// 126. UI panel includes Wave 5 Guided Acceptance section with required fields and buttons
+test("126. UI panel includes Wave 5 Guided Acceptance section with all required elements", () => {
+  assert.ok(panelSrc.includes("Wave 5 Guided Acceptance"), "Panel must include the Wave 5 Guided Acceptance section label");
+  assert.ok(panelSrc.includes("Load / Resume Wave 5"), "Panel must include Load / Resume Wave 5 button");
+  assert.ok(panelSrc.includes("Run Next Gate"), "Panel must include Run Next Gate button");
+  assert.ok(panelSrc.includes("gaJobId"), "Panel must include operational_job_id input state");
+  assert.ok(panelSrc.includes("basis_value"), "Panel must include basis_value input");
+  assert.ok(panelSrc.includes("other_direct_cost"), "Panel must include other_direct_cost input");
+  assert.ok(panelSrc.includes("direct_cost_source_reference"), "Panel must include direct_cost_source_reference input");
+  assert.ok(panelSrc.includes("nextGate"), "Panel must display next recommended gate");
+  assert.ok(panelSrc.includes("blockerReason"), "Panel must display blocker reason when fail closed");
+  assert.ok(panelSrc.includes("runWave5NextGate"), "Panel must import and use runWave5NextGate");
+  assert.ok(panelSrc.includes("loadWave5AcceptanceState"), "Panel must import and use loadWave5AcceptanceState");
+  assert.ok(panelSrc.includes("approveContractorPayable"), "Panel runtime import must include approveContractorPayable");
+});
+

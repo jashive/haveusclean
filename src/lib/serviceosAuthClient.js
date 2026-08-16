@@ -116,6 +116,100 @@ export async function authenticatedRestFetch(path, accessToken, options = {}) {
   return response;
 }
 
+// ── Token expiry helpers ──────────────────────────────────────────────────────
+
+const TOKEN_EXPIRY_BUFFER_SECONDS = 60;
+
+function isTokenExpiredOrNearlyExpired(session) {
+  if (!session?.expires_at) return false;
+  const nowSec = Math.floor(Date.now() / 1000);
+  return session.expires_at - nowSec <= TOKEN_EXPIRY_BUFFER_SECONDS;
+}
+
+function isSupabaseExpiredError(status, body) {
+  if (status === 401) return true;
+  // PGRST303 = JWT expired PostgREST code
+  if (typeof body === "string" && body.includes("PGRST303")) return true;
+  if (body && typeof body === "object" && body.code === "PGRST303") return true;
+  return false;
+}
+
+/**
+ * Proactively refresh the stored session if the token is expired or nearly expired.
+ * Returns the (possibly refreshed) access_token, or throws if refresh fails.
+ * Never exposes tokens in logs.
+ */
+export async function getValidAccessToken() {
+  const session = getStoredSession();
+  if (!session?.access_token) {
+    throw new Error("ServiceOS: no active session");
+  }
+  if (!isTokenExpiredOrNearlyExpired(session)) {
+    return session.access_token;
+  }
+  if (!session.refresh_token) {
+    clearSession();
+    throw new Error("ServiceOS: session expired and no refresh token — please sign in again");
+  }
+  // Attempt proactive refresh
+  const refreshed = await refreshSession(session.refresh_token);
+  return refreshed.access_token;
+}
+
+/**
+ * Authenticated REST fetch with automatic JWT refresh and single retry.
+ * - Proactively refreshes if token is expired/nearly expired before the request.
+ * - If the response indicates JWT expired (401 / PGRST303), refreshes once and retries once.
+ * - Never retries more than once; never exposes tokens in UI/logs.
+ * - If refresh fails, clears session and throws (fail closed).
+ *
+ * @param {string} path – PostgREST path (no leading slash)
+ * @param {object} [options] – fetch options
+ * @returns {Response}
+ */
+export async function authenticatedRestFetchWithRefresh(path, options = {}) {
+  let accessToken;
+  try {
+    accessToken = await getValidAccessToken();
+  } catch (err) {
+    clearSession();
+    throw err;
+  }
+
+  const response = await authenticatedRestFetch(path, accessToken, options);
+
+  if (!response.ok) {
+    // Clone the response so we can read the body without consuming it
+    let bodyText = "";
+    let bodyObj = null;
+    try {
+      bodyText = await response.clone().text();
+      bodyObj = JSON.parse(bodyText);
+    } catch {
+      // ignore parse errors
+    }
+
+    if (isSupabaseExpiredError(response.status, bodyObj ?? bodyText)) {
+      // Single refresh + single retry
+      const session = getStoredSession();
+      if (!session?.refresh_token) {
+        clearSession();
+        throw new Error("ServiceOS: session expired — please sign in again");
+      }
+      let refreshed;
+      try {
+        refreshed = await refreshSession(session.refresh_token);
+      } catch {
+        // refreshSession already called clearSession on failure
+        throw new Error("ServiceOS: session expired and refresh failed — please sign in again");
+      }
+      return authenticatedRestFetch(path, refreshed.access_token, options);
+    }
+  }
+
+  return response;
+}
+
 // ── Canonical ServiceOS context validation ────────────────────────────────────
 
 export async function validateServiceOSContext(session) {

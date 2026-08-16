@@ -27,12 +27,16 @@ import {
   fetchActiveCompensationVersionForWorker,
   fetchContractorCompensationVersionById,
   createContractorPayable,
+  updateContractorPayable,
+  fetchContractorPayableById,
   fetchContractorPayablesByJobId,
   createJobProfitabilitySnapshot,
   // A15: updateJobProfitabilitySnapshot removed — profitability snapshots are append-only.
   // Use createJobProfitabilitySnapshot each capture; load latest by MAX(snapshot_taken_at).
   fetchJobProfitabilitySnapshotByJobId,
 } from "./serviceosWave5FinanceClient.js";
+
+import { authenticatedRestFetch } from "./serviceosAuthClient.js";
 
 import {
   buildBillingReadinessGatePayload,
@@ -513,6 +517,72 @@ export async function createPayableForAssignment(scope, workerAssignment, operat
   });
 
   return createContractorPayable(payload, accessToken);
+}
+
+/**
+ * Approve a pending contractor payable.
+ *
+ * Governed mutation — only updates approval fields.
+ * Rejects self-approval (worker.app_user_id === approverAppUserId).
+ * Requires payable_status = 'pending'.
+ * The M012 DB trigger enforces these rules as a second layer.
+ *
+ * @param {string} contractorPayableId   – contractor_payable.id
+ * @param {string} approverAppUserId     – app_user.id of the approver
+ * @param {string} accessToken           – valid JWT
+ * @returns {object} updated contractor_payable row
+ */
+export async function approveContractorPayable(contractorPayableId, approverAppUserId, accessToken) {
+  if (!contractorPayableId) throw new Error("approveContractorPayable: contractorPayableId required");
+  if (!approverAppUserId) throw new Error("approveContractorPayable: approverAppUserId required");
+  if (!accessToken) throw new Error("approveContractorPayable: accessToken required");
+
+  // Load canonical payable
+  const payable = await fetchContractorPayableById(contractorPayableId, accessToken);
+  if (!payable) {
+    throw new Error(`approveContractorPayable: contractor_payable not found (id=${contractorPayableId})`);
+  }
+
+  // Require pending status
+  if (payable.payable_status !== "pending") {
+    throw new Error(
+      `approveContractorPayable: payable must be pending to approve (is: ${payable.payable_status})`
+    );
+  }
+
+  // Load worker to enforce self-approval guard
+  const workerId = payable.worker_id;
+  if (!workerId) {
+    throw new Error("approveContractorPayable: payable has no worker_id");
+  }
+  const workerRes = await authenticatedRestFetch(
+    `worker?id=eq.${encodeURIComponent(workerId)}&select=id,app_user_id&limit=1`,
+    accessToken
+  );
+  if (!workerRes || !workerRes.ok) {
+    throw new Error("approveContractorPayable: failed to load worker");
+  }
+  const workers = await workerRes.json();
+  const worker = Array.isArray(workers) ? workers[0] ?? null : null;
+  if (!worker) {
+    throw new Error(`approveContractorPayable: worker not found (id=${workerId})`);
+  }
+
+  // Reject self-approval
+  if (worker.app_user_id && worker.app_user_id === approverAppUserId) {
+    throw new Error(
+      "approveContractorPayable: self-approval not permitted — approver is the worker"
+    );
+  }
+
+  // Update only approval fields — never touch computed_amount, worker, version, assignment, job, currency
+  const patch = {
+    payable_status: "approved",
+    approved_by_app_user_id: approverAppUserId,
+    approved_at: new Date().toISOString(),
+  };
+
+  return updateContractorPayable(contractorPayableId, patch, accessToken);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

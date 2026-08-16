@@ -22,9 +22,14 @@ import {
   createCompensationVersion,
   approveCompensationVersion,
   createPayableForAssignment,
+  approveContractorPayable,
   captureJobProfitabilitySnapshot,
   loadWave5FinanceStatus,
 } from "../../lib/serviceosWave5Runtime.js";
+import {
+  runWave5NextGate,
+  loadWave5AcceptanceState,
+} from "../../lib/serviceosWave5AcceptanceRunner.js";
 import {
   fetchContractorCompensationVersionById,
   fetchInvoiceRequestById,
@@ -737,6 +742,68 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
     }
   }, [jobId9, accessToken]);
 
+  // ── Wave 5 Guided Acceptance (runner) ────────────────────────────────────────
+  const [gaJobId, setGaJobId] = useState("");
+  const [gaBasisValue, setGaBasisValue] = useState("");
+  const [gaOtherDirectCost, setGaOtherDirectCost] = useState("0");
+  const [gaDirectCostRef, setGaDirectCostRef] = useState("");
+  const [gaState, setGaState] = useState(null);
+  const [gaGateResult, setGaGateResult] = useState(null);
+  const [gaErr, setGaErr] = useState(null);
+  const [gaLoading, setGaLoading] = useState(false);
+
+  const handleGaLoad = useCallback(async () => {
+    const jobId = gaJobId.trim();
+    if (!jobId) { setGaErr("operational_job_id required"); return; }
+    if (!accessToken) { setGaErr("No access token — please sign in"); return; }
+    setGaLoading(true);
+    setGaErr(null);
+    setGaState(null);
+    setGaGateResult(null);
+    try {
+      const state = await loadWave5AcceptanceState(jobId, accessToken);
+      setGaState(state);
+    } catch (e) {
+      setGaErr(e.message);
+    } finally {
+      setGaLoading(false);
+    }
+  }, [gaJobId, accessToken]);
+
+  const handleGaRunNextGate = useCallback(async () => {
+    const jobId = gaJobId.trim();
+    if (!jobId) { setGaErr("operational_job_id required"); return; }
+    if (!accessToken) { setGaErr("No access token — please sign in"); return; }
+    if (!appUserId) { setGaErr("Cannot run gate: canonical app user required"); return; }
+    if (!gaState?.nextGate) { setGaErr("No next gate available — load state first"); return; }
+    setGaLoading(true);
+    setGaErr(null);
+    setGaGateResult(null);
+    try {
+      const orgId = gaState?.financeStatus?.organization_id ?? revenueContext?.orgId ?? null;
+      const buId = gaState?.financeStatus?.business_unit_id ?? revenueContext?.primaryBusinessUnitId ?? null;
+      if (!orgId || !buId) throw new Error("Cannot determine organizationId/businessUnitId from state — load state first");
+      const result = await runWave5NextGate({
+        operationalJobId: jobId,
+        organizationId: orgId,
+        businessUnitId: buId,
+        approverAppUserId: appUserId,
+        basisValue: gaBasisValue.trim() ? Number(gaBasisValue) : 0,
+        otherDirectCost: Number(gaOtherDirectCost ?? 0),
+        directCostSourceReference: gaDirectCostRef.trim() || null,
+        accessToken,
+      });
+      setGaGateResult(result);
+      // Refresh state after gate execution
+      const state = await loadWave5AcceptanceState(jobId, accessToken);
+      setGaState(state);
+    } catch (e) {
+      setGaErr(e.message);
+    } finally {
+      setGaLoading(false);
+    }
+  }, [gaJobId, gaBasisValue, gaOtherDirectCost, gaDirectCostRef, gaState, appUserId, accessToken, revenueContext]);
+
   return (
     <div style={styles.panel}>
       <h4 style={styles.heading}>
@@ -899,6 +966,92 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
           {statusLoading ? "…" : "Load Finance Status"}
         </button>
         <ResultBlock data={statusResult} error={statusErr} />
+      </div>
+
+      {/* ── Wave 5 Guided Acceptance ─────────────────────────────────────── */}
+      <div style={{
+        ...styles.section,
+        borderTop: "2px solid #0ea5e9",
+        paddingTop: "0.9rem",
+        marginTop: "1rem",
+      }}>
+        <div style={{ ...styles.sectionLabel, color: "#38bdf8", fontSize: "0.78rem" }}>
+          🧭 Wave 5 Guided Acceptance
+          <span style={{ ...styles.badge, marginLeft: 8, background: "#0c4a6e" }}>PREVIEW ONLY</span>
+        </div>
+
+        <input
+          style={styles.input}
+          placeholder="operational_job_id (required)"
+          value={gaJobId}
+          onChange={(e) => setGaJobId(e.target.value)}
+        />
+        <input
+          style={styles.input}
+          placeholder="basis_value (optional — 0 for flat_amount)"
+          value={gaBasisValue}
+          onChange={(e) => setGaBasisValue(e.target.value)}
+        />
+        <input
+          style={styles.input}
+          placeholder="other_direct_cost (default 0)"
+          value={gaOtherDirectCost}
+          onChange={(e) => setGaOtherDirectCost(e.target.value)}
+        />
+        <input
+          style={styles.input}
+          placeholder="direct_cost_source_reference (optional)"
+          value={gaDirectCostRef}
+          onChange={(e) => setGaDirectCostRef(e.target.value)}
+        />
+
+        <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+          <button style={styles.btn} onClick={handleGaLoad} disabled={gaLoading}>
+            {gaLoading ? "…" : "Load / Resume Wave 5"}
+          </button>
+          <button
+            style={{
+              ...styles.btn,
+              background: gaState?.nextGate && !gaState?.blockerReason ? "#166534" : "#374151",
+              cursor: gaState?.nextGate && !gaState?.blockerReason ? "pointer" : "not-allowed",
+            }}
+            onClick={handleGaRunNextGate}
+            disabled={gaLoading || !gaState?.nextGate || !!gaState?.blockerReason}
+          >
+            {gaLoading ? "…" : "Run Next Gate"}
+          </button>
+        </div>
+
+        {gaErr && <div style={styles.error}>{gaErr}</div>}
+
+        {gaState && (
+          <div style={styles.statusBlock}>
+            {/* Assignment */}
+            <div><b>Assignment:</b> {gaState.assignment?.id ?? "—"} | status: {gaState.assignment?.assignment_status ?? "—"}</div>
+            {/* Invoice */}
+            <div><b>Invoice status:</b> {gaState.financeStatus?.invoice_request_status ?? "—"} | id: {gaState.financeStatus?.invoice_request_id ?? "—"}</div>
+            {/* Payments */}
+            <div><b>Payments:</b> {gaState.financeStatus?.payment_count ?? 0} | statuses: {(gaState.financeStatus?.payment_statuses ?? []).join(", ") || "—"}</div>
+            {/* Compensation (from payable if available) */}
+            <div><b>Payable:</b> {gaState.payable?.id ?? "—"} | status: {gaState.payable?.payable_status ?? "—"} | amount: {gaState.payable?.computed_amount ?? "—"} {gaState.payable?.currency_code ?? ""}</div>
+            {/* Profitability */}
+            <div><b>Profitability:</b> {gaState.profitability ? `snapshot ${gaState.profitability.id}` : "—"} | gross contribution: {gaState.profitability?.gross_contribution ?? "—"} | margin: {gaState.profitability?.gross_margin_percent != null ? `${gaState.profitability.gross_margin_percent}%` : "—"}</div>
+            {/* Next gate */}
+            <div style={{ marginTop: 4 }}><b>Next gate:</b> <span style={{ color: "#4ade80" }}>{gaState.nextGate ?? "—"}</span></div>
+            {gaState.blockerReason && (
+              <div style={{ color: "#f87171", marginTop: 2 }}><b>Blocker:</b> {gaState.blockerReason}</div>
+            )}
+          </div>
+        )}
+
+        {gaGateResult && (
+          <div style={{ ...styles.statusBlock, borderColor: "#166534", marginTop: 6 }}>
+            <div style={{ color: "#4ade80", fontWeight: 700, marginBottom: 4 }}>
+              ✓ Gate executed: {gaGateResult.gate}
+            </div>
+            {JSON.stringify(gaGateResult.result, null, 2)}
+          </div>
+        )}
       </div>
     </div>
   );
