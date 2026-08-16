@@ -531,7 +531,7 @@ async function resolveTokenIdentity(token, ownerToken) {
   if (appUserId) {
     const workerRes = await authenticatedRestFetchPath(
       ownerToken,
-      `worker?select=id,app_user_id,is_active,organization_id&app_user_id=eq.${encodeURIComponent(appUserId)}&limit=1`
+      `worker?select=id,app_user_id,status,organization_id,business_unit_id&app_user_id=eq.${encodeURIComponent(appUserId)}&status=eq.active&limit=1`
     );
     if (workerRes.ok) {
       const workerRows = await workerRes.json().catch(() => []);
