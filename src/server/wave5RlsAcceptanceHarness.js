@@ -826,21 +826,6 @@ function classifyDenyMutationProbe({ role, operation, table, result, expected_sc
     });
   }
   if (result.ok) {
-    const rows = Array.isArray(result.body) ? result.body : null;
-    if (rows && rows.length === 0) {
-      return buildProbe({
-        role,
-        operation,
-        table,
-        expected: "deny",
-        classification: CLASSIFICATION.PROVEN_RLS_DENY,
-        result,
-        expected_scope,
-        actual_row_count: 0,
-        integrity,
-        note: "PATCH returned empty representation, proving update filtering/denial",
-      });
-    }
     return buildProbe({
       role,
       operation,
@@ -850,7 +835,7 @@ function classifyDenyMutationProbe({ role, operation, table, result, expected_sc
       result,
       expected_scope,
       integrity,
-      note: "Mutation returned 2xx; this is an unexpected allow",
+      note: "INSERT returned 2xx; this is an unexpected allow",
     });
   }
   if (isRlsDeniedResponse(result)) {
@@ -903,6 +888,142 @@ function classifyDenyMutationProbe({ role, operation, table, result, expected_sc
     expected_scope,
     integrity,
     note: `HTTP ${result.status} did not prove authorization/RLS denial`,
+  });
+}
+
+function classifyDenyPatchProbe({ role, operation, table, result, expected_scope, beforeRow, afterRow }) {
+  if (isTransportFailure(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.TRANSPORT_FAILURE,
+      result,
+      expected_scope,
+      note: result.error || "Transport failure",
+    });
+  }
+  // CASE 6: canonical retained row did not exist before the probe — cannot prove denial
+  if (!beforeRow) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      note: "Canonical retained row did not exist before the probe; RLS denial cannot be proven.",
+    });
+  }
+  if (!result.ok) {
+    // CASE 3: explicit RLS / authorization denial
+    if (isRlsDeniedResponse(result)) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        classification: CLASSIFICATION.PROVEN_RLS_DENY,
+        result,
+        expected_scope,
+        note: "Authorization/RLS denial proven",
+      });
+    }
+    if (isAuthorizationGuardResponse(result)) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        classification: CLASSIFICATION.PROVEN_AUTHZ_DENY,
+        result,
+        expected_scope,
+        note: "Authorization guard denial proven",
+      });
+    }
+    // CASE 4: request reached DB validation/trigger after authorization
+    if (isValidationFailureResponse(result)) {
+      return buildProbe({
+        role,
+        operation,
+        table,
+        expected: "deny",
+        classification: CLASSIFICATION.VALIDATION_FAILURE,
+        result,
+        expected_scope,
+        proof_detail: "request_reached_db_validation_after_authz",
+        note: "DB validation/immutability reached after authorization; deny expectation failed",
+      });
+    }
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      note: `HTTP ${result.status} did not prove authorization/RLS denial`,
+    });
+  }
+  // result.ok (2xx) — must verify before/after row state
+  const rows = Array.isArray(result.body) ? result.body : null;
+  const beforeStable = stableStringify(beforeRow ?? null);
+  const afterStable = stableStringify(afterRow ?? null);
+  // CASE 5: retained row changed after probe — integrity failure
+  if (afterStable !== beforeStable) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      note: "PATCH returned 2xx and the retained row changed after the probe; integrity failure",
+    });
+  }
+  // CASE 1: HTTP 2xx + empty representation + row existed and is unchanged
+  if (rows !== null && rows.length === 0) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.PROVEN_RLS_DENY,
+      result,
+      expected_scope,
+      actual_row_count: 0,
+      proof_detail: "rls_filtered_update_zero_rows",
+      note: "Known retained row existed, role PATCH affected zero rows, and retained row remained unchanged.",
+    });
+  }
+  // CASE 2: HTTP 2xx + non-empty representation — unexpected allow
+  if (rows !== null && rows.length > 0) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      actual_row_count: rows.length,
+      note: "PATCH returned 2xx with affected rows; unexpected allow",
+    });
+  }
+  // 2xx with non-array body — cannot prove denial
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "deny",
+    classification: CLASSIFICATION.NOT_PROVEN,
+    result,
+    expected_scope,
+    note: "PATCH returned 2xx with non-array body; cannot prove denial",
   });
 }
 
@@ -1078,8 +1199,8 @@ async function allowInsertNoPersistProbe(role, token, table, payload) {
 }
 
 async function denyPatchProbe(role, token, table, id) {
-  const row = await serviceRoleExactRow(table, id);
-  const patch = makeNoOpPatch(table, row ?? {});
+  const beforeRow = await serviceRoleExactRow(table, id);
+  const patch = makeNoOpPatch(table, beforeRow ?? {});
   const result = await restProbe(
     process.env.SUPABASE_URL,
     process.env.SUPABASE_ANON_KEY,
@@ -1089,14 +1210,18 @@ async function denyPatchProbe(role, token, table, id) {
     {
       filter: `?id=eq.${encodeURIComponent(id)}`,
       body: patch,
+      prefer: "return=representation",
     }
   );
-  return classifyDenyMutationProbe({
+  const afterRow = await serviceRoleExactRow(table, id);
+  return classifyDenyPatchProbe({
     role,
     operation: `UPDATE ${table} (retained canonical row, no-op patch)`,
     table,
     result,
     expected_scope: { id },
+    beforeRow,
+    afterRow,
   });
 }
 
@@ -1587,6 +1712,15 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
     missingIdentities.length === 0 &&
     failedCount === 0;
 
+  if (!passed) {
+    console.warn("wave5_rls_acceptance_failed", {
+      failed_roles: sections.filter((s) => !s.passed).map((s) => s.role),
+      failed_count: failedCount,
+      not_proven_count: notProvenCount,
+      retained_data_unchanged: retainedIntegrity.unchanged,
+    });
+  }
+
   return res.status(passed ? 200 : 422).json({
     contract_version: CONTRACT_VERSION,
     environment: env,
@@ -1625,4 +1759,5 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   });
 }
 
+export { classifyDenyPatchProbe, classifyDenyMutationProbe };
 export default runWave5RlsAcceptanceHandler;

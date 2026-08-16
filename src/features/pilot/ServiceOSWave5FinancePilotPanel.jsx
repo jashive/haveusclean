@@ -831,7 +831,20 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
       });
       const payload = await response.json().catch(() => null);
       if (!response.ok) {
-        throw new Error(payload?.detail || payload?.error || "Wave 5 RLS acceptance failed: HTTP " + response.status);
+        if (payload) setGaRlsResult(payload);
+        const failedRoles = [
+          "owner_admin",
+          "office_ops",
+          "worker",
+          "qa",
+          "anon",
+        ].filter((role) => payload?.[role]?.passed === false);
+        setGaRlsErr(
+          payload?.error ||
+          `Wave 5 RLS acceptance failed: HTTP ${response.status}` +
+          (failedRoles.length ? ` | failed roles: ${failedRoles.join(", ")}` : "")
+        );
+        return;
       }
       setGaRlsResult(payload);
     } catch (e) {
