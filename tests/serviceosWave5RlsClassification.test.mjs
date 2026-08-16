@@ -310,22 +310,37 @@ test("W5RC-S2. classifyDenyMutationProbe no longer contains the empty-array PROV
 });
 
 test("W5RC-S3. console.warn diagnostic log is emitted on passed=false", () => {
-  assert.ok(
-    wave5RlsHarnessSrc.includes("wave5_rls_acceptance_failed"),
-    "harness must log wave5_rls_acceptance_failed on failure"
+  const warnMatch = wave5RlsHarnessSrc.match(
+    /console\.warn\("wave5_rls_acceptance_failed",\s*\{([\s\S]*?)\}\);/
   );
-  assert.ok(
-    wave5RlsHarnessSrc.includes("failed_roles"),
-    "diagnostic log must include failed_roles"
-  );
-  assert.ok(
-    wave5RlsHarnessSrc.includes("retained_data_unchanged: retainedIntegrity.unchanged"),
-    "diagnostic log must include retained_data_unchanged"
-  );
-  // Must not log secrets
-  assert.ok(
-    !wave5RlsHarnessSrc.includes("console.warn") ||
-    !wave5RlsHarnessSrc.includes("access_token"),
-    "diagnostic log must not include access tokens"
-  );
+  assert.ok(warnMatch, "failure diagnostic warning block must exist");
+
+  const warningBlock = warnMatch[0];
+
+  for (const required of [
+    "failed_roles",
+    "failed_count",
+    "not_proven_count",
+    "retained_data_unchanged",
+  ]) {
+    assert.ok(
+      warningBlock.includes(required),
+      `warning block must include ${required}`
+    );
+  }
+
+  for (const forbidden of [
+    "access_token",
+    "refresh_token",
+    "password",
+    "SUPABASE_ANON_KEY",
+    "SUPABASE_SERVICE_ROLE_KEY",
+    "Authorization",
+    "apikey",
+  ]) {
+    assert.ok(
+      !warningBlock.includes(forbidden),
+      `warning block must not contain ${forbidden}`
+    );
+  }
 });
