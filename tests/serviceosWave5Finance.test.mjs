@@ -2905,13 +2905,9 @@ test("144. evaluateFinanceCorePass returns pass when all finance conditions met"
 
 // 145. Margin 0.6364 renders as 63.64%
 test("145. gross_margin_percent 0.6364 renders as 63.64%", () => {
-  // Test the expression used in the UI panel
-  const panelSrc_ = readFileSync(
-    resolve(ROOT, "src/features/pilot/ServiceOSWave5FinancePilotPanel.jsx"),
-    "utf8"
-  );
+  // Test the expression used in the UI panel (panelSrc loaded at module top)
   assert.ok(
-    panelSrc_.includes("gross_margin_percent * 100).toFixed(2)"),
+    panelSrc.includes("gross_margin_percent * 100).toFixed(2)"),
     "Panel must multiply gross_margin_percent by 100 and call toFixed(2)"
   );
   // Inline computation test
