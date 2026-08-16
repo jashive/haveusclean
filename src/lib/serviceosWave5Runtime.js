@@ -36,7 +36,9 @@ import {
   fetchJobProfitabilitySnapshotByJobId,
 } from "./serviceosWave5FinanceClient.js";
 
-import { authenticatedRestFetch } from "./serviceosAuthClient.js";
+import {
+  authenticatedRestFetchWithRefresh,
+} from "./serviceosAuthClient.js";
 
 import {
   buildBillingReadinessGatePayload,
@@ -555,9 +557,8 @@ export async function approveContractorPayable(contractorPayableId, approverAppU
   if (!workerId) {
     throw new Error("approveContractorPayable: payable has no worker_id");
   }
-  const workerRes = await authenticatedRestFetch(
-    `worker?id=eq.${encodeURIComponent(workerId)}&select=id,app_user_id&limit=1`,
-    accessToken
+  const workerRes = await authenticatedRestFetchWithRefresh(
+    `worker?id=eq.${encodeURIComponent(workerId)}&select=id,app_user_id&limit=1`
   );
   if (!workerRes || !workerRes.ok) {
     throw new Error("approveContractorPayable: failed to load worker");

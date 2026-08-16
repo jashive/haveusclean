@@ -34,7 +34,7 @@ import {
   fetchContractorCompensationVersionById,
   fetchInvoiceRequestById,
 } from "../../lib/serviceosWave5FinanceClient.js";
-import { authenticatedRestFetch } from "../../lib/serviceosAuthClient.js";
+import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
 import {
   fetchOperationalHandoffForJob,
   fetchOperationalJobById,
@@ -144,10 +144,9 @@ function ResultBlock({ data, error }) {
   );
 }
 
-async function fetchExactRow(table, id, accessToken) {
-  const res = await authenticatedRestFetch(
-    `${table}?id=eq.${encodeURIComponent(id)}&limit=1`,
-    accessToken
+async function fetchExactRow(table, id, _accessToken) {
+  const res = await authenticatedRestFetchWithRefresh(
+    `${table}?id=eq.${encodeURIComponent(id)}&limit=1`
   );
   if (!res.ok) {
     const text = await res.text().catch(() => "");
@@ -159,8 +158,8 @@ async function fetchExactRow(table, id, accessToken) {
   return row;
 }
 
-async function fetchRows(table, filter, accessToken) {
-  const res = await authenticatedRestFetch(`${table}?${filter}`, accessToken);
+async function fetchRows(table, filter, _accessToken) {
+  const res = await authenticatedRestFetchWithRefresh(`${table}?${filter}`);
   if (!res.ok) {
     const text = await res.text().catch(() => "");
     throw new Error(`${table} lookup failed: HTTP ${res.status} ${text}`);
@@ -780,13 +779,8 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
     setGaErr(null);
     setGaGateResult(null);
     try {
-      const orgId = gaState?.financeStatus?.organization_id ?? revenueContext?.orgId ?? null;
-      const buId = gaState?.financeStatus?.business_unit_id ?? revenueContext?.primaryBusinessUnitId ?? null;
-      if (!orgId || !buId) throw new Error("Cannot determine organizationId/businessUnitId from state — load state first");
       const result = await runWave5NextGate({
         operationalJobId: jobId,
-        organizationId: orgId,
-        businessUnitId: buId,
         approverAppUserId: appUserId,
         basisValue: gaBasisValue.trim() ? Number(gaBasisValue) : 0,
         otherDirectCost: Number(gaOtherDirectCost ?? 0),
@@ -1020,6 +1014,11 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
           >
             {gaLoading ? "…" : "Run Next Gate"}
           </button>
+          {gaState?.financeCoreStatus === "pass" && (
+            <button style={styles.btn} onClick={handleGaLoad} disabled={gaLoading}>
+              {gaLoading ? "…" : "Refresh Status"}
+            </button>
+          )}
         </div>
 
         {gaErr && <div style={styles.error}>{gaErr}</div>}
@@ -1035,7 +1034,15 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
             {/* Compensation (from payable if available) */}
             <div><b>Payable:</b> {gaState.payable?.id ?? "—"} | status: {gaState.payable?.payable_status ?? "—"} | amount: {gaState.payable?.computed_amount ?? "—"} {gaState.payable?.currency_code ?? ""}</div>
             {/* Profitability */}
-            <div><b>Profitability:</b> {gaState.profitability ? `snapshot ${gaState.profitability.id}` : "—"} | gross contribution: {gaState.profitability?.gross_contribution ?? "—"} | margin: {gaState.profitability?.gross_margin_percent != null ? `${gaState.profitability.gross_margin_percent}%` : "—"}</div>
+            <div><b>Profitability:</b> {gaState.profitability ? `snapshot ${gaState.profitability.id}` : "—"} | gross contribution: {gaState.profitability?.gross_contribution ?? "—"} | margin: {gaState.profitability?.gross_margin_percent != null ? `${(gaState.profitability.gross_margin_percent * 100).toFixed(2)}%` : "—"}</div>
+            {/* Terminal state */}
+            {gaState.financeCoreStatus === "pass" && (
+              <div style={{ color: "#4ade80", marginTop: 4, fontWeight: "bold" }}>✅ FINANCE CORE PASS — proceed to RLS / HEMS closure</div>
+            )}
+            {/* Compensation version */}
+            {gaState.compensationVersion && (
+              <div><b>Comp version:</b> {gaState.compensationVersion.id} | method: {gaState.compensationVersion.compensation_method} | rate: {gaState.compensationVersion.rate_value} {gaState.compensationVersion.currency_code} | status: {gaState.compensationVersion.compensation_status}</div>
+            )}
             {/* Next gate */}
             <div style={{ marginTop: 4 }}><b>Next gate:</b> <span style={{ color: "#4ade80" }}>{gaState.nextGate ?? "—"}</span></div>
             {gaState.blockerReason && (

@@ -8,7 +8,7 @@
 //   payment_observation, contractor_compensation_version,
 //   contractor_payable, job_profitability_snapshot
 
-import { authenticatedRestFetch } from "./serviceosAuthClient.js";
+import { authenticatedRestFetchWithRefresh } from "./serviceosAuthClient.js";
 
 // ── Feature guard ─────────────────────────────────────────────────────────────
 
@@ -34,8 +34,8 @@ function assertEnabled() {
 
 // ── Generic helpers ───────────────────────────────────────────────────────────
 
-async function insertOne(table, payload, accessToken) {
-  const res = await authenticatedRestFetch(table, accessToken, {
+async function insertOne(table, payload, _accessToken) {
+  const res = await authenticatedRestFetchWithRefresh(table, {
     method: "POST",
     headers: { Prefer: "return=representation" },
     body: JSON.stringify(payload),
@@ -50,10 +50,9 @@ async function insertOne(table, payload, accessToken) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
-async function updateById(table, id, patch, accessToken) {
-  const res = await authenticatedRestFetch(
+async function updateById(table, id, patch, _accessToken) {
+  const res = await authenticatedRestFetchWithRefresh(
     `${table}?id=eq.${encodeURIComponent(id)}`,
-    accessToken,
     {
       method: "PATCH",
       headers: { Prefer: "return=representation" },
@@ -70,10 +69,9 @@ async function updateById(table, id, patch, accessToken) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
-async function fetchOneById(table, id, accessToken) {
-  const res = await authenticatedRestFetch(
-    `${table}?id=eq.${encodeURIComponent(id)}&limit=1`,
-    accessToken
+async function fetchOneById(table, id, _accessToken) {
+  const res = await authenticatedRestFetchWithRefresh(
+    `${table}?id=eq.${encodeURIComponent(id)}&limit=1`
   );
   if (!res || !res.ok) {
     const text = await res?.text().catch(() => "");
@@ -85,9 +83,9 @@ async function fetchOneById(table, id, accessToken) {
   return Array.isArray(rows) ? rows[0] ?? null : rows ?? null;
 }
 
-async function fetchMany(table, filter, accessToken) {
+async function fetchMany(table, filter, _accessToken) {
   const qs = filter ? `?${filter}` : "";
-  const res = await authenticatedRestFetch(`${table}${qs}`, accessToken);
+  const res = await authenticatedRestFetchWithRefresh(`${table}${qs}`);
   if (!res || !res.ok) {
     const text = await res?.text().catch(() => "");
     throw new Error(
@@ -273,7 +271,7 @@ export async function fetchJobProfitabilitySnapshotByJobId(operationalJobId, acc
   assertEnabled();
   const rows = await fetchMany(
     "job_profitability_snapshot",
-    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&limit=1`,
+    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&order=snapshot_taken_at.desc,created_at.desc&limit=1`,
     accessToken
   );
   return Array.isArray(rows) ? rows[0] ?? null : null;
