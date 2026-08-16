@@ -1810,3 +1810,140 @@ test("94. M012 self-validation checks profitability BEFORE INSERT validator trig
     "M012 self-validation must verify trg_jps_before_insert_validator trigger/function exists"
   );
 });
+
+// ── Hardening patch: canonical appUserId + handoff resolver ──────────────────
+
+test("95. Wave5 panel uses revenueContext.appUserId, not session.user.id", () => {
+  assert.ok(
+    panelSrc.includes("revenueContext?.appUserId"),
+    "Wave5 panel must derive appUserId from revenueContext.appUserId"
+  );
+  assert.ok(
+    !panelSrc.includes("session?.user?.id"),
+    "Wave5 panel must not fall back to session.user.id as appUserId"
+  );
+  assert.ok(
+    !panelSrc.includes("session?.user?.id ?? null"),
+    "Wave5 panel must not use session.user.id as the appUserId source"
+  );
+});
+
+test("96. Wave5 panel accepts revenueContext prop and main.jsx passes it", () => {
+  assert.ok(
+    panelSrc.includes("{ session, revenueContext }"),
+    "Wave5 panel component must accept revenueContext prop"
+  );
+  assert.ok(
+    mainSrc.includes("revenueContext={ctx?.revenueContext ?? null}") &&
+      mainSrc.includes("ServiceOSWave5FinancePilotPanel"),
+    "main.jsx must pass revenueContext into ServiceOSWave5FinancePilotPanel"
+  );
+});
+
+test("97. Wave5 panel shows preview-only warning when appUserId is unavailable", () => {
+  assert.ok(
+    panelSrc.includes("canMutate") &&
+      panelSrc.includes("canonical ServiceOS app user could not be resolved"),
+    "Wave5 panel must display a preview-only warning when canonical app user is absent"
+  );
+  assert.ok(
+    !panelSrc.includes("session?.user?.id"),
+    "Wave5 panel must not reference session.user.id anywhere"
+  );
+});
+
+test("98. Wave5 panel includes handoff resolver section with required operations client functions", () => {
+  assert.ok(
+    panelSrc.includes("fetchOperationalHandoffForJob"),
+    "Wave5 panel must use fetchOperationalHandoffForJob to check for existing handoff"
+  );
+  assert.ok(
+    panelSrc.includes("createOperationalHandoff"),
+    "Wave5 panel must use createOperationalHandoff to create a new handoff"
+  );
+  assert.ok(
+    panelSrc.includes("buildOperationalHandoffPayload"),
+    "Wave5 panel must use buildOperationalHandoffPayload (not an invented payload)"
+  );
+  assert.ok(
+    panelSrc.includes("fetchOperationalJobById") &&
+      panelSrc.includes("fetchWorkOrderForJob") &&
+      panelSrc.includes("fetchQaInspectionsForJob") &&
+      panelSrc.includes("fetchCorrectiveActionsForJob"),
+    "Wave5 panel must load and verify all canonical prerequisite records before handoff creation"
+  );
+});
+
+test("99. Wave5 panel handoff resolver does not use recoverOperationalHandoff", () => {
+  assert.ok(
+    !panelSrc.includes("recoverOperationalHandoff"),
+    "Wave5 panel must not use recoverOperationalHandoff — that is a separate recovery pathway"
+  );
+});
+
+test("100. Wave5 panel handoff resolver reuses existing handoff without creating a duplicate", () => {
+  assert.ok(
+    panelSrc.includes("resolved: \"existing\""),
+    "Wave5 handoff resolver must indicate reuse of an existing handoff (resolved: 'existing')"
+  );
+  assert.ok(
+    panelSrc.includes("resolved: \"created\""),
+    "Wave5 handoff resolver must indicate creation of a new handoff (resolved: 'created')"
+  );
+});
+
+test("101. Wave5 panel handoff resolver blocks on cancelled handoff and does not reuse it", () => {
+  assert.ok(
+    panelSrc.includes("handoff_status === \"cancelled\""),
+    "Wave5 handoff resolver must refuse cancelled handoffs and surface as blocker"
+  );
+});
+
+test("102. Wave5 panel handoff resolver enforces all creation prerequisites", () => {
+  assert.ok(
+    panelSrc.includes("qa_passed") && panelSrc.includes("closed"),
+    "Wave5 handoff resolver must require job status qa_passed or closed"
+  );
+  assert.ok(
+    panelSrc.includes("qa_complete"),
+    "Wave5 handoff resolver must require work_order status qa_complete or closed"
+  );
+  assert.ok(
+    panelSrc.includes("outcome === \"passed\"") || panelSrc.includes('outcome === "passed"'),
+    "Wave5 handoff resolver must require a passed or waived QA inspection"
+  );
+  assert.ok(
+    panelSrc.includes("corrective_status") &&
+      (panelSrc.includes("verified") || panelSrc.includes("cancelled")),
+    "Wave5 handoff resolver must verify all corrective actions are verified or cancelled"
+  );
+});
+
+test("103. Wave5 billing readiness requires non-blank operational_handoff_id", () => {
+  assert.ok(
+    panelSrc.includes("Resolve the canonical operational handoff before assessing billing readiness"),
+    "Wave5 billing readiness must block with an explicit message when handoff ID is blank"
+  );
+  assert.ok(
+    panelSrc.includes("!handoffId1.trim()"),
+    "Wave5 billing readiness guard must check handoffId1.trim() is non-empty"
+  );
+  assert.ok(
+    panelSrc.includes("operational_handoff_id (required"),
+    "Wave5 billing readiness handoff input placeholder must mark the field as required"
+  );
+});
+
+test("104. Wave5 panel does not invent UUIDs in the browser", () => {
+  assert.ok(
+    !panelSrc.includes("crypto.randomUUID") && !panelSrc.includes("uuidv4"),
+    "Wave5 panel must not generate handoff UUIDs in the browser — IDs come from the database"
+  );
+});
+
+test("105. Wave5 handoff resolver resolver section is labeled 0", () => {
+  assert.ok(
+    panelSrc.includes("0 · Resolve / Load Operational Handoff"),
+    "Wave5 panel must have a section labeled '0 · Resolve / Load Operational Handoff'"
+  );
+});

@@ -30,6 +30,15 @@ import {
   fetchInvoiceRequestById,
 } from "../../lib/serviceosWave5FinanceClient.js";
 import { authenticatedRestFetch } from "../../lib/serviceosAuthClient.js";
+import {
+  fetchOperationalHandoffForJob,
+  fetchOperationalJobById,
+  fetchWorkOrderForJob,
+  fetchQaInspectionsForJob,
+  fetchCorrectiveActionsForJob,
+  createOperationalHandoff,
+} from "../../lib/serviceosOperationsClient.js";
+import { buildOperationalHandoffPayload } from "../../lib/serviceosOperationsUtils.js";
 
 const FINANCE_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -176,11 +185,140 @@ function parseOptionalJsonObject(value, label) {
   return parsed;
 }
 
-export default function ServiceOSWave5FinancePilotPanel({ session }) {
+export default function ServiceOSWave5FinancePilotPanel({ session, revenueContext }) {
   if (!WAVE5_PILOT_ENABLED) return null;
 
   const accessToken = session?.access_token ?? null;
-  const appUserId = session?.user?.id ?? null;
+  const appUserId = revenueContext?.appUserId ?? null;
+  const canMutate = !!appUserId;
+
+  // ── 0 · Operational handoff resolver ────────────────────────────────────────
+  const [resolverJobId, setResolverJobId] = useState("");
+  const [resolverWorkOrderId, setResolverWorkOrderId] = useState("");
+  const [resolverResult, setResolverResult] = useState(null);
+  const [resolverErr, setResolverErr] = useState(null);
+  const [resolverLoading, setResolverLoading] = useState(false);
+
+  const handleResolveHandoff = useCallback(async () => {
+    const jobId = resolverJobId.trim();
+    const workOrderId = resolverWorkOrderId.trim();
+    if (!jobId || !workOrderId) {
+      setResolverErr("operational_job_id and work_order_id are required");
+      return;
+    }
+    if (!canMutate) {
+      setResolverErr("Cannot resolve handoff: canonical ServiceOS app user could not be resolved. Preview-only.");
+      return;
+    }
+    setResolverLoading(true);
+    setResolverErr(null);
+    setResolverResult(null);
+    try {
+      // A. Check for an existing handoff first
+      const existing = await fetchOperationalHandoffForJob(jobId, accessToken);
+      if (existing) {
+        if (existing.handoff_status === "cancelled") {
+          throw new Error(
+            `Existing operational handoff ${existing.id} is cancelled — resolve this condition before proceeding. Do not reuse a cancelled handoff.`
+          );
+        }
+        if (existing.work_order_id !== workOrderId) {
+          throw new Error(
+            `Existing operational handoff ${existing.id} belongs to work_order ${existing.work_order_id}, not ${workOrderId} — lineage mismatch.`
+          );
+        }
+        setHandoffId1(existing.id);
+        setResolverResult({
+          resolved: "existing",
+          handoff_id: existing.id,
+          handoff_status: existing.handoff_status,
+          message: `Canonical operational handoff already exists — reusing ID ${existing.id}`,
+        });
+        return;
+      }
+
+      // B. No existing handoff — verify all prerequisites before creating
+      const [job, workOrder, qaInspections, correctiveActions] = await Promise.all([
+        fetchOperationalJobById(jobId, accessToken),
+        fetchWorkOrderForJob(jobId, accessToken),
+        fetchQaInspectionsForJob(jobId, accessToken),
+        fetchCorrectiveActionsForJob(jobId, accessToken),
+      ]);
+
+      if (!job) throw new Error(`operational_job ${jobId} not found`);
+      if (!workOrder) throw new Error(`work_order for job ${jobId} not found`);
+      if (workOrder.id !== workOrderId) {
+        throw new Error(
+          `work_order for job ${jobId} is ${workOrder.id}, not ${workOrderId} — lineage mismatch.`
+        );
+      }
+
+      const VALID_JOB_STATUSES = ["qa_passed", "closed"];
+      if (!VALID_JOB_STATUSES.includes(job.operational_status)) {
+        throw new Error(
+          `BLOCKER: operational_job status is "${job.operational_status}" — must be qa_passed or closed before handoff creation.`
+        );
+      }
+
+      const VALID_WO_STATUSES = ["qa_complete", "closed"];
+      if (!VALID_WO_STATUSES.includes(workOrder.work_order_status)) {
+        throw new Error(
+          `BLOCKER: work_order status is "${workOrder.work_order_status}" — must be qa_complete or closed before handoff creation.`
+        );
+      }
+
+      const finalQa = Array.isArray(qaInspections)
+        ? qaInspections.find((q) => q.outcome === "passed" || q.outcome === "waived")
+        : null;
+      if (!finalQa) {
+        throw new Error(
+          "BLOCKER: No QA inspection with outcome passed or waived found for this job — handoff creation blocked."
+        );
+      }
+
+      const openCas = Array.isArray(correctiveActions)
+        ? correctiveActions.filter(
+            (ca) => ca.corrective_status !== "verified" && ca.corrective_status !== "cancelled"
+          )
+        : [];
+      if (openCas.length > 0) {
+        throw new Error(
+          `BLOCKER: ${openCas.length} corrective action(s) are not verified or cancelled — resolve them before handoff creation.`
+        );
+      }
+
+      if (!job.pricing_snapshot_id) throw new Error("BLOCKER: operational_job.pricing_snapshot_id is missing.");
+      if (!job.quote_version_id) throw new Error("BLOCKER: operational_job.quote_version_id is missing.");
+      if (!job.organization_id) throw new Error("BLOCKER: operational_job.organization_id is missing.");
+      if (!job.business_unit_id) throw new Error("BLOCKER: operational_job.business_unit_id is missing.");
+
+      const payload = buildOperationalHandoffPayload({
+        organizationId: job.organization_id,
+        businessUnitId: job.business_unit_id,
+        operationalJobId: jobId,
+        workOrderId: workOrder.id,
+        qaInspectionId: finalQa.id,
+        pricingSnapshotId: job.pricing_snapshot_id,
+        quoteVersionId: job.quote_version_id,
+        handoffStatus: "ready",
+        appUserId,
+      });
+
+      const created = await createOperationalHandoff(payload, accessToken);
+      if (!created?.id) throw new Error("createOperationalHandoff did not return a record ID.");
+
+      setHandoffId1(created.id);
+      setResolverResult({
+        resolved: "created",
+        handoff_id: created.id,
+        message: `Canonical operational handoff created — ID ${created.id}`,
+      });
+    } catch (e) {
+      setResolverErr(e.message);
+    } finally {
+      setResolverLoading(false);
+    }
+  }, [resolverJobId, resolverWorkOrderId, accessToken, appUserId, canMutate]);
 
   const [jobId1, setJobId1] = useState("");
   const [workOrderId1, setWorkOrderId1] = useState("");
@@ -192,6 +330,10 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
   const handleAssessBillingReadiness = useCallback(async () => {
     if (!jobId1.trim() || !workOrderId1.trim()) {
       setGateErr("operational_job_id and work_order_id required");
+      return;
+    }
+    if (!handoffId1.trim()) {
+      setGateErr("Resolve the canonical operational handoff before assessing billing readiness.");
       return;
     }
     setGateLoading(true);
@@ -600,6 +742,36 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
         <span style={styles.badge}>PREVIEW ONLY</span>
       </h4>
 
+      {!canMutate && (
+        <div style={{ ...styles.statusBlock, color: "#fbbf24", marginBottom: 8 }}>
+          ⚠️ Preview-only: canonical ServiceOS app user could not be resolved. Mutation and assessment actions are disabled until the app user is authenticated through the ServiceOS revenue context.
+        </div>
+      )}
+
+      <div style={styles.section}>
+        <div style={styles.sectionLabel}>0 · Resolve / Load Operational Handoff</div>
+        <input
+          style={styles.input}
+          placeholder="operational_job_id"
+          value={resolverJobId}
+          onChange={(e) => setResolverJobId(e.target.value)}
+        />
+        <input
+          style={styles.input}
+          placeholder="work_order_id"
+          value={resolverWorkOrderId}
+          onChange={(e) => setResolverWorkOrderId(e.target.value)}
+        />
+        <button
+          style={styles.btn}
+          onClick={handleResolveHandoff}
+          disabled={resolverLoading || !canMutate}
+        >
+          {resolverLoading ? "…" : "Resolve / Load Operational Handoff"}
+        </button>
+        <ResultBlock data={resolverResult} error={resolverErr} />
+      </div>
+
       <div style={styles.section}>
         <div style={styles.sectionLabel}>1 · Billing readiness</div>
         <input
@@ -616,11 +788,16 @@ export default function ServiceOSWave5FinancePilotPanel({ session }) {
         />
         <input
           style={styles.input}
-          placeholder="operational_handoff_id (optional)"
+          placeholder="operational_handoff_id (required — resolve above first)"
           value={handoffId1}
           onChange={(e) => setHandoffId1(e.target.value)}
         />
-        <button style={styles.btn} onClick={handleAssessBillingReadiness} disabled={gateLoading}>
+        {!handoffId1.trim() && (
+          <div style={{ ...styles.error, marginBottom: 4 }}>
+            Resolve the canonical operational handoff before assessing billing readiness.
+          </div>
+        )}
+        <button style={styles.btn} onClick={handleAssessBillingReadiness} disabled={gateLoading || !handoffId1.trim()}>
           {gateLoading ? "…" : "Assess Billing Readiness"}
         </button>
         <ResultBlock data={gateResult} error={gateErr} />
