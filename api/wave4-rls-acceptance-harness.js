@@ -1,5 +1,13 @@
 // api/wave4-rls-acceptance-harness.js
 //
+// Wave 4 / Wave 5 Acceptance Harness Dispatcher — PREVIEW/TEST ONLY
+//
+// DISPATCH:
+//   POST body with { "wave": "wave5" } or { "contract_version": "wave5-rls-acceptance-v1" }
+//     → delegates to Wave 5 RLS handler (src/server/wave5RlsAcceptanceHarness.js)
+//   No discriminator / explicit wave4 → existing Wave 4 handler (unchanged)
+//   Unknown discriminator → fail closed 400
+//
 // Wave 4 Role/RLS Acceptance Harness — PREVIEW/TEST ONLY
 //
 // PURPOSE:
@@ -51,6 +59,8 @@
 //   This harness must NOT be executed here.
 //   DO NOT execute M012. DO NOT create auth users.
 //   The harness reports which identities are missing if they do not yet exist.
+
+import { runWave5RlsAcceptanceHandler } from "../src/server/wave5RlsAcceptanceHarness.js";
 
 const CONTRACT_VERSION = "wave4-rls-acceptance-v2";
 
@@ -1122,6 +1132,39 @@ function summarizeProbes(role, probes) {
 }
 
 export default async function handler(req, res) {
+  // ── Wave Dispatcher ─────────────────────────────────────────────────────────
+  // Parse the body once, before any per-wave guards, to check for an explicit
+  // wave discriminator. This is safe because we only peek at two scalar fields.
+  if (req.method === "POST") {
+    let dispatchBody = {};
+    try {
+      dispatchBody = typeof req.body === "string" ? JSON.parse(req.body) : (req.body || {});
+    } catch (_) {
+      // malformed JSON — let the per-wave handler return the error
+    }
+    const reqWave = String(dispatchBody.wave || "").trim().toLowerCase();
+    const reqContractVersion = String(dispatchBody.contract_version || "").trim().toLowerCase();
+
+    const isWave5Request =
+      reqWave === "wave5" || reqContractVersion === "wave5-rls-acceptance-v1";
+    const isWave4Request =
+      !reqWave ||
+      reqWave === "wave4" ||
+      reqContractVersion === "wave4-rls-acceptance-v2" ||
+      reqContractVersion === "wave4-rls-acceptance-v1";
+
+    if (isWave5Request) {
+      return runWave5RlsAcceptanceHandler(req, res);
+    }
+    if (!isWave4Request) {
+      return res.status(400).json({
+        error:
+          "Unknown acceptance harness mode. Supported: wave4 (default) or wave5. " +
+          "Set { \"wave\": \"wave5\" } or { \"contract_version\": \"wave5-rls-acceptance-v1\" } for Wave 5.",
+      });
+    }
+  }
+  // ── End Dispatcher — Wave 4 handler follows unchanged ────────────────────
   if (req.method !== "POST" && req.method !== "GET") {
     return res.status(405).json({ error: "Method not allowed" });
   }

@@ -1,4 +1,4 @@
-// api/wave5-rls-acceptance-harness.js
+// src/server/wave5RlsAcceptanceHarness.js
 //
 // Wave 5 authenticated RLS acceptance harness — PREVIEW/TEST ONLY.
 //
@@ -1410,7 +1410,7 @@ async function probeAnon() {
   return probes;
 }
 
-export default async function handler(req, res) {
+export async function runWave5RlsAcceptanceHandler(req, res) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed", contract_version: CONTRACT_VERSION });
   }
@@ -1624,3 +1624,5 @@ export default async function handler(req, res) {
     ],
   });
 }
+
+export default runWave5RlsAcceptanceHandler;

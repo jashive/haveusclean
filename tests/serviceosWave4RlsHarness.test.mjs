@@ -3,7 +3,7 @@
 // Source-level contract checks only. No live DB operations are executed.
 // =============================================================================
 
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 import { test } from "node:test";
@@ -17,7 +17,7 @@ const harnessSrc = readFileSync(
   "utf8"
 );
 const wave5RlsHarnessSrc = readFileSync(
-  resolve(ROOT, "api/wave5-rls-acceptance-harness.js"),
+  resolve(ROOT, "src/server/wave5RlsAcceptanceHarness.js"),
   "utf8"
 );
 const stripeSrc = readFileSync(resolve(ROOT, "api/stripe-webhook.js"), "utf8");
@@ -317,10 +317,23 @@ test("W4H-22. Wave 5 RLS harness is preview/test only, requester-authenticated, 
   );
 });
 
-test("W4H-23. Wave 5 pilot panel exposes finance-core-pass-gated RLS acceptance button and posts bearer auth to server-only endpoint", () => {
+test("W4H-23. Wave 5 pilot panel exposes finance-core-pass-gated RLS acceptance button and posts bearer auth to the unified dispatcher endpoint with Wave 5 discriminators", () => {
   assert.ok(
-    panelSrc.includes('fetch("/api/wave5-rls-acceptance-harness"'),
-    "Wave 5 pilot panel must POST to /api/wave5-rls-acceptance-harness"
+    panelSrc.includes('fetch("/api/wave4-rls-acceptance-harness"'),
+    "Wave 5 pilot panel must POST to /api/wave4-rls-acceptance-harness (unified dispatcher)"
+  );
+  assert.ok(
+    !panelSrc.includes('fetch("/api/wave5-rls-acceptance-harness"'),
+    "Wave 5 pilot panel must NOT call the deleted /api/wave5-rls-acceptance-harness endpoint"
+  );
+  assert.ok(
+    panelSrc.includes('"wave": "wave5"') || panelSrc.includes("wave: \"wave5\""),
+    "Wave 5 pilot panel must send wave: 'wave5' discriminator to dispatcher"
+  );
+  assert.ok(
+    panelSrc.includes('"contract_version": "wave5-rls-acceptance-v1"') ||
+      panelSrc.includes('contract_version: "wave5-rls-acceptance-v1"'),
+    "Wave 5 pilot panel must send contract_version: 'wave5-rls-acceptance-v1' discriminator to dispatcher"
   );
   assert.ok(
     panelSrc.includes("Run Wave 5 RLS Acceptance"),
@@ -334,5 +347,103 @@ test("W4H-23. Wave 5 pilot panel exposes finance-core-pass-gated RLS acceptance 
   assert.ok(
     panelSrc.includes("Authorization:") && panelSrc.includes("accessToken"),
     "Wave 5 pilot panel must send the current ServiceOS bearer token"
+  );
+});
+
+// ── Dispatcher regression tests ───────────────────────────────────────────────
+
+test("W4H-24. Wave 4 dispatcher: default (no wave discriminator) routes to Wave 4 handler", () => {
+  // The dispatcher import and the Wave 5 handler import must both be present
+  assert.ok(
+    harnessSrc.includes("runWave5RlsAcceptanceHandler"),
+    "Wave 4 dispatcher must import runWave5RlsAcceptanceHandler"
+  );
+  assert.ok(
+    harnessSrc.includes("wave5RlsAcceptanceHarness"),
+    "Wave 4 dispatcher must reference the Wave 5 server-only module"
+  );
+  // Default path (no discriminator, or explicit wave4) must not call Wave 5 handler
+  // Verified by ensuring Wave 4 contract version and fixture IDs remain in harnessSrc
+  assert.ok(
+    harnessSrc.includes("wave4-rls-acceptance-v2"),
+    "Wave 4 dispatcher must preserve Wave 4 contract version"
+  );
+  assert.ok(
+    harnessSrc.includes("SERVICEOS_W4_RLS_HARNESS_ENABLED"),
+    "Wave 4 dispatcher must preserve Wave 4 feature flag guard"
+  );
+});
+
+test("W4H-25. Wave 4 dispatcher: explicit Wave 5 discriminators route to Wave 5 handler", () => {
+  assert.ok(
+    harnessSrc.includes('"wave5"') || harnessSrc.includes("'wave5'"),
+    "Dispatcher must check for wave5 string discriminator"
+  );
+  assert.ok(
+    harnessSrc.includes("wave5-rls-acceptance-v1"),
+    "Dispatcher must check for contract_version wave5-rls-acceptance-v1 discriminator"
+  );
+  assert.ok(
+    harnessSrc.includes("return runWave5RlsAcceptanceHandler(req, res)"),
+    "Dispatcher must forward Wave 5 requests to runWave5RlsAcceptanceHandler"
+  );
+});
+
+test("W4H-26. Wave 4 dispatcher: unknown mode fails closed with 400", () => {
+  assert.ok(
+    harnessSrc.includes("Unknown acceptance harness mode"),
+    "Dispatcher must fail closed with an error message on unknown wave discriminator"
+  );
+  assert.ok(
+    harnessSrc.includes("status(400)") || harnessSrc.includes(".status(400)"),
+    "Dispatcher must return HTTP 400 for unknown modes"
+  );
+});
+
+test("W4H-27. Wave 5 module is NOT a serverless function — lives outside /api", () => {
+  assert.ok(
+    !existsSync(resolve(ROOT, "api/wave5-rls-acceptance-harness.js")),
+    "api/wave5-rls-acceptance-harness.js must be deleted to stay within the 12-function Vercel limit"
+  );
+  assert.ok(
+    existsSync(resolve(ROOT, "src/server/wave5RlsAcceptanceHarness.js")),
+    "Wave 5 RLS handler must exist at src/server/wave5RlsAcceptanceHarness.js"
+  );
+});
+
+test("W4H-28. Wave 5 cannot accidentally execute Wave 4 probes — no Wave 4 fixture IDs or Wave 4 env vars in Wave 5 module", () => {
+  // Wave 5 module must not embed Wave 4 specific contract version or Wave 4 mandatory fixture IDs
+  assert.ok(
+    !wave5RlsHarnessSrc.includes("wave4-rls-acceptance-v2"),
+    "Wave 5 module must not reference Wave 4 contract version"
+  );
+  assert.ok(
+    !wave5RlsHarnessSrc.includes("SERVICEOS_W4_RLS_HARNESS_ENABLED"),
+    "Wave 5 module must not check Wave 4 harness flag"
+  );
+});
+
+test("W4H-29. Wave 4 cannot accidentally execute Wave 5 probes — Wave 5 finance table IDs not in Wave 4 scope", () => {
+  // Wave 5 canonical IDs for finance tables must not appear in the Wave 4 harness fixture scope
+  const wave5FinanceIds = [
+    "c626972d-3d5f-411c-ba87-613a62f5a885", // billing_readiness_gate_id
+    "71fec2d6-a941-4644-901b-f35d2a29afdd", // invoice_request_id
+    "23026a2e-13e9-4a0a-938a-95f4fc28761b", // contractor_payable_id
+  ];
+  // The harnessSrc still includes the dispatcher import from Wave5 module, so we isolate
+  // the Wave 4 FIXTURE_SCOPE constant block to check for contamination
+  const fixtureScopeMatch = harnessSrc.match(/const FIXTURE_SCOPE[\s\S]*?}\s*\)/);
+  if (fixtureScopeMatch) {
+    const fixtureScopeStr = fixtureScopeMatch[0];
+    for (const id of wave5FinanceIds) {
+      assert.ok(
+        !fixtureScopeStr.includes(id),
+        `Wave 4 FIXTURE_SCOPE must not contain Wave 5 finance canonical ID ${id}`
+      );
+    }
+  }
+  assert.ok(
+    !harnessSrc.includes("SERVICEOS_W5_RLS_HARNESS_ENABLED"),
+    "Wave 4 dispatcher must not check Wave 5 harness flag in the Wave 4 path"
   );
 });

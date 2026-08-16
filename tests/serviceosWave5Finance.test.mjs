@@ -58,7 +58,7 @@ const previewPaymentSrc = readFileSync(
   "utf8"
 );
 const wave5RlsHarnessSrc = readFileSync(
-  resolve(ROOT, "api/wave5-rls-acceptance-harness.js"),
+  resolve(ROOT, "src/server/wave5RlsAcceptanceHarness.js"),
   "utf8"
 );
 const panelSrc = readFileSync(
@@ -2921,7 +2921,7 @@ test("145. gross_margin_percent 0.6364 renders as 63.64%", () => {
 });
 
 test("146. Wave5 RLS harness reports missing requester bearer auth before probing", async () => {
-  const handler = await importDefault(resolve(ROOT, "api/wave5-rls-acceptance-harness.js"));
+  const handler = await importDefault(resolve(ROOT, "src/server/wave5RlsAcceptanceHarness.js"));
   const originalEnv = { ...process.env };
 
   process.env.SERVICEOS_ENVIRONMENT = "preview";
@@ -2943,7 +2943,7 @@ test("146. Wave5 RLS harness reports missing requester bearer auth before probin
 });
 
 test("147. Wave5 RLS harness fails closed with missing identity env vars after validating requester", async () => {
-  const handler = await importDefault(resolve(ROOT, "api/wave5-rls-acceptance-harness.js"));
+  const handler = await importDefault(resolve(ROOT, "src/server/wave5RlsAcceptanceHarness.js"));
   const originalEnv = { ...process.env };
   const originalFetch = global.fetch;
 

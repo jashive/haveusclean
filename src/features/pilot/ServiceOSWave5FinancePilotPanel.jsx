@@ -817,13 +817,15 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
     setGaRlsErr(null);
     setGaRlsResult(null);
     try {
-      const response = await fetch("/api/wave5-rls-acceptance-harness", {
+      const response = await fetch("/api/wave4-rls-acceptance-harness", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: "Bearer " + accessToken,
         },
         body: JSON.stringify({
+          wave: "wave5",
+          contract_version: "wave5-rls-acceptance-v1",
           operational_job_id: jobId,
         }),
       });
