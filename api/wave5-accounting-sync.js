@@ -222,7 +222,7 @@ async function loadCanonicalInvoiceRequest(invoiceRequestId) {
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: "Bearer " + serviceKey,
         "Content-Type": "application/json",
       },
     }
@@ -249,7 +249,7 @@ async function resolveOutboxByIdempotencyKey(idempotencyKey) {
     {
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: "Bearer " + serviceKey,
         "Content-Type": "application/json",
       },
     }
@@ -269,7 +269,7 @@ async function upsertOutboxRow(payload) {
     method: "POST",
     headers: {
       apikey: serviceKey,
-      Authorization: `******
+      Authorization: "Bearer " + serviceKey,
       "Content-Type": "application/json",
       Prefer: "return=representation",
     },
@@ -296,7 +296,7 @@ async function updateOutboxRow(id, patch) {
       method: "PATCH",
       headers: {
         apikey: serviceKey,
-        Authorization: `******
+        Authorization: "Bearer " + serviceKey,
         "Content-Type": "application/json",
         Prefer: "return=representation",
       },
@@ -360,7 +360,7 @@ async function createQBOInvoice(accessToken, realmId, invoicePayload, isSandbox,
   const res = await fetch(url.toString(), {
     method: "POST",
     headers: {
-      Authorization: `******
+      Authorization: "Bearer " + accessToken,
       "Content-Type": "application/json",
       Accept: "application/json",
     },
