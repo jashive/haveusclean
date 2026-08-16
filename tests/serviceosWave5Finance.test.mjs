@@ -142,6 +142,172 @@ function restoreEnv(originalEnv) {
   Object.assign(process.env, originalEnv);
 }
 
+async function runAccountingSyncAuthScenario({
+  roleCode = "owner_admin",
+  membershipOrganizationId = "org-1",
+  membershipBusinessUnitId = "bu-1",
+  invoiceOrganizationId = "org-1",
+  invoiceBusinessUnitId = "bu-1",
+}) {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-accounting-sync.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+  delete process.env.QBO_CLIENT_ID;
+  delete process.env.QBO_CLIENT_SECRET;
+  delete process.env.QBO_REFRESH_TOKEN;
+  delete process.env.QBO_REALM_ID;
+
+  global.fetch = async (url, options = {}) => {
+    const href = String(url);
+    if (href.includes("/auth/v1/user")) {
+      return jsonResponse(200, { id: "auth-user-1" });
+    }
+    if (href.includes("/rest/v1/app_user")) {
+      return jsonResponse(200, [{ id: "app-user-1", auth_user_id: "auth-user-1", status: "active" }]);
+    }
+    if (href.includes("/rest/v1/app_role")) {
+      return jsonResponse(200, [{ id: "role-1", code: roleCode }]);
+    }
+    if (href.includes("/rest/v1/user_membership")) {
+      return jsonResponse(200, [{
+        id: "membership-1",
+        app_user_id: "app-user-1",
+        organization_id: membershipOrganizationId,
+        business_unit_id: membershipBusinessUnitId,
+        role_id: "role-1",
+        status: "active",
+      }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?select=id,organization_id,business_unit_id,request_status")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: invoiceOrganizationId,
+        business_unit_id: invoiceBusinessUnitId,
+        request_status: "submitted",
+      }]);
+    }
+    if (href.includes("/rest/v1/accounting_sync_outbox?idempotency_key=eq.key-1")) {
+      return jsonResponse(200, []);
+    }
+    if (href.endsWith("/rest/v1/accounting_sync_outbox") && options.method === "POST") {
+      return jsonResponse(201, [{ id: "outbox-1" }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1&limit=1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: invoiceOrganizationId,
+        business_unit_id: invoiceBusinessUnitId,
+        operational_job_id: "job-1",
+        request_status: "submitted",
+        currency_code: "CAD",
+        subtotal_amount: 220,
+        tax_amount: 28.6,
+        total_amount: 248.6,
+      }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: { authorization: "Bearer " + "token-1" },
+      body: { idempotency_key: "key-1", invoice_request_id: "ir-1" },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    return res;
+  } finally {
+    global.fetch = originalFetch;
+    restoreEnv(originalEnv);
+  }
+}
+
+async function runPreviewPaymentAuthScenario({
+  roleCode = "owner_admin",
+  membershipOrganizationId = "org-1",
+  membershipBusinessUnitId = "bu-1",
+  invoiceOrganizationId = "org-1",
+  invoiceBusinessUnitId = "bu-1",
+}) {
+  const handler = await importDefault(resolve(ROOT, "api/wave5-preview-payment.js"));
+  const originalEnv = { ...process.env };
+  const originalFetch = global.fetch;
+
+  process.env.SERVICEOS_ENVIRONMENT = "preview";
+  process.env.SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED = "true";
+  process.env.SUPABASE_URL = "https://example.supabase.co";
+  process.env.SUPABASE_ANON_KEY = "anon";
+  process.env.SUPABASE_SERVICE_ROLE_KEY = "service";
+
+  global.fetch = async (url) => {
+    const href = String(url);
+    if (href.includes("/auth/v1/user")) {
+      return jsonResponse(200, { id: "auth-user-1" });
+    }
+    if (href.includes("/rest/v1/app_user")) {
+      return jsonResponse(200, [{ id: "app-user-1", auth_user_id: "auth-user-1", status: "active" }]);
+    }
+    if (href.includes("/rest/v1/app_role")) {
+      return jsonResponse(200, [{ id: "role-1", code: roleCode }]);
+    }
+    if (href.includes("/rest/v1/user_membership")) {
+      return jsonResponse(200, [{
+        id: "membership-1",
+        app_user_id: "app-user-1",
+        organization_id: membershipOrganizationId,
+        business_unit_id: membershipBusinessUnitId,
+        role_id: "role-1",
+        status: "active",
+      }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?select=id,organization_id,business_unit_id&id=eq.ir-1&limit=1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: invoiceOrganizationId,
+        business_unit_id: invoiceBusinessUnitId,
+      }]);
+    }
+    if (href.includes("/rest/v1/invoice_request?id=eq.ir-1&limit=1")) {
+      return jsonResponse(200, [{
+        id: "ir-1",
+        organization_id: invoiceOrganizationId,
+        business_unit_id: invoiceBusinessUnitId,
+        request_status: "submitted",
+        currency_code: "CAD",
+        total_amount: 248.6,
+      }]);
+    }
+    if (href.includes("/rest/v1/payment_observation?provider=eq.preview_test")) {
+      return jsonResponse(200, [{
+        id: "po-1",
+        invoice_request_id: "ir-1",
+        provider_event_id: "evt-1",
+      }]);
+    }
+    throw new Error(`Unhandled fetch: ${href}`);
+  };
+
+  try {
+    const req = {
+      method: "POST",
+      headers: { authorization: "Bearer " + "token-1" },
+      body: { invoice_request_id: "ir-1", provider_event_id: "evt-1" },
+    };
+    const res = createMockRes();
+    await handler(req, res);
+    return res;
+  } finally {
+    global.fetch = originalFetch;
+    restoreEnv(originalEnv);
+  }
+}
+
 // ── Historical Wave 1–4 no change ─────────────────────────────────────────────
 
 test("1. Wave 5 migration does not modify Wave 1-4 migration files", () => {
@@ -1909,13 +2075,22 @@ test("102. Wave5 panel handoff resolver enforces all creation prerequisites", ()
     "Wave5 handoff resolver must require work_order status qa_complete or closed"
   );
   assert.ok(
-    panelSrc.includes("outcome === \"passed\"") || panelSrc.includes('outcome === "passed"'),
+    panelSrc.includes("inspection_status === \"passed\"") ||
+      panelSrc.includes('inspection_status === "passed"'),
     "Wave5 handoff resolver must require a passed or waived QA inspection"
   );
   assert.ok(
-    panelSrc.includes("corrective_status") &&
+    panelSrc.includes("action_status") &&
       (panelSrc.includes("verified") || panelSrc.includes("cancelled")),
     "Wave5 handoff resolver must verify all corrective actions are verified or cancelled"
+  );
+  assert.ok(
+    !panelSrc.includes("q.outcome"),
+    "Wave5 handoff resolver must not use legacy QA outcome field"
+  );
+  assert.ok(
+    !panelSrc.includes("ca.corrective_status"),
+    "Wave5 handoff resolver must not use legacy corrective_status field"
   );
 });
 
@@ -1946,4 +2121,96 @@ test("105. Wave5 handoff resolver resolver section is labeled 0", () => {
     panelSrc.includes("0 · Resolve / Load Operational Handoff"),
     "Wave5 panel must have a section labeled '0 · Resolve / Load Operational Handoff'"
   );
+});
+
+test("106. accounting sync allows org-wide owner_admin membership with null BU", async () => {
+  const res = await runAccountingSyncAuthScenario({
+    roleCode: "owner_admin",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: null,
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 200);
+});
+
+test("107. accounting sync allows BU-scoped office_ops membership when BU matches", async () => {
+  const res = await runAccountingSyncAuthScenario({
+    roleCode: "office_ops",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: "bu-1",
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 200);
+});
+
+test("108. accounting sync denies non-null wrong BU membership in same organization", async () => {
+  const res = await runAccountingSyncAuthScenario({
+    roleCode: "office_ops",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: "bu-wrong",
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body?.detail || "", /organization\/business unit/i);
+});
+
+test("109. accounting sync denies membership from wrong organization even with null BU", async () => {
+  const res = await runAccountingSyncAuthScenario({
+    roleCode: "owner_admin",
+    membershipOrganizationId: "org-wrong",
+    membershipBusinessUnitId: null,
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body?.detail || "", /organization\/business unit/i);
+});
+
+test("110. preview payment allows org-wide owner_admin membership with null BU", async () => {
+  const res = await runPreviewPaymentAuthScenario({
+    roleCode: "owner_admin",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: null,
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 200);
+});
+
+test("111. preview payment allows BU-scoped office_ops membership when BU matches", async () => {
+  const res = await runPreviewPaymentAuthScenario({
+    roleCode: "office_ops",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: "bu-1",
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 200);
+});
+
+test("112. preview payment denies non-null wrong BU membership in same organization", async () => {
+  const res = await runPreviewPaymentAuthScenario({
+    roleCode: "office_ops",
+    membershipOrganizationId: "org-1",
+    membershipBusinessUnitId: "bu-wrong",
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body?.detail || "", /organization\/business unit/i);
+});
+
+test("113. preview payment denies membership from wrong organization even with null BU", async () => {
+  const res = await runPreviewPaymentAuthScenario({
+    roleCode: "owner_admin",
+    membershipOrganizationId: "org-wrong",
+    membershipBusinessUnitId: null,
+    invoiceOrganizationId: "org-1",
+    invoiceBusinessUnitId: "bu-1",
+  });
+  assert.equal(res.statusCode, 403);
+  assert.match(res.body?.detail || "", /organization\/business unit/i);
 });

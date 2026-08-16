@@ -268,7 +268,9 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
       }
 
       const finalQa = Array.isArray(qaInspections)
-        ? qaInspections.find((q) => q.outcome === "passed" || q.outcome === "waived")
+        ? qaInspections.find(
+            (q) => q.inspection_status === "passed" || q.inspection_status === "waived"
+          )
         : null;
       if (!finalQa) {
         throw new Error(
@@ -278,7 +280,7 @@ export default function ServiceOSWave5FinancePilotPanel({ session, revenueContex
 
       const openCas = Array.isArray(correctiveActions)
         ? correctiveActions.filter(
-            (ca) => ca.corrective_status !== "verified" && ca.corrective_status !== "cancelled"
+            (ca) => ca.action_status !== "verified" && ca.action_status !== "cancelled"
           )
         : [];
       if (openCas.length > 0) {

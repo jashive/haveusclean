@@ -193,7 +193,8 @@ async function loadAuthorizedMembershipContext(accessToken, appUserId, invoiceRe
   const matchingMembership = activeMemberships.find(
     (membership) =>
       membership.organization_id === invoiceSummary.organization_id &&
-      membership.business_unit_id === invoiceSummary.business_unit_id &&
+      (membership.business_unit_id == null ||
+        membership.business_unit_id === invoiceSummary.business_unit_id) &&
       roleById.has(membership.role_id)
   );
 
