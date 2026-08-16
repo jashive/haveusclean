@@ -1777,8 +1777,10 @@ REVOKE ALL ON public.job_profitability_snapshot      FROM anon;
 GRANT SELECT, INSERT, UPDATE ON public.billing_readiness_gate          TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.invoice_request                 TO authenticated;
 -- A5: accounting_sync_outbox — SELECT only for authenticated; INSERT/UPDATE is service_role only via server API
+REVOKE ALL ON public.accounting_sync_outbox FROM authenticated;
 GRANT SELECT                 ON public.accounting_sync_outbox          TO authenticated;
 -- A11: payment_observation — SELECT only for authenticated; INSERT is service_role only (Stripe webhook)
+REVOKE ALL ON public.payment_observation FROM authenticated;
 GRANT SELECT                 ON public.payment_observation             TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.contractor_compensation_version TO authenticated;
 GRANT SELECT, INSERT, UPDATE ON public.contractor_payable              TO authenticated;
@@ -2106,26 +2108,48 @@ BEGIN
     RAISE EXCEPTION 'M012 SV-12 FAIL: trg_invoice_request_lineage_and_monetary_check() function not found — A3 invoice lineage guard missing';
   END IF;
 
-  -- [SV-13] accounting_sync_outbox has no INSERT/UPDATE grant for authenticated
+  -- [SV-13] accounting_sync_outbox: SELECT must exist; no mutation/DDL-adjacent privileges for authenticated
   SELECT COUNT(*) INTO v_count
   FROM information_schema.role_table_grants
   WHERE table_schema = 'public'
     AND table_name   = 'accounting_sync_outbox'
     AND grantee      = 'authenticated'
-    AND privilege_type IN ('INSERT', 'UPDATE');
+    AND privilege_type = 'SELECT';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-13 FAIL: authenticated role lacks SELECT on accounting_sync_outbox';
+  END IF;
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name   = 'accounting_sync_outbox'
+    AND grantee      = 'authenticated'
+    AND privilege_type IN (
+      'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+    );
   IF v_count > 0 THEN
-    RAISE EXCEPTION 'M012 SV-13 FAIL: authenticated role has INSERT/UPDATE on accounting_sync_outbox — A5 server-only boundary violation';
+    RAISE EXCEPTION 'M012 SV-13 FAIL: authenticated role has non-SELECT privileges on accounting_sync_outbox — A5 server-only boundary violation';
   END IF;
 
-  -- [SV-14] payment_observation has no INSERT grant for authenticated
+  -- [SV-14] payment_observation: SELECT must exist; no mutation/DDL-adjacent privileges for authenticated
   SELECT COUNT(*) INTO v_count
   FROM information_schema.role_table_grants
   WHERE table_schema = 'public'
     AND table_name   = 'payment_observation'
     AND grantee      = 'authenticated'
-    AND privilege_type IN ('INSERT', 'UPDATE');
+    AND privilege_type = 'SELECT';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M012 SV-14 FAIL: authenticated role lacks SELECT on payment_observation';
+  END IF;
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.role_table_grants
+  WHERE table_schema = 'public'
+    AND table_name   = 'payment_observation'
+    AND grantee      = 'authenticated'
+    AND privilege_type IN (
+      'INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'REFERENCES', 'TRIGGER'
+    );
   IF v_count > 0 THEN
-    RAISE EXCEPTION 'M012 SV-14 FAIL: authenticated role has INSERT/UPDATE on payment_observation — A11 server-only boundary violation';
+    RAISE EXCEPTION 'M012 SV-14 FAIL: authenticated role has non-SELECT privileges on payment_observation — A11 server-only boundary violation';
   END IF;
 
   -- [SV-15] contractor_payable eligibility trigger function exists
