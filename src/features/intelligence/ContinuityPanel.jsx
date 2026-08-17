@@ -208,6 +208,12 @@ export default function ContinuityPanel({
       setError("Transaction snapshot summary is required.");
       return;
     }
+    const amountInput = snapshotAmount.trim();
+    const parsedAmount = amountInput === "" ? null : Number(amountInput);
+    if (amountInput !== "" && !Number.isFinite(parsedAmount)) {
+      setError("Amount observed must be a finite number when provided.");
+      return;
+    }
     setBusy(true);
     try {
       await recordContinuityTransaction(session, {
@@ -220,7 +226,7 @@ export default function ContinuityPanel({
         serviceos_entity_id: entityId.trim() || null,
         transaction_data: {
           summary: snapshotSummary.trim(),
-          amount_observed: snapshotAmount.trim() === "" ? null : Number(snapshotAmount),
+          amount_observed: parsedAmount,
           captured_source: "continuity_panel",
         },
       });
@@ -282,7 +288,8 @@ export default function ContinuityPanel({
     !busy &&
     Boolean(selectedSessionId) &&
     isValidOfflineCorrelationId(correlationId.trim()) &&
-    snapshotSummary.trim() !== "";
+    snapshotSummary.trim() !== "" &&
+    (snapshotAmount.trim() === "" || Number.isFinite(Number(snapshotAmount.trim())));
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null;
 
   return (
@@ -442,6 +449,9 @@ export default function ContinuityPanel({
             <div style={styles.note}>
               Correlation id must be 4-64 characters: letters, digits, dot, dash or underscore.
             </div>
+          )}
+          {snapshotAmount.trim() !== "" && !Number.isFinite(Number(snapshotAmount.trim())) && (
+            <div style={styles.note}>Amount observed must be a finite number.</div>
           )}
           {transactions.length === 0 && (
             <div style={styles.note}>No offline transactions recorded for this session.</div>

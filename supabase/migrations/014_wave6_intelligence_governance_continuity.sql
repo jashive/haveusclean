@@ -673,6 +673,8 @@ SET search_path = public, pg_catalog
 AS $$
 DECLARE
   v_actor uuid;
+  v_to_in_review boolean;
+  v_to_closed boolean;
 BEGIN
   -- ── 1. Terminal immutability ─────────────────────────────────────────────────
   IF OLD.review_status = 'closed' THEN
@@ -688,17 +690,39 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
-  -- opened_at: stamped only on legal entry to in_review; immutable thereafter.
-  IF NEW.review_status = 'in_review' AND OLD.review_status <> 'in_review' THEN
-    NEW.opened_at := COALESCE(OLD.opened_at, now());
+  v_to_in_review := (OLD.review_status = 'draft' AND NEW.review_status = 'in_review');
+  v_to_closed := (
+    OLD.review_status IN ('in_review', 'actions_open')
+    AND NEW.review_status = 'closed'
+  );
+
+  -- opened_at: may only be set by DB during draft→in_review.
+  IF v_to_in_review THEN
+    NEW.opened_at := now();
+  ELSIF OLD.opened_at IS NULL AND NEW.opened_at IS NOT NULL THEN
+    RAISE EXCEPTION
+      'management_review: opened_at may only be set during draft→in_review transition (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  ELSIF OLD.opened_at IS NOT NULL AND NEW.opened_at IS DISTINCT FROM OLD.opened_at THEN
+    RAISE EXCEPTION
+      'management_review: opened_at is DB-owned and immutable once set (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
   END IF;
 
-  -- closed_at: stamped only on legal close; immutable thereafter.
-  IF NEW.review_status = 'closed' AND OLD.review_status <> 'closed' THEN
+  -- closed_at: may only be set by DB during legal transition into closed.
+  IF v_to_closed THEN
     NEW.closed_at := now();
+  ELSIF OLD.closed_at IS NULL AND NEW.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION
+      'management_review: closed_at may only be set during legal transition into closed (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  ELSIF OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
+    RAISE EXCEPTION
+      'management_review: closed_at is DB-owned and immutable once set (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
   END IF;
 
-  -- Waiver is one-way: once recorded, evidence becomes immutable.
+  -- Waiver is one-way: once true, it must stay true and evidence is immutable.
   IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
     IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
       RAISE EXCEPTION
@@ -708,7 +732,11 @@ BEGIN
     NEW.waiver_actor_app_user_id := v_actor;
     NEW.waiver_recorded_at := now();
   ELSIF OLD.waiver_recorded = true THEN
-    -- Once waiver is recorded, its evidence fields are immutable.
+    IF NEW.waiver_recorded IS DISTINCT FROM true THEN
+      RAISE EXCEPTION
+        'management_review: waiver_recorded cannot transition true→false (row id=%)', OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
     IF NEW.waiver_reason IS DISTINCT FROM OLD.waiver_reason
        OR NEW.waiver_actor_app_user_id IS DISTINCT FROM OLD.waiver_actor_app_user_id
        OR NEW.waiver_recorded_at IS DISTINCT FROM OLD.waiver_recorded_at THEN
@@ -716,6 +744,15 @@ BEGIN
         'management_review: waiver evidence is immutable once recorded (row id=%)', OLD.id
         USING ERRCODE = 'P0001';
     END IF;
+  ELSIF NEW.waiver_recorded IS NOT TRUE
+     AND (
+       NEW.waiver_reason IS NOT NULL
+       OR NEW.waiver_actor_app_user_id IS NOT NULL
+       OR NEW.waiver_recorded_at IS NOT NULL
+     ) THEN
+    RAISE EXCEPTION
+      'management_review: waiver evidence may not be set unless waiver_recorded=true (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
   END IF;
 
   -- ── 3. Immutability guards on DB-owned identity fields ──────────────────────
@@ -729,18 +766,6 @@ BEGIN
       'management_review: owner_app_user_id cannot be silently reassigned (row id=%)', OLD.id
       USING ERRCODE = 'P0001';
   END IF;
-  -- opened_at must not be overridden by the caller once set.
-  IF OLD.opened_at IS NOT NULL AND NEW.opened_at IS DISTINCT FROM OLD.opened_at THEN
-    RAISE EXCEPTION
-      'management_review: opened_at is DB-owned and immutable once set (row id=%)', OLD.id
-      USING ERRCODE = 'P0001';
-  END IF;
-  -- closed_at must not be overridden by the caller once set.
-  IF OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
-    RAISE EXCEPTION
-      'management_review: closed_at is DB-owned and immutable once set (row id=%)', OLD.id
-      USING ERRCODE = 'P0001';
-  END IF;
 
   -- ── 4. FSM transition validation ────────────────────────────────────────────
   IF NEW.review_status <> OLD.review_status THEN
@@ -748,7 +773,7 @@ BEGIN
     IF NOT (
       (OLD.review_status = 'draft'        AND NEW.review_status = 'in_review')    OR
       (OLD.review_status = 'in_review'    AND NEW.review_status = 'actions_open') OR
-      (OLD.review_status = 'in_review'    AND NEW.review_status = 'closed')        OR
+      (OLD.review_status = 'in_review'    AND NEW.review_status = 'closed')       OR
       (OLD.review_status = 'actions_open' AND NEW.review_status = 'closed')
     ) THEN
       RAISE EXCEPTION
@@ -760,13 +785,11 @@ BEGIN
 
   -- ── 5. Closure prerequisites ─────────────────────────────────────────────────
   IF NEW.review_status = 'closed' THEN
-    -- closed_at must be set (was stamped above; belt-and-suspenders).
     IF NEW.closed_at IS NULL THEN
       RAISE EXCEPTION
         'management_review: closed_at must be set when closing (row id=%)', OLD.id
         USING ERRCODE = 'P0001';
     END IF;
-    -- Unresolved actions require a waiver.
     IF NEW.waiver_recorded IS NOT TRUE THEN
       IF EXISTS (
         SELECT 1
@@ -881,6 +904,176 @@ COMMENT ON FUNCTION public.trg_enforce_ccr_fsm() IS
   'Wave 6: DB-level change_control_record FSM. '
   'measure→analyze→improve→approve→update→retrain→validate→closed. '
   'Material changes require impact_assessment + validation_result.passed=true. SOURCE ONLY.';
+
+CREATE OR REPLACE FUNCTION public.trg_validate_ccr_dependency_impact()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_requires_assessment boolean;
+  v_source text;
+  v_paths jsonb;
+  v_path jsonb;
+  v_edge_exists boolean;
+  v_reachable_nodes text[];
+  v_node text;
+BEGIN
+  v_requires_assessment := (
+    NEW.material_change = true
+    AND NEW.change_status IN ('approve', 'update', 'retrain', 'validate', 'closed')
+  );
+
+  IF NOT v_requires_assessment THEN
+    RETURN NEW;
+  END IF;
+
+  IF NEW.impact_assessment IS NULL OR jsonb_typeof(NEW.impact_assessment) <> 'object' THEN
+    RAISE EXCEPTION
+      'change_control_record: material change in % requires structured impact_assessment object (row id=%)',
+      NEW.change_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  v_source := NULLIF(btrim(COALESCE(NEW.impact_assessment ->> 'dependency_graph_source', '')), '');
+  IF v_source IS NULL THEN
+    RAISE EXCEPTION
+      'change_control_record: impact_assessment.dependency_graph_source is required before % (row id=%)',
+      NEW.change_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  IF NOT EXISTS (
+    SELECT 1
+    FROM public.dependency_edge de
+    WHERE de.from_node = v_source
+      AND (de.organization_id IS NULL OR de.organization_id = NEW.organization_id)
+  ) THEN
+    RAISE EXCEPTION
+      'change_control_record: dependency_graph_source "%" is not a visible dependency_edge source node (row id=%)',
+      v_source, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  v_paths := NEW.impact_assessment -> 'dependency_paths';
+  IF jsonb_typeof(v_paths) IS DISTINCT FROM 'array' THEN
+    RAISE EXCEPTION
+      'change_control_record: impact_assessment.dependency_paths must be an array (row id=%)',
+      OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF jsonb_array_length(v_paths) = 0 THEN
+    RAISE EXCEPTION
+      'change_control_record: impact_assessment.dependency_paths must be non-empty for material change (row id=%)',
+      OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  FOR v_path IN
+    SELECT value
+    FROM jsonb_array_elements(v_paths)
+  LOOP
+    IF NULLIF(btrim(COALESCE(v_path ->> 'kg_id', '')), '') IS NULL
+       OR NULLIF(btrim(COALESCE(v_path ->> 'from_node', '')), '') IS NULL
+       OR NULLIF(btrim(COALESCE(v_path ->> 'to_node', '')), '') IS NULL
+       OR NULLIF(btrim(COALESCE(v_path ->> 'edge_type', '')), '') IS NULL THEN
+      RAISE EXCEPTION
+        'change_control_record: dependency_paths entries must include kg_id/from_node/to_node/edge_type (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+
+    SELECT EXISTS (
+      SELECT 1
+      FROM public.dependency_edge de
+      WHERE de.kg_id = (v_path ->> 'kg_id')
+        AND de.from_node = (v_path ->> 'from_node')
+        AND de.to_node = (v_path ->> 'to_node')
+        AND de.edge_type = (v_path ->> 'edge_type')
+        AND (
+          (de.control_rule IS NULL AND NULLIF(v_path ->> 'control_rule', '') IS NULL)
+          OR de.control_rule = (v_path ->> 'control_rule')
+        )
+        AND (de.organization_id IS NULL OR de.organization_id = NEW.organization_id)
+    ) INTO v_edge_exists;
+
+    IF NOT v_edge_exists THEN
+      RAISE EXCEPTION
+        'change_control_record: dependency_paths includes edge that does not exist or is not visible (kg_id=% from=% to=% type=%) (row id=%)',
+        v_path ->> 'kg_id',
+        v_path ->> 'from_node',
+        v_path ->> 'to_node',
+        v_path ->> 'edge_type',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+
+  WITH RECURSIVE reachable(node, visited) AS (
+    SELECT
+      de.to_node,
+      ARRAY[de.from_node, de.to_node]::text[]
+    FROM public.dependency_edge de
+    WHERE de.from_node = v_source
+      AND (de.organization_id IS NULL OR de.organization_id = NEW.organization_id)
+
+    UNION ALL
+
+    SELECT
+      de.to_node,
+      (r.visited || de.to_node)::text[]
+    FROM reachable r
+    JOIN public.dependency_edge de
+      ON de.from_node = r.node
+    WHERE (de.organization_id IS NULL OR de.organization_id = NEW.organization_id)
+      AND NOT de.to_node = ANY(r.visited)
+  )
+  SELECT COALESCE(array_agg(DISTINCT node), ARRAY[]::text[])
+  INTO v_reachable_nodes
+  FROM reachable;
+
+  IF NEW.affected_dependencies IS NULL OR array_length(NEW.affected_dependencies, 1) IS NULL THEN
+    RAISE EXCEPTION
+      'change_control_record: affected_dependencies must be non-empty for material change before % (row id=%)',
+      NEW.change_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  FOREACH v_node IN ARRAY NEW.affected_dependencies
+  LOOP
+    IF v_node IS NULL OR btrim(v_node) = '' THEN
+      RAISE EXCEPTION
+        'change_control_record: affected_dependencies cannot contain blank nodes (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF NOT (v_node = ANY(v_reachable_nodes)) THEN
+      RAISE EXCEPTION
+        'change_control_record: affected dependency "%" is not downstream-reachable from source "%" (row id=%)',
+        v_node, v_source, OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_validate_ccr_dependency_impact() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_validate_ccr_dependency_impact() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_validate_ccr_dependency_impact() FROM authenticated;
+
+CREATE TRIGGER trig_ccr_dependency_impact_validate
+  BEFORE UPDATE ON public.change_control_record
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_validate_ccr_dependency_impact();
+
+COMMENT ON FUNCTION public.trg_validate_ccr_dependency_impact() IS
+  'Wave 6: DB-level dependency-impact validator for material change_control_record transitions into '
+  'approve/update/retrain/validate/closed. Validates dependency_graph_source, structured '
+  'dependency_paths edges, and downstream-reachable affected_dependencies via recursive cycle-safe CTE. SOURCE ONLY.';
+
 
 -- ── continuity_session FSM ───────────────────────────────────────────────────
 
@@ -1059,7 +1252,7 @@ CREATE TRIGGER trig_continuity_payload_hash
 
 COMMENT ON FUNCTION public.trg_set_continuity_payload_hash() IS
   'Wave 6: Computes SHA-256 payload_hash for continuity_transaction on INSERT. '
-  'Hash = encode(extensions.digest(transaction_data::text, ''sha256''), ''hex''). '
+  'Hash covers continuity_session_id, offline_correlation_id, organization_id, business_unit_id, transaction_type, serviceos_entity_type, serviceos_entity_id, and transaction_data. '
   'Schema-qualified extensions.digest (pgcrypto in schema extensions). '
   'INSERT-only trigger — hash is immutable after row creation. '
   'FAIL CLOSED: if extensions.digest unavailable the INSERT is aborted. SOURCE ONLY.';
@@ -1156,8 +1349,13 @@ BEGIN
   IF NEW.review_status <> 'draft' THEN
     RAISE EXCEPTION 'management_review: insert must start at draft (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
-  IF NEW.closed_at IS NOT NULL OR NEW.waiver_recorded = true OR NEW.waiver_reason IS NOT NULL THEN
-    RAISE EXCEPTION 'management_review: insert cannot pre-populate closure/waiver evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  IF NEW.opened_at IS NOT NULL
+     OR NEW.closed_at IS NOT NULL
+     OR NEW.waiver_recorded = true
+     OR NEW.waiver_reason IS NOT NULL
+     OR NEW.waiver_actor_app_user_id IS NOT NULL
+     OR NEW.waiver_recorded_at IS NOT NULL THEN
+    RAISE EXCEPTION 'management_review: insert cannot pre-populate transition/waiver evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
   IF NEW.created_by_app_user_id IS NOT NULL AND NEW.created_by_app_user_id <> v_actor THEN
     RAISE EXCEPTION 'management_review: created_by_app_user_id spoof rejected (row id=%)', NEW.id USING ERRCODE = 'P0001';
@@ -1167,10 +1365,6 @@ BEGIN
   END IF;
   NEW.created_by_app_user_id := v_actor;
   NEW.owner_app_user_id := COALESCE(NEW.owner_app_user_id, v_actor);
-  -- opened_at must not be pre-populated on INSERT.
-  IF NEW.opened_at IS NOT NULL THEN
-    RAISE EXCEPTION 'management_review: opened_at must not be set on insert (row id=%)', NEW.id USING ERRCODE = 'P0001';
-  END IF;
   RETURN NEW;
 END;
 $$;
@@ -1268,15 +1462,19 @@ BEGIN
     RAISE EXCEPTION 'continuity_session: insert must start at declared (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
   IF NEW.service_restored_at IS NOT NULL OR NEW.reconciliation_started_at IS NOT NULL
-     OR NEW.reconciliation_completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL THEN
-    RAISE EXCEPTION 'continuity_session: insert cannot pre-populate transition-owned timestamps (row id=%)', NEW.id USING ERRCODE = 'P0001';
+     OR NEW.reconciliation_completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL
+     OR NEW.closed_by_app_user_id IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: insert cannot pre-populate transition-owned timestamps/actors (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
-  -- declared_at must not be pre-populated: DB always stamps it.
-  IF NEW.declared_at IS NOT NULL THEN
-    RAISE EXCEPTION 'continuity_session: declared_at is DB-owned and must not be set on insert (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  IF NEW.waiver_recorded = true
+     OR NEW.waiver_reason IS NOT NULL
+     OR NEW.waiver_actor_app_user_id IS NOT NULL
+     OR NEW.waiver_recorded_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: insert cannot pre-populate waiver evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
-  NEW.declared_by_app_user_id := v_actor;
+  -- declared_at has a DEFAULT now(); DB still owns this value and always restamps it.
   NEW.declared_at := now();
+  NEW.declared_by_app_user_id := v_actor;
   RETURN NEW;
 END;
 $$;
@@ -1293,44 +1491,103 @@ SET search_path = public, pg_catalog
 AS $$
 DECLARE
   v_actor uuid;
+  v_to_service_restored boolean;
+  v_to_reconciling boolean;
+  v_to_reconciled boolean;
+  v_to_closed boolean;
 BEGIN
   v_actor := public.current_app_user_id();
   IF v_actor IS NULL THEN
     RAISE EXCEPTION 'continuity_session: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
   END IF;
+
+  v_to_service_restored := (
+    OLD.session_status = 'fallback_active'
+    AND NEW.session_status = 'service_restored'
+  );
+  v_to_reconciling := (
+    OLD.session_status = 'service_restored'
+    AND NEW.session_status = 'reconciling'
+  );
+  v_to_reconciled := (
+    OLD.session_status = 'reconciling'
+    AND NEW.session_status = 'reconciled'
+  );
+  v_to_closed := (
+    OLD.session_status = 'reconciled'
+    AND NEW.session_status = 'closed'
+  );
+
+  IF NEW.declared_at IS DISTINCT FROM OLD.declared_at THEN
+    RAISE EXCEPTION 'continuity_session: declared_at is DB-owned and immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
   IF NEW.declared_by_app_user_id IS DISTINCT FROM OLD.declared_by_app_user_id THEN
     RAISE EXCEPTION 'continuity_session: declared_by_app_user_id is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
-  IF NEW.session_status = 'service_restored' AND OLD.session_status <> 'service_restored' THEN
+
+  IF v_to_service_restored THEN
     NEW.service_restored_at := now();
+  ELSIF OLD.service_restored_at IS NULL AND NEW.service_restored_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: service_restored_at may only be set on fallback_active→service_restored (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  ELSIF OLD.service_restored_at IS NOT NULL AND NEW.service_restored_at IS DISTINCT FROM OLD.service_restored_at THEN
+    RAISE EXCEPTION 'continuity_session: service_restored_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
-  IF NEW.session_status = 'reconciling' AND OLD.session_status <> 'reconciling' THEN
+
+  IF v_to_reconciling THEN
     NEW.reconciliation_started_at := now();
+  ELSIF OLD.reconciliation_started_at IS NULL AND NEW.reconciliation_started_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: reconciliation_started_at may only be set on service_restored→reconciling (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  ELSIF OLD.reconciliation_started_at IS NOT NULL AND NEW.reconciliation_started_at IS DISTINCT FROM OLD.reconciliation_started_at THEN
+    RAISE EXCEPTION 'continuity_session: reconciliation_started_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
-  IF NEW.session_status = 'reconciled' AND OLD.session_status <> 'reconciled' THEN
+
+  IF v_to_reconciled THEN
     NEW.reconciliation_completed_at := now();
+  ELSIF OLD.reconciliation_completed_at IS NULL AND NEW.reconciliation_completed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: reconciliation_completed_at may only be set on reconciling→reconciled (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  ELSIF OLD.reconciliation_completed_at IS NOT NULL AND NEW.reconciliation_completed_at IS DISTINCT FROM OLD.reconciliation_completed_at THEN
+    RAISE EXCEPTION 'continuity_session: reconciliation_completed_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
+
   IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
     IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
       RAISE EXCEPTION 'continuity_session: waiver requires rationale/evidence (row id=%)', OLD.id USING ERRCODE = 'P0001';
     END IF;
     NEW.waiver_actor_app_user_id := v_actor;
     NEW.waiver_recorded_at := now();
-  END IF;
-  IF NEW.session_status = 'closed' AND OLD.session_status <> 'closed' THEN
-    NEW.closed_at := now();
-    NEW.closed_by_app_user_id := v_actor;
-  ELSIF OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
-    RAISE EXCEPTION 'continuity_session: closed_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
-  END IF;
-  -- Waiver evidence is immutable once recorded.
-  IF OLD.waiver_recorded = true THEN
+  ELSIF OLD.waiver_recorded = true THEN
+    IF NEW.waiver_recorded IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'continuity_session: waiver_recorded cannot transition true→false (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
     IF NEW.waiver_reason IS DISTINCT FROM OLD.waiver_reason
        OR NEW.waiver_actor_app_user_id IS DISTINCT FROM OLD.waiver_actor_app_user_id
        OR NEW.waiver_recorded_at IS DISTINCT FROM OLD.waiver_recorded_at THEN
       RAISE EXCEPTION 'continuity_session: waiver evidence is immutable once recorded (row id=%)', OLD.id USING ERRCODE = 'P0001';
     END IF;
+  ELSIF NEW.waiver_recorded IS NOT TRUE
+     AND (
+       NEW.waiver_reason IS NOT NULL
+       OR NEW.waiver_actor_app_user_id IS NOT NULL
+       OR NEW.waiver_recorded_at IS NOT NULL
+     ) THEN
+    RAISE EXCEPTION 'continuity_session: waiver evidence may not be set unless waiver_recorded=true (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
+
+  IF v_to_closed THEN
+    NEW.closed_at := now();
+    NEW.closed_by_app_user_id := v_actor;
+  ELSIF OLD.closed_at IS NULL
+        AND (NEW.closed_at IS NOT NULL OR NEW.closed_by_app_user_id IS NOT NULL) THEN
+    RAISE EXCEPTION 'continuity_session: closed_at/closed_by may only be set on reconciled→closed (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  ELSIF OLD.closed_at IS NOT NULL THEN
+    IF NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
+      RAISE EXCEPTION 'continuity_session: closed_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
+    IF NEW.closed_by_app_user_id IS DISTINCT FROM OLD.closed_by_app_user_id THEN
+      RAISE EXCEPTION 'continuity_session: closed_by_app_user_id is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -1760,8 +2017,8 @@ CREATE TRIGGER trig_wave6_ccr_manifest
 --   (canonical ServiceOS lead-creation timestamp, consistent with KPI seed lineage).
 -- Timestamp convention for sales.quote.accepted: quote_response.responded_at
 --   (semantically the acceptance event; responded_at is set when the response is recorded).
--- Remaining Wave 1–2 tables (opportunity, quote, conversion_record) are excluded
--- pending column verification.
+-- Remaining Wave 1–2 tables (opportunity, quote, conversion_record) are absent from
+-- wave6_canonical_event because no locked canonical event name currently requires them.
 --
 -- security_invoker = true so that the caller's RLS policies apply to every
 -- underlying table (the view must never widen access).

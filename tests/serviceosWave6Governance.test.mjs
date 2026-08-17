@@ -510,3 +510,70 @@ test("migration combined MR trigger fires BEFORE UPDATE once with combined gover
   const matchCount = (sql.match(/CREATE TRIGGER trig_wave6_mr_governance\b/g) || []).length;
   assert.equal(matchCount, 1, "exactly one combined MR governance trigger must be created");
 });
+
+test("management_review waiver is one-way and evidence is immutable once recorded", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_mr_governance"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_wave6_mr_governance")
+  );
+  assert.match(body, /waiver_recorded cannot transition true→false/);
+  assert.match(body, /waiver evidence is immutable once recorded/);
+});
+
+test("management_review stamps opened_at only on draft→in_review and blocks draft injection", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_mr_governance"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_wave6_mr_governance")
+  );
+  assert.match(body, /OLD\.review_status = 'draft' AND NEW\.review_status = 'in_review'/);
+  assert.match(body, /opened_at may only be set during draft→in_review transition/);
+  const insertGuard = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_guard_management_review_insert"),
+    sql.indexOf("REVOKE ALL ON FUNCTION public.trg_wave6_guard_management_review_insert")
+  );
+  assert.match(insertGuard, /insert cannot pre-populate transition\/waiver evidence/);
+  assert.match(insertGuard, /NEW\.opened_at IS NOT NULL/);
+});
+
+test("management_review stamps closed_at only during legal close and blocks pre-close injection", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_mr_governance"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_wave6_mr_governance")
+  );
+  assert.match(body, /OLD\.review_status IN \('in_review', 'actions_open'\)/);
+  assert.match(body, /NEW\.review_status = 'closed'/);
+  assert.match(body, /closed_at may only be set during legal transition into closed/);
+});
+
+test("material change dependency impact validator trigger exists and runs before update", () => {
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.trg_validate_ccr_dependency_impact\(\)/);
+  assert.match(
+    sql,
+    /CREATE TRIGGER trig_ccr_dependency_impact_validate\s+BEFORE UPDATE ON public\.change_control_record/
+  );
+});
+
+test("dependency impact validator enforces structured assessment and recursive reachability", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_validate_ccr_dependency_impact"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_validate_ccr_dependency_impact")
+  );
+  assert.match(body, /dependency_graph_source is required/i);
+  assert.match(body, /dependency_paths must be an array/i);
+  assert.match(body, /dependency_paths entries must include kg_id\/from_node\/to_node\/edge_type/i);
+  assert.match(body, /WITH RECURSIVE reachable/);
+  assert.match(body, /NOT de\.to_node = ANY\(r\.visited\)/);
+  assert.match(body, /affected dependency .* is not downstream-reachable from source/i);
+});
+
+test("dependency impact validator has explicit fail-closed guards for invented/invalid payloads", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_validate_ccr_dependency_impact"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_validate_ccr_dependency_impact")
+  );
+  assert.match(body, /requires structured impact_assessment object/i, "arbitrary JSON must fail");
+  assert.match(body, /dependency_graph_source .* not a visible dependency_edge source node/i);
+  assert.match(body, /dependency_paths includes edge that does not exist or is not visible/i);
+  assert.match(body, /affected dependency .* is not downstream-reachable from source/i);
+  assert.match(body, /v_requires_assessment := \(\s*NEW\.material_change = true[\s\S]*approve', 'update', 'retrain', 'validate', 'closed'/);
+});

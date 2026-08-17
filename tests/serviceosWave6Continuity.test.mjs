@@ -3,9 +3,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 
 import {
   CONTINUITY_TRANSITIONS,
@@ -33,6 +35,41 @@ const clientSource = readFileSync(
   path.join(here, "..", "src", "lib", "serviceosIntelligenceClient.js"),
   "utf8"
 );
+
+function runChecked(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: "utf8", ...options });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed:\n${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim()
+    );
+  }
+  return result;
+}
+
+function withTempPostgres(run) {
+  const binDir = process.env.PG_BINDIR || "/usr/lib/postgresql/16/bin";
+  const initdb = path.join(binDir, "initdb");
+  const pgCtl = path.join(binDir, "pg_ctl");
+  const psql = path.join(binDir, "psql");
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "wave6-pg-"));
+  const dataDir = path.join(rootDir, "data");
+  const socketDir = path.join(rootDir, "socket");
+  const port = String(56000 + Math.floor(Math.random() * 3000));
+  runChecked("mkdir", ["-p", dataDir, socketDir]);
+  try {
+    runChecked(initdb, ["-D", dataDir, "-A", "trust", "-U", "postgres", "--no-locale"]);
+    runChecked(pgCtl, ["-D", dataDir, "-o", `-k ${socketDir} -p ${port}`, "-w", "start"]);
+    const execSql = (statement) =>
+      runChecked(
+        psql,
+        ["-h", socketDir, "-p", port, "-U", "postgres", "-d", "postgres", "-At", "-c", statement]
+      ).stdout.trim();
+    return run(execSql);
+  } finally {
+    spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "stop"], { encoding: "utf8" });
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+}
 
 // ── Session lifecycle ────────────────────────────────────────────────────────
 
@@ -337,4 +374,91 @@ test("migration immutability trigger blocks mutation of payload evidence fields"
   assert.match(body, /payload_hash IS DISTINCT FROM OLD\.payload_hash/);
   assert.match(body, /transaction_data IS DISTINCT FROM OLD\.transaction_data/);
   assert.match(body, /offline_correlation_id IS DISTINCT FROM OLD\.offline_correlation_id/);
+});
+
+test("PostgreSQL default declared_at and BEFORE INSERT trigger coexist; ordinary continuity declaration succeeds", () => {
+  withTempPostgres((execSql) => {
+    execSql(`
+      CREATE TABLE continuity_session_like (
+        id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+        session_code text NOT NULL,
+        session_status text NOT NULL DEFAULT 'declared',
+        declared_at timestamptz NOT NULL DEFAULT now(),
+        declared_by_app_user_id uuid
+      );
+    `);
+    execSql(`
+      CREATE OR REPLACE FUNCTION trg_wave6_guard_continuity_session_insert_like()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$
+      BEGIN
+        IF NEW.session_status <> 'declared' THEN
+          RAISE EXCEPTION 'must start declared';
+        END IF;
+        NEW.declared_at := now();
+        NEW.declared_by_app_user_id := '00000000-0000-0000-0000-000000000001'::uuid;
+        RETURN NEW;
+      END;
+      $$;
+    `);
+    execSql(`
+      CREATE TRIGGER trig_wave6_guard_continuity_session_insert_like
+      BEFORE INSERT ON continuity_session_like
+      FOR EACH ROW
+      EXECUTE FUNCTION trg_wave6_guard_continuity_session_insert_like();
+    `);
+    const created = execSql(`
+      INSERT INTO continuity_session_like (session_code)
+      VALUES ('DR-ORDINARY-1')
+      RETURNING session_status, declared_at IS NOT NULL, declared_by_app_user_id::text;
+    `);
+    const createdParts = created.split("|");
+    assert.equal(createdParts[0], "declared");
+    assert.equal(createdParts[1], "t");
+    assert.equal(createdParts[2], "00000000-0000-0000-0000-000000000001");
+
+    const overridden = execSql(`
+      INSERT INTO continuity_session_like (session_code, declared_at)
+      VALUES ('DR-OVERRIDE-1', '2001-01-01T00:00:00Z')
+      RETURNING (declared_at > '2001-01-01T00:00:00Z'::timestamptz), declared_by_app_user_id::text;
+    `);
+    const overriddenParts = overridden.split("|");
+    assert.equal(overriddenParts[0], "t");
+    assert.equal(overriddenParts[1], "00000000-0000-0000-0000-000000000001");
+  });
+});
+
+test("continuity insert guard allows ordinary declared insert while blocking prepopulated lifecycle evidence", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_guard_continuity_session_insert"),
+    sql.indexOf("REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_session_insert")
+  );
+  assert.match(body, /NEW\.declared_at := now\(\)/);
+  assert.match(body, /NEW\.declared_by_app_user_id := v_actor/);
+  assert.doesNotMatch(body, /declared_at is DB-owned and must not be set on insert/);
+  assert.match(body, /insert cannot pre-populate transition-owned timestamps\/actors/);
+  assert.match(body, /insert cannot pre-populate waiver evidence/);
+});
+
+test("continuity waiver is one-way and immutable once recorded", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_continuity_session_update"),
+    sql.indexOf("REVOKE ALL ON FUNCTION public.trg_wave6_stamp_continuity_session_update")
+  );
+  assert.match(body, /waiver_recorded cannot transition true→false/);
+  assert.match(body, /waiver evidence is immutable once recorded/);
+});
+
+test("continuity lifecycle timestamps are DB-owned and transition-scoped", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_continuity_session_update"),
+    sql.indexOf("REVOKE ALL ON FUNCTION public.trg_wave6_stamp_continuity_session_update")
+  );
+  assert.match(body, /service_restored_at may only be set on fallback_active→service_restored/);
+  assert.match(body, /reconciliation_started_at may only be set on service_restored→reconciling/);
+  assert.match(body, /reconciliation_completed_at may only be set on reconciling→reconciled/);
+  assert.match(body, /closed_at\/closed_by may only be set on reconciled→closed/);
+  assert.match(body, /declared_at is DB-owned and immutable/);
+  assert.match(body, /closed_by_app_user_id is DB-owned and immutable once set/);
 });

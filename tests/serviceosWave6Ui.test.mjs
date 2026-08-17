@@ -30,6 +30,7 @@ const clientSource = read(path.join(libDir, "serviceosIntelligenceClient.js"));
 const utilsSource = read(path.join(libDir, "serviceosIntelligenceUtils.js"));
 const mainSource = read(path.join(here, "..", "src", "main.jsx"));
 const packageJson = JSON.parse(read(path.join(here, "..", "package.json")));
+const workflowSource = read(path.join(here, "..", ".github", "workflows", "pr-acceptance.yml"));
 const loadManagementReviewEvidence = () =>
   import("../src/features/intelligence/managementReviewEvidence.js");
 
@@ -728,4 +729,41 @@ test("KpiReviewPanel fail-closed: ambiguous and absent definitions both yield NO
     /definition === null/,
     "KpiReviewPanel must guard the governed display path on definition === null"
   );
+});
+
+test("ChangeControlPanel refreshes only draft impact_assessment after Load & persist dependency impact", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  assert.match(source, /setDrafts\(\(prev\) =>/);
+  assert.match(source, /const existingDraft = prev\[record\.id\] \?\? resolveDraft\(record\)/);
+  assert.match(source, /impact_assessment: JSON\.stringify\(newAssessment, null, 2\)/);
+  assert.match(source, /\.\.\.existingDraft/);
+  assert.match(source, /await updateChangeControlRecord\(session, record\.id, \{/);
+  assert.match(source, /Save workflow evidence/);
+});
+
+test("ContinuityPanel rejects non-finite amount_observed input before submit", () => {
+  const source = PANELS["ContinuityPanel.jsx"];
+  assert.match(source, /const amountInput = snapshotAmount\.trim\(\)/);
+  assert.match(source, /const parsedAmount = amountInput === \"\" \? null : Number\(amountInput\)/);
+  assert.match(source, /amountInput !== \"\" && !Number\.isFinite\(parsedAmount\)/);
+  assert.match(source, /Amount observed must be a finite number when provided/);
+  assert.match(source, /amount_observed: parsedAmount/);
+  assert.match(
+    source,
+    /snapshotAmount\.trim\(\) === \"\" \|\| Number\.isFinite\(Number\(snapshotAmount\.trim\(\)\)\)/,
+    "canRecord must fail closed for invalid amount values"
+  );
+});
+
+test("Wave6IntelligencePanel uses governed KPI quality.exceptions_opened for period exception count", () => {
+  const source = PANELS["Wave6IntelligencePanel.jsx"];
+  assert.match(source, /state\.kpis\.find\(\(kpi\) => kpi\.kpiCode === \"quality\.exceptions_opened\"\)/);
+  assert.doesNotMatch(source, /state\.events\.filter\([\s\S]*quality\.exception\.opened/);
+  assert.match(source, /exceptions opened \(governed KPI\):/i);
+  assert.match(source, /loaded canonical events/);
+});
+
+test("PR acceptance workflow runs Node 24", () => {
+  assert.match(workflowSource, /node-version:\s*'24'/);
+  assert.doesNotMatch(workflowSource, /node-version:\s*'20'/);
 });

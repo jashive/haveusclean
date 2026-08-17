@@ -233,9 +233,9 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
     refresh();
   }, [refresh]);
 
-  const exceptionCount = state.events.filter(
-    (event) => event.event_name === "quality.exception.opened"
-  ).length;
+  const exceptionsOpenedKpi = state.kpis.find((kpi) => kpi.kpiCode === "quality.exceptions_opened");
+  const exceptionsOpenedValue = Number(exceptionsOpenedKpi?.value);
+  const exceptionCount = Number.isFinite(exceptionsOpenedValue) ? exceptionsOpenedValue : "—";
 
   const freshestEvent = state.events.reduce(
     (latest, event) =>
@@ -287,10 +287,10 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         Period {formatTimestamp(period.periodStart, timezone)} →{" "}
         {formatTimestamp(period.periodEnd, timezone)}
         <br />
-        Data read {loadedAt ? formatFreshness(loadedAt) : "not yet"} · canonical events{" "}
+        Data read {loadedAt ? formatFreshness(loadedAt) : "not yet"} · loaded canonical events{" "}
         {state.events.length} · latest event {freshestEvent ? formatFreshness(freshestEvent) : "—"}
         <br />
-        Captured snapshots this period: {state.snapshots.length} · exceptions opened:{" "}
+        Captured snapshots this period: {state.snapshots.length} · exceptions opened (governed KPI):{" "}
         {exceptionCount}
         <br />
         Lineage: values are computed live from governed Wave 1-5 source tables and canonical

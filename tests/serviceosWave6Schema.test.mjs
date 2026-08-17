@@ -546,6 +546,14 @@ test("payload_hash is documented as immutable (INSERT-only trigger)", () => {
   );
 });
 
+test("payload hash function comment describes identity envelope plus transaction payload", () => {
+  assert.match(
+    sql,
+    /Hash covers continuity_session_id, offline_correlation_id, organization_id, business_unit_id, transaction_type, serviceos_entity_type, serviceos_entity_id, and transaction_data\./
+  );
+  assert.doesNotMatch(sql, /Hash = encode\(extensions\.digest\(transaction_data::text/);
+});
+
 test("kpi_snapshot rejects non-null numeric evidence with empty lineage", () => {
   assert.match(sql, /ck_ks_numeric_lineage_nonempty/);
   assert.match(sql, /numeric_value IS NULL OR source_lineage <> '\{\}'::jsonb/);
@@ -569,6 +577,14 @@ test("canonical event view uses semantic business-event timestamps without creat
 test("canonical event view comment no longer claims unverified opportunity/quote/conversion schemas", () => {
   assert.doesNotMatch(sql, /excluded pending column verification/i);
   assert.match(sql, /no locked canonical event name currently requires them/i);
+});
+
+test("migration includes DB-level material dependency-impact validator trigger", () => {
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.trg_validate_ccr_dependency_impact\(\)/);
+  assert.match(
+    sql,
+    /CREATE TRIGGER trig_ccr_dependency_impact_validate\s+BEFORE UPDATE ON public\.change_control_record/
+  );
 });
 
 // ── Blocker 4: Canonical event vocabulary ────────────────────────────────────

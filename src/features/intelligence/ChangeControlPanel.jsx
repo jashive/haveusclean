@@ -296,6 +296,16 @@ export default function ChangeControlPanel({
         affected_dependencies: affected,
         impact_assessment: newAssessment,
       });
+      setDrafts((prev) => {
+        const existingDraft = prev[record.id] ?? resolveDraft(record);
+        return {
+          ...prev,
+          [record.id]: {
+            ...existingDraft,
+            impact_assessment: JSON.stringify(newAssessment, null, 2),
+          },
+        };
+      });
       if (onChanged) await onChanged();
     } catch (err) {
       setError(formatErrorMessage(err));
