@@ -23,10 +23,18 @@ const PANELS = {
 };
 
 const formatters = read(path.join(featureDir, "wave6Formatters.js"));
+const managementReviewEvidenceSource = read(
+  path.join(featureDir, "managementReviewEvidence.js")
+);
 const clientSource = read(path.join(libDir, "serviceosIntelligenceClient.js"));
 const utilsSource = read(path.join(libDir, "serviceosIntelligenceUtils.js"));
 const mainSource = read(path.join(here, "..", "src", "main.jsx"));
 const packageJson = JSON.parse(read(path.join(here, "..", "package.json")));
+const {
+  buildSnapshotSourceLineage,
+  mergeSnapshotManifest,
+  resolveDefinition,
+} = await import("../src/features/intelligence/managementReviewEvidence.js");
 
 const ALL_WAVE6_SOURCES = { ...PANELS, "wave6Formatters.js": formatters };
 
@@ -380,12 +388,141 @@ test("KPI snapshot payload does not contain invalid DB column names", () => {
 
 test("KPI snapshot resolves kpi_definition_id from definitions — fail closed if missing", () => {
   // Criterion G: If an active definition cannot be resolved, fail closed
-  assert.match(mrpSource, /skipped\.push\(kpi\.kpiCode\)/, "must skip KPIs with no definition — fail closed");
-  assert.match(mrpSource, /no active definition/i, "must report skipped due to missing definition");
+  assert.match(mrpSource, /skipped\.push\(/, "must skip KPIs with no definition — fail closed");
+  assert.match(
+    managementReviewEvidenceSource,
+    /no active applicable definition|ambiguous active definition/i,
+    "must report skipped due to missing or ambiguous definition"
+  );
   assert.doesNotMatch(
     mrpSource,
     /kpi_definition_id: null/,
     "must never send null kpi_definition_id"
+  );
+});
+
+test("KPI snapshot payload links real snapshot ids into the management review manifest", () => {
+  assert.match(mrpSource, /kpi_snapshot_manifest:/, "must patch kpi_snapshot_manifest");
+  assert.match(mrpSource, /kpi_snapshot_id:/, "manifest must store real snapshot ids");
+  assert.match(mrpSource, /snapshot\.id/, "manifest ids must come from DB-returned snapshot rows");
+  assert.match(mrpSource, /mergeSnapshotManifest/, "manifest entries must be deduplicated");
+});
+
+test("KPI snapshot payload persists effective jurisdiction scope only when computation applied it", () => {
+  assert.match(mrpSource, /jurisdiction_id:\s*kpi\.effectiveScope\?\.jurisdiction_id \?\? null/);
+});
+
+test("definition resolution fails closed on ambiguity instead of choosing the first row", () => {
+  assert.match(managementReviewEvidenceSource, /ambiguous active definition/i);
+  assert.doesNotMatch(managementReviewEvidenceSource, /\.find\(/, "definition resolution must not use Array.find guessing");
+});
+
+test("definition resolution fails closed when multiple active versions remain applicable", () => {
+  const resolved = resolveDefinition(
+    [
+      {
+        id: "global-v1",
+        code: "sales.leads_created",
+        definition_version: "1",
+        active: true,
+        organization_id: null,
+        effective_from: "2026-01-01T00:00:00.000Z",
+        effective_to: null,
+      },
+      {
+        id: "global-v2",
+        code: "sales.leads_created",
+        definition_version: "2",
+        active: true,
+        organization_id: null,
+        effective_from: "2026-01-01T00:00:00.000Z",
+        effective_to: null,
+      },
+    ],
+    "sales.leads_created",
+    { asOf: Date.parse("2026-08-17T00:00:00.000Z") }
+  );
+  assert.equal(resolved.definition, null);
+  assert.match(resolved.error, /ambiguous active definition/i);
+});
+
+test("definition resolution prefers one applicable organization-scoped row over global", () => {
+  const resolved = resolveDefinition(
+    [
+      {
+        id: "global-v1",
+        code: "sales.leads_created",
+        definition_version: "1",
+        active: true,
+        organization_id: null,
+      },
+      {
+        id: "org-v1",
+        code: "sales.leads_created",
+        definition_version: "1",
+        active: true,
+        organization_id: "org-1",
+      },
+    ],
+    "sales.leads_created",
+    { asOf: Date.parse("2026-08-17T00:00:00.000Z") }
+  );
+  assert.equal(resolved.definition?.id, "org-v1");
+});
+
+test("buildSnapshotSourceLineage combines governed definition lineage and runtime lineage", () => {
+  const lineage = buildSnapshotSourceLineage(
+    {
+      code: "sales.leads_created",
+      definition_version: "1",
+      source_lineage: { canonical_event_name: "sales.lead.created" },
+    },
+    {
+      sourceLineage: {
+        runtime: {
+          kpi_code: "sales.leads_created",
+          row_counts: { service_request: 2 },
+        },
+      },
+    }
+  );
+  assert.deepEqual(lineage.definition_ref, {
+    kpi_code: "sales.leads_created",
+    definition_version: "1",
+  });
+  assert.deepEqual(lineage.definition, { canonical_event_name: "sales.lead.created" });
+  assert.deepEqual(lineage.runtime.row_counts, { service_request: 2 });
+});
+
+test("mergeSnapshotManifest references real snapshot ids without duplicates", () => {
+  const merged = mergeSnapshotManifest(
+    [
+      {
+        kpi_snapshot_id: "snap-1",
+        kpi_code: "sales.leads_created",
+        definition_version: "1",
+        captured_at: "2026-08-17T00:00:00.000Z",
+      },
+    ],
+    [
+      {
+        kpi_snapshot_id: "snap-1",
+        kpi_code: "sales.leads_created",
+        definition_version: "1",
+        captured_at: "2026-08-17T00:00:00.000Z",
+      },
+      {
+        kpi_snapshot_id: "snap-2",
+        kpi_code: "operations.jobs_created",
+        definition_version: "1",
+        captured_at: "2026-08-17T00:01:00.000Z",
+      },
+    ]
+  );
+  assert.equal(merged.length, 2);
+  assert.deepEqual(
+    merged.map((entry) => entry.kpi_snapshot_id).sort(),
+    ["snap-1", "snap-2"]
   );
 });
 

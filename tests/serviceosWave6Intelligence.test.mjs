@@ -16,6 +16,11 @@ import {
   getKpiSpec,
   getPeriodBoundaries,
 } from "../src/lib/serviceosIntelligenceUtils.js";
+import {
+  captureKpiSnapshot,
+  computePeriodKpis,
+  fetchKpiSourceData,
+} from "../src/lib/serviceosIntelligenceClient.js";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const clientSource = readFileSync(
@@ -34,6 +39,8 @@ const sql = readFileSync(
 
 const TORONTO = "America/Toronto";
 const PHOENIX = "America/Phoenix";
+
+process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED = "true";
 
 // ── Period boundaries ────────────────────────────────────────────────────────
 
@@ -475,6 +482,393 @@ test("utils module is pure — no network, no storage, no import.meta", () => {
   assert.doesNotMatch(utilsSource, /\bfetch\(/);
   assert.doesNotMatch(utilsSource, /localStorage/);
   assert.doesNotMatch(utilsSource, /import\.meta/);
+});
+
+test("computed KPI contains non-empty runtime source lineage", async () => {
+  const rowsByTable = {
+    quote_response: [
+      {
+        id: "qr-1",
+        responded_at: "2026-08-01T15:45:00.000Z",
+        response_type: "accepted",
+      },
+    ],
+  };
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.quotes_accepted"],
+    },
+    {
+      selectRowsImpl: async (table) => rowsByTable[table] ?? [],
+      readAt: () => "2099-12-31T23:59:59.999Z",
+    }
+  );
+  const result = results[0];
+  assert.equal(result.value, 1);
+  assert.ok(result.sourceLineage);
+  assert.ok(Object.keys(result.sourceLineage.runtime ?? {}).length > 0);
+  assert.equal(result.sourceLineage.runtime.kpi_code, "sales.quotes_accepted");
+  assert.deepEqual(result.sourceLineage.runtime.timestamp_columns, {
+    quote_response: "responded_at",
+  });
+  assert.deepEqual(result.sourceLineage.runtime.row_counts, {
+    quote_response: 1,
+  });
+});
+
+test("source freshness derives from source evidence, not browser clock", async () => {
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.quotes_accepted"],
+    },
+    {
+      selectRowsImpl: async () => [
+        {
+          id: "qr-1",
+          responded_at: "2026-08-09T13:30:00.000Z",
+          response_type: "accepted",
+        },
+      ],
+      readAt: () => "2099-12-31T23:59:59.999Z",
+    }
+  );
+  const result = results[0];
+  assert.equal(result.sourceFreshnessAt, "2026-08-09T13:30:00.000Z");
+  assert.equal(
+    result.sourceLineage.runtime.sources[0].latest_source_timestamp,
+    "2026-08-09T13:30:00.000Z"
+  );
+  assert.equal(result.sourceLineage.runtime.calculated_at, "2099-12-31T23:59:59.999Z");
+  assert.notEqual(result.sourceFreshnessAt, result.sourceLineage.runtime.calculated_at);
+});
+
+test("source freshness is null when a KPI has no source rows", async () => {
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.leads_created"],
+    },
+    {
+      selectRowsImpl: async () => [],
+      readAt: () => "2099-12-31T23:59:59.999Z",
+    }
+  );
+  assert.equal(results[0].value, 0);
+  assert.equal(results[0].sourceFreshnessAt, null);
+});
+
+test("quotes_accepted period uses responded_at", async () => {
+  const seenQueries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "sales.quotes_accepted",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (table, query) => {
+        seenQueries.push({ table, query });
+        return [];
+      },
+    }
+  );
+  assert.match(seenQueries[0].query, /select=id,responded_at,response_type/);
+  assert.match(seenQueries[0].query, /responded_at=gte\./);
+  assert.match(seenQueries[0].query, /response_type=eq\.accepted/);
+  assert.doesNotMatch(seenQueries[0].query, /created_at=gte\./);
+});
+
+test("conversions use converted_at", async () => {
+  const seenQueries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "sales.conversions",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (table, query) => {
+        seenQueries.push({ table, query });
+        return [];
+      },
+    }
+  );
+  assert.match(seenQueries[0].query, /select=id,converted_at/);
+  assert.match(seenQueries[0].query, /converted_at=gte\./);
+});
+
+test("work_completed uses service_completed_at", async () => {
+  const seenQueries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "operations.work_completed",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: "jur-1",
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (table, query) => {
+        seenQueries.push({ table, query });
+        return [];
+      },
+    }
+  );
+  assert.match(seenQueries[0].query, /select=id,service_completed_at,work_order_status,jurisdiction_id/);
+  assert.match(seenQueries[0].query, /service_completed_at=gte\./);
+  assert.match(seenQueries[0].query, /work_order_status=in\.\(qa_complete,closed\)/);
+  assert.match(seenQueries[0].query, /jurisdiction_id=eq\.jur-1/);
+});
+
+test("qa_pass_rate uses inspected_at", async () => {
+  const seenQueries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "quality.qa_pass_rate",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (table, query) => {
+        seenQueries.push({ table, query });
+        return [];
+      },
+    }
+  );
+  assert.match(seenQueries[0].query, /select=id,inspected_at,inspection_status/);
+  assert.match(seenQueries[0].query, /inspected_at=gte\./);
+  assert.match(seenQueries[0].query, /inspection_status=in\.\(passed,failed\)/);
+});
+
+test("contractor_payable_approved uses approved_at", async () => {
+  const seenQueries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "finance.contractor_payable_approved",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (table, query) => {
+        seenQueries.push({ table, query });
+        return [];
+      },
+    }
+  );
+  assert.match(seenQueries[0].query, /select=id,approved_at,payable_status,computed_amount/);
+  assert.match(seenQueries[0].query, /approved_at=gte\./);
+  assert.match(seenQueries[0].query, /payable_status=eq\.approved/);
+});
+
+test("jurisdiction-scoped computation persists jurisdiction_id", async () => {
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: "jur-1",
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["operations.jobs_created"],
+    },
+    {
+      selectRowsImpl: async () => [{ id: "job-1", created_at: "2026-08-02T01:00:00.000Z", jurisdiction_id: "jur-1" }],
+    }
+  );
+  assert.equal(results[0].effectiveScope.jurisdiction_id, "jur-1");
+  assert.equal(results[0].sourceLineage.runtime.jurisdiction_id, "jur-1");
+});
+
+test("unscoped KPI leaves jurisdiction_id null", async () => {
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: "jur-1",
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.leads_created"],
+    },
+    {
+      selectRowsImpl: async () => [{ id: "lead-1", created_at: "2026-08-02T01:00:00.000Z" }],
+    }
+  );
+  assert.equal(results[0].effectiveScope.jurisdiction_id, null);
+  assert.equal(results[0].sourceLineage.runtime.jurisdiction_id, null);
+});
+
+test(">1000 source records cannot be silently truncated", async () => {
+  const offsets = [];
+  const results = await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "YEARLY",
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-12-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.leads_created"],
+    },
+    {
+      selectRowsImpl: async (_table, query) => {
+        const offset = Number(query.match(/offset=(\d+)/)?.[1] ?? "0");
+        offsets.push(offset);
+        if (offset === 0) {
+          return Array.from({ length: 1000 }, (_, index) => ({
+            id: `lead-${index}`,
+            created_at: "2026-06-01T00:00:00.000Z",
+          }));
+        }
+        if (offset === 1000) {
+          return Array.from({ length: 250 }, (_, index) => ({
+            id: `lead-${1000 + index}`,
+            created_at: "2026-06-02T00:00:00.000Z",
+          }));
+        }
+        return [];
+      },
+    }
+  );
+  assert.deepEqual(offsets, [0, 1000]);
+  assert.equal(results[0].value, 1250);
+  assert.equal(results[0].rowCounts.service_request, 1250);
+});
+
+test("KPI source query does not use select=*", async () => {
+  const queries = [];
+  await fetchKpiSourceData(
+    null,
+    {
+      kpiCode: "finance.payments_observed",
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+    },
+    {
+      selectRowsImpl: async (_table, query) => {
+        queries.push(query);
+        return [];
+      },
+    }
+  );
+  assert.doesNotMatch(queries[0], /select=\*/);
+  assert.match(queries[0], /select=id,observed_at,amount_observed/);
+});
+
+test("captured non-null KPI cannot use empty lineage", async () => {
+  await assert.rejects(
+    captureKpiSnapshot(null, {
+      kpi_definition_id: "def-1",
+      kpi_code: "sales.leads_created",
+      definition_version: "1",
+      organization_id: "org-1",
+      business_unit_id: "bu-1",
+      period_type: "MONTHLY",
+      period_start: "2026-08-01T00:00:00.000Z",
+      period_end: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      numeric_value: 3,
+      source_lineage: {},
+    }),
+    /requires non-empty source_lineage/
+  );
+});
+
+test("duplicate capture resolves existing evidence instead of fabricating a new snapshot id", async () => {
+  const snapshot = await captureKpiSnapshot(
+    null,
+    {
+      kpi_definition_id: "def-1",
+      kpi_code: "sales.leads_created",
+      definition_version: "1",
+      organization_id: "org-1",
+      business_unit_id: "bu-1",
+      jurisdiction_id: null,
+      period_type: "MONTHLY",
+      period_start: "2026-08-01T00:00:00.000Z",
+      period_end: "2026-08-31T23:59:59.999Z",
+      timezone: TORONTO,
+      numeric_value: 3,
+      source_lineage: { runtime: { row_counts: { service_request: 3 } } },
+    },
+    {
+      insertRowImpl: async () => {
+        throw new Error("duplicate key value violates unique constraint uq_ks_period_scope");
+      },
+      selectRowsImpl: async () => [
+        {
+          id: "snap-existing",
+          kpi_code: "sales.leads_created",
+          definition_version: "1",
+          captured_at: "2026-08-17T00:00:00.000Z",
+        },
+      ],
+    }
+  );
+  assert.equal(snapshot.id, "snap-existing");
+  assert.equal(snapshot.resolved_existing, true);
 });
 
 // ── Correction area 2: Sales canonical events (D, E, F) ─────────────────────

@@ -181,6 +181,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         loadKpiSnapshots(session, {
           organizationId,
           businessUnitId,
+          jurisdictionId,
           periodType,
           periodStart: period.periodStart,
           periodEnd: period.periodEnd,
@@ -285,8 +286,8 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         Captured snapshots this period: {state.snapshots.length} · exceptions opened:{" "}
         {exceptionCount}
         <br />
-        Lineage: values are computed live from canonical Wave 2-5 tables; snapshots are the
-        append-only evidence of a capture.
+        Lineage: values are computed live from governed Wave 1-5 source tables and canonical
+        events where available; snapshots are the append-only evidence of a capture.
       </div>
 
       {error && <div style={styles.error}>{error}</div>}
@@ -297,6 +298,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
           session={session}
           organizationId={organizationId}
           businessUnitId={businessUnitId}
+          jurisdictionId={jurisdictionId}
           periodType={periodType}
           period={period}
           timezone={timezone}

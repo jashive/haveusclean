@@ -140,16 +140,17 @@ test("Wave 1-2 table exclusion is documented with reason in migration comments",
   assert.match(sql, /independently verified/i, "migration must document independent verification");
 });
 
-test("sales KPI seeds declare their unverified Wave 1-2 lineage", () => {
+test("sales KPI seeds declare verified live lineage and canonical-event truthfulness", () => {
   const salesSeeds = sql.match(/\('sales\.[a-z_]+',[\s\S]*?'1', true\)/g) ?? [];
   assert.equal(salesSeeds.length, 6, "expected 6 seeded sales KPIs");
   for (const seed of salesSeeds) {
     assert.ok(seed.includes('"wave":"1-2"'), `sales seed missing wave tag: ${seed.slice(0, 60)}`);
-    assert.ok(
-      seed.includes('"in_canonical_event_view":false'),
-      `sales seed missing canonical-view tag: ${seed.slice(0, 60)}`
-    );
+    assert.ok(seed.includes('"schema_verification":"independently_verified_live"'));
   }
+  assert.match(sql, /sales\.leads_created[\s\S]*"in_canonical_event_view":true/);
+  assert.match(sql, /sales\.quotes_accepted[\s\S]*"in_canonical_event_view":true/);
+  assert.match(sql, /sales\.quotes_accepted[\s\S]*"responded_at"/);
+  assert.match(sql, /sales\.conversions[\s\S]*"converted_at"/);
 });
 
 test("RLS is enabled on every Wave 6 table", () => {
@@ -394,6 +395,7 @@ const GOVERNANCE_TRIGGER_FUNCTIONS = [
   "trg_enforce_continuity_fsm",
   "trg_enforce_release_gate_sequence",
   "trg_set_continuity_payload_hash",
+  "trg_immute_continuity_transaction_fields",
 ];
 
 const GOVERNANCE_TRIGGERS = [
@@ -402,9 +404,10 @@ const GOVERNANCE_TRIGGERS = [
   "trig_continuity_fsm",
   "trig_release_gate_sequence",
   "trig_continuity_payload_hash",
+  "trig_immute_continuity_transaction_fields",
 ];
 
-test("all 5 governance trigger functions are declared in the migration", () => {
+test("all 6 governance trigger functions are declared in the migration", () => {
   for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
     assert.match(
       sql,
@@ -414,7 +417,7 @@ test("all 5 governance trigger functions are declared in the migration", () => {
   }
 });
 
-test("all 5 governance triggers are created in the migration", () => {
+test("all 6 governance triggers are created in the migration", () => {
   for (const trig of GOVERNANCE_TRIGGERS) {
     assert.match(
       sql,
@@ -452,6 +455,11 @@ test("governance trigger functions have EXECUTE revoked from PUBLIC and anon", (
 
 test("management_review FSM trigger fires BEFORE UPDATE", () => {
   assert.match(sql, /BEFORE UPDATE ON public\.management_review\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_management_review_fsm/);
+});
+
+test("migration header truthfully documents 6 trigger functions and 6 triggers", () => {
+  assert.match(sql, /Trigger functions created \(6\):/);
+  assert.match(sql, /Triggers created \(6\):/);
 });
 
 test("change_control_record FSM trigger fires BEFORE UPDATE", () => {
@@ -534,6 +542,31 @@ test("payload_hash is documented as immutable (INSERT-only trigger)", () => {
     sql,
     /BEFORE UPDATE ON public\.continuity_transaction\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_immute_continuity_transaction_fields/
   );
+});
+
+test("kpi_snapshot rejects non-null numeric evidence with empty lineage", () => {
+  assert.match(sql, /ck_ks_numeric_lineage_nonempty/);
+  assert.match(sql, /numeric_value IS NULL OR source_lineage <> '\{\}'::jsonb/);
+});
+
+test("kpi_snapshot enforces kpi_definition id/code/version consistency", () => {
+  assert.match(sql, /uq_kd_id_code_version UNIQUE \(id, code, definition_version\)/);
+  assert.match(sql, /FOREIGN KEY \(kpi_definition_id, kpi_code, definition_version\)/);
+  assert.match(sql, /REFERENCES public\.kpi_definition\(id, code, definition_version\)/);
+});
+
+test("canonical event view uses semantic business-event timestamps without created_at fallbacks", () => {
+  assert.match(sql, /ops\.work\.completed[\s\S]*wo\.service_completed_at/);
+  assert.match(sql, /quality\.qa\.passed[\s\S]*qi\.inspected_at/);
+  assert.match(sql, /finance\.payable\.approved[\s\S]*cp\.approved_at/);
+  assert.doesNotMatch(sql, /COALESCE\(wo\.service_completed_at, wo\.updated_at\)/);
+  assert.doesNotMatch(sql, /COALESCE\(qi\.inspected_at, qi\.updated_at\)/);
+  assert.doesNotMatch(sql, /COALESCE\(cp\.approved_at, cp\.created_at\)/);
+});
+
+test("canonical event view comment no longer claims unverified opportunity/quote/conversion schemas", () => {
+  assert.doesNotMatch(sql, /excluded pending column verification/i);
+  assert.match(sql, /no locked canonical event name currently requires them/i);
 });
 
 // ── Blocker 4: Canonical event vocabulary ────────────────────────────────────

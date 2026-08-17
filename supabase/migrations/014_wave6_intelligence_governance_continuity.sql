@@ -23,19 +23,21 @@
 -- View created (1):
 --   wave6_canonical_event  (security_invoker)
 --
--- Trigger functions created (5):
+-- Trigger functions created (6):
 --   trg_enforce_management_review_fsm   — management_review BEFORE UPDATE
 --   trg_enforce_ccr_fsm                 — change_control_record BEFORE UPDATE
 --   trg_enforce_continuity_fsm          — continuity_session BEFORE UPDATE
 --   trg_enforce_release_gate_sequence   — release_gate BEFORE UPDATE
 --   trg_set_continuity_payload_hash     — continuity_transaction BEFORE INSERT
+--   trg_immute_continuity_transaction_fields — continuity_transaction BEFORE UPDATE
 --
--- Triggers created (5):
+-- Triggers created (6):
 --   trig_management_review_fsm
 --   trig_ccr_fsm
 --   trig_continuity_fsm
 --   trig_release_gate_sequence
 --   trig_continuity_payload_hash
+--   trig_immute_continuity_transaction_fields
 --
 -- Terminal marker on success: M014_WAVE6_INTELLIGENCE_PASS
 -- =============================================================================
@@ -81,6 +83,7 @@ CREATE TABLE public.kpi_definition (
   -- re-issued under a new definition_version, and older versions stay readable
   -- as evidence. A bare UNIQUE (code) would make versioning impossible.
   CONSTRAINT uq_kd_code_version UNIQUE (code, definition_version),
+  CONSTRAINT uq_kd_id_code_version UNIQUE (id, code, definition_version),
 
   CONSTRAINT ck_kd_aggregation CHECK (
     aggregation_type IN ('sum', 'count', 'rate', 'average', 'weighted_average')
@@ -134,6 +137,9 @@ CREATE TABLE public.kpi_snapshot (
 
   CONSTRAINT fk_ks_definition
     FOREIGN KEY (kpi_definition_id) REFERENCES public.kpi_definition(id),
+  CONSTRAINT fk_ks_definition_triplet
+    FOREIGN KEY (kpi_definition_id, kpi_code, definition_version)
+    REFERENCES public.kpi_definition(id, code, definition_version),
 
   CONSTRAINT ck_ks_period_type CHECK (
     period_type IN ('DAILY', 'MONTHLY', 'QUARTERLY', 'YEARLY')
@@ -144,6 +150,9 @@ CREATE TABLE public.kpi_snapshot (
   -- Rates must never fabricate a value from a zero denominator.
   CONSTRAINT ck_ks_zero_denominator_guard CHECK (
     denominator IS NULL OR denominator <> 0 OR numeric_value IS NULL
+  ),
+  CONSTRAINT ck_ks_numeric_lineage_nonempty CHECK (
+    numeric_value IS NULL OR source_lineage <> '{}'::jsonb
   )
 );
 
@@ -1029,7 +1038,7 @@ AS
     wo.business_unit_id,
     wo.jurisdiction_id,
     'ops.work.completed'::text,
-    COALESCE(wo.service_completed_at, wo.updated_at),
+    wo.service_completed_at,
     'work_order'::text,
     wo.id,
     'work_order'::text,
@@ -1045,7 +1054,7 @@ AS
     qi.business_unit_id,
     NULL::uuid,
     'quality.qa.passed'::text,
-    COALESCE(qi.inspected_at, qi.updated_at),
+    qi.inspected_at,
     'qa_inspection'::text,
     qi.id,
     'qa_inspection'::text,
@@ -1122,7 +1131,7 @@ AS
     cp.business_unit_id,
     NULL::uuid,
     'finance.payable.approved'::text,
-    COALESCE(cp.approved_at, cp.created_at),
+    cp.approved_at,
     'contractor_payable'::text,
     cp.id,
     'contractor_payable'::text,
@@ -1188,7 +1197,8 @@ COMMENT ON VIEW public.wave6_canonical_event IS
   'Wave 6: Read-only canonical event spine. '
   'Covers Wave 3/4/5 tables (migrations 007, 009, 012) plus independently verified '
   'Wave 1-2 tables service_request (sales.lead.created) and quote_response (sales.quote.accepted). '
-  'Remaining Wave 1-2 tables (opportunity, quote, conversion_record) excluded pending column verification. '
+  'Opportunity, quote, and conversion_record remain absent because no locked canonical event name '
+  'currently requires them, not because their live schemas are unknown. '
   'security_invoker = true — caller RLS applies. SOURCE ONLY — not executed.';
 
 -- ---------------------------------------------------------------------------
@@ -1463,52 +1473,51 @@ GRANT  EXECUTE ON FUNCTION public.worker_has_active_assignment(uuid) TO service_
 -- ---------------------------------------------------------------------------
 -- Provenance note: the six `sales.*` KPIs below are sourced from Wave 1-2
 -- tables (service_request, opportunity, quote, quote_response,
--- conversion_record). Those tables exist in the deployed database but their
--- DDL is NOT vendored into this repository, so their columns cannot be
--- verified from source. Their lineage is therefore tagged
--- "wave":"1-2" / "in_canonical_event_view":false, and they are intentionally
--- absent from public.wave6_canonical_event. Everything from
--- `operations.*` onwards is sourced from migrations 007/009/012 and IS
--- represented in the canonical event view.
+-- conversion_record). Their live schemas and governed business-event timestamps
+-- have been independently verified even though their DDL is not vendored in
+-- this repository. service_request and quote_response are represented in
+-- public.wave6_canonical_event because locked canonical event names require
+-- them; opportunity, quote, and conversion_record remain direct KPI sources
+-- because no locked canonical event name currently requires them.
 
 INSERT INTO public.kpi_definition
   (code, name, domain, description, unit, aggregation_type, period_support,
    source_lineage, formula_code, definition_version, active)
 VALUES
   ('sales.leads_created', 'Leads Created', 'sales',
-   'Count of canonical service requests created in period. Wave 1-2 table (service_request) — DDL not vendored in this repository.', 'count', 'count',
+   'Count of canonical service requests created in period. Live service_request schema independently verified.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["service_request"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["service_request"],"timestamp_columns":{"service_request":"created_at"},"filters":{"service_request":null},"wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":"sales.lead.created","in_canonical_event_view":true}'::jsonb,
    'count(service_request)', '1', true),
 
   ('sales.opportunities_created', 'Opportunities Created', 'sales',
-   'Count of opportunities created in period. Wave 1-2 table (opportunity) — DDL not vendored in this repository.', 'count', 'count',
+   'Count of opportunities created in period. Live opportunity schema independently verified.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["opportunity"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["opportunity"],"timestamp_columns":{"opportunity":"created_at"},"filters":{"opportunity":null},"wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":null,"in_canonical_event_view":false}'::jsonb,
    'count(opportunity)', '1', true),
 
   ('sales.quotes_created', 'Quotes Created', 'sales',
-   'Count of quotes created in period. Wave 1-2 table (quote) — DDL not vendored in this repository.', 'count', 'count',
+   'Count of quotes created in period. Live quote schema independently verified.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["quote"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["quote"],"timestamp_columns":{"quote":"created_at"},"filters":{"quote":null},"wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":null,"in_canonical_event_view":false}'::jsonb,
    'count(quote)', '1', true),
 
   ('sales.quotes_accepted', 'Quotes Accepted', 'sales',
-   'Count of quote responses with response_type = accepted. Wave 1-2 table (quote_response) — DDL not vendored in this repository.', 'count', 'count',
+   'Count of quote responses with response_type = accepted. Live quote_response schema independently verified.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["quote_response"],"filter":"response_type=accepted","timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["quote_response"],"timestamp_columns":{"quote_response":"responded_at"},"filters":{"quote_response":"response_type=accepted"},"wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":"sales.quote.accepted","in_canonical_event_view":true}'::jsonb,
    'count(quote_response where response_type=accepted)', '1', true),
 
   ('sales.conversions', 'Conversions', 'sales',
-   'Count of conversion records created in period. Wave 1-2 table (conversion_record) — DDL not vendored in this repository.', 'count', 'count',
+   'Count of conversion records converted in period. Live conversion_record schema independently verified.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["conversion_record"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["conversion_record"],"timestamp_columns":{"conversion_record":"converted_at"},"filters":{"conversion_record":null},"wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":null,"in_canonical_event_view":false}'::jsonb,
    'count(conversion_record)', '1', true),
 
   ('sales.lead_to_conversion_rate', 'Lead to Conversion Rate', 'sales',
-   'Conversions divided by leads created. NULL when no leads exist. Wave 1-2 tables (conversion_record, service_request) — DDL not vendored in this repository.', 'ratio', 'rate',
+   'Conversions divided by leads created. NULL when no leads exist. Live conversion_record and service_request schemas independently verified.', 'ratio', 'rate',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["conversion_record","service_request"],"numerator":"sales.conversions","denominator":"sales.leads_created","wave":"1-2","in_canonical_event_view":false}'::jsonb,
+   '{"tables":["conversion_record","service_request"],"timestamp_columns":{"conversion_record":"converted_at","service_request":"created_at"},"filters":{"conversion_record":null,"service_request":null},"numerator":"sales.conversions","denominator":"sales.leads_created","wave":"1-2","schema_verification":"independently_verified_live","canonical_event_name":null,"in_canonical_event_view":false}'::jsonb,
    'sales.conversions / sales.leads_created', '1', true),
 
   ('operations.jobs_created', 'Jobs Created', 'operations',
@@ -1532,7 +1541,7 @@ VALUES
   ('quality.qa_pass_rate', 'QA Pass Rate', 'quality',
    'Passed inspections divided by adjudicated inspections. NULL when none adjudicated.', 'ratio', 'rate',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["qa_inspection"],"numerator":"inspection_status=passed","denominator":"inspection_status in (passed,failed)"}'::jsonb,
+   '{"tables":["qa_inspection"],"timestamp_columns":{"qa_inspection":"inspected_at"},"filters":{"qa_inspection":"inspection_status in (passed,failed)"},"numerator":"inspection_status=passed","denominator":"inspection_status in (passed,failed)"}'::jsonb,
    'count(passed) / count(passed+failed)', '1', true),
 
   ('quality.exceptions_opened', 'Exceptions Opened', 'quality',
@@ -1581,7 +1590,7 @@ VALUES
    'Weighted gross margin: sum(gross_contribution) / sum(recognized_revenue_amount). NULL when revenue is zero.',
    'ratio', 'weighted_average',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["job_profitability_snapshot"],"numerator":"gross_contribution","denominator":"recognized_revenue_amount"}'::jsonb,
+   '{"tables":["job_profitability_snapshot"],"timestamp_columns":{"job_profitability_snapshot":"snapshot_taken_at"},"filters":{"job_profitability_snapshot":null},"numerator":"gross_contribution","denominator":"recognized_revenue_amount"}'::jsonb,
    'sum(gross_contribution) / sum(recognized_revenue_amount)', '1', true)
 ON CONFLICT (code, definition_version) DO NOTHING;
 

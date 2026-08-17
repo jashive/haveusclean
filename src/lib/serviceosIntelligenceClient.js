@@ -38,13 +38,14 @@ import {
 
 export function isIntelligenceEnabled() {
   try {
-    return (
-      (typeof import.meta !== "undefined"
-        ? import.meta.env?.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED
-        : "") === "true"
-    );
+    const flag =
+      typeof import.meta !== "undefined"
+        ? (import.meta.env?.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED ??
+          process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED)
+        : process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED;
+    return flag === "true";
   } catch {
-    return false;
+    return process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === "true";
   }
 }
 
@@ -133,6 +134,10 @@ function toIso(value) {
   return value instanceof Date ? value.toISOString() : String(value);
 }
 
+function isPopulatedObject(value) {
+  return !!value && typeof value === "object" && !Array.isArray(value) && Object.keys(value).length > 0;
+}
+
 // ── KPI definitions ──────────────────────────────────────────────────────────
 
 export async function loadKpiDefinitions(session, { organizationId } = {}) {
@@ -146,55 +151,169 @@ export async function loadKpiDefinitions(session, { organizationId } = {}) {
 
 // ── KPI source data + computation ────────────────────────────────────────────
 
+const SOURCE_PAGE_SIZE = 1000;
+
+function sourceConfig(
+  table,
+  {
+    timestampColumn,
+    selectColumns,
+    predicateFilters = [],
+    jurisdictionScoped = false,
+    unverifiedSchema = false,
+  }
+) {
+  return {
+    table,
+    timestampColumn,
+    selectColumns,
+    predicateFilters,
+    jurisdictionScoped,
+    unverifiedSchema,
+  };
+}
+
+function eqFilter(column, value) {
+  return { column, operator: "eq", value };
+}
+
+function inFilter(column, values) {
+  return { column, operator: "in", value: values };
+}
+
 // Source-table map for KPI computation.
 //
 // `unverifiedSchema: true` marks Wave 1-2 tables whose DDL is NOT vendored in
-// this repository (supabase/migrations only contains 007/009/012/013). Those
-// tables exist in the deployed database, but because their columns cannot be
-// verified from source we treat a failed read as "source unavailable" (null)
-// rather than an error — and computeKpiValue then yields a NULL KPI value
-// instead of a fabricated zero.
+// this repository. Those live schemas have been independently verified, so the
+// runtime uses the verified business-event timestamps and fields below. A read
+// failure must still be treated as "source unavailable" (null) rather than a
+// fabricated zero.
 const KPI_SOURCE_QUERIES = {
   "sales.leads_created": [
-    { table: "service_request", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("service_request", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at"],
+      unverifiedSchema: true,
+    }),
   ],
   "sales.opportunities_created": [
-    { table: "opportunity", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("opportunity", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at"],
+      unverifiedSchema: true,
+    }),
   ],
   "sales.quotes_created": [
-    { table: "quote", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("quote", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at"],
+      unverifiedSchema: true,
+    }),
   ],
   "sales.quotes_accepted": [
-    { table: "quote_response", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("quote_response", {
+      timestampColumn: "responded_at",
+      selectColumns: ["id", "responded_at", "response_type"],
+      predicateFilters: [eqFilter("response_type", "accepted")],
+      unverifiedSchema: true,
+    }),
   ],
   "sales.conversions": [
-    { table: "conversion_record", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("conversion_record", {
+      timestampColumn: "converted_at",
+      selectColumns: ["id", "converted_at"],
+      unverifiedSchema: true,
+    }),
   ],
   "sales.lead_to_conversion_rate": [
-    { table: "conversion_record", timestampColumn: "created_at", unverifiedSchema: true },
-    { table: "service_request", timestampColumn: "created_at", unverifiedSchema: true },
+    sourceConfig("conversion_record", {
+      timestampColumn: "converted_at",
+      selectColumns: ["id", "converted_at"],
+      unverifiedSchema: true,
+    }),
+    sourceConfig("service_request", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at"],
+      unverifiedSchema: true,
+    }),
   ],
-  "operations.jobs_created": [{ table: "operational_job", timestampColumn: "created_at" }],
-  "operations.work_completed": [{ table: "work_order", timestampColumn: "updated_at" }],
-  "quality.qa_inspections": [{ table: "qa_inspection", timestampColumn: "created_at" }],
-  "quality.qa_pass_rate": [{ table: "qa_inspection", timestampColumn: "created_at" }],
-  "quality.exceptions_opened": [{ table: "service_exception", timestampColumn: "reported_at" }],
-  "quality.reclean_requests": [{ table: "customer_outcome", timestampColumn: "reported_at" }],
+  "operations.jobs_created": [
+    sourceConfig("operational_job", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at", "jurisdiction_id"],
+      jurisdictionScoped: true,
+    }),
+  ],
+  "operations.work_completed": [
+    sourceConfig("work_order", {
+      timestampColumn: "service_completed_at",
+      selectColumns: ["id", "service_completed_at", "work_order_status", "jurisdiction_id"],
+      predicateFilters: [inFilter("work_order_status", ["qa_complete", "closed"])],
+      jurisdictionScoped: true,
+    }),
+  ],
+  "quality.qa_inspections": [
+    sourceConfig("qa_inspection", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at"],
+    }),
+  ],
+  "quality.qa_pass_rate": [
+    sourceConfig("qa_inspection", {
+      timestampColumn: "inspected_at",
+      selectColumns: ["id", "inspected_at", "inspection_status"],
+      predicateFilters: [inFilter("inspection_status", ["passed", "failed"])],
+    }),
+  ],
+  "quality.exceptions_opened": [
+    sourceConfig("service_exception", {
+      timestampColumn: "reported_at",
+      selectColumns: ["id", "reported_at"],
+    }),
+  ],
+  "quality.reclean_requests": [
+    sourceConfig("customer_outcome", {
+      timestampColumn: "reported_at",
+      selectColumns: ["id", "reported_at", "outcome_type"],
+      predicateFilters: [eqFilter("outcome_type", "reclean_request")],
+    }),
+  ],
   "finance.invoice_subtotal_requested": [
-    { table: "invoice_request", timestampColumn: "created_at" },
+    sourceConfig("invoice_request", {
+      timestampColumn: "created_at",
+      selectColumns: ["id", "created_at", "subtotal_amount"],
+    }),
   ],
-  "finance.payments_observed": [{ table: "payment_observation", timestampColumn: "observed_at" }],
+  "finance.payments_observed": [
+    sourceConfig("payment_observation", {
+      timestampColumn: "observed_at",
+      selectColumns: ["id", "observed_at", "amount_observed"],
+    }),
+  ],
   "finance.contractor_payable_approved": [
-    { table: "contractor_payable", timestampColumn: "created_at" },
+    sourceConfig("contractor_payable", {
+      timestampColumn: "approved_at",
+      selectColumns: ["id", "approved_at", "payable_status", "computed_amount"],
+      predicateFilters: [eqFilter("payable_status", "approved")],
+    }),
   ],
   "finance.recognized_revenue": [
-    { table: "job_profitability_snapshot", timestampColumn: "snapshot_taken_at" },
+    sourceConfig("job_profitability_snapshot", {
+      timestampColumn: "snapshot_taken_at",
+      selectColumns: ["id", "snapshot_taken_at", "recognized_revenue_amount"],
+    }),
   ],
   "finance.gross_contribution": [
-    { table: "job_profitability_snapshot", timestampColumn: "snapshot_taken_at" },
+    sourceConfig("job_profitability_snapshot", {
+      timestampColumn: "snapshot_taken_at",
+      selectColumns: ["id", "snapshot_taken_at", "gross_contribution"],
+    }),
   ],
   "finance.gross_margin": [
-    { table: "job_profitability_snapshot", timestampColumn: "snapshot_taken_at" },
+    sourceConfig("job_profitability_snapshot", {
+      timestampColumn: "snapshot_taken_at",
+      selectColumns: ["id", "snapshot_taken_at", "recognized_revenue_amount", "gross_contribution"],
+    }),
   ],
 };
 
@@ -203,13 +322,110 @@ export function getKpiSourceTables(kpiCode) {
   return (KPI_SOURCE_QUERIES[kpiCode] ?? []).map((source) => source.table);
 }
 
+function encodeInList(values) {
+  return `(${values.map((value) => encodeURIComponent(String(value))).join(",")})`;
+}
+
+function predicateFilterToQuery(filter) {
+  if (!filter) return null;
+  if (filter.operator === "eq") {
+    return eq(filter.column, filter.value);
+  }
+  if (filter.operator === "in") {
+    return `${filter.column}=in.${encodeInList(filter.value ?? [])}`;
+  }
+  throw new Error(`Wave 6: unsupported filter operator "${filter.operator}"`);
+}
+
+function predicateFilterToLineage(filter) {
+  if (!filter) return null;
+  return {
+    column: filter.column,
+    operator: filter.operator,
+    value: Array.isArray(filter.value) ? [...filter.value] : filter.value,
+  };
+}
+
+function buildSourceQueryParts(source, scope) {
+  const {
+    organizationId,
+    businessUnitId,
+    jurisdictionId,
+    startIso,
+    endIso,
+    limit,
+    offset,
+  } = scope;
+  const filters = [
+    `select=${source.selectColumns.join(",")}`,
+    eq("organization_id", organizationId),
+    `${source.timestampColumn}=gte.${encodeURIComponent(startIso)}`,
+    `${source.timestampColumn}=lte.${encodeURIComponent(endIso)}`,
+    `limit=${limit}`,
+    `offset=${offset}`,
+  ];
+  if (businessUnitId) filters.push(eq("business_unit_id", businessUnitId));
+  if (jurisdictionId && source.jurisdictionScoped) {
+    filters.push(eq("jurisdiction_id", jurisdictionId));
+  }
+  for (const filter of source.predicateFilters) {
+    filters.push(predicateFilterToQuery(filter));
+  }
+  return filters;
+}
+
+function latestTimestampForRows(rows, column) {
+  if (!Array.isArray(rows) || rows.length === 0) return null;
+  let latest = null;
+  for (const row of rows) {
+    const raw = row?.[column];
+    if (!raw) continue;
+    const millis = Date.parse(raw);
+    if (!Number.isFinite(millis)) continue;
+    if (latest === null || millis > latest) latest = millis;
+  }
+  return latest === null ? null : new Date(latest).toISOString();
+}
+
+function deriveSourceFreshnessAt(sourceStates) {
+  const participating = sourceStates
+    .map((state) => state.latestSourceTimestamp)
+    .filter((value) => typeof value === "string");
+  if (participating.length === 0) return null;
+  const earliestLatestMillis = Math.min(...participating.map((value) => Date.parse(value)));
+  return Number.isFinite(earliestLatestMillis) ? new Date(earliestLatestMillis).toISOString() : null;
+}
+
+async function fetchSourceRows(selectRowsImpl, source, scope) {
+  const rows = [];
+  let offset = 0;
+  while (true) {
+    const page = await selectRowsImpl(
+      source.table,
+      buildSourceQueryParts(source, {
+        ...scope,
+        limit: SOURCE_PAGE_SIZE,
+        offset,
+      }).join("&")
+    );
+    if (!Array.isArray(page)) {
+      throw new Error(`Wave 6: expected array rows from ${source.table}`);
+    }
+    rows.push(...page);
+    if (page.length < SOURCE_PAGE_SIZE) break;
+    offset += SOURCE_PAGE_SIZE;
+  }
+  return rows;
+}
+
 /**
  * Loads the raw canonical rows a KPI is derived from, scoped to org/BU and
  * bounded by the governed period. Returns { [table]: rows[] }.
  */
 export async function fetchKpiSourceData(
   session,
-  { kpiCode, organizationId, businessUnitId, jurisdictionId, periodType, periodStart, periodEnd, timezone }
+  { kpiCode, organizationId, businessUnitId, jurisdictionId, periodType, periodStart, periodEnd, timezone },
+  { selectRowsImpl = selectRows, readAt = () => new Date().toISOString() } = {}
 ) {
   assertEnabled();
   requireValue(kpiCode, "kpiCode");
@@ -225,32 +441,99 @@ export async function fetchKpiSourceData(
   const endIso = toIso(periodEnd);
   const result = {};
   const unavailableSources = [];
+  const sourceStates = [];
+  const readTimestamp = readAt();
 
   for (const source of sources) {
-    const filters = [
-      "select=*",
-      eq("organization_id", organizationId),
-      `${source.timestampColumn}=gte.${encodeURIComponent(startIso)}`,
-      `${source.timestampColumn}=lte.${encodeURIComponent(endIso)}`,
-    ];
-    if (businessUnitId) filters.push(eq("business_unit_id", businessUnitId));
-    if (jurisdictionId && source.table === "operational_job") {
-      filters.push(eq("jurisdiction_id", jurisdictionId));
-    }
-
     if (source.unverifiedSchema) {
-      // Wave 1-2 table: a read failure must not break the whole KPI panel and
-      // must not be silently reported as zero. null == "source unavailable".
+      // A verified live Wave 1-2 source may still be unavailable to the runtime.
       try {
-        result[source.table] = await selectRows(source.table, filters.join("&"));
+        result[source.table] = await fetchSourceRows(selectRowsImpl, source, {
+          organizationId,
+          businessUnitId,
+          jurisdictionId,
+          startIso,
+          endIso,
+        });
       } catch {
         result[source.table] = null;
         unavailableSources.push(source.table);
       }
     } else {
-      result[source.table] = await selectRows(source.table, filters.join("&"));
+      result[source.table] = await fetchSourceRows(selectRowsImpl, source, {
+        organizationId,
+        businessUnitId,
+        jurisdictionId,
+        startIso,
+        endIso,
+      });
     }
+
+    const rows = result[source.table];
+    const latestSourceTimestamp = latestTimestampForRows(rows, source.timestampColumn);
+    sourceStates.push({
+      table: source.table,
+      selectColumns: [...source.selectColumns],
+      timestampColumn: source.timestampColumn,
+      predicateFilters: source.predicateFilters.map(predicateFilterToLineage),
+      rowCount: Array.isArray(rows) ? rows.length : null,
+      latestSourceTimestamp,
+      unavailable: rows === null,
+      jurisdictionScoped: source.jurisdictionScoped,
+    });
   }
+
+  const jurisdictionApplied =
+    !!jurisdictionId && sourceStates.some((state) => state.jurisdictionScoped === true);
+  const runtimeLineage = {
+    kpi_code: kpiCode,
+    period_type: periodType ?? null,
+    period_start: startIso,
+    period_end: endIso,
+    timezone: timezone ?? null,
+    organization_id: organizationId,
+    business_unit_id: businessUnitId ?? null,
+    jurisdiction_id: jurisdictionApplied ? jurisdictionId : null,
+    effective_scope: {
+      organization_id: organizationId,
+      business_unit_id: businessUnitId ?? null,
+      jurisdiction_id: jurisdictionApplied ? jurisdictionId : null,
+    },
+    timestamp_columns: Object.fromEntries(
+      sourceStates.map((state) => [state.table, state.timestampColumn])
+    ),
+    filters: {
+      organization_id: organizationId,
+      business_unit_id: businessUnitId ?? null,
+      jurisdiction_id: jurisdictionApplied ? jurisdictionId : null,
+      period_type: periodType ?? null,
+      period_start: startIso,
+      period_end: endIso,
+      timezone: timezone ?? null,
+      per_source: Object.fromEntries(
+        sourceStates.map((state) => [
+          state.table,
+          {
+            timestamp_column: state.timestampColumn,
+            predicates: state.predicateFilters,
+          },
+        ])
+      ),
+    },
+    row_counts: Object.fromEntries(sourceStates.map((state) => [state.table, state.rowCount])),
+    unavailable_sources: [...unavailableSources],
+    freshness_rule: "minimum_of_per_source_latest_timestamps",
+    calculated_at: readTimestamp,
+    sources: sourceStates.map((state) => ({
+      table: state.table,
+      select_columns: state.selectColumns,
+      timestamp_column: state.timestampColumn,
+      predicates: state.predicateFilters,
+      row_count: state.rowCount,
+      latest_source_timestamp: state.latestSourceTimestamp,
+      unavailable: state.unavailable,
+    })),
+  };
 
   return {
     kpiCode,
@@ -258,6 +541,10 @@ export async function fetchKpiSourceData(
     timezone: timezone ?? null,
     sourceRows: result,
     unavailableSources,
+    rowCounts: runtimeLineage.row_counts,
+    sourceLineage: { runtime: runtimeLineage },
+    effectiveScope: runtimeLineage.effective_scope,
+    sourceFreshnessAt: deriveSourceFreshnessAt(sourceStates),
   };
 }
 
@@ -268,7 +555,8 @@ export async function fetchKpiSourceData(
  */
 export async function computePeriodKpis(
   session,
-  { organizationId, businessUnitId, jurisdictionId, periodType, periodStart, periodEnd, timezone, kpiCodes }
+  { organizationId, businessUnitId, jurisdictionId, periodType, periodStart, periodEnd, timezone, kpiCodes },
+  deps
 ) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
@@ -281,7 +569,14 @@ export async function computePeriodKpis(
   const results = [];
 
   for (const kpiCode of codes) {
-    const { sourceRows, unavailableSources } = await fetchKpiSourceData(session, {
+    const {
+      sourceRows,
+      unavailableSources,
+      rowCounts,
+      sourceLineage,
+      effectiveScope,
+      sourceFreshnessAt,
+    } = await fetchKpiSourceData(session, {
       kpiCode,
       organizationId,
       businessUnitId,
@@ -290,7 +585,7 @@ export async function computePeriodKpis(
       periodStart,
       periodEnd,
       timezone,
-    });
+    }, deps);
     const computed = computeKpiValue({ kpiCode, sourceRows, periodType });
     results.push({
       kpiCode,
@@ -300,21 +595,59 @@ export async function computePeriodKpis(
       unavailable: computed.unavailable === true,
       unavailableSources,
       sourceTables: getKpiSourceTables(kpiCode),
-      rowCounts: Object.fromEntries(
-        Object.entries(sourceRows).map(([table, rows]) => [
-          table,
-          Array.isArray(rows) ? rows.length : null,
-        ])
-      ),
-      freshnessAt: new Date().toISOString(),
+      rowCounts,
+      sourceLineage,
+      effectiveScope,
+      freshnessAt: sourceFreshnessAt,
+      sourceFreshnessAt,
     });
   }
 
   return results;
 }
 
-/** Appends a KPI snapshot. Duplicate captures are rejected by the database. */
-export async function captureKpiSnapshot(session, payload) {
+function buildSnapshotNaturalKeyFilters(payload) {
+  const filters = [
+    "select=*",
+    eq("kpi_code", payload.kpi_code),
+    eq("definition_version", payload.definition_version ?? "1"),
+    eq("organization_id", payload.organization_id),
+    eq("period_type", payload.period_type),
+    `period_start=eq.${encodeURIComponent(toIso(payload.period_start))}`,
+    `period_end=eq.${encodeURIComponent(toIso(payload.period_end))}`,
+    eq("timezone", payload.timezone),
+    "limit=2",
+  ];
+  filters.push(
+    payload.business_unit_id ? eq("business_unit_id", payload.business_unit_id) : "business_unit_id=is.null"
+  );
+  filters.push(
+    payload.jurisdiction_id ? eq("jurisdiction_id", payload.jurisdiction_id) : "jurisdiction_id=is.null"
+  );
+  return filters.join("&");
+}
+
+async function resolveExistingKpiSnapshot(payload, { selectRowsImpl = selectRows } = {}) {
+  const rows = await selectRowsImpl("kpi_snapshot", buildSnapshotNaturalKeyFilters(payload));
+  if (rows.length !== 1) {
+    throw new Error(
+      `Wave 6: duplicate snapshot could not be resolved unambiguously for ${payload.kpi_code}`
+    );
+  }
+  return rows[0];
+}
+
+function isDuplicateSnapshotError(message) {
+  const text = String(message ?? "").toLowerCase();
+  return text.includes("duplicate") || text.includes("unique");
+}
+
+/** Appends a KPI snapshot or resolves the existing governed evidence row. */
+export async function captureKpiSnapshot(
+  session,
+  payload,
+  { insertRowImpl = insertRow, selectRowsImpl = selectRows } = {}
+) {
   assertEnabled();
   requireValue(payload?.kpi_definition_id, "kpi_definition_id");
   requireValue(payload?.kpi_code, "kpi_code");
@@ -323,17 +656,38 @@ export async function captureKpiSnapshot(session, payload) {
   requireValue(payload?.period_start, "period_start");
   requireValue(payload?.period_end, "period_end");
   requireValue(payload?.timezone, "timezone");
-  return insertRow("kpi_snapshot", payload);
+  if (payload?.numeric_value !== null && payload?.numeric_value !== undefined) {
+    if (!isPopulatedObject(payload?.source_lineage)) {
+      throw new Error(
+        `Wave 6: non-null KPI snapshot ${payload.kpi_code} requires non-empty source_lineage`
+      );
+    }
+  }
+  try {
+    return await insertRowImpl("kpi_snapshot", payload);
+  } catch (error) {
+    if (!isDuplicateSnapshotError(error?.message)) throw error;
+    const existing = await resolveExistingKpiSnapshot(payload, { selectRowsImpl });
+    return { ...existing, resolved_existing: true };
+  }
 }
 
 export async function loadKpiSnapshots(
   session,
-  { organizationId, businessUnitId, periodType, periodStart, periodEnd } = {}
+  { organizationId, businessUnitId, jurisdictionId, periodType, periodStart, periodEnd, kpiCode } = {}
 ) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
   const filters = ["select=*", eq("organization_id", organizationId), "order=captured_at.desc"];
   if (businessUnitId) filters.push(eq("business_unit_id", businessUnitId));
+  if (kpiCode) filters.push(eq("kpi_code", kpiCode));
+  if (jurisdictionId) {
+    filters.push(
+      `or=(jurisdiction_id.is.null,jurisdiction_id.eq.${encodeURIComponent(jurisdictionId)})`
+    );
+  } else {
+    filters.push("jurisdiction_id=is.null");
+  }
   filters.push(
     ...periodFilters({
       periodType,

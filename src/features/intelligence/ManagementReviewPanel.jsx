@@ -34,6 +34,11 @@ import {
   canTransitionManagementReview,
 } from "../../lib/serviceosIntelligenceUtils.js";
 import { formatErrorMessage, formatStatusLabel, formatTimestamp } from "./wave6Formatters.js";
+import {
+  buildSnapshotSourceLineage,
+  mergeSnapshotManifest,
+  resolveDefinition,
+} from "./managementReviewEvidence.js";
 
 const styles = {
   section: { marginBottom: "0.85rem" },
@@ -169,19 +174,6 @@ function reviewStatusLabel(status) {
   return formatStatusLabel(status) ?? status ?? "—";
 }
 
-/**
- * Resolve the active kpi_definition record for a given kpi_code.
- * Returns null if no matching active definition is found (fail closed at callsite).
- */
-function resolveDefinition(kpiDefinitions, kpiCode) {
-  if (!Array.isArray(kpiDefinitions) || !kpiCode) return null;
-  return (
-    kpiDefinitions.find(
-      (d) => d.code === kpiCode && d.active !== false
-    ) ?? null
-  );
-}
-
 // ── Sub-component: create a new review record ────────────────────────────────
 
 function CreateReviewForm({ session, organizationId, businessUnitId, periodType, period, timezone, onCreated }) {
@@ -247,7 +239,18 @@ function CreateReviewForm({ session, organizationId, businessUnitId, periodType,
 // source_freshness_at, kpi_definition_id, definition_version.
 // Never sends value, row_counts, source_tables, or freshness_at.
 
-function SnapshotCaptureButton({ session, organizationId, businessUnitId, periodType, period, kpis, kpiDefinitions, timezone, onCaptured }) {
+function SnapshotCaptureButton({
+  session,
+  review,
+  organizationId,
+  businessUnitId,
+  periodType,
+  period,
+  kpis,
+  kpiDefinitions,
+  timezone,
+  onCaptured,
+}) {
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -262,26 +265,31 @@ function SnapshotCaptureButton({ session, organizationId, businessUnitId, period
     setSuccess(null);
     const errors = [];
     const skipped = [];
+    const manifestEntries = [];
     let capturedCount = 0;
     for (const kpi of kpis) {
       if (kpi.unavailable === true) continue;
       if (kpi.value === null || kpi.value === undefined) continue;
 
-      // Resolve the active governed definition for this kpi_code.
-      const definition = resolveDefinition(kpiDefinitions, kpi.kpiCode);
+      const { definition, error: definitionError } = resolveDefinition(kpiDefinitions, kpi.kpiCode);
       if (!definition) {
-        // Fail closed: do not capture a snapshot without a valid definition.
-        skipped.push(kpi.kpiCode);
+        skipped.push(`${kpi.kpiCode} (${definitionError})`);
+        continue;
+      }
+      const sourceLineage = buildSnapshotSourceLineage(definition, kpi);
+      if (!sourceLineage) {
+        errors.push(`${kpi.kpiCode}: missing runtime source lineage`);
         continue;
       }
 
       try {
-        await captureKpiSnapshot(session, {
+        const snapshot = await captureKpiSnapshot(session, {
           kpi_definition_id: definition.id,
           kpi_code: kpi.kpiCode,
           definition_version: definition.definition_version ?? "1",
           organization_id: organizationId,
           business_unit_id: businessUnitId ?? null,
+          jurisdiction_id: kpi.effectiveScope?.jurisdiction_id ?? null,
           period_type: periodType,
           period_start: period.periodStart.toISOString(),
           period_end: period.periodEnd.toISOString(),
@@ -289,29 +297,51 @@ function SnapshotCaptureButton({ session, organizationId, businessUnitId, period
           numeric_value: kpi.value,
           numerator: kpi.numerator ?? null,
           denominator: kpi.denominator ?? null,
-          source_lineage: kpi.sourceLineage ?? {},
-          source_freshness_at: kpi.freshnessAt ?? null,
+          source_lineage: sourceLineage,
+          source_freshness_at: kpi.sourceFreshnessAt ?? null,
         });
         capturedCount += 1;
+        if (!snapshot?.id) {
+          throw new Error(`Wave 6: snapshot capture for ${kpi.kpiCode} returned no id`);
+        }
+        manifestEntries.push({
+          kpi_snapshot_id: snapshot.id,
+          kpi_code: snapshot.kpi_code ?? kpi.kpiCode,
+          definition_version: snapshot.definition_version ?? definition.definition_version ?? "1",
+          captured_at: snapshot.captured_at ?? new Date().toISOString(),
+        });
       } catch (err) {
-        const msg = formatErrorMessage(err);
-        // Duplicate snapshots are expected if already captured; skip quietly.
-        if (!msg.toLowerCase().includes("unique") && !msg.toLowerCase().includes("duplicate")) {
-          errors.push(`${kpi.kpiCode}: ${msg}`);
+        errors.push(`${kpi.kpiCode}: ${formatErrorMessage(err)}`);
+      }
+    }
+    if (manifestEntries.length > 0) {
+      const mergedManifest = mergeSnapshotManifest(review?.kpi_snapshot_manifest, manifestEntries);
+      const currentManifestLength = Array.isArray(review?.kpi_snapshot_manifest)
+        ? review.kpi_snapshot_manifest.length
+        : 0;
+      if (mergedManifest.length !== currentManifestLength) {
+        try {
+          await updateManagementReview(session, review.id, {
+            kpi_snapshot_manifest: mergedManifest,
+            current_status: review.review_status,
+          });
+        } catch (err) {
+          errors.push(`manifest: ${formatErrorMessage(err)}`);
         }
       }
     }
     setCapturing(false);
     const parts = [];
     if (capturedCount > 0) parts.push(`Captured ${capturedCount} snapshot(s).`);
-    if (skipped.length > 0) parts.push(`Skipped ${skipped.length} (no active definition): ${skipped.join(", ")}.`);
+    if (manifestEntries.length > 0) parts.push(`Linked ${manifestEntries.length} manifest reference(s).`);
+    if (skipped.length > 0) parts.push(`Skipped ${skipped.length}: ${skipped.join(", ")}.`);
     if (errors.length > 0) {
       setError(`Partial capture — ${errors.length} error(s): ${errors.join("; ")}`);
     } else {
       setSuccess(parts.join(" ") || "Nothing to capture.");
       if (capturedCount > 0 && onCaptured) onCaptured();
     }
-  }, [session, organizationId, businessUnitId, periodType, period, kpis, kpiDefinitions, timezone, onCaptured]);
+  }, [session, review, organizationId, businessUnitId, periodType, period, kpis, kpiDefinitions, timezone, onCaptured]);
 
   return (
     <div>
@@ -605,6 +635,7 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
           {/* Snapshot capture */}
           <SnapshotCaptureButton
             session={session}
+            review={review}
             organizationId={review.organization_id}
             businessUnitId={review.business_unit_id}
             periodType={review.period_type}

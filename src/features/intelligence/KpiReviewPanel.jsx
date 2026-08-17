@@ -86,6 +86,9 @@ export default function KpiReviewPanel({
                 const knownRowCounts = Object.values(kpi.rowCounts ?? {}).filter(
                   (count) => typeof count === "number"
                 );
+                const runtimeSourceTables = Array.isArray(kpi.sourceLineage?.runtime?.sources)
+                  ? kpi.sourceLineage.runtime.sources.map((source) => source.table)
+                  : null;
                 return (
                   <div key={kpi.kpiCode} style={styles.card}>
                     <div style={styles.cardName}>{definition?.name ?? kpi.kpiCode}</div>
@@ -105,7 +108,7 @@ export default function KpiReviewPanel({
                                 : NO_DATA
                             }`}
                       <br />
-                      Source: {formatLineage(kpi.sourceTables ?? definition?.source_lineage?.tables)}
+                      Source: {formatLineage(runtimeSourceTables ?? kpi.sourceTables ?? definition?.source_lineage?.tables)}
                       <br />
                       {formatFreshness(kpi.freshnessAt)}
                     </div>
