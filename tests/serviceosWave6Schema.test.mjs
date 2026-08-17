@@ -362,3 +362,204 @@ test("seed inserts are idempotent", () => {
   assert.ok(insertCount > 0);
   assert.equal(conflictCount, insertCount, "every seed insert must be ON CONFLICT DO NOTHING");
 });
+
+// ── Blocker 1: DB-level governance triggers (structural source check) ─────────
+
+const GOVERNANCE_TRIGGER_FUNCTIONS = [
+  "trg_enforce_management_review_fsm",
+  "trg_enforce_ccr_fsm",
+  "trg_enforce_continuity_fsm",
+  "trg_enforce_release_gate_sequence",
+  "trg_set_continuity_payload_hash",
+];
+
+const GOVERNANCE_TRIGGERS = [
+  "trig_management_review_fsm",
+  "trig_ccr_fsm",
+  "trig_continuity_fsm",
+  "trig_release_gate_sequence",
+  "trig_continuity_payload_hash",
+];
+
+test("all 5 governance trigger functions are declared in the migration", () => {
+  for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
+    assert.match(
+      sql,
+      new RegExp(`CREATE OR REPLACE FUNCTION public\\.${fn}\\(\\)`),
+      `missing trigger function: ${fn}`
+    );
+  }
+});
+
+test("all 5 governance triggers are created in the migration", () => {
+  for (const trig of GOVERNANCE_TRIGGERS) {
+    assert.match(
+      sql,
+      new RegExp(`CREATE TRIGGER ${trig}\\b`),
+      `missing trigger: ${trig}`
+    );
+  }
+});
+
+test("governance trigger functions are SECURITY DEFINER with fixed search_path", () => {
+  for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
+    const fnBody = sql.slice(
+      sql.indexOf(`CREATE OR REPLACE FUNCTION public.${fn}()`),
+      sql.indexOf(`COMMENT ON FUNCTION public.${fn}`)
+    );
+    assert.match(fnBody, /SECURITY DEFINER/, `${fn} must be SECURITY DEFINER`);
+    assert.match(fnBody, /SET search_path = public, pg_catalog/, `${fn} must fix search_path`);
+  }
+});
+
+test("governance trigger functions have EXECUTE revoked from PUBLIC and anon", () => {
+  for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
+    assert.match(
+      sql,
+      new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn}\\(\\) FROM PUBLIC`),
+      `${fn} must revoke PUBLIC EXECUTE`
+    );
+    assert.match(
+      sql,
+      new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn}\\(\\) FROM anon`),
+      `${fn} must revoke anon EXECUTE`
+    );
+  }
+});
+
+test("management_review FSM trigger fires BEFORE UPDATE", () => {
+  assert.match(sql, /BEFORE UPDATE ON public\.management_review\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_management_review_fsm/);
+});
+
+test("change_control_record FSM trigger fires BEFORE UPDATE", () => {
+  assert.match(sql, /BEFORE UPDATE ON public\.change_control_record\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_ccr_fsm/);
+});
+
+test("continuity_session FSM trigger fires BEFORE UPDATE", () => {
+  assert.match(sql, /BEFORE UPDATE ON public\.continuity_session\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_continuity_fsm/);
+});
+
+test("payload hash trigger fires BEFORE INSERT on continuity_transaction", () => {
+  assert.match(sql, /BEFORE INSERT ON public\.continuity_transaction\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_set_continuity_payload_hash/);
+});
+
+// ── Blocker 3: payload_hash integrity ────────────────────────────────────────
+
+test("continuity_transaction has a payload_hash column", () => {
+  assert.match(sql, /payload_hash\s+text\s+NULL/);
+});
+
+test("continuity_transaction has payload_hash format constraint", () => {
+  assert.match(sql, /ck_ct_payload_hash_format/);
+  assert.match(sql, /\^\[0-9a-f\]\{64\}\$/);
+});
+
+test("payload_hash trigger uses pgcrypto digest with sha256", () => {
+  const trigBody = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_set_continuity_payload_hash"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_set_continuity_payload_hash")
+  );
+  assert.match(trigBody, /digest\(.*sha256/);
+  assert.match(trigBody, /encode\(/);
+  assert.match(trigBody, /payload_hash/);
+});
+
+test("payload_hash is documented as immutable (INSERT-only trigger)", () => {
+  assert.match(sql, /INSERT-only trigger.*hash is immutable|hash is immutable.*INSERT-only/i);
+});
+
+// ── Blocker 4: Canonical event vocabulary ────────────────────────────────────
+
+const REQUIRED_CANONICAL_EVENTS = [
+  "ops.job.created",
+  "ops.work.completed",
+  "quality.qa.passed",
+  "quality.exception.opened",
+  "quality.outcome.reclean_requested",
+  "finance.invoice.requested",
+  "finance.payment.observed",
+  "finance.payable.approved",
+  "finance.profitability.captured",
+];
+
+test("canonical event view includes all verified Wave 3/4/5 events", () => {
+  for (const name of REQUIRED_CANONICAL_EVENTS) {
+    assert.ok(sql.includes(`'${name}'`), `missing canonical event: ${name}`);
+  }
+});
+
+test("Wave 1/2 sales events are excluded from canonical view with documented reason", () => {
+  // Wave 1/2 DDL is not in this repository; columns cannot be verified from source.
+  // This test confirms the exclusion is documented (not silently omitted).
+  assert.match(
+    sql,
+    /Wave 1.2 sales tables are excluded because their columns cannot be verified from source/,
+    "Wave 1/2 exclusion must be documented in the migration"
+  );
+  // Confirm sales events are NOT in the canonical view body
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event SET")
+  );
+  assert.doesNotMatch(viewBody, /'sales\.lead\.created'/, "sales.lead.created must not appear unverified in view");
+  assert.doesNotMatch(viewBody, /'sales\.quote\.accepted'/, "sales.quote.accepted must not appear unverified in view");
+});
+
+// ── Blocker 6: Exact 18 KPI self-validation ──────────────────────────────────
+
+const REQUIRED_KPI_CODES = [
+  "sales.leads_created",
+  "sales.opportunities_created",
+  "sales.quotes_created",
+  "sales.quotes_accepted",
+  "sales.conversions",
+  "sales.lead_to_conversion_rate",
+  "operations.jobs_created",
+  "operations.work_completed",
+  "quality.qa_inspections",
+  "quality.qa_pass_rate",
+  "quality.exceptions_opened",
+  "quality.reclean_requests",
+  "finance.invoice_subtotal_requested",
+  "finance.payments_observed",
+  "finance.contractor_payable_approved",
+  "finance.recognized_revenue",
+  "finance.gross_contribution",
+  "finance.gross_margin",
+];
+
+test("all 18 required KPI codes are seeded in the migration", () => {
+  assert.equal(REQUIRED_KPI_CODES.length, 18, "test vector must have exactly 18 codes");
+  for (const code of REQUIRED_KPI_CODES) {
+    assert.ok(sql.includes(`'${code}'`), `missing KPI code: ${code}`);
+  }
+});
+
+test("self-validation SV-7 asserts exact 18 KPI codes individually", () => {
+  for (const code of REQUIRED_KPI_CODES) {
+    assert.ok(
+      sql.includes(`'${code}'`),
+      `SV-7 must check for KPI code ${code}`
+    );
+  }
+  // Must require exactly 18, not >= 17
+  assert.match(sql, /expected exactly 18/, "SV-7 must assert exactly 18, not >= 17");
+  assert.doesNotMatch(sql, /expected >= 17/, "SV-7 must not use >= 17 threshold");
+});
+
+test("self-validation SV-7 checks each individual KPI code", () => {
+  // Verify that SV-7 iterates over individual codes rather than just counting
+  assert.match(sql, /v_required_kpi_code/, "SV-7 must iterate individual required codes");
+  assert.match(sql, /required KPI code.*is missing/, "SV-7 must name missing code in error");
+});
+
+test("self-validation SV-16 verifies governance trigger functions exist", () => {
+  assert.match(sql, /SV-16/, "SV-16 governance trigger check must exist");
+  for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
+    assert.ok(
+      sql.includes(fn),
+      `SV-16 must check for trigger function ${fn}`
+    );
+  }
+  assert.match(sql, /payload_hash column missing/, "SV-16 must verify payload_hash column");
+});

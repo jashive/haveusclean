@@ -245,3 +245,80 @@ test("all five Wave 6 test files are registered in the npm test script", () => {
     assert.ok(script.includes(file), `npm test script is missing ${file}`);
   }
 });
+
+// ── App.jsx dead control regression (Blocker 2) ──────────────────────────────
+
+test("App.jsx does not contain the alert-only check-in Review button", () => {
+  const appSource = read(path.join(here, "..", "src", "App.jsx"));
+  assert.doesNotMatch(
+    appSource,
+    /onClick=\{.*alert\(`Alert reviewed for/,
+    "App.jsx must not contain alert-only Review button"
+  );
+});
+
+test("App.jsx does not contain the Upgrade to Pro alert-only button", () => {
+  const appSource = read(path.join(here, "..", "src", "App.jsx"));
+  assert.doesNotMatch(
+    appSource,
+    /Upgrading to Pro plan/,
+    "App.jsx must not contain Upgrade to Pro placeholder"
+  );
+  assert.doesNotMatch(
+    appSource,
+    /Upgrade to Pro/,
+    "App.jsx must not contain Upgrade to Pro control"
+  );
+});
+
+test("App.jsx does not contain the Manage Billing alert-only button", () => {
+  const appSource = read(path.join(here, "..", "src", "App.jsx"));
+  assert.doesNotMatch(
+    appSource,
+    /Billing portal opening/,
+    "App.jsx must not contain Billing portal alert"
+  );
+  assert.doesNotMatch(
+    appSource,
+    /Manage Billing/,
+    "App.jsx must not contain Manage Billing placeholder"
+  );
+});
+
+test("App.jsx does not contain Partner Logins Coming Soon placeholder", () => {
+  const appSource = read(path.join(here, "..", "src", "App.jsx"));
+  assert.doesNotMatch(
+    appSource,
+    /Partner Logins.*Coming Soon/is,
+    "App.jsx must not contain Partner Logins Coming Soon"
+  );
+});
+
+// ── ManagementReviewPanel exists and is wired (Blocker 5) ────────────────────
+
+test("ManagementReviewPanel.jsx exists and exposes management review workflow", () => {
+  const src = read(path.join(featureDir, "ManagementReviewPanel.jsx"));
+  assert.match(src, /createManagementReview\(/, "must call createManagementReview");
+  assert.match(src, /updateManagementReview\(/, "must call updateManagementReview");
+  assert.match(src, /captureKpiSnapshot\(/, "must call captureKpiSnapshot");
+  assert.match(src, /loadManagementReviews\(/, "must call loadManagementReviews");
+  assert.match(src, /canCloseManagementReview\(/, "must check canCloseManagementReview");
+  assert.match(src, /canTransitionManagementReview\(/, "must check canTransitionManagementReview");
+  assert.match(src, /data-testid="management-review-panel"/, "must have testid");
+  assert.match(src, /data-testid="capture-kpi-snapshot-btn"/, "must have snapshot capture button");
+});
+
+test("Wave6IntelligencePanel mounts ManagementReviewPanel in the management section", () => {
+  const src = PANELS["Wave6IntelligencePanel.jsx"];
+  assert.match(src, /ManagementReviewPanel/, "ManagementReviewPanel not imported/used");
+  assert.match(src, /activeSection === "management"/, "no management section guard");
+  assert.match(src, /loadManagementReviews\(/, "does not call loadManagementReviews");
+  assert.match(src, /id: "management"/, "management tab missing from SECTIONS");
+});
+
+test("Wave6IntelligencePanel exposes KPI snapshot capture workflow", () => {
+  const src = PANELS["Wave6IntelligencePanel.jsx"];
+  assert.match(src, /loadKpiSnapshots\(/, "must load snapshots");
+  // Snapshot capture is exposed via ManagementReviewPanel
+  assert.match(src, /ManagementReviewPanel/, "ManagementReviewPanel provides snapshot capture");
+});

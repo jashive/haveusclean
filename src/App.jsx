@@ -1147,7 +1147,6 @@ function Geofencing({ jobs, partners }) {
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <span style={S.badge(a.status==="ok"?"green":"red")}>{a.status==="ok"?"✅ In Range":"⚠️ Outside Range"}</span>
-                {a.status==="alert" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>alert(`Alert reviewed for ${a.partner}`)}>Review</button>}
               </div>
             </div>
           </div>
@@ -1449,8 +1448,6 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
               </div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8 }}>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... 🚀")}>⬆ Upgrade to Pro</button>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>💳 Manage Billing</button>
             </div>
           </div>
         </div>
@@ -1492,7 +1489,6 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
           {[
             { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
             { icon:"☁️", label:"Cloud Database", status:getCloudStatusLabel(isCloudConnected, dbStatus), color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Supabase writes are active" : "Falling back to local storage" },
-            { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
             { icon:"🔄", label:"Real-Time Sync", status:isCloudConnected ? "Active" : "Offline", color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Live updates across devices" : "Local-only sync" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>

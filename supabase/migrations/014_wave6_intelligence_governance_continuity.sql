@@ -23,6 +23,20 @@
 -- View created (1):
 --   wave6_canonical_event  (security_invoker)
 --
+-- Trigger functions created (5):
+--   trg_enforce_management_review_fsm   — management_review BEFORE UPDATE
+--   trg_enforce_ccr_fsm                 — change_control_record BEFORE UPDATE
+--   trg_enforce_continuity_fsm          — continuity_session BEFORE UPDATE
+--   trg_enforce_release_gate_sequence   — release_gate BEFORE UPDATE
+--   trg_set_continuity_payload_hash     — continuity_transaction BEFORE INSERT
+--
+-- Triggers created (5):
+--   trig_management_review_fsm
+--   trig_ccr_fsm
+--   trig_continuity_fsm
+--   trig_release_gate_sequence
+--   trig_continuity_payload_hash
+--
 -- Terminal marker on success: M014_WAVE6_INTELLIGENCE_PASS
 -- =============================================================================
 
@@ -410,6 +424,12 @@ CREATE TABLE public.continuity_transaction (
 
   created_at                    timestamptz NOT NULL DEFAULT now(),
 
+  -- Payload integrity: SHA-256 of the canonical transaction_data JSONB snapshot.
+  -- Set by trigger on INSERT; immutable (INSERT-only trigger, never overwritten).
+  -- Requires pgcrypto (available in Supabase by default).
+  -- NULL only if pgcrypto is unavailable (trigger will populate when possible).
+  payload_hash                  text        NULL,
+
   CONSTRAINT fk_ct_session
     FOREIGN KEY (continuity_session_id) REFERENCES public.continuity_session(id),
 
@@ -430,6 +450,10 @@ CREATE TABLE public.continuity_transaction (
   ),
   CONSTRAINT ck_ct_reconciled_requires_timestamp CHECK (
     reconciliation_status = 'pending' OR reconciled_at IS NOT NULL
+  ),
+  -- Payload hash must be a 64-character lowercase hex string (SHA-256) when present.
+  CONSTRAINT ck_ct_payload_hash_format CHECK (
+    payload_hash IS NULL OR payload_hash ~ '^[0-9a-f]{64}$'
   )
 );
 
@@ -554,6 +578,288 @@ CREATE INDEX idx_ct_status            ON public.continuity_transaction (reconcil
 CREATE INDEX idx_smp_active           ON public.service_module_profile (active);
 
 CREATE INDEX idx_rg_sequence          ON public.release_gate (sequence_order);
+
+-- ---------------------------------------------------------------------------
+-- SECTION 2.5: GOVERNANCE ENFORCEMENT TRIGGERS
+-- ---------------------------------------------------------------------------
+-- BEFORE UPDATE triggers enforce FSM transitions at the database level.
+-- OLD.status (persisted row) is the authoritative source of current state —
+-- caller-supplied "current_status" is never trusted.
+-- Authenticated users cannot bypass these via raw REST PATCH.
+--
+-- Trigger functions use SECURITY DEFINER with a fixed search_path to
+-- prevent search_path injection. EXECUTE is NOT granted to PUBLIC, anon,
+-- or authenticated — triggers are not directly callable.
+--
+-- Payload hash trigger uses BEFORE INSERT (INSERT-only, immutable).
+-- ---------------------------------------------------------------------------
+
+-- ── management_review FSM ────────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.trg_enforce_management_review_fsm()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+  -- Status unchanged: allow (only non-status field changes).
+  IF NEW.review_status = OLD.review_status THEN
+    RETURN NEW;
+  END IF;
+
+  -- Validate OLD → NEW using the locked FSM:
+  --   draft → in_review
+  --   in_review → actions_open | closed
+  --   actions_open → closed
+  --   closed → (terminal)
+  IF NOT (
+    (OLD.review_status = 'draft'        AND NEW.review_status = 'in_review')   OR
+    (OLD.review_status = 'in_review'    AND NEW.review_status = 'actions_open') OR
+    (OLD.review_status = 'in_review'    AND NEW.review_status = 'closed')       OR
+    (OLD.review_status = 'actions_open' AND NEW.review_status = 'closed')
+  ) THEN
+    RAISE EXCEPTION
+      'management_review FSM: illegal transition % → % (row id=%)',
+      OLD.review_status, NEW.review_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Closure prerequisite: all actions resolved or waiver recorded.
+  IF NEW.review_status = 'closed' AND NEW.waiver_recorded IS NOT TRUE THEN
+    IF EXISTS (
+      SELECT 1
+      FROM jsonb_array_elements(NEW.actions) AS a
+      WHERE (a->>'is_resolved')::boolean IS NOT TRUE
+    ) THEN
+      RAISE EXCEPTION
+        'management_review: cannot close with unresolved actions unless waiver_recorded=true (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  -- closed_at must be set when closing (belt-and-suspenders; CHECK also enforces this).
+  IF NEW.review_status = 'closed' AND NEW.closed_at IS NULL THEN
+    RAISE EXCEPTION
+      'management_review: closed_at must be set when closing (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM authenticated;
+
+CREATE TRIGGER trig_management_review_fsm
+  BEFORE UPDATE ON public.management_review
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_enforce_management_review_fsm();
+
+COMMENT ON FUNCTION public.trg_enforce_management_review_fsm() IS
+  'Wave 6: DB-level management_review FSM. Illegal transitions raise P0001. '
+  'Closure requires resolved actions or waiver_recorded=true. SOURCE ONLY.';
+
+-- ── change_control_record FSM ────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+  IF NEW.change_status = OLD.change_status THEN
+    RETURN NEW;
+  END IF;
+
+  -- Locked FSM: measure→analyze→improve→approve→update→retrain→validate→closed.
+  IF NOT (
+    (OLD.change_status = 'measure'  AND NEW.change_status = 'analyze')  OR
+    (OLD.change_status = 'analyze'  AND NEW.change_status = 'improve')   OR
+    (OLD.change_status = 'improve'  AND NEW.change_status = 'approve')   OR
+    (OLD.change_status = 'approve'  AND NEW.change_status = 'update')    OR
+    (OLD.change_status = 'update'   AND NEW.change_status = 'retrain')   OR
+    (OLD.change_status = 'retrain'  AND NEW.change_status = 'validate')  OR
+    (OLD.change_status = 'validate' AND NEW.change_status = 'closed')
+  ) THEN
+    RAISE EXCEPTION
+      'change_control_record FSM: illegal transition % → % (row id=%)',
+      OLD.change_status, NEW.change_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Material-change closure prerequisites: impact_assessment + validation_result.passed=true.
+  IF NEW.change_status = 'closed' AND NEW.material_change = true THEN
+    IF NEW.impact_assessment IS NULL OR NEW.impact_assessment = '{}'::jsonb THEN
+      RAISE EXCEPTION
+        'change_control_record: material change requires impact_assessment before closure (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+    IF (NEW.validation_result ->> 'passed') IS DISTINCT FROM 'true' THEN
+      RAISE EXCEPTION
+        'change_control_record: material change requires validation_result.passed=true before closure (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_enforce_ccr_fsm() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_enforce_ccr_fsm() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_enforce_ccr_fsm() FROM authenticated;
+
+CREATE TRIGGER trig_ccr_fsm
+  BEFORE UPDATE ON public.change_control_record
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_enforce_ccr_fsm();
+
+COMMENT ON FUNCTION public.trg_enforce_ccr_fsm() IS
+  'Wave 6: DB-level change_control_record FSM. '
+  'measure→analyze→improve→approve→update→retrain→validate→closed. '
+  'Material changes require impact_assessment + validation_result.passed=true. SOURCE ONLY.';
+
+-- ── continuity_session FSM ───────────────────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.trg_enforce_continuity_fsm()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+  IF NEW.session_status = OLD.session_status THEN
+    RETURN NEW;
+  END IF;
+
+  -- Locked FSM: declared→fallback_active→service_restored→reconciling→reconciled→closed.
+  IF NOT (
+    (OLD.session_status = 'declared'         AND NEW.session_status = 'fallback_active')  OR
+    (OLD.session_status = 'fallback_active'  AND NEW.session_status = 'service_restored') OR
+    (OLD.session_status = 'service_restored' AND NEW.session_status = 'reconciling')      OR
+    (OLD.session_status = 'reconciling'      AND NEW.session_status = 'reconciled')       OR
+    (OLD.session_status = 'reconciled'       AND NEW.session_status = 'closed')
+  ) THEN
+    RAISE EXCEPTION
+      'continuity_session FSM: illegal transition % → % (row id=%)',
+      OLD.session_status, NEW.session_status, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_enforce_continuity_fsm() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_enforce_continuity_fsm() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_enforce_continuity_fsm() FROM authenticated;
+
+CREATE TRIGGER trig_continuity_fsm
+  BEFORE UPDATE ON public.continuity_session
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_enforce_continuity_fsm();
+
+COMMENT ON FUNCTION public.trg_enforce_continuity_fsm() IS
+  'Wave 6: DB-level continuity_session FSM. '
+  'declared→fallback_active→service_restored→reconciling→reconciled→closed. SOURCE ONLY.';
+
+-- ── release_gate sequence enforcement ───────────────────────────────────────
+
+CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_prev_status text;
+BEGIN
+  -- Passed is terminal for a single gate: cannot be reverted.
+  IF OLD.gate_status = 'passed' AND NEW.gate_status <> 'passed' THEN
+    RAISE EXCEPTION
+      'release_gate: gate % (id=%) is passed and cannot be reverted',
+      OLD.gate_code, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  -- When moving to passed, verify the predecessor gate (if any) is also passed.
+  IF NEW.gate_status = 'passed' AND OLD.gate_status <> 'passed' THEN
+    SELECT rg.gate_status INTO v_prev_status
+    FROM public.release_gate rg
+    WHERE rg.sequence_order = (NEW.sequence_order - 1)
+    LIMIT 1;
+
+    IF FOUND AND v_prev_status <> 'passed' THEN
+      RAISE EXCEPTION
+        'release_gate: cannot pass gate % (sequence %) before predecessor (sequence %) is passed',
+        NEW.gate_code, NEW.sequence_order, (NEW.sequence_order - 1)
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_enforce_release_gate_sequence() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_enforce_release_gate_sequence() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_enforce_release_gate_sequence() FROM authenticated;
+
+CREATE TRIGGER trig_release_gate_sequence
+  BEFORE UPDATE ON public.release_gate
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_enforce_release_gate_sequence();
+
+COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence() IS
+  'Wave 6: DB-level release_gate sequence enforcement. '
+  'Passed gates cannot be reverted. A gate cannot be passed before its predecessor. SOURCE ONLY.';
+
+-- ── continuity_transaction payload hash (INSERT-only, immutable) ─────────────
+
+CREATE OR REPLACE FUNCTION public.trg_set_continuity_payload_hash()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+  -- Canonical representation: transaction_data::text (JSONB to text, stable
+  -- within a PostgreSQL version for the same in-memory value).
+  -- Algorithm: SHA-256 via pgcrypto digest(). Encoded as lowercase hex (64 chars).
+  -- This function is INSERT-only — the hash is never silently overwritten.
+  BEGIN
+    NEW.payload_hash := encode(digest(NEW.transaction_data::text, 'sha256'), 'hex');
+  EXCEPTION
+    WHEN undefined_function THEN
+      -- pgcrypto not available; leave payload_hash NULL. The constraint
+      -- ck_ct_payload_hash_format still validates the format when non-NULL.
+      NULL;
+  END;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_set_continuity_payload_hash() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_set_continuity_payload_hash() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_set_continuity_payload_hash() FROM authenticated;
+
+CREATE TRIGGER trig_continuity_payload_hash
+  BEFORE INSERT ON public.continuity_transaction
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_set_continuity_payload_hash();
+
+COMMENT ON FUNCTION public.trg_set_continuity_payload_hash() IS
+  'Wave 6: Computes SHA-256 payload_hash for continuity_transaction on INSERT. '
+  'Hash = encode(digest(transaction_data::text, ''sha256''), ''hex''). '
+  'INSERT-only trigger — hash is immutable after row creation. '
+  'Requires pgcrypto; leaves payload_hash NULL if extension unavailable. SOURCE ONLY.';
 
 -- ---------------------------------------------------------------------------
 -- SECTION 3: CANONICAL EVENT VIEW
@@ -1344,10 +1650,45 @@ BEGIN
     RAISE EXCEPTION 'M014 SV-6 FAIL: wave6_canonical_event is not security_invoker';
   END IF;
 
-  -- [SV-7] governed KPI definition seeds
-  SELECT COUNT(*) INTO v_count FROM public.kpi_definition;
-  IF v_count < 17 THEN
-    RAISE EXCEPTION 'M014 SV-7 FAIL: expected >= 17 kpi_definition rows, found %', v_count;
+  -- [SV-7] governed KPI definition seeds — exact 18 required codes, individually verified
+  DECLARE
+    v_required_kpi_code text;
+  BEGIN
+    FOR v_required_kpi_code IN SELECT unnest(ARRAY[
+      'sales.leads_created',
+      'sales.opportunities_created',
+      'sales.quotes_created',
+      'sales.quotes_accepted',
+      'sales.conversions',
+      'sales.lead_to_conversion_rate',
+      'operations.jobs_created',
+      'operations.work_completed',
+      'quality.qa_inspections',
+      'quality.qa_pass_rate',
+      'quality.exceptions_opened',
+      'quality.reclean_requests',
+      'finance.invoice_subtotal_requested',
+      'finance.payments_observed',
+      'finance.contractor_payable_approved',
+      'finance.recognized_revenue',
+      'finance.gross_contribution',
+      'finance.gross_margin'
+    ])
+    LOOP
+      SELECT COUNT(*) INTO v_count
+      FROM public.kpi_definition
+      WHERE code = v_required_kpi_code AND active = true AND definition_version = '1';
+      IF v_count = 0 THEN
+        RAISE EXCEPTION 'M014 SV-7 FAIL: required KPI code % (active, version=1) is missing',
+          v_required_kpi_code;
+      END IF;
+    END LOOP;
+  END;
+
+  -- Exact active KPI count: must be exactly 18 (future additions require a new version).
+  SELECT COUNT(*) INTO v_count FROM public.kpi_definition WHERE active = true AND definition_version = '1';
+  IF v_count <> 18 THEN
+    RAISE EXCEPTION 'M014 SV-7 FAIL: expected exactly 18 active version-1 kpi_definition rows, found %', v_count;
   END IF;
 
   -- [SV-8] HEMS dependency graph seeds
@@ -1425,6 +1766,39 @@ BEGIN
     );
   IF v_count > 0 THEN
     RAISE EXCEPTION 'M014 SV-15 FAIL: Wave 6 namespace collides with a huc_* table';
+  END IF;
+
+  -- [SV-16] governance trigger functions exist
+  DECLARE
+    v_required_fn text;
+  BEGIN
+    FOR v_required_fn IN SELECT unnest(ARRAY[
+      'trg_enforce_management_review_fsm',
+      'trg_enforce_ccr_fsm',
+      'trg_enforce_continuity_fsm',
+      'trg_enforce_release_gate_sequence',
+      'trg_set_continuity_payload_hash'
+    ])
+    LOOP
+      SELECT COUNT(*) INTO v_count
+      FROM pg_proc p
+      JOIN pg_namespace n ON n.oid = p.pronamespace
+      WHERE n.nspname = 'public' AND p.proname = v_required_fn;
+      IF v_count = 0 THEN
+        RAISE EXCEPTION 'M014 SV-16 FAIL: governance trigger function public.% not found',
+          v_required_fn;
+      END IF;
+    END LOOP;
+  END;
+
+  -- [SV-16b] payload_hash column exists on continuity_transaction
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'continuity_transaction'
+    AND column_name = 'payload_hash';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M014 SV-16 FAIL: payload_hash column missing from continuity_transaction';
   END IF;
 
   RAISE NOTICE 'M014_WAVE6_INTELLIGENCE_PASS';

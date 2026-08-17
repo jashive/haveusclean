@@ -15,6 +15,7 @@ import {
   loadContinuitySessions,
   loadKpiDefinitions,
   loadKpiSnapshots,
+  loadManagementReviews,
   loadReleaseGates,
   loadServiceModuleProfiles,
   computePeriodKpis,
@@ -23,6 +24,7 @@ import { formatPeriodLabel, getPeriodBoundaries } from "../../lib/serviceosIntel
 import ChangeControlPanel from "./ChangeControlPanel.jsx";
 import ContinuityPanel from "./ContinuityPanel.jsx";
 import KpiReviewPanel from "./KpiReviewPanel.jsx";
+import ManagementReviewPanel from "./ManagementReviewPanel.jsx";
 import ModuleReadinessPanel from "./ModuleReadinessPanel.jsx";
 import { formatErrorMessage, formatFreshness, formatTimestamp } from "./wave6Formatters.js";
 
@@ -35,6 +37,7 @@ const TABS = [
 
 const SECTIONS = [
   { id: "kpi", label: "KPI review" },
+  { id: "management", label: "Mgmt review" },
   { id: "change", label: "Change control" },
   { id: "continuity", label: "Continuity" },
   { id: "readiness", label: "Module readiness" },
@@ -116,6 +119,7 @@ const EMPTY_STATE = {
   continuitySessions: [],
   profiles: [],
   gates: [],
+  reviews: [],
 };
 
 export default function Wave6IntelligencePanel({ session, revenueContext }) {
@@ -162,6 +166,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         continuitySessions,
         profiles,
         gates,
+        reviews,
       ] = await Promise.all([
         loadKpiDefinitions(session, { organizationId }),
         computePeriodKpis(session, {
@@ -185,6 +190,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         loadContinuitySessions(session, { organizationId }),
         loadServiceModuleProfiles(session, { organizationId }),
         loadReleaseGates(session, { organizationId }),
+        loadManagementReviews(session, { organizationId, periodType }),
       ]);
       setState({
         definitions,
@@ -195,6 +201,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         continuitySessions,
         profiles,
         gates,
+        reviews,
       });
       setLoadedAt(new Date().toISOString());
     } catch (err) {
@@ -284,6 +291,20 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
 
       {error && <div style={styles.error}>{error}</div>}
       {loading && <div style={styles.loading}>Reading governed data…</div>}
+
+      {!loading && activeSection === "management" && (
+        <ManagementReviewPanel
+          session={session}
+          organizationId={organizationId}
+          businessUnitId={businessUnitId}
+          periodType={periodType}
+          period={period}
+          timezone={timezone}
+          kpis={state.kpis}
+          reviews={state.reviews}
+          onChanged={refresh}
+        />
+      )}
 
       {!loading && activeSection === "kpi" && (
         <KpiReviewPanel
