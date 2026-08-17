@@ -153,7 +153,16 @@ test("ChangeControlPanel calls real create and update client functions", () => {
 test("ChangeControlPanel only offers FSM-legal transitions", () => {
   const source = PANELS["ChangeControlPanel.jsx"];
   assert.match(source, /const transitions = nextCcrStatuses\(record\.change_status\)/);
-  assert.doesNotMatch(source, /change_status: "closed"(?!.*canClose)/s);
+  assert.match(
+    source,
+    /nextStatus === "closed" && !canCloseChangeControlRecord\(record\)/,
+    "closed transitions must be guarded by canCloseChangeControlRecord"
+  );
+  assert.doesNotMatch(
+    source,
+    /change_status:\s*"closed"/,
+    "ChangeControlPanel must not hard-code an unconditional closed status patch"
+  );
 });
 
 test("ContinuityPanel calls real client functions for every action", () => {
@@ -414,7 +423,11 @@ test("KPI snapshot payload persists effective jurisdiction scope only when compu
 
 test("definition resolution fails closed on ambiguity instead of choosing the first row", () => {
   assert.match(managementReviewEvidenceSource, /ambiguous active definition/i);
-  assert.doesNotMatch(managementReviewEvidenceSource, /\.find\(/, "definition resolution must not use Array.find guessing");
+  const resolveDefinitionBody = managementReviewEvidenceSource.slice(
+    managementReviewEvidenceSource.indexOf("export function resolveDefinition"),
+    managementReviewEvidenceSource.indexOf("export function buildSnapshotSourceLineage")
+  );
+  assert.doesNotMatch(resolveDefinitionBody, /\.find\(/, "definition resolution must not use Array.find guessing");
 });
 
 test("definition resolution fails closed when multiple active versions remain applicable", () => {

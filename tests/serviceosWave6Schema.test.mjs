@@ -363,7 +363,7 @@ test("self-validation raises on failure and emits the terminal marker", () => {
   assert.match(sql, /M014_WAVE6_INTELLIGENCE_PASS/);
   const markerIndex = sql.lastIndexOf("M014_WAVE6_INTELLIGENCE_PASS");
   const commitIndex = sql.lastIndexOf("COMMIT;");
-  assert.ok(markerIndex > 0 && commitIndex > 0);
+  assert.ok(markerIndex > 0 && commitIndex > 0 && markerIndex < commitIndex);
 });
 
 test("self-validation asserts the seed and object counts", () => {
