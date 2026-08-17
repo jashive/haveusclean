@@ -1253,3 +1253,96 @@ test("W5RC-CAT-32. no credential data appears in response/log serialization", ()
   assert.ok(!wave5RlsHarnessSrc.includes("Authorization: bearerToken"));
   assert.ok(wave5RlsHarnessSrc.includes("catalog_attestation"));
 });
+
+// ── W5RC-CAT-33 through W5RC-CAT-38: cast normalization regression tests ─────
+
+test("W5RC-CAT-33. live pg_policies office_ops ::text form normalizes to match expected", () => {
+  const attestation = makeValidCatalogAttestation();
+  // Replace all office_ops quals/with_checks with the live pg_policies form including ::text casts
+  attestation.policies = attestation.policies.map((p) => {
+    const updated = { ...p };
+    if (updated.qual && updated.qual.includes("office_ops")) {
+      updated.qual = "public.has_bu_role(\n  organization_id,\n  business_unit_id,\n  ARRAY['office_ops'::text]\n)";
+    }
+    if (updated.with_check && updated.with_check.includes("office_ops")) {
+      updated.with_check = "public.has_bu_role(\n  organization_id,\n  business_unit_id,\n  ARRAY['office_ops'::text]\n)";
+    }
+    return updated;
+  });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, true,
+    "office_ops ::text live form must normalize and pass");
+});
+
+test("W5RC-CAT-34. live pg_policies owner_admin ::text form normalizes to match expected", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies = attestation.policies.map((p) => {
+    const updated = { ...p };
+    if (updated.qual && updated.qual.includes("owner_admin")) {
+      updated.qual = "public.has_bu_role(\n  organization_id,\n  business_unit_id,\n  ARRAY['owner_admin'::text]\n)";
+    }
+    if (updated.with_check && updated.with_check.includes("owner_admin")) {
+      updated.with_check = "public.has_bu_role(\n  organization_id,\n  business_unit_id,\n  ARRAY['owner_admin'::text]\n)";
+    }
+    return updated;
+  });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, true,
+    "owner_admin ::text live form must normalize and pass");
+});
+
+test("W5RC-CAT-35. live pg_policies worker current_worker_id form normalizes to match expected", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies = attestation.policies.map((p) => {
+    const updated = { ...p };
+    if (updated.qual && updated.qual.includes("current_worker_id")) {
+      updated.qual = "(worker_id = public.current_worker_id(organization_id))";
+    }
+    return updated;
+  });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, true,
+    "worker current_worker_id live form must normalize and pass");
+});
+
+test("W5RC-CAT-36. semantically different policy expression still fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  // Change office_ops to qa — semantically wrong
+  attestation.policies.find((p) => p.policy_name === "pol_aso_office_ops_select").qual =
+    "public.has_bu_role(\n  organization_id,\n  business_unit_id,\n  ARRAY['qa'::text]\n)";
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false,
+    "semantically wrong expression must fail even with ::text normalization");
+});
+
+test("W5RC-CAT-37. catalog validator with exact live 16-policy payload (all ::text casts) passes", () => {
+  const attestation = makeValidCatalogAttestation();
+  // Simulate all pg_policies expressions using live forms with ::text and public. prefix
+  attestation.policies = attestation.policies.map((p) => {
+    const updated = { ...p };
+    const applyLive = (expr) => {
+      if (!expr) return expr;
+      // Wrap every ARRAY['...'] with ::text cast on the string literal
+      return expr.replace(/ARRAY\['([^']+)'\]/g, "ARRAY['$1'::text]")
+                 .replace(/\bhas_bu_role\b/g, "public.has_bu_role")
+                 .replace(/\bcurrent_worker_id\b/g, "public.current_worker_id");
+    };
+    updated.qual = applyLive(updated.qual);
+    updated.with_check = applyLive(updated.with_check);
+    return updated;
+  });
+  const result = validateWave5CatalogAttestation(attestation);
+  assert.equal(result.passed, true, "live 16-policy form must pass");
+  assert.equal(result.exact_policy_count, 16);
+});
+
+test("W5RC-CAT-38. unexpected role in ARRAY expression fails closed", () => {
+  const attestation = makeValidCatalogAttestation();
+  // Inject an extra unexpected policy
+  attestation.policies.push({
+    table_name: "billing_readiness_gate",
+    policy_name: "pol_brg_unexpected_role",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['superadmin'::text])",
+    with_check: null,
+  });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false,
+    "unexpected policy must fail closed");
+});

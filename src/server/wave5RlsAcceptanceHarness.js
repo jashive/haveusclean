@@ -946,7 +946,7 @@ function normalizePolicyExpression(expression) {
     .toLowerCase()
     .replace(/\s+/g, "")
     .replace(/\bpublic\./g, "")
-    .replace(/::[a-z_][a-z0-9_\[\]]*/g, "");
+    .replace(/::[a-z_][a-z0-9_]*/g, "");
   return stripBalancedOuterParens(lowered);
 }
 
