@@ -27,6 +27,11 @@ const utilsSource = readFileSync(
   "utf8"
 );
 
+const sql = readFileSync(
+  path.join(here, "..", "supabase", "migrations", "014_wave6_intelligence_governance_continuity.sql"),
+  "utf8"
+);
+
 const TORONTO = "America/Toronto";
 const PHOENIX = "America/Phoenix";
 
@@ -470,4 +475,64 @@ test("utils module is pure — no network, no storage, no import.meta", () => {
   assert.doesNotMatch(utilsSource, /\bfetch\(/);
   assert.doesNotMatch(utilsSource, /localStorage/);
   assert.doesNotMatch(utilsSource, /import\.meta/);
+});
+
+// ── Correction area 2: Sales canonical events (D, E, F) ─────────────────────
+
+test("sales.lead.created is emitted by the canonical event view", () => {
+  // Criterion D
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event")
+  );
+  assert.ok(viewBody.includes("'sales.lead.created'"), "missing canonical event sales.lead.created");
+  assert.ok(
+    viewBody.includes("FROM public.service_request"),
+    "sales.lead.created must source from service_request"
+  );
+  // Timestamp convention: created_at (canonical lead creation timestamp)
+  assert.match(
+    sql,
+    /sales\.lead\.created.*created_at|created_at.*sales\.lead\.created/s,
+    "sales.lead.created must use created_at as occurred_at"
+  );
+});
+
+test("sales.quote.accepted is emitted by the canonical event view", () => {
+  // Criterion E
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event")
+  );
+  assert.ok(viewBody.includes("'sales.quote.accepted'"), "missing canonical event sales.quote.accepted");
+  assert.ok(
+    viewBody.includes("FROM public.quote_response"),
+    "sales.quote.accepted must source from quote_response"
+  );
+  // Acceptance filter: only response_type = 'accepted'
+  assert.ok(
+    viewBody.includes("response_type = 'accepted'"),
+    "sales.quote.accepted must filter on response_type = 'accepted'"
+  );
+  // Timestamp convention: responded_at
+  assert.ok(
+    viewBody.includes("responded_at"),
+    "sales.quote.accepted must use responded_at as occurred_at"
+  );
+});
+
+test("canonical event view no longer deliberately excludes verified Wave 1-2 tables", () => {
+  // Criterion F: Wave 1/2 tables (service_request, quote_response) are no longer excluded
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event")
+  );
+  assert.ok(
+    viewBody.includes("FROM public.service_request"),
+    "service_request must now be in the canonical event view"
+  );
+  assert.ok(
+    viewBody.includes("FROM public.quote_response"),
+    "quote_response must now be in the canonical event view"
+  );
 });

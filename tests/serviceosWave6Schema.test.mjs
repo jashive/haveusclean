@@ -74,7 +74,7 @@ test("canonical event view emits the governed event names", () => {
   }
 });
 
-test("canonical event view only references tables whose DDL is in this repo", () => {
+test("canonical event view only references tables with verified DDL", () => {
   const viewBody = sql.slice(
     sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
     sql.indexOf("ALTER VIEW public.wave6_canonical_event")
@@ -90,7 +90,13 @@ test("canonical event view only references tables whose DDL is in this repo", ()
     .map((f) => read(path.join(migrationsDir, f)))
     .join("\n");
 
+  // service_request and quote_response are independently verified (2026-08-17)
+  // against the live Supabase project; their DDL is not in this repo but their
+  // columns have been confirmed. All other tables must be from vendored migrations.
+  const liveVerifiedTables = new Set(["service_request", "quote_response"]);
+
   for (const table of new Set(referenced)) {
+    if (liveVerifiedTables.has(table)) continue;
     assert.ok(
       vendoredDdl.includes(`CREATE TABLE public.${table} (`),
       `wave6_canonical_event references public.${table}, whose CREATE TABLE is not in migrations 007/009/012`
@@ -98,23 +104,43 @@ test("canonical event view only references tables whose DDL is in this repo", ()
   }
 });
 
-test("Wave 1-2 sales tables are excluded from the canonical event view", () => {
+test("sales.lead.created and sales.quote.accepted are in the canonical event view", () => {
+  // service_request and quote_response columns are independently verified (2026-08-17).
+  // The canonical events for lead creation and quote acceptance are now included.
   const viewBody = sql.slice(
     sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
     sql.indexOf("ALTER VIEW public.wave6_canonical_event")
   );
-  for (const table of [
-    "service_request",
-    "opportunity",
-    "quote",
-    "quote_response",
-    "conversion_record",
-  ]) {
-    assert.ok(
-      !viewBody.includes(`FROM public.${table}`),
+  assert.ok(
+    viewBody.includes("FROM public.service_request"),
+    "view must include service_request for sales.lead.created"
+  );
+  assert.ok(
+    viewBody.includes("FROM public.quote_response"),
+    "view must include quote_response for sales.quote.accepted"
+  );
+  assert.ok(viewBody.includes("'sales.lead.created'"), "missing sales.lead.created event");
+  assert.ok(viewBody.includes("'sales.quote.accepted'"), "missing sales.quote.accepted event");
+  // Wave 1-2 tables without verified columns remain excluded.
+  // Use regex with word boundary to avoid false matches (e.g. quote_response contains "quote").
+  for (const table of ["opportunity", "quote", "conversion_record"]) {
+    assert.doesNotMatch(
+      viewBody,
+      new RegExp(`FROM public\.${table}\b(?!_)`),
       `view must not select from unverified Wave 1-2 table ${table}`
     );
   }
+});
+
+test("Wave 1-2 table exclusion is documented with reason in migration comments", () => {
+  // The old blanket exclusion comment is replaced with a verified-columns note.
+  assert.doesNotMatch(
+    sql,
+    /Wave 1.2 sales tables are excluded because their columns cannot be verified from source/,
+    "stale unverifiable comment must be removed"
+  );
+  // Updated comment confirms verification
+  assert.match(sql, /independently verified/i, "migration must document independent verification");
 });
 
 test("sales KPI seeds declare their unverified Wave 1-2 lineage", () => {
@@ -445,8 +471,10 @@ test("payload hash trigger fires BEFORE INSERT on continuity_transaction", () =>
 
 // ── Blocker 3: payload_hash integrity ────────────────────────────────────────
 
-test("continuity_transaction has a payload_hash column", () => {
-  assert.match(sql, /payload_hash\s+text\s+NULL/);
+test("continuity_transaction has a payload_hash column — NOT NULL", () => {
+  // Criterion B: payload_hash must be NOT NULL (fail closed — hash is mandatory)
+  assert.match(sql, /payload_hash\s+text\s+NOT NULL/);
+  assert.doesNotMatch(sql, /payload_hash\s+text\s+NULL(?!\s+DEFAULT)(?!\s+NOT)/, "must not be nullable");
 });
 
 test("continuity_transaction has payload_hash format constraint", () => {
@@ -454,18 +482,61 @@ test("continuity_transaction has payload_hash format constraint", () => {
   assert.match(sql, /\^\[0-9a-f\]\{64\}\$/);
 });
 
-test("payload_hash trigger uses pgcrypto digest with sha256", () => {
+test("payload_hash trigger uses extensions.digest (schema-qualified pgcrypto)", () => {
+  // Criterion A: extensions.digest is correctly schema-qualified
   const trigBody = sql.slice(
     sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_set_continuity_payload_hash"),
     sql.indexOf("COMMENT ON FUNCTION public.trg_set_continuity_payload_hash")
   );
-  assert.match(trigBody, /digest\(.*sha256/);
+  assert.match(trigBody, /extensions\.digest\(/, "must use schema-qualified extensions.digest");
+  assert.match(trigBody, /sha256/);
   assert.match(trigBody, /encode\(/);
   assert.match(trigBody, /payload_hash/);
+  // Fail closed: no EXCEPTION/NULL fallback
+  assert.doesNotMatch(trigBody, /undefined_function/, "must not catch undefined_function — fail closed");
+  assert.doesNotMatch(trigBody, /leave payload_hash NULL/, "must not permit NULL fallback");
+});
+
+test("payload_hash is NOT NULL on continuity_transaction — fail closed contract", () => {
+  // Criterion B: payload_hash cannot be NULL from a successful insert contract
+  assert.match(sql, /payload_hash\s+text\s+NOT NULL/, "payload_hash must be NOT NULL");
+  assert.doesNotMatch(
+    sql,
+    /payload_hash\s+text\s+NULL/,
+    "payload_hash must not be declared nullable"
+  );
+  assert.doesNotMatch(
+    sql,
+    /payload_hash IS NULL OR/,
+    "CHECK constraint must not permit NULL hash"
+  );
+});
+
+test("immutability trigger prevents post-insertion mutation of payload evidence", () => {
+  // Criterion C: payload hash/payload cannot be silently changed later
+  assert.match(
+    sql,
+    /CREATE OR REPLACE FUNCTION public\.trg_immute_continuity_transaction_fields\(\)/,
+    "immutability trigger function must exist"
+  );
+  assert.match(sql, /CREATE TRIGGER trig_immute_continuity_transaction_fields/);
+  const immBody = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_immute_continuity_transaction_fields"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_immute_continuity_transaction_fields")
+  );
+  assert.match(immBody, /payload_hash IS DISTINCT FROM OLD\.payload_hash/);
+  assert.match(immBody, /transaction_data IS DISTINCT FROM OLD\.transaction_data/);
+  assert.match(immBody, /offline_correlation_id IS DISTINCT FROM OLD\.offline_correlation_id/);
+  assert.match(immBody, /BEFORE UPDATE ON public\.continuity_transaction|BEFORE UPDATE/);
 });
 
 test("payload_hash is documented as immutable (INSERT-only trigger)", () => {
   assert.match(sql, /INSERT-only trigger.*hash is immutable|hash is immutable.*INSERT-only/i);
+  // Also confirm a BEFORE UPDATE trigger enforces this at the DB level
+  assert.match(
+    sql,
+    /BEFORE UPDATE ON public\.continuity_transaction\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_immute_continuity_transaction_fields/
+  );
 });
 
 // ── Blocker 4: Canonical event vocabulary ────────────────────────────────────
@@ -488,21 +559,21 @@ test("canonical event view includes all verified Wave 3/4/5 events", () => {
   }
 });
 
-test("Wave 1/2 sales events are excluded from canonical view with documented reason", () => {
-  // Wave 1/2 DDL is not in this repository; columns cannot be verified from source.
-  // This test confirms the exclusion is documented (not silently omitted).
-  assert.match(
-    sql,
-    /Wave 1.2 sales tables are excluded because their columns cannot be verified from source/,
-    "Wave 1/2 exclusion must be documented in the migration"
-  );
-  // Confirm sales events are NOT in the canonical view body
+test("Wave 1/2 exclusion is documented selectively — verified tables are included", () => {
+  // After independent verification (2026-08-17), service_request and quote_response
+  // are INCLUDED in the canonical view. The stale blanket-exclusion comment is gone.
+  // Remaining unverified Wave 1-2 tables (opportunity, quote, conversion_record) stay out.
   const viewBody = sql.slice(
     sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
     sql.indexOf("ALTER VIEW public.wave6_canonical_event SET")
   );
-  assert.doesNotMatch(viewBody, /'sales\.lead\.created'/, "sales.lead.created must not appear unverified in view");
-  assert.doesNotMatch(viewBody, /'sales\.quote\.accepted'/, "sales.quote.accepted must not appear unverified in view");
+  // Confirmed included
+  assert.ok(viewBody.includes("'sales.lead.created'"), "sales.lead.created must be in view");
+  assert.ok(viewBody.includes("'sales.quote.accepted'"), "sales.quote.accepted must be in view");
+  // Unverified Wave 1-2 tables still excluded
+  assert.doesNotMatch(viewBody, /'sales\.lead\.created'.*opportunity|FROM public\.opportunity/);
+  assert.doesNotMatch(viewBody, /FROM public\.quote\b(?!_)/, "quote table not verified — must remain excluded");
+  assert.ok(!viewBody.includes("FROM public.conversion_record"), "conversion_record must remain excluded");
 });
 
 // ── Blocker 6: Exact 18 KPI self-validation ──────────────────────────────────
@@ -562,4 +633,105 @@ test("self-validation SV-16 verifies governance trigger functions exist", () => 
     );
   }
   assert.match(sql, /payload_hash column missing/, "SV-16 must verify payload_hash column");
+});
+
+// ── Correction area 5: Continuity closure with unresolved transactions (M) ───
+
+test("continuity_session FSM trigger rejects closure with unresolved transactions", () => {
+  // Criterion M: continuity session cannot close with unresolved transactions
+  const fsmBody = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_continuity_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_continuity_fsm")
+  );
+  assert.match(
+    fsmBody,
+    /unresolved transaction|pending reconciliation/i,
+    "continuity FSM must check for unresolved transactions on closure"
+  );
+  assert.match(
+    fsmBody,
+    /continuity_transaction/,
+    "FSM must query continuity_transaction to verify all transactions are resolved"
+  );
+  assert.match(
+    fsmBody,
+    /reconciliation_status NOT IN/,
+    "FSM must check terminal reconciliation_status values"
+  );
+  assert.match(
+    fsmBody,
+    /waiver_recorded/,
+    "FSM must allow waiver to bypass the unresolved-transaction check"
+  );
+});
+
+test("self-validation confirms pgcrypto extensions.digest is available", () => {
+  // Criterion A self-validation at DB level
+  assert.match(
+    sql,
+    /extensions\.digest\('probe'/,
+    "SV must probe extensions.digest for availability"
+  );
+  assert.match(
+    sql,
+    /pgcrypto must be installed/i,
+    "SV must name the missing extension in the error"
+  );
+});
+
+// ── Correction area 6: Terminal governance evidence protection (N) ────────────
+
+test("management_review FSM blocks any update to a closed row", () => {
+  // Criterion N: terminal governance evidence cannot be silently rewritten
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_management_review_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_management_review_fsm")
+  );
+  assert.match(
+    body,
+    /OLD\.review_status = 'closed'/,
+    "management_review FSM must block updates when already closed"
+  );
+  assert.match(body, /terminal row is immutable/i);
+});
+
+test("change_control_record FSM blocks any update to a closed row", () => {
+  // Criterion N
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_ccr_fsm")
+  );
+  assert.match(
+    body,
+    /OLD\.change_status = 'closed'/,
+    "CCR FSM must block updates when already closed"
+  );
+  assert.match(body, /terminal row is immutable/i);
+});
+
+test("release_gate FSM blocks any update to a passed gate", () => {
+  // Criterion N
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence")
+  );
+  // The terminal immutability block must appear before the more specific reversal check
+  const terminalIdx = body.indexOf("terminal evidence is immutable");
+  const reversalIdx = body.indexOf("cannot be reverted");
+  assert.ok(terminalIdx >= 0, "release_gate FSM must protect terminal evidence");
+  assert.ok(terminalIdx < reversalIdx, "immutability block must appear before reversal check");
+});
+
+test("continuity_session FSM blocks any update to a closed session", () => {
+  // Criterion N
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_continuity_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_continuity_fsm")
+  );
+  assert.match(
+    body,
+    /OLD\.session_status = 'closed'/,
+    "continuity FSM must block updates when already closed"
+  );
+  assert.match(body, /terminal row is immutable/i);
 });

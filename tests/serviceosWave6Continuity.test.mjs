@@ -278,3 +278,63 @@ test("continuity transactions are never deleted by the client", () => {
 test("client validates correlation ids before recording a transaction", () => {
   assert.match(clientSource, /isValidOfflineCorrelationId/);
 });
+
+// ── Correction area 5: DB-level closure enforcement (M) ─────────────────────
+
+test("migration FSM trigger enforces unresolved-transaction check before closure", () => {
+  // Criterion M: continuity session cannot close with unresolved transactions at DB level
+  const fsmBody = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_continuity_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_continuity_fsm")
+  );
+  assert.match(
+    fsmBody,
+    /continuity_transaction/,
+    "FSM must query continuity_transaction on closure attempt"
+  );
+  assert.match(
+    fsmBody,
+    /reconciliation_status NOT IN/,
+    "FSM must check terminal reconciliation statuses"
+  );
+  // Terminal statuses for reconciliation must include the full verified vocabulary
+  for (const status of ["matched", "discrepancy", "waived"]) {
+    assert.ok(
+      fsmBody.includes(`'${status}'`),
+      `FSM closure check must reference terminal status '${status}'`
+    );
+  }
+});
+
+test("migration FSM trigger checks terminal immutability on continuity_session", () => {
+  // Criterion N: terminal closed session cannot be silently rewritten
+  const fsmBody = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_continuity_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_continuity_fsm")
+  );
+  assert.match(
+    fsmBody,
+    /OLD\.session_status = 'closed'/,
+    "FSM must detect terminal closed status"
+  );
+  assert.match(
+    fsmBody,
+    /terminal row is immutable/i,
+    "FSM must raise on any update to a closed session"
+  );
+});
+
+test("migration immutability trigger blocks mutation of payload evidence fields", () => {
+  // Criterion C: DB-level immutability for payload_hash/transaction_data/offline_correlation_id
+  assert.match(
+    sql,
+    /BEFORE UPDATE ON public\.continuity_transaction\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_immute_continuity_transaction_fields/
+  );
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_immute_continuity_transaction_fields"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_immute_continuity_transaction_fields")
+  );
+  assert.match(body, /payload_hash IS DISTINCT FROM OLD\.payload_hash/);
+  assert.match(body, /transaction_data IS DISTINCT FROM OLD\.transaction_data/);
+  assert.match(body, /offline_correlation_id IS DISTINCT FROM OLD\.offline_correlation_id/);
+});

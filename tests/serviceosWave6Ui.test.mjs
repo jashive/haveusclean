@@ -322,3 +322,111 @@ test("Wave6IntelligencePanel exposes KPI snapshot capture workflow", () => {
   // Snapshot capture is exposed via ManagementReviewPanel
   assert.match(src, /ManagementReviewPanel/, "ManagementReviewPanel provides snapshot capture");
 });
+
+// ── Correction area 3: KPI snapshot payload contract (G, H, I, J, K) ────────
+
+const mrpSource = read(path.join(featureDir, "ManagementReviewPanel.jsx"));
+
+test("KPI snapshot payload includes kpi_definition_id resolved from definitions", () => {
+  // Criterion G: KPI snapshot payload contains kpi_definition_id
+  assert.match(mrpSource, /kpi_definition_id/, "ManagementReviewPanel must send kpi_definition_id");
+  assert.match(mrpSource, /resolveDefinition/, "ManagementReviewPanel must call resolveDefinition helper");
+  assert.match(mrpSource, /definition\.id/, "kpi_definition_id must be sourced from loaded definition record");
+});
+
+test("KPI snapshot payload uses numeric_value not value", () => {
+  // Criterion H: KPI snapshot uses numeric_value
+  assert.match(
+    mrpSource,
+    /numeric_value:\s*kpi\.value/,
+    "payload must use column name numeric_value"
+  );
+  assert.doesNotMatch(
+    mrpSource,
+    /^\s*value:\s*kpi\.value/m,
+    "payload must not send a bare 'value' field — that is not a valid kpi_snapshot column"
+  );
+});
+
+test("KPI snapshot payload uses source_lineage not source_tables", () => {
+  // Criterion I: KPI snapshot uses source_lineage
+  assert.match(mrpSource, /source_lineage:/, "payload must use source_lineage");
+  assert.doesNotMatch(mrpSource, /source_tables:/, "payload must not send source_tables — invalid column");
+});
+
+test("KPI snapshot payload uses source_freshness_at not freshness_at", () => {
+  // Criterion J: KPI snapshot uses source_freshness_at
+  assert.match(mrpSource, /source_freshness_at:/, "payload must use source_freshness_at");
+  assert.doesNotMatch(
+    mrpSource,
+    /(?<!source_)freshness_at:\s*kpi\.freshnessAt/,
+    "payload must not send bare freshness_at — that is not a valid kpi_snapshot column"
+  );
+});
+
+test("KPI snapshot payload does not contain invalid DB column names", () => {
+  // Criterion K: no value / row_counts / source_tables / freshness_at invalid DB fields are sent
+  // These are NOT columns on kpi_snapshot. The correct names are: numeric_value,
+  // source_lineage, source_freshness_at.
+  assert.doesNotMatch(mrpSource, /row_counts:/, "must not send row_counts — not a kpi_snapshot column");
+  assert.doesNotMatch(mrpSource, /source_tables:/, "must not send source_tables — not a kpi_snapshot column");
+  // 'value:' by itself (not as part of numeric_value or definition_version) is not a valid column
+  assert.doesNotMatch(
+    mrpSource,
+    /value: kpi/,
+    "must not send raw 'value' field — use numeric_value"
+  );
+});
+
+test("KPI snapshot resolves kpi_definition_id from definitions — fail closed if missing", () => {
+  // Criterion G: If an active definition cannot be resolved, fail closed
+  assert.match(mrpSource, /skipped\.push\(kpi\.kpiCode\)/, "must skip KPIs with no definition — fail closed");
+  assert.match(mrpSource, /no active definition/i, "must report skipped due to missing definition");
+  assert.doesNotMatch(
+    mrpSource,
+    /kpi_definition_id: null/,
+    "must never send null kpi_definition_id"
+  );
+});
+
+// ── Correction area 4: Management review operability (L) ─────────────────────
+
+test("ManagementReviewPanel has actual mutation paths for exceptions", () => {
+  // Criterion L: management review actions/exceptions/decisions/waiver have actual mutation paths
+  assert.match(mrpSource, /handleAddException/, "must have exception mutation handler");
+  assert.match(mrpSource, /Add Exception|\+ Exception/i, "must expose Add Exception control");
+  assert.match(mrpSource, /exceptions: updated/, "must update exceptions array via updateManagementReview");
+});
+
+test("ManagementReviewPanel has actual mutation paths for decisions", () => {
+  // Criterion L
+  assert.match(mrpSource, /handleAddDecision/, "must have decision mutation handler");
+  assert.match(mrpSource, /Add Decision|\+ Decision/i, "must expose Add Decision control");
+  assert.match(mrpSource, /decisions: updated/, "must update decisions array via updateManagementReview");
+});
+
+test("ManagementReviewPanel has actual mutation paths for actions and resolve", () => {
+  // Criterion L
+  assert.match(mrpSource, /handleAddAction/, "must have action mutation handler");
+  assert.match(mrpSource, /Add Action|\+ Action/i, "must expose Add Action control");
+  assert.match(mrpSource, /handleResolveAction/, "must have action resolve handler");
+  assert.match(mrpSource, /is_resolved: true/, "must mark action resolved");
+  assert.match(mrpSource, /actions: updated/, "must update actions array via updateManagementReview");
+});
+
+test("ManagementReviewPanel has actual mutation path for waiver", () => {
+  // Criterion L
+  assert.match(mrpSource, /handleRecordWaiver/, "must have waiver mutation handler");
+  assert.match(mrpSource, /waiver_recorded: true/, "must set waiver_recorded=true via updateManagementReview");
+  assert.match(mrpSource, /data-testid="record-waiver-btn"/, "must have waiver button testid");
+});
+
+test("Wave6IntelligencePanel passes kpiDefinitions to ManagementReviewPanel", () => {
+  // Criterion G: definitions must be forwarded so kpi_definition_id can be resolved
+  const w6src = PANELS["Wave6IntelligencePanel.jsx"];
+  assert.match(
+    w6src,
+    /kpiDefinitions=\{state\.definitions\}/,
+    "Wave6IntelligencePanel must pass kpiDefinitions to ManagementReviewPanel"
+  );
+});

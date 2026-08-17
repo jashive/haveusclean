@@ -301,6 +301,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
           period={period}
           timezone={timezone}
           kpis={state.kpis}
+          kpiDefinitions={state.definitions}
           reviews={state.reviews}
           onChanged={refresh}
         />

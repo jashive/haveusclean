@@ -426,9 +426,10 @@ CREATE TABLE public.continuity_transaction (
 
   -- Payload integrity: SHA-256 of the canonical transaction_data JSONB snapshot.
   -- Set by trigger on INSERT; immutable (INSERT-only trigger, never overwritten).
-  -- Requires pgcrypto (available in Supabase by default).
-  -- NULL only if pgcrypto is unavailable (trigger will populate when possible).
-  payload_hash                  text        NULL,
+  -- Computed via extensions.digest() (pgcrypto installed in schema extensions
+  -- on the Have Us Clean Supabase project). NOT NULL: if extensions.digest is
+  -- unavailable the INSERT trigger raises an exception — fail closed, never NULL.
+  payload_hash                  text        NOT NULL,
 
   CONSTRAINT fk_ct_session
     FOREIGN KEY (continuity_session_id) REFERENCES public.continuity_session(id),
@@ -451,9 +452,9 @@ CREATE TABLE public.continuity_transaction (
   CONSTRAINT ck_ct_reconciled_requires_timestamp CHECK (
     reconciliation_status = 'pending' OR reconciled_at IS NOT NULL
   ),
-  -- Payload hash must be a 64-character lowercase hex string (SHA-256) when present.
+  -- Payload hash is a 64-character lowercase hex string (SHA-256). NOT NULL.
   CONSTRAINT ck_ct_payload_hash_format CHECK (
-    payload_hash IS NULL OR payload_hash ~ '^[0-9a-f]{64}$'
+    payload_hash ~ '^[0-9a-f]{64}$'
   )
 );
 
@@ -603,6 +604,13 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 BEGIN
+  -- Terminal immutability: a closed review cannot be modified at all.
+  IF OLD.review_status = 'closed' THEN
+    RAISE EXCEPTION
+      'management_review: terminal row is immutable (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
   -- Status unchanged: allow (only non-status field changes).
   IF NEW.review_status = OLD.review_status THEN
     RETURN NEW;
@@ -672,6 +680,13 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 BEGIN
+  -- Terminal immutability: a closed change control record cannot be modified.
+  IF OLD.change_status = 'closed' THEN
+    RAISE EXCEPTION
+      'change_control_record: terminal row is immutable (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
   IF NEW.change_status = OLD.change_status THEN
     RETURN NEW;
   END IF;
@@ -734,7 +749,16 @@ LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
+DECLARE
+  v_pending_count integer;
 BEGIN
+  -- Terminal immutability: a closed session cannot be modified at all.
+  IF OLD.session_status = 'closed' THEN
+    RAISE EXCEPTION
+      'continuity_session: terminal row is immutable (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
   IF NEW.session_status = OLD.session_status THEN
     RETURN NEW;
   END IF;
@@ -753,6 +777,22 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
+  -- Closure prerequisite: no unresolved transactions (unless waiver recorded).
+  -- Terminal statuses for continuity_transaction: matched, discrepancy, waived.
+  -- Pending/unresolved statuses block closure without a waiver.
+  IF NEW.session_status = 'closed' AND NOT COALESCE(NEW.waiver_recorded, false) THEN
+    SELECT COUNT(*) INTO v_pending_count
+    FROM public.continuity_transaction ct
+    WHERE ct.continuity_session_id = NEW.id
+      AND ct.reconciliation_status NOT IN ('matched', 'discrepancy', 'waived');
+    IF v_pending_count > 0 THEN
+      RAISE EXCEPTION
+        'continuity_session: cannot close — % unresolved transaction(s) pending reconciliation (row id=%)',
+        v_pending_count, OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
   RETURN NEW;
 END;
 $$;
@@ -768,7 +808,9 @@ CREATE TRIGGER trig_continuity_fsm
 
 COMMENT ON FUNCTION public.trg_enforce_continuity_fsm() IS
   'Wave 6: DB-level continuity_session FSM. '
-  'declared→fallback_active→service_restored→reconciling→reconciled→closed. SOURCE ONLY.';
+  'declared→fallback_active→service_restored→reconciling→reconciled→closed. '
+  'Closure blocked when unresolved transactions exist (unless waiver_recorded=true). '
+  'Terminal rows are immutable. SOURCE ONLY.';
 
 -- ── release_gate sequence enforcement ───────────────────────────────────────
 
@@ -781,6 +823,14 @@ AS $$
 DECLARE
   v_prev_status text;
 BEGIN
+  -- Terminal immutability: a passed gate row cannot be modified at all.
+  IF OLD.gate_status = 'passed' THEN
+    RAISE EXCEPTION
+      'release_gate: gate % (id=%) is passed — terminal evidence is immutable',
+      OLD.gate_code, OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
   -- Passed is terminal for a single gate: cannot be reverted.
   IF OLD.gate_status = 'passed' AND NEW.gate_status <> 'passed' THEN
     RAISE EXCEPTION
@@ -832,16 +882,16 @@ AS $$
 BEGIN
   -- Canonical representation: transaction_data::text (JSONB to text, stable
   -- within a PostgreSQL version for the same in-memory value).
-  -- Algorithm: SHA-256 via pgcrypto digest(). Encoded as lowercase hex (64 chars).
+  -- Algorithm: SHA-256 via extensions.digest() (pgcrypto in schema extensions,
+  -- as installed in the Have Us Clean Supabase project). Encoded as hex (64 chars).
+  -- Schema-qualified to guarantee resolution regardless of search_path.
   -- This function is INSERT-only — the hash is never silently overwritten.
-  BEGIN
-    NEW.payload_hash := encode(digest(NEW.transaction_data::text, 'sha256'), 'hex');
-  EXCEPTION
-    WHEN undefined_function THEN
-      -- pgcrypto not available; leave payload_hash NULL. The constraint
-      -- ck_ct_payload_hash_format still validates the format when non-NULL.
-      NULL;
-  END;
+  -- FAIL CLOSED: if extensions.digest is unavailable the exception propagates
+  -- and the INSERT is aborted. payload_hash is NOT NULL on continuity_transaction.
+  NEW.payload_hash := encode(
+    extensions.digest(NEW.transaction_data::text, 'sha256'),
+    'hex'
+  );
   RETURN NEW;
 END;
 $$;
@@ -857,9 +907,56 @@ CREATE TRIGGER trig_continuity_payload_hash
 
 COMMENT ON FUNCTION public.trg_set_continuity_payload_hash() IS
   'Wave 6: Computes SHA-256 payload_hash for continuity_transaction on INSERT. '
-  'Hash = encode(digest(transaction_data::text, ''sha256''), ''hex''). '
+  'Hash = encode(extensions.digest(transaction_data::text, ''sha256''), ''hex''). '
+  'Schema-qualified extensions.digest (pgcrypto in schema extensions). '
   'INSERT-only trigger — hash is immutable after row creation. '
-  'Requires pgcrypto; leaves payload_hash NULL if extension unavailable. SOURCE ONLY.';
+  'FAIL CLOSED: if extensions.digest unavailable the INSERT is aborted. SOURCE ONLY.';
+-- ── continuity_transaction field immutability (BEFORE UPDATE) ────────────────
+-- Prevents post-insertion mutation of payload_hash, transaction_data, and
+-- offline_correlation_id. The hash is bound to the captured payload at INSERT
+-- time and must remain bound to it forever.
+
+CREATE OR REPLACE FUNCTION public.trg_immute_continuity_transaction_fields()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+BEGIN
+  IF NEW.payload_hash IS DISTINCT FROM OLD.payload_hash THEN
+    RAISE EXCEPTION
+      'continuity_transaction: payload_hash is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.transaction_data IS DISTINCT FROM OLD.transaction_data THEN
+    RAISE EXCEPTION
+      'continuity_transaction: transaction_data is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.offline_correlation_id IS DISTINCT FROM OLD.offline_correlation_id THEN
+    RAISE EXCEPTION
+      'continuity_transaction: offline_correlation_id is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_immute_continuity_transaction_fields() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_immute_continuity_transaction_fields() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_immute_continuity_transaction_fields() FROM authenticated;
+
+CREATE TRIGGER trig_immute_continuity_transaction_fields
+  BEFORE UPDATE ON public.continuity_transaction
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_immute_continuity_transaction_fields();
+
+COMMENT ON FUNCTION public.trg_immute_continuity_transaction_fields() IS
+  'Wave 6: Prevents post-insertion mutation of payload_hash, transaction_data, and '
+  'offline_correlation_id on continuity_transaction. The hash must remain bound to the '
+  'captured payload. Raises P0001 on any attempt to modify these fields. SOURCE ONLY.';
+
+
 
 -- ---------------------------------------------------------------------------
 -- SECTION 3: CANONICAL EVENT VIEW
@@ -894,12 +991,16 @@ COMMENT ON FUNCTION public.trg_set_continuity_payload_hash() IS
 --                                       snapshot_taken_at
 --                                       (no jurisdiction_id)
 --
--- The Wave 1–2 sales tables (service_request, opportunity, quote,
--- quote_response, conversion_record) exist in the deployed database but their
--- DDL is NOT in this repository, so their column names cannot be verified from
--- source. They are deliberately EXCLUDED from this view: an unverified column
--- reference would abort the whole migration transaction. Sales-domain events
--- can be added in a follow-up migration once the Wave 1–2 DDL is vendored in.
+-- Wave 1–2 table column contracts independently verified against the live
+-- Supabase project (2026-08-17):
+--   public.service_request : id, organization_id, business_unit_id, created_at, requested_at
+--   public.quote_response  : id, organization_id, business_unit_id, response_type, responded_at, created_at
+-- Timestamp convention for sales.lead.created: service_request.created_at
+--   (canonical ServiceOS lead-creation timestamp, consistent with KPI seed lineage).
+-- Timestamp convention for sales.quote.accepted: quote_response.responded_at
+--   (semantically the acceptance event; responded_at is set when the response is recorded).
+-- Remaining Wave 1–2 tables (opportunity, quote, conversion_record) are excluded
+-- pending column verification.
 --
 -- security_invoker = true so that the caller's RLS policies apply to every
 -- underlying table (the view must never widen access).
@@ -1042,16 +1143,52 @@ AS
     jps.id,
     'job_profitability_snapshot'::text,
     jps.id
-  FROM public.job_profitability_snapshot jps;
+  FROM public.job_profitability_snapshot jps
+
+  UNION ALL
+
+  -- sales.lead.created
+  -- Source: service_request (independently verified 2026-08-17).
+  -- Timestamp: created_at — canonical ServiceOS lead creation timestamp.
+  SELECT
+    sr.organization_id,
+    sr.business_unit_id,
+    NULL::uuid,
+    'sales.lead.created'::text,
+    sr.created_at,
+    'service_request'::text,
+    sr.id,
+    'service_request'::text,
+    sr.id
+  FROM public.service_request sr
+
+  UNION ALL
+
+  -- sales.quote.accepted
+  -- Source: quote_response where response_type = 'accepted' (verified 2026-08-17).
+  -- Timestamp: responded_at — the point in time the acceptance was recorded.
+  SELECT
+    qr.organization_id,
+    qr.business_unit_id,
+    NULL::uuid,
+    'sales.quote.accepted'::text,
+    qr.responded_at,
+    'quote_response'::text,
+    qr.id,
+    'quote_response'::text,
+    qr.id
+  FROM public.quote_response qr
+  WHERE qr.response_type = 'accepted';
 
 -- Explicit re-assertion (idempotent) in case the CREATE VIEW option list is
 -- ignored by an older planner version.
 ALTER VIEW public.wave6_canonical_event SET (security_invoker = true);
 
 COMMENT ON VIEW public.wave6_canonical_event IS
-  'Wave 6: Read-only canonical event spine over the Wave 3/4/5 canonical tables '
-  'whose DDL is present in this repository (migrations 007, 009, 012). '
-  'Wave 1-2 sales tables are excluded because their columns cannot be verified from source. '
+  'Wave 6: Read-only canonical event spine. '
+  'Covers Wave 3/4/5 tables (migrations 007, 009, 012) plus independently verified '
+  'Wave 1-2 tables service_request (sales.lead.created) and quote_response (sales.quote.accepted). '
+  'Remaining Wave 1-2 tables (opportunity, quote, conversion_record) excluded pending column verification. '
   'security_invoker = true — caller RLS applies. SOURCE ONLY — not executed.';
 
 -- ---------------------------------------------------------------------------
@@ -1777,7 +1914,8 @@ BEGIN
       'trg_enforce_ccr_fsm',
       'trg_enforce_continuity_fsm',
       'trg_enforce_release_gate_sequence',
-      'trg_set_continuity_payload_hash'
+      'trg_set_continuity_payload_hash',
+      'trg_immute_continuity_transaction_fields'
     ])
     LOOP
       SELECT COUNT(*) INTO v_count
@@ -1791,7 +1929,7 @@ BEGIN
     END LOOP;
   END;
 
-  -- [SV-16b] payload_hash column exists on continuity_transaction
+  -- [SV-16b] payload_hash column exists on continuity_transaction and is NOT NULL
   SELECT COUNT(*) INTO v_count
   FROM information_schema.columns
   WHERE table_schema = 'public'
@@ -1800,6 +1938,35 @@ BEGIN
   IF v_count = 0 THEN
     RAISE EXCEPTION 'M014 SV-16 FAIL: payload_hash column missing from continuity_transaction';
   END IF;
+  -- Verify NOT NULL constraint
+  SELECT COUNT(*) INTO v_count
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'continuity_transaction'
+    AND column_name = 'payload_hash'
+    AND is_nullable = 'NO';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M014 SV-16 FAIL: payload_hash must be NOT NULL on continuity_transaction';
+  END IF;
+
+  -- [SV-16c] immutability trigger for continuity_transaction exists
+  SELECT COUNT(*) INTO v_count
+  FROM pg_proc p
+  JOIN pg_namespace n ON n.oid = p.pronamespace
+  WHERE n.nspname = 'public' AND p.proname = 'trg_immute_continuity_transaction_fields';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION 'M014 SV-16 FAIL: trg_immute_continuity_transaction_fields trigger function not found';
+  END IF;
+
+  -- [SV-16d] extensions.digest is available (pgcrypto in schema extensions)
+  BEGIN
+    PERFORM extensions.digest('probe'::text, 'sha256');
+  EXCEPTION
+    WHEN undefined_function THEN
+      RAISE EXCEPTION
+        'M014 SV-16 FAIL: extensions.digest not available — pgcrypto must be installed '
+        'in schema extensions before applying this migration';
+  END;
 
   RAISE NOTICE 'M014_WAVE6_INTELLIGENCE_PASS';
 END;

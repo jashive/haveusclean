@@ -3,12 +3,22 @@
 // Renders the governed management review workflow for a given period:
 //   - View and open review records (DAILY/MONTHLY/QUARTERLY/YEARLY)
 //   - Capture governed KPI snapshots (append-only evidence)
-//   - Record exceptions and decisions as supported by the schema
+//     KPI snapshot payload contract:
+//       kpi_definition_id (resolved from loaded definitions — fail closed if missing)
+//       kpi_code, definition_version, organization_id, business_unit_id,
+//       period_type, period_start, period_end, timezone,
+//       numeric_value, numerator, denominator,
+//       source_lineage, source_freshness_at
+//   - Record exceptions, decisions, and actions
+//   - Mark actions resolved
+//   - Record an explicit waiver when governance permits
 //   - Advance the review through legal lifecycle states
 //   - Close only when governance prerequisites are met
 //
 // Every mutation goes through serviceosIntelligenceClient.js.
 // No synthetic values. Unavailable data is reported truthfully.
+// No value, row_counts, source_tables, or freshness_at fields are sent
+// (those are not valid kpi_snapshot columns).
 
 import React, { useCallback, useState } from "react";
 
@@ -85,6 +95,16 @@ const styles = {
     padding: "0.3rem 0.55rem",
     cursor: "pointer",
   },
+  buttonWarning: {
+    background: "#78350f",
+    border: "none",
+    borderRadius: 4,
+    color: "#fde68a",
+    fontSize: "0.68rem",
+    fontWeight: 600,
+    padding: "0.3rem 0.55rem",
+    cursor: "pointer",
+  },
   input: {
     width: "100%",
     background: "#0a1628",
@@ -122,6 +142,20 @@ const styles = {
     background: ok ? "#14532d" : "#3f1d1d",
     color: ok ? "#86efac" : "#fca5a5",
   }),
+  subSection: {
+    marginTop: 8,
+    borderTop: "1px solid #1e3a5f",
+    paddingTop: 6,
+  },
+  itemRow: {
+    background: "#060f1f",
+    border: "1px solid #1e2d44",
+    borderRadius: 4,
+    padding: "0.3rem 0.45rem",
+    marginBottom: 4,
+    fontSize: "0.7rem",
+    color: "#cbd5e1",
+  },
 };
 
 /** Allowed next statuses for a review_status. */
@@ -133,6 +167,19 @@ function nextReviewStatuses(status) {
 /** Human-readable label for a review status. */
 function reviewStatusLabel(status) {
   return formatStatusLabel(status) ?? status ?? "—";
+}
+
+/**
+ * Resolve the active kpi_definition record for a given kpi_code.
+ * Returns null if no matching active definition is found (fail closed at callsite).
+ */
+function resolveDefinition(kpiDefinitions, kpiCode) {
+  if (!Array.isArray(kpiDefinitions) || !kpiCode) return null;
+  return (
+    kpiDefinitions.find(
+      (d) => d.code === kpiCode && d.active !== false
+    ) ?? null
+  );
 }
 
 // ── Sub-component: create a new review record ────────────────────────────────
@@ -192,8 +239,15 @@ function CreateReviewForm({ session, organizationId, businessUnitId, periodType,
 }
 
 // ── Sub-component: capture KPI snapshot ─────────────────────────────────────
+//
+// Resolves kpi_definition_id from the loaded kpiDefinitions for each KPI.
+// Fails closed: if no active definition is found, that KPI snapshot is skipped
+// with a warning rather than sending an invalid payload to the database.
+// Sends only valid kpi_snapshot columns: numeric_value, source_lineage,
+// source_freshness_at, kpi_definition_id, definition_version.
+// Never sends value, row_counts, source_tables, or freshness_at.
 
-function SnapshotCaptureButton({ session, organizationId, businessUnitId, periodType, period, kpis, timezone, onCaptured }) {
+function SnapshotCaptureButton({ session, organizationId, businessUnitId, periodType, period, kpis, kpiDefinitions, timezone, onCaptured }) {
   const [capturing, setCapturing] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
@@ -207,25 +261,36 @@ function SnapshotCaptureButton({ session, organizationId, businessUnitId, period
     setError(null);
     setSuccess(null);
     const errors = [];
+    const skipped = [];
     let capturedCount = 0;
     for (const kpi of kpis) {
       if (kpi.unavailable === true) continue;
       if (kpi.value === null || kpi.value === undefined) continue;
+
+      // Resolve the active governed definition for this kpi_code.
+      const definition = resolveDefinition(kpiDefinitions, kpi.kpiCode);
+      if (!definition) {
+        // Fail closed: do not capture a snapshot without a valid definition.
+        skipped.push(kpi.kpiCode);
+        continue;
+      }
+
       try {
         await captureKpiSnapshot(session, {
+          kpi_definition_id: definition.id,
+          kpi_code: kpi.kpiCode,
+          definition_version: definition.definition_version ?? "1",
           organization_id: organizationId,
           business_unit_id: businessUnitId ?? null,
-          kpi_code: kpi.kpiCode,
           period_type: periodType,
           period_start: period.periodStart.toISOString(),
           period_end: period.periodEnd.toISOString(),
           timezone,
-          value: kpi.value,
+          numeric_value: kpi.value,
           numerator: kpi.numerator ?? null,
           denominator: kpi.denominator ?? null,
-          row_counts: kpi.rowCounts ?? null,
-          source_tables: kpi.sourceTables ?? null,
-          freshness_at: kpi.freshnessAt ?? null,
+          source_lineage: kpi.sourceLineage ?? {},
+          source_freshness_at: kpi.freshnessAt ?? null,
         });
         capturedCount += 1;
       } catch (err) {
@@ -237,13 +302,16 @@ function SnapshotCaptureButton({ session, organizationId, businessUnitId, period
       }
     }
     setCapturing(false);
+    const parts = [];
+    if (capturedCount > 0) parts.push(`Captured ${capturedCount} snapshot(s).`);
+    if (skipped.length > 0) parts.push(`Skipped ${skipped.length} (no active definition): ${skipped.join(", ")}.`);
     if (errors.length > 0) {
       setError(`Partial capture — ${errors.length} error(s): ${errors.join("; ")}`);
     } else {
-      setSuccess(`Captured ${capturedCount} KPI snapshot(s) for this period.`);
-      if (onCaptured) onCaptured();
+      setSuccess(parts.join(" ") || "Nothing to capture.");
+      if (capturedCount > 0 && onCaptured) onCaptured();
     }
-  }, [session, organizationId, businessUnitId, periodType, period, kpis, timezone, onCaptured]);
+  }, [session, organizationId, businessUnitId, periodType, period, kpis, kpiDefinitions, timezone, onCaptured]);
 
   return (
     <div>
@@ -262,9 +330,66 @@ function SnapshotCaptureButton({ session, organizationId, businessUnitId, period
   );
 }
 
+// ── Sub-component: add exception / decision / action inline forms ────────────
+
+function AddItemForm({ label, placeholder, onAdd }) {
+  const [text, setText] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [open, setOpen] = useState(false);
+
+  const handleAdd = useCallback(async () => {
+    if (!text.trim()) return;
+    setSaving(true);
+    setError(null);
+    try {
+      await onAdd(text.trim());
+      setText("");
+      setOpen(false);
+    } catch (err) {
+      setError(formatErrorMessage(err));
+    } finally {
+      setSaving(false);
+    }
+  }, [text, onAdd]);
+
+  if (!open) {
+    return (
+      <button type="button" style={styles.buttonSecondary} onClick={() => setOpen(true)}>
+        + {label}
+      </button>
+    );
+  }
+  return (
+    <div style={{ marginTop: 4 }}>
+      <textarea
+        style={styles.textarea}
+        placeholder={placeholder}
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        maxLength={2000}
+      />
+      <div style={styles.actions}>
+        <button
+          type="button"
+          style={saving || !text.trim() ? styles.buttonDisabled : styles.button}
+          onClick={handleAdd}
+          disabled={saving || !text.trim()}
+        >
+          {saving ? "Saving…" : `Add ${label}`}
+        </button>
+        <button type="button" style={styles.buttonSecondary} onClick={() => { setText(""); setOpen(false); }}>
+          Cancel
+        </button>
+      </div>
+      {error && <div style={styles.error}>{error}</div>}
+    </div>
+  );
+}
+
 // ── Sub-component: single review record row ──────────────────────────────────
 
-function ReviewRow({ session, review, kpis, periodType, period, timezone, onChanged }) {
+function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, timezone, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [summary, setSummary] = useState(review.summary ?? "");
   const [saving, setSaving] = useState(false);
@@ -273,6 +398,10 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
   const canClose = canCloseManagementReview(review);
   const nextStatuses = nextReviewStatuses(review.review_status);
   const isTerminal = review.review_status === "closed";
+
+  const currentExceptions = Array.isArray(review.exceptions) ? review.exceptions : [];
+  const currentDecisions = Array.isArray(review.decisions) ? review.decisions : [];
+  const currentActions = Array.isArray(review.actions) ? review.actions : [];
 
   const handleSaveSummary = useCallback(async () => {
     setSaving(true);
@@ -315,6 +444,52 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
     }
   }, [session, review, onChanged]);
 
+  const handleAddException = useCallback(async (text) => {
+    const updated = [...currentExceptions, { id: crypto.randomUUID(), text, recorded_at: new Date().toISOString() }];
+    await updateManagementReview(session, review.id, {
+      exceptions: updated,
+      current_status: review.review_status,
+    });
+    if (onChanged) onChanged();
+  }, [session, review.id, review.review_status, currentExceptions, onChanged]);
+
+  const handleAddDecision = useCallback(async (text) => {
+    const updated = [...currentDecisions, { id: crypto.randomUUID(), text, recorded_at: new Date().toISOString() }];
+    await updateManagementReview(session, review.id, {
+      decisions: updated,
+      current_status: review.review_status,
+    });
+    if (onChanged) onChanged();
+  }, [session, review.id, review.review_status, currentDecisions, onChanged]);
+
+  const handleAddAction = useCallback(async (text) => {
+    const updated = [...currentActions, { id: crypto.randomUUID(), text, is_resolved: false, created_at: new Date().toISOString() }];
+    await updateManagementReview(session, review.id, {
+      actions: updated,
+      current_status: review.review_status,
+    });
+    if (onChanged) onChanged();
+  }, [session, review.id, review.review_status, currentActions, onChanged]);
+
+  const handleResolveAction = useCallback(async (actionId) => {
+    const updated = currentActions.map((a) =>
+      a.id === actionId ? { ...a, is_resolved: true, resolved_at: new Date().toISOString() } : a
+    );
+    await updateManagementReview(session, review.id, {
+      actions: updated,
+      current_status: review.review_status,
+    });
+    if (onChanged) onChanged();
+  }, [session, review.id, review.review_status, currentActions, onChanged]);
+
+  const handleRecordWaiver = useCallback(async () => {
+    await updateManagementReview(session, review.id, {
+      waiver_recorded: true,
+      current_status: review.review_status,
+    });
+    if (onChanged) onChanged();
+  }, [session, review.id, review.review_status, onChanged]);
+
   return (
     <div style={styles.row}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
@@ -332,9 +507,9 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
         Opened: {review.opened_at ? formatTimestamp(review.opened_at, review.timezone) : "—"} ·
         Closed: {review.closed_at ? formatTimestamp(review.closed_at, review.timezone) : "—"}
         <br />
-        Actions: {Array.isArray(review.actions) ? review.actions.length : 0} ·
-        Exceptions: {Array.isArray(review.exceptions) ? review.exceptions.length : 0} ·
-        Decisions: {Array.isArray(review.decisions) ? review.decisions.length : 0}
+        Actions: {currentActions.length} ·
+        Exceptions: {currentExceptions.length} ·
+        Decisions: {currentDecisions.length}
         {review.waiver_recorded && <span style={{ color: "#fbbf24" }}> · Waiver recorded</span>}
       </div>
 
@@ -352,6 +527,51 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
             onChange={(e) => setSummary(e.target.value)}
             maxLength={2000}
           />
+        </div>
+      )}
+
+      {/* Exceptions */}
+      {currentExceptions.length > 0 && (
+        <div style={styles.subSection}>
+          <div style={{ ...styles.rowMeta, fontWeight: 700, marginBottom: 4 }}>Exceptions</div>
+          {currentExceptions.map((ex) => (
+            <div key={ex.id} style={styles.itemRow}>{ex.text}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Decisions */}
+      {currentDecisions.length > 0 && (
+        <div style={styles.subSection}>
+          <div style={{ ...styles.rowMeta, fontWeight: 700, marginBottom: 4 }}>Decisions</div>
+          {currentDecisions.map((dec) => (
+            <div key={dec.id} style={styles.itemRow}>{dec.text}</div>
+          ))}
+        </div>
+      )}
+
+      {/* Actions */}
+      {currentActions.length > 0 && (
+        <div style={styles.subSection}>
+          <div style={{ ...styles.rowMeta, fontWeight: 700, marginBottom: 4 }}>Actions</div>
+          {currentActions.map((act) => (
+            <div key={act.id} style={{ ...styles.itemRow, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ textDecoration: act.is_resolved ? "line-through" : "none", color: act.is_resolved ? "#64748b" : "#cbd5e1" }}>
+                {act.text}
+              </span>
+              {!isTerminal && !act.is_resolved && (
+                <button
+                  type="button"
+                  style={{ ...styles.buttonSecondary, marginLeft: 6, padding: "0.15rem 0.35rem" }}
+                  onClick={() => handleResolveAction(act.id)}
+                  data-testid={`resolve-action-${act.id}`}
+                >
+                  Resolve
+                </button>
+              )}
+              {act.is_resolved && <span style={{ color: "#86efac", fontSize: "0.62rem", marginLeft: 6 }}>✓</span>}
+            </div>
+          ))}
         </div>
       )}
 
@@ -382,19 +602,18 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
             );
           })}
 
-          {/* Snapshot capture for this review period */}
-          {!isTerminal && (
-            <SnapshotCaptureButton
-              session={session}
-              organizationId={review.organization_id}
-              businessUnitId={review.business_unit_id}
-              periodType={review.period_type}
-              period={period}
-              kpis={kpis}
-              timezone={review.timezone}
-              onCaptured={onChanged}
-            />
-          )}
+          {/* Snapshot capture */}
+          <SnapshotCaptureButton
+            session={session}
+            organizationId={review.organization_id}
+            businessUnitId={review.business_unit_id}
+            periodType={review.period_type}
+            period={period}
+            kpis={kpis}
+            kpiDefinitions={kpiDefinitions}
+            timezone={review.timezone}
+            onCaptured={onChanged}
+          />
 
           {/* Edit summary */}
           {!editing && (
@@ -425,6 +644,40 @@ function ReviewRow({ session, review, kpis, periodType, period, timezone, onChan
               </button>
             </>
           )}
+
+          {/* Add exception */}
+          <AddItemForm
+            label="Exception"
+            placeholder="Describe the exception…"
+            onAdd={handleAddException}
+          />
+
+          {/* Add decision */}
+          <AddItemForm
+            label="Decision"
+            placeholder="Describe the decision…"
+            onAdd={handleAddDecision}
+          />
+
+          {/* Add action */}
+          <AddItemForm
+            label="Action"
+            placeholder="Describe the action item…"
+            onAdd={handleAddAction}
+          />
+
+          {/* Record waiver */}
+          {!review.waiver_recorded && (
+            <button
+              type="button"
+              style={styles.buttonWarning}
+              onClick={handleRecordWaiver}
+              data-testid="record-waiver-btn"
+              title="Record an explicit governance waiver for this review period"
+            >
+              Record Waiver
+            </button>
+          )}
         </div>
       )}
 
@@ -449,6 +702,7 @@ export default function ManagementReviewPanel({
   period,
   timezone,
   kpis = [],
+  kpiDefinitions = [],
   reviews: initialReviews = [],
   onChanged,
 }) {
@@ -498,6 +752,7 @@ export default function ManagementReviewPanel({
           session={session}
           review={review}
           kpis={kpis}
+          kpiDefinitions={kpiDefinitions}
           periodType={periodType}
           period={period}
           timezone={timezone}
