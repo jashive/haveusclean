@@ -122,14 +122,11 @@ test("sales.lead.created and sales.quote.accepted are in the canonical event vie
   assert.ok(viewBody.includes("'sales.lead.created'"), "missing sales.lead.created event");
   assert.ok(viewBody.includes("'sales.quote.accepted'"), "missing sales.quote.accepted event");
   // Wave 1-2 tables without verified columns remain excluded.
-  // Use regex with word boundary to avoid false matches (e.g. quote_response contains "quote").
-  for (const table of ["opportunity", "quote", "conversion_record"]) {
-    assert.doesNotMatch(
-      viewBody,
-      new RegExp(`FROM public\.${table}\b(?!_)`),
-      `view must not select from unverified Wave 1-2 table ${table}`
-    );
-  }
+  // Regex literals used (not new RegExp) to avoid template-literal escape ambiguity.
+  // The negative lookahead (?![a-z_]) guards against substring matches like "quote_response".
+  assert.doesNotMatch(viewBody, /FROM public\.opportunity(?![a-z_])/, "opportunity must remain excluded");
+  assert.doesNotMatch(viewBody, /FROM public\.quote(?![a-z_])/, "quote table must remain excluded");
+  assert.doesNotMatch(viewBody, /FROM public\.conversion_record(?![a-z_])/, "conversion_record must remain excluded");
 });
 
 test("Wave 1-2 table exclusion is documented with reason in migration comments", () => {
@@ -572,7 +569,7 @@ test("Wave 1/2 exclusion is documented selectively — verified tables are inclu
   assert.ok(viewBody.includes("'sales.quote.accepted'"), "sales.quote.accepted must be in view");
   // Unverified Wave 1-2 tables still excluded
   assert.doesNotMatch(viewBody, /'sales\.lead\.created'.*opportunity|FROM public\.opportunity/);
-  assert.doesNotMatch(viewBody, /FROM public\.quote\b(?!_)/, "quote table not verified — must remain excluded");
+  assert.doesNotMatch(viewBody, /FROM public\.quote(?![a-z_])/, "quote table not verified — must remain excluded");
   assert.ok(!viewBody.includes("FROM public.conversion_record"), "conversion_record must remain excluded");
 });
 
