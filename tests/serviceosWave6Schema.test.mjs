@@ -265,8 +265,9 @@ test("cross-wave hardening tolerates absent tables", () => {
 });
 
 test("function EXECUTE hardening is present", () => {
+  const escapeRegExp = (value) => value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   for (const fn of ["current_worker_id(uuid)", "worker_has_active_assignment(uuid)"]) {
-    const escaped = fn.replace(/[()]/g, "\\$&");
+    const escaped = escapeRegExp(fn);
     assert.match(sql, new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${escaped} FROM PUBLIC;`));
     assert.match(sql, new RegExp(`REVOKE EXECUTE ON FUNCTION public\\.${escaped} FROM anon;`));
     assert.match(
