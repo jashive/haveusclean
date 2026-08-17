@@ -138,7 +138,19 @@ COMMENT ON TABLE public.kpi_snapshot IS
   'Duplicate captures are prevented by uq_ks_period_scope. '
   'SOURCE ONLY — not executed.';
 
--- Duplicate-capture prevention (NULL-safe via COALESCE sentinel).
+-- Duplicate-capture prevention.
+--
+-- PostgreSQL treats NULLs as distinct inside a UNIQUE constraint, so a plain
+-- table-level UNIQUE over (…, business_unit_id, jurisdiction_id, …) would NOT
+-- stop two identical org-wide captures (both with NULL scope columns) from
+-- being inserted. Dropping the nullable scope columns instead is also wrong —
+-- it would block two different business units from capturing the same KPI for
+-- the same period.
+--
+-- The COALESCE sentinel expression below is therefore used: it is NULL-safe,
+-- keeps the business-unit / jurisdiction scope in the key, and requires an
+-- expression index rather than a table constraint. Behaviour is equivalent to
+-- UNIQUE NULLS NOT DISTINCT (PostgreSQL 15+) while remaining portable.
 CREATE UNIQUE INDEX uq_ks_period_scope
   ON public.kpi_snapshot (
     kpi_code,

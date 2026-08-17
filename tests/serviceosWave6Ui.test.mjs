@@ -25,7 +25,7 @@ const PANELS = {
 const formatters = read(path.join(featureDir, "wave6Formatters.js"));
 const clientSource = read(path.join(libDir, "serviceosIntelligenceClient.js"));
 const utilsSource = read(path.join(libDir, "serviceosIntelligenceUtils.js"));
-const appSource = read(path.join(here, "..", "src", "App.jsx"));
+const mainSource = read(path.join(here, "..", "src", "main.jsx"));
 const packageJson = JSON.parse(read(path.join(here, "..", "package.json")));
 
 const ALL_WAVE6_SOURCES = { ...PANELS, "wave6Formatters.js": formatters };
@@ -34,17 +34,34 @@ const ALL_WAVE6_SOURCES = { ...PANELS, "wave6Formatters.js": formatters };
 
 test("Wave 6 is feature-flagged by VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED", () => {
   assert.match(clientSource, /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
-  assert.match(appSource, /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
+  assert.match(mainSource, /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
 });
 
-test("App.jsx mounts Wave6IntelligencePanel lazily behind the flag", () => {
+test("main.jsx mounts Wave6IntelligencePanel lazily behind the flag", () => {
+  // Wave 6 follows the existing pilot-panel mounting pattern in main.jsx:
+  // the lazy import itself is gated so the chunk is never requested when off.
   assert.match(
-    appSource,
-    /lazy\(\(\) => import\("\.\/features\/intelligence\/Wave6IntelligencePanel"\)\)/
+    mainSource,
+    /const WAVE6_PILOT_UI =[\s\S]*?VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === 'true'/
   );
-  assert.match(appSource, /<Wave6IntelligenceMount \/>/);
-  assert.match(appSource, /if \(!WAVE6_INTELLIGENCE_UI\) return null;/);
-  assert.match(appSource, /<Suspense fallback=\{null\}>/);
+  assert.match(
+    mainSource,
+    /const Wave6IntelligencePanel = WAVE6_PILOT_UI\s*\?\s*lazy\(\(\) => import\('\.\/features\/intelligence\/Wave6IntelligencePanel'\)\)\s*:\s*null/
+  );
+  assert.match(mainSource, /\{Wave6IntelligencePanel && \(/);
+  assert.match(
+    mainSource,
+    /<Wave6IntelligencePanel\s+session=\{ctx\?\.session \?\? null\}\s+revenueContext=\{ctx\?\.revenueContext \?\? null\}/
+  );
+});
+
+test("Wave 6 mounts inside PilotPanelMount alongside the other pilot panels", () => {
+  const mountBody = mainSource.slice(
+    mainSource.indexOf("function PilotPanelMount()"),
+    mainSource.indexOf("ReactDOM.createRoot")
+  );
+  assert.ok(mountBody.includes("Wave6IntelligencePanel"), "Wave 6 is not in PilotPanelMount");
+  assert.ok(mountBody.includes("ServiceOSWave5FinancePilotPanel"));
 });
 
 test("client fails closed when the Wave 6 flag is off", () => {
@@ -75,10 +92,10 @@ test("no Wave 6 UI contains a no-op or alert-only handler", () => {
   }
 });
 
-test("App.jsx no longer contains dead alert-only controls or coming-soon status", () => {
-  assert.doesNotMatch(appSource, /Coming Soon/);
-  assert.doesNotMatch(appSource, /onClick=\{\(\)=>alert\(/);
-  assert.doesNotMatch(appSource, /onClick=\{\(\) => alert\(/);
+test("Wave 6 integration does not modify App.jsx", () => {
+  const appSource = read(path.join(here, "..", "src", "App.jsx"));
+  assert.doesNotMatch(appSource, /Wave6/, "Wave 6 must be mounted from main.jsx, not App.jsx");
+  assert.doesNotMatch(appSource, /features\/intelligence/);
 });
 
 // ── Real client wiring ───────────────────────────────────────────────────────

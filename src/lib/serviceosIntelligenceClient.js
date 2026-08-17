@@ -9,6 +9,12 @@
 //   - fail closed: any non-OK response throws a descriptive error
 //   - no token, header, or session value is ever logged
 //
+// Call convention (identical to serviceosWave5FinanceClient.js): every exported
+// function accepts the caller's `session` for call-site symmetry, but the value
+// is intentionally unused — authenticatedRestFetchWithRefresh resolves and
+// refreshes the stored session itself, so no credential is ever passed around
+// or serialized by this module.
+//
 // Wave 6 tables:
 //   kpi_definition, kpi_snapshot, management_review, change_control_record,
 //   dependency_edge, continuity_session, continuity_transaction,

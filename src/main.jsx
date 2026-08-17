@@ -23,6 +23,11 @@ const WAVE5_PILOT_UI =
   import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === 'true' &&
   import.meta.env?.VITE_SERVICEOS_WAVE5_PILOT_UI === 'true'
 
+// Wave 6: Intelligence / governance / continuity — defaults false
+const WAVE6_PILOT_UI =
+  typeof import.meta !== 'undefined' &&
+  import.meta.env?.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === 'true'
+
 const ServiceOSPilotPanel = REVENUE_PILOT_UI
   ? lazy(() => import('./features/pilot/ServiceOSPilotPanel'))
   : null
@@ -37,6 +42,10 @@ const ServiceOSWave4PilotPanel = WAVE4_PILOT_UI
 
 const ServiceOSWave5FinancePilotPanel = WAVE5_PILOT_UI
   ? lazy(() => import('./features/pilot/ServiceOSWave5FinancePilotPanel'))
+  : null
+
+const Wave6IntelligencePanel = WAVE6_PILOT_UI
+  ? lazy(() => import('./features/intelligence/Wave6IntelligencePanel'))
   : null
 
 function PilotPanelMount() {
@@ -70,6 +79,14 @@ function PilotPanelMount() {
       {ServiceOSWave5FinancePilotPanel && (
         <Suspense fallback={null}>
           <ServiceOSWave5FinancePilotPanel
+            session={ctx?.session ?? null}
+            revenueContext={ctx?.revenueContext ?? null}
+          />
+        </Suspense>
+      )}
+      {Wave6IntelligencePanel && (
+        <Suspense fallback={null}>
+          <Wave6IntelligencePanel
             session={ctx?.session ?? null}
             revenueContext={ctx?.revenueContext ?? null}
           />
