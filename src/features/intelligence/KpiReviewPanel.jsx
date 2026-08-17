@@ -82,6 +82,10 @@ export default function KpiReviewPanel({
                 const definition = definitionByCode.get(kpi.kpiCode) ?? null;
                 const unit = definition?.unit ?? null;
                 const isRate = unit === "ratio";
+                const unavailable = kpi.unavailable === true;
+                const knownRowCounts = Object.values(kpi.rowCounts ?? {}).filter(
+                  (count) => typeof count === "number"
+                );
                 return (
                   <div key={kpi.kpiCode} style={styles.card}>
                     <div style={styles.cardName}>{definition?.name ?? kpi.kpiCode}</div>
@@ -91,13 +95,15 @@ export default function KpiReviewPanel({
                     <div style={styles.cardMeta}>
                       {periodLabel ? `${periodLabel} · ${timezone}` : timezone}
                       <br />
-                      {isRate
-                        ? describeRateBasis(kpi.numerator, kpi.denominator)
-                        : `Rows: ${
-                            kpi.rowCounts
-                              ? Object.values(kpi.rowCounts).reduce((a, b) => a + b, 0)
-                              : NO_DATA
-                          }`}
+                      {unavailable
+                        ? `Source unavailable: ${formatLineage(kpi.unavailableSources)}`
+                        : isRate
+                          ? describeRateBasis(kpi.numerator, kpi.denominator)
+                          : `Rows: ${
+                              knownRowCounts.length > 0
+                                ? knownRowCounts.reduce((a, b) => a + b, 0)
+                                : NO_DATA
+                            }`}
                       <br />
                       Source: {formatLineage(kpi.sourceTables ?? definition?.source_lineage?.tables)}
                       <br />

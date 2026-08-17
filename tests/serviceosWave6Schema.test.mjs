@@ -9,11 +9,10 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const migrationsDir = path.join(here, "..", "supabase", "migrations");
+const read = (p) => readFileSync(p, "utf8");
 const migrationPath = path.join(
-  here,
-  "..",
-  "supabase",
-  "migrations",
+  migrationsDir,
   "014_wave6_intelligence_governance_continuity.sql"
 );
 const sql = readFileSync(migrationPath, "utf8");
@@ -60,12 +59,11 @@ test("wave6_canonical_event is SECURITY INVOKER", () => {
 
 test("canonical event view emits the governed event names", () => {
   const eventNames = [
-    "sales.lead.created",
-    "sales.quote.accepted",
     "ops.job.created",
     "ops.work.completed",
     "quality.qa.passed",
     "quality.exception.opened",
+    "quality.outcome.reclean_requested",
     "finance.invoice.requested",
     "finance.payment.observed",
     "finance.payable.approved",
@@ -73,6 +71,61 @@ test("canonical event view emits the governed event names", () => {
   ];
   for (const name of eventNames) {
     assert.ok(sql.includes(`'${name}'`), `missing canonical event ${name}`);
+  }
+});
+
+test("canonical event view only references tables whose DDL is in this repo", () => {
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event")
+  );
+  const referenced = [...viewBody.matchAll(/FROM public\.(\w+)/g)].map((m) => m[1]);
+  assert.ok(referenced.length > 0, "view references no tables");
+
+  const vendoredDdl = [
+    "007_wave3_operations.sql",
+    "009_wave4_delivery_quality_gaps.sql",
+    "012_wave5_finance.sql",
+  ]
+    .map((f) => read(path.join(migrationsDir, f)))
+    .join("\n");
+
+  for (const table of new Set(referenced)) {
+    assert.ok(
+      vendoredDdl.includes(`CREATE TABLE public.${table} (`),
+      `wave6_canonical_event references public.${table}, whose CREATE TABLE is not in migrations 007/009/012`
+    );
+  }
+});
+
+test("Wave 1-2 sales tables are excluded from the canonical event view", () => {
+  const viewBody = sql.slice(
+    sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
+    sql.indexOf("ALTER VIEW public.wave6_canonical_event")
+  );
+  for (const table of [
+    "service_request",
+    "opportunity",
+    "quote",
+    "quote_response",
+    "conversion_record",
+  ]) {
+    assert.ok(
+      !viewBody.includes(`FROM public.${table}`),
+      `view must not select from unverified Wave 1-2 table ${table}`
+    );
+  }
+});
+
+test("sales KPI seeds declare their unverified Wave 1-2 lineage", () => {
+  const salesSeeds = sql.match(/\('sales\.[a-z_]+',[\s\S]*?'1', true\)/g) ?? [];
+  assert.equal(salesSeeds.length, 6, "expected 6 seeded sales KPIs");
+  for (const seed of salesSeeds) {
+    assert.ok(seed.includes('"wave":"1-2"'), `sales seed missing wave tag: ${seed.slice(0, 60)}`);
+    assert.ok(
+      seed.includes('"in_canonical_event_view":false'),
+      `sales seed missing canonical-view tag: ${seed.slice(0, 60)}`
+    );
   }
 });
 

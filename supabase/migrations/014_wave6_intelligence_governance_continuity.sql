@@ -558,55 +558,60 @@ CREATE INDEX idx_rg_sequence          ON public.release_gate (sequence_order);
 -- ---------------------------------------------------------------------------
 -- SECTION 3: CANONICAL EVENT VIEW
 -- ---------------------------------------------------------------------------
--- Read-only canonical event spine over Wave 2–5 tables that are known to exist.
+-- Read-only canonical event spine.
+--
+-- SCOPE RULE: this view references ONLY tables whose DDL is present in this
+-- repository's migration history — 007 (Wave 3), 009 (Wave 4) and 012 (Wave 5).
+-- Every column below was verified against those files:
+--
+--   operational_job            007:59   organization_id, business_unit_id,
+--                                       jurisdiction_id, created_at
+--   work_order                 007:252  organization_id, business_unit_id,
+--                                       jurisdiction_id, work_order_status,
+--                                       service_completed_at, updated_at
+--   qa_inspection              007:472  organization_id, business_unit_id,
+--                                       inspection_status, inspected_at,
+--                                       updated_at   (no jurisdiction_id)
+--   service_exception          009:218  organization_id, business_unit_id,
+--                                       reported_at  (no jurisdiction_id)
+--   customer_outcome           009:299  organization_id, business_unit_id,
+--                                       outcome_type, reported_at
+--                                       (no jurisdiction_id)
+--   invoice_request            012:87   organization_id, business_unit_id,
+--                                       jurisdiction_id, created_at
+--   payment_observation        012:235  organization_id, business_unit_id,
+--                                       observed_at  (no jurisdiction_id)
+--   contractor_payable         012:358  organization_id, business_unit_id,
+--                                       payable_status, approved_at,
+--                                       created_at   (no jurisdiction_id)
+--   job_profitability_snapshot 012:428  organization_id, business_unit_id,
+--                                       snapshot_taken_at
+--                                       (no jurisdiction_id)
+--
+-- The Wave 1–2 sales tables (service_request, opportunity, quote,
+-- quote_response, conversion_record) exist in the deployed database but their
+-- DDL is NOT in this repository, so their column names cannot be verified from
+-- source. They are deliberately EXCLUDED from this view: an unverified column
+-- reference would abort the whole migration transaction. Sales-domain events
+-- can be added in a follow-up migration once the Wave 1–2 DDL is vendored in.
+--
 -- security_invoker = true so that the caller's RLS policies apply to every
 -- underlying table (the view must never widen access).
 
 CREATE VIEW public.wave6_canonical_event
 WITH (security_invoker = true)
 AS
-  -- sales.lead.created
-  SELECT
-    sr.organization_id                        AS organization_id,
-    sr.business_unit_id                       AS business_unit_id,
-    NULL::uuid                                AS jurisdiction_id,
-    'sales.lead.created'::text                AS event_name,
-    sr.created_at                             AS occurred_at,
-    'service_request'::text                   AS entity_type,
-    sr.id                                     AS entity_id,
-    'service_request'::text                   AS source_table,
-    sr.id                                     AS source_id
-  FROM public.service_request sr
-
-  UNION ALL
-
-  -- sales.quote.accepted
-  SELECT
-    qr.organization_id,
-    qr.business_unit_id,
-    NULL::uuid,
-    'sales.quote.accepted'::text,
-    qr.created_at,
-    'quote_response'::text,
-    qr.id,
-    'quote_response'::text,
-    qr.id
-  FROM public.quote_response qr
-  WHERE qr.response_type = 'accepted'
-
-  UNION ALL
-
   -- ops.job.created
   SELECT
-    oj.organization_id,
-    oj.business_unit_id,
-    oj.jurisdiction_id,
-    'ops.job.created'::text,
-    oj.created_at,
-    'operational_job'::text,
-    oj.id,
-    'operational_job'::text,
-    oj.id
+    oj.organization_id                        AS organization_id,
+    oj.business_unit_id                       AS business_unit_id,
+    oj.jurisdiction_id                        AS jurisdiction_id,
+    'ops.job.created'::text                   AS event_name,
+    oj.created_at                             AS occurred_at,
+    'operational_job'::text                   AS entity_type,
+    oj.id                                     AS entity_id,
+    'operational_job'::text                   AS source_table,
+    oj.id                                     AS source_id
   FROM public.operational_job oj
 
   UNION ALL
@@ -738,7 +743,9 @@ AS
 ALTER VIEW public.wave6_canonical_event SET (security_invoker = true);
 
 COMMENT ON VIEW public.wave6_canonical_event IS
-  'Wave 6: Read-only canonical event spine over Wave 2–5 canonical tables. '
+  'Wave 6: Read-only canonical event spine over the Wave 3/4/5 canonical tables '
+  'whose DDL is present in this repository (migrations 007, 009, 012). '
+  'Wave 1-2 sales tables are excluded because their columns cannot be verified from source. '
   'security_invoker = true — caller RLS applies. SOURCE ONLY — not executed.';
 
 -- ---------------------------------------------------------------------------
@@ -1011,45 +1018,54 @@ GRANT  EXECUTE ON FUNCTION public.worker_has_active_assignment(uuid) TO service_
 -- ---------------------------------------------------------------------------
 -- SECTION 10: GOVERNED KPI DEFINITION SEEDS
 -- ---------------------------------------------------------------------------
+-- Provenance note: the six `sales.*` KPIs below are sourced from Wave 1-2
+-- tables (service_request, opportunity, quote, quote_response,
+-- conversion_record). Those tables exist in the deployed database but their
+-- DDL is NOT vendored into this repository, so their columns cannot be
+-- verified from source. Their lineage is therefore tagged
+-- "wave":"1-2" / "in_canonical_event_view":false, and they are intentionally
+-- absent from public.wave6_canonical_event. Everything from
+-- `operations.*` onwards is sourced from migrations 007/009/012 and IS
+-- represented in the canonical event view.
 
 INSERT INTO public.kpi_definition
   (code, name, domain, description, unit, aggregation_type, period_support,
    source_lineage, formula_code, definition_version, active)
 VALUES
   ('sales.leads_created', 'Leads Created', 'sales',
-   'Count of canonical service requests created in period.', 'count', 'count',
+   'Count of canonical service requests created in period. Wave 1-2 table (service_request) — DDL not vendored in this repository.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["service_request"],"filter":null,"timestamp":"created_at"}'::jsonb,
+   '{"tables":["service_request"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'count(service_request)', '1', true),
 
   ('sales.opportunities_created', 'Opportunities Created', 'sales',
-   'Count of opportunities created in period.', 'count', 'count',
+   'Count of opportunities created in period. Wave 1-2 table (opportunity) — DDL not vendored in this repository.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["opportunity"],"filter":null,"timestamp":"created_at"}'::jsonb,
+   '{"tables":["opportunity"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'count(opportunity)', '1', true),
 
   ('sales.quotes_created', 'Quotes Created', 'sales',
-   'Count of quotes created in period.', 'count', 'count',
+   'Count of quotes created in period. Wave 1-2 table (quote) — DDL not vendored in this repository.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["quote"],"filter":null,"timestamp":"created_at"}'::jsonb,
+   '{"tables":["quote"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'count(quote)', '1', true),
 
   ('sales.quotes_accepted', 'Quotes Accepted', 'sales',
-   'Count of quote responses with response_type = accepted.', 'count', 'count',
+   'Count of quote responses with response_type = accepted. Wave 1-2 table (quote_response) — DDL not vendored in this repository.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["quote_response"],"filter":"response_type=accepted","timestamp":"created_at"}'::jsonb,
+   '{"tables":["quote_response"],"filter":"response_type=accepted","timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'count(quote_response where response_type=accepted)', '1', true),
 
   ('sales.conversions', 'Conversions', 'sales',
-   'Count of conversion records created in period.', 'count', 'count',
+   'Count of conversion records created in period. Wave 1-2 table (conversion_record) — DDL not vendored in this repository.', 'count', 'count',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["conversion_record"],"filter":null,"timestamp":"created_at"}'::jsonb,
+   '{"tables":["conversion_record"],"filter":null,"timestamp":"created_at","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'count(conversion_record)', '1', true),
 
   ('sales.lead_to_conversion_rate', 'Lead to Conversion Rate', 'sales',
-   'Conversions divided by leads created. NULL when no leads exist.', 'ratio', 'rate',
+   'Conversions divided by leads created. NULL when no leads exist. Wave 1-2 tables (conversion_record, service_request) — DDL not vendored in this repository.', 'ratio', 'rate',
    ARRAY['DAILY','MONTHLY','QUARTERLY','YEARLY'],
-   '{"tables":["conversion_record","service_request"],"numerator":"sales.conversions","denominator":"sales.leads_created"}'::jsonb,
+   '{"tables":["conversion_record","service_request"],"numerator":"sales.conversions","denominator":"sales.leads_created","wave":"1-2","in_canonical_event_view":false}'::jsonb,
    'sales.conversions / sales.leads_created', '1', true),
 
   ('operations.jobs_created', 'Jobs Created', 'operations',

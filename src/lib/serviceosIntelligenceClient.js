@@ -146,15 +146,33 @@ export async function loadKpiDefinitions(session, { organizationId } = {}) {
 
 // ── KPI source data + computation ────────────────────────────────────────────
 
+// Source-table map for KPI computation.
+//
+// `unverifiedSchema: true` marks Wave 1-2 tables whose DDL is NOT vendored in
+// this repository (supabase/migrations only contains 007/009/012/013). Those
+// tables exist in the deployed database, but because their columns cannot be
+// verified from source we treat a failed read as "source unavailable" (null)
+// rather than an error — and computeKpiValue then yields a NULL KPI value
+// instead of a fabricated zero.
 const KPI_SOURCE_QUERIES = {
-  "sales.leads_created": [{ table: "service_request", timestampColumn: "created_at" }],
-  "sales.opportunities_created": [{ table: "opportunity", timestampColumn: "created_at" }],
-  "sales.quotes_created": [{ table: "quote", timestampColumn: "created_at" }],
-  "sales.quotes_accepted": [{ table: "quote_response", timestampColumn: "created_at" }],
-  "sales.conversions": [{ table: "conversion_record", timestampColumn: "created_at" }],
+  "sales.leads_created": [
+    { table: "service_request", timestampColumn: "created_at", unverifiedSchema: true },
+  ],
+  "sales.opportunities_created": [
+    { table: "opportunity", timestampColumn: "created_at", unverifiedSchema: true },
+  ],
+  "sales.quotes_created": [
+    { table: "quote", timestampColumn: "created_at", unverifiedSchema: true },
+  ],
+  "sales.quotes_accepted": [
+    { table: "quote_response", timestampColumn: "created_at", unverifiedSchema: true },
+  ],
+  "sales.conversions": [
+    { table: "conversion_record", timestampColumn: "created_at", unverifiedSchema: true },
+  ],
   "sales.lead_to_conversion_rate": [
-    { table: "conversion_record", timestampColumn: "created_at" },
-    { table: "service_request", timestampColumn: "created_at" },
+    { table: "conversion_record", timestampColumn: "created_at", unverifiedSchema: true },
+    { table: "service_request", timestampColumn: "created_at", unverifiedSchema: true },
   ],
   "operations.jobs_created": [{ table: "operational_job", timestampColumn: "created_at" }],
   "operations.work_completed": [{ table: "work_order", timestampColumn: "updated_at" }],
@@ -206,6 +224,7 @@ export async function fetchKpiSourceData(
   const startIso = toIso(periodStart);
   const endIso = toIso(periodEnd);
   const result = {};
+  const unavailableSources = [];
 
   for (const source of sources) {
     const filters = [
@@ -218,7 +237,19 @@ export async function fetchKpiSourceData(
     if (jurisdictionId && source.table === "operational_job") {
       filters.push(eq("jurisdiction_id", jurisdictionId));
     }
-    result[source.table] = await selectRows(source.table, filters.join("&"));
+
+    if (source.unverifiedSchema) {
+      // Wave 1-2 table: a read failure must not break the whole KPI panel and
+      // must not be silently reported as zero. null == "source unavailable".
+      try {
+        result[source.table] = await selectRows(source.table, filters.join("&"));
+      } catch {
+        result[source.table] = null;
+        unavailableSources.push(source.table);
+      }
+    } else {
+      result[source.table] = await selectRows(source.table, filters.join("&"));
+    }
   }
 
   return {
@@ -226,6 +257,7 @@ export async function fetchKpiSourceData(
     periodType: periodType ?? null,
     timezone: timezone ?? null,
     sourceRows: result,
+    unavailableSources,
   };
 }
 
@@ -249,7 +281,7 @@ export async function computePeriodKpis(
   const results = [];
 
   for (const kpiCode of codes) {
-    const { sourceRows } = await fetchKpiSourceData(session, {
+    const { sourceRows, unavailableSources } = await fetchKpiSourceData(session, {
       kpiCode,
       organizationId,
       businessUnitId,
@@ -265,9 +297,14 @@ export async function computePeriodKpis(
       value: computed.value,
       numerator: computed.numerator,
       denominator: computed.denominator,
+      unavailable: computed.unavailable === true,
+      unavailableSources,
       sourceTables: getKpiSourceTables(kpiCode),
       rowCounts: Object.fromEntries(
-        Object.entries(sourceRows).map(([table, rows]) => [table, rows.length])
+        Object.entries(sourceRows).map(([table, rows]) => [
+          table,
+          Array.isArray(rows) ? rows.length : null,
+        ])
       ),
       freshnessAt: new Date().toISOString(),
     });

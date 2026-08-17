@@ -207,6 +207,49 @@ test("computeKpiValue accepts a bare array for single-source KPIs", () => {
   assert.equal(result.value, 2);
 });
 
+test("an unavailable source yields NULL, never a fabricated zero", () => {
+  // null means "the loader could not read this table" (e.g. a Wave 1-2 table
+  // whose DDL is not vendored here). It must NOT be reported as 0 leads.
+  const unavailable = computeKpiValue({
+    kpiCode: "sales.leads_created",
+    sourceRows: { service_request: null },
+    periodType: "DAILY",
+  });
+  assert.equal(unavailable.value, null);
+  assert.equal(unavailable.unavailable, true);
+
+  // A genuinely empty period is still a real, reportable zero.
+  const empty = computeKpiValue({
+    kpiCode: "sales.leads_created",
+    sourceRows: { service_request: [] },
+    periodType: "DAILY",
+  });
+  assert.equal(empty.value, 0);
+  assert.equal(empty.unavailable, undefined);
+});
+
+test("an unavailable rate denominator yields NULL for the whole rate", () => {
+  const result = computeKpiValue({
+    kpiCode: "sales.lead_to_conversion_rate",
+    sourceRows: { conversion_record: [{ id: "c1" }], service_request: null },
+    periodType: "MONTHLY",
+  });
+  assert.equal(result.value, null);
+  assert.equal(result.numerator, null);
+  assert.equal(result.denominator, null);
+  assert.equal(result.unavailable, true);
+});
+
+test("unavailability never affects KPIs sourced from vendored migrations", () => {
+  const result = computeKpiValue({
+    kpiCode: "operations.jobs_created",
+    sourceRows: { operational_job: [{ id: "a" }], service_request: null },
+    periodType: "MONTHLY",
+  });
+  assert.equal(result.value, 1);
+  assert.equal(result.unavailable, undefined);
+});
+
 test("computeKpiValue uses the real quote_response vocabulary", () => {
   const result = computeKpiValue({
     kpiCode: "sales.quotes_accepted",

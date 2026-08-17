@@ -283,6 +283,26 @@ function rowsFor(sourceRows, table) {
   return [];
 }
 
+/**
+ * A source is "unavailable" when the loader explicitly reported null for it
+ * (e.g. a Wave 1-2 table whose DDL is not vendored in this repository and which
+ * the caller could not read). Unavailable is NOT the same as empty: an
+ * unavailable source must yield a NULL KPI value rather than a fabricated zero.
+ */
+function sourceUnavailable(sourceRows, ...tables) {
+  if (!sourceRows || typeof sourceRows !== "object" || Array.isArray(sourceRows)) {
+    return false;
+  }
+  return tables.some((table) => table in sourceRows && sourceRows[table] === null);
+}
+
+const UNAVAILABLE_KPI_RESULT = Object.freeze({
+  value: null,
+  numerator: null,
+  denominator: null,
+  unavailable: true,
+});
+
 function countWhere(rows, predicate) {
   if (!predicate) return rows.length;
   let total = 0;
@@ -405,12 +425,14 @@ export function computeKpiValue({ kpiCode, sourceRows, periodType }) {
   }
 
   if (spec.kind === "count") {
+    if (sourceUnavailable(sourceRows, spec.table)) return { ...UNAVAILABLE_KPI_RESULT };
     const rows = rowsFor(sourceRows, spec.table);
     const value = countWhere(rows, spec.predicate);
     return { value, numerator: null, denominator: null };
   }
 
   if (spec.kind === "sum") {
+    if (sourceUnavailable(sourceRows, spec.table)) return { ...UNAVAILABLE_KPI_RESULT };
     const rows = rowsFor(sourceRows, spec.table).filter((row) =>
       spec.predicate ? spec.predicate(row) : true
     );
@@ -418,6 +440,9 @@ export function computeKpiValue({ kpiCode, sourceRows, periodType }) {
   }
 
   if (spec.kind === "rate") {
+    if (sourceUnavailable(sourceRows, spec.numeratorTable, spec.denominatorTable)) {
+      return { ...UNAVAILABLE_KPI_RESULT };
+    }
     const numeratorRows = rowsFor(sourceRows, spec.numeratorTable);
     const denominatorRows = rowsFor(sourceRows, spec.denominatorTable);
     const numerator = countWhere(numeratorRows, spec.numeratorPredicate);
@@ -426,6 +451,7 @@ export function computeKpiValue({ kpiCode, sourceRows, periodType }) {
   }
 
   // weighted_margin
+  if (sourceUnavailable(sourceRows, spec.table)) return { ...UNAVAILABLE_KPI_RESULT };
   const rows = rowsFor(sourceRows, spec.table);
   const numerator = sumField(rows, "gross_contribution");
   const denominator = sumField(rows, "recognized_revenue_amount");
