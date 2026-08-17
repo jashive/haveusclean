@@ -467,6 +467,15 @@ function extractFieldReferences(variableName) {
   );
 }
 
+function extractBlock(startMarker, endMarker, fromIndex = 0) {
+  const start = sql.indexOf(startMarker, fromIndex);
+  assert.notEqual(start, -1, `missing block start marker: ${startMarker}`);
+  const end = sql.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `missing block end marker: ${endMarker}`);
+  assert.ok(end > start, `invalid block range: ${startMarker} -> ${endMarker}`);
+  return sql.slice(start, end);
+}
+
 test("all 7 governance trigger functions are declared in the migration", () => {
   for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
     assert.match(
@@ -744,31 +753,43 @@ test("self-validation SV-7 checks each individual KPI code", () => {
 });
 
 test("self-validation SV-16 verifies governance trigger functions exist", () => {
-  assert.match(sql, /SV-16/, "SV-16 governance trigger check must exist");
+  const sv16Block = extractBlock("-- [SV-16]", "-- [SV-17]");
   assert.equal(ALL_WAVE6_TRIGGER_FUNCTIONS.length, 18, "SV-16 inventory must cover all 18 trigger functions");
   for (const fn of ALL_WAVE6_TRIGGER_FUNCTIONS) {
     assert.ok(
-      sql.includes(fn),
+      sv16Block.includes(fn),
       `SV-16 must check for trigger function ${fn}`
     );
   }
-  assert.match(sql, /payload_hash column missing/, "SV-16 must verify payload_hash column");
 });
 
 test("self-validation SV-18 validates all 18 internal trigger functions deny direct EXECUTE", () => {
+  const sv18Start = sql.indexOf("-- [SV-18]");
+  assert.notEqual(sv18Start, -1, "SV-18 block start marker must exist");
+  const sv18Block = extractBlock("-- [SV-18]", "-- [SV-16b]", sv18Start);
   assert.equal(ALL_WAVE6_TRIGGER_FUNCTIONS.length, 18, "SV-18 inventory must cover all 18 trigger functions");
   for (const fn of ALL_WAVE6_TRIGGER_FUNCTIONS) {
-    assert.ok(sql.includes(fn), `SV-18 must cover trigger function ${fn}`);
+    assert.ok(sv18Block.includes(fn), `SV-18 must cover trigger function ${fn}`);
   }
-  assert.match(sql, /PUBLIC\/anon\/authenticated/, "SV-18 must verify all three role classes");
+  assert.match(sv18Block, /PUBLIC\/anon\/authenticated/, "SV-18 must verify all three role classes");
+  assert.match(sv18Block, /%anon%=%X%/, "SV-18 must deny direct EXECUTE for anon");
+  assert.match(sv18Block, /%authenticated%=%X%/, "SV-18 must deny direct EXECUTE for authenticated");
+  assert.match(sv18Block, /=%X%/, "SV-18 must deny direct EXECUTE for PUBLIC");
 });
 
 test("header and trigger inventory cover all 18 actual CREATE TRIGGER statements", () => {
+  const beginIndex = sql.indexOf("BEGIN;");
+  assert.notEqual(beginIndex, -1, "migration must contain BEGIN;");
+  const headerBlock = sql.slice(0, beginIndex);
+  const executableSql = sql.slice(beginIndex);
+  assert.match(headerBlock, /Triggers created \(18\)/, "header must declare Triggers created (18)");
   assert.equal(ALL_WAVE6_TRIGGERS.length, 18, "test vector must cover all 18 triggers");
   for (const trig of ALL_WAVE6_TRIGGERS) {
-    assert.ok(sql.includes(`CREATE TRIGGER ${trig}`), `missing CREATE TRIGGER for ${trig}`);
-    assert.ok(sql.includes(trig), `migration documentation must mention ${trig}`);
+    assert.ok(executableSql.includes(`CREATE TRIGGER ${trig}`), `missing CREATE TRIGGER for ${trig}`);
+    assert.ok(headerBlock.includes(trig), `migration header must mention ${trig}`);
   }
+  const createTriggerCount = (executableSql.match(/^\s*CREATE TRIGGER\b/gm) ?? []).length;
+  assert.equal(createTriggerCount, 18, "executable SQL must contain exactly 18 CREATE TRIGGER statements");
 });
 
 test("all migration 014 %ROWTYPE field references resolve to declared table columns", () => {

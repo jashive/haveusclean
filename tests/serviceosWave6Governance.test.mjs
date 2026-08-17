@@ -742,6 +742,7 @@ test("CCR KPI manifest validation uses source_lineage, rejects empty lineage, an
       DECLARE
         v_state text;
         v_message text;
+        v_rejected boolean := false;
       BEGIN
         BEGIN
           INSERT INTO public.change_control_record (
@@ -766,7 +767,6 @@ test("CCR KPI manifest validation uses source_lineage, rejects empty lineage, an
             ),
             '${orgId}'::uuid
           );
-          RAISE EXCEPTION 'expected empty source_lineage rejection';
         EXCEPTION WHEN OTHERS THEN
           GET STACKED DIAGNOSTICS
             v_state = RETURNED_SQLSTATE,
@@ -777,7 +777,11 @@ test("CCR KPI manifest validation uses source_lineage, rejects empty lineage, an
           IF position('source_lineage' in v_message) = 0 THEN
             RAISE EXCEPTION 'expected source_lineage rejection message, got %', v_message;
           END IF;
+          v_rejected := true;
         END;
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION 'expected empty source_lineage rejection';
+        END IF;
       END;
       $$;
       SELECT 'rejected_empty_lineage';
