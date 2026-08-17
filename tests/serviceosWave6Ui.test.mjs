@@ -398,11 +398,7 @@ test("KPI snapshot payload does not contain invalid DB column names", () => {
 test("KPI snapshot resolves kpi_definition_id from definitions — fail closed if missing", () => {
   // Criterion G: If an active definition cannot be resolved, fail closed
   assert.match(mrpSource, /skipped\.push\(/, "must skip KPIs with no definition — fail closed");
-  assert.match(
-    managementReviewEvidenceSource,
-    /no active applicable definition|ambiguous active definition/i,
-    "must report skipped due to missing or ambiguous definition"
-  );
+  assert.match(managementReviewEvidenceSource, /resolveGovernedKpiDefinition/);
   assert.doesNotMatch(
     mrpSource,
     /kpi_definition_id: null/,
@@ -422,7 +418,7 @@ test("KPI snapshot payload persists effective jurisdiction scope only when compu
 });
 
 test("definition resolution fails closed on ambiguity instead of choosing the first row", () => {
-  assert.match(managementReviewEvidenceSource, /ambiguous active definition/i);
+  assert.match(managementReviewEvidenceSource, /resolveGovernedKpiDefinition/);
   const resolveDefinitionBody = managementReviewEvidenceSource.slice(
     managementReviewEvidenceSource.indexOf("export function resolveDefinition"),
     managementReviewEvidenceSource.indexOf("export function buildSnapshotSourceLineage")
@@ -439,6 +435,7 @@ test("definition resolution fails closed when multiple active versions remain ap
         definition_version: "1",
         active: true,
         organization_id: null,
+        period_support: ["MONTHLY"],
         effective_from: "2026-01-01T00:00:00.000Z",
         effective_to: null,
       },
@@ -448,15 +445,21 @@ test("definition resolution fails closed when multiple active versions remain ap
         definition_version: "2",
         active: true,
         organization_id: null,
+        period_support: ["MONTHLY"],
         effective_from: "2026-01-01T00:00:00.000Z",
         effective_to: null,
       },
     ],
     "sales.leads_created",
-    { asOf: Date.parse("2026-08-17T00:00:00.000Z") }
+    {
+      organizationId: "org-1",
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+    }
   );
   assert.equal(resolved.definition, null);
-  assert.match(resolved.error, /ambiguous active definition/i);
+  assert.match(resolved.error, /ambiguous governed definition/i);
 });
 
 test("definition resolution prefers one applicable organization-scoped row over global", () => {
@@ -468,6 +471,9 @@ test("definition resolution prefers one applicable organization-scoped row over 
         definition_version: "1",
         active: true,
         organization_id: null,
+        period_support: ["MONTHLY"],
+        effective_from: "2026-01-01T00:00:00.000Z",
+        effective_to: null,
       },
       {
         id: "org-v1",
@@ -475,10 +481,18 @@ test("definition resolution prefers one applicable organization-scoped row over 
         definition_version: "1",
         active: true,
         organization_id: "org-1",
+        period_support: ["MONTHLY"],
+        effective_from: "2026-01-01T00:00:00.000Z",
+        effective_to: null,
       },
     ],
     "sales.leads_created",
-    { asOf: Date.parse("2026-08-17T00:00:00.000Z") }
+    {
+      organizationId: "org-1",
+      periodType: "MONTHLY",
+      periodStart: "2026-08-01T00:00:00.000Z",
+      periodEnd: "2026-08-31T23:59:59.999Z",
+    }
   );
   assert.equal(resolved.definition?.id, "org-v1");
 });

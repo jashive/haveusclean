@@ -91,6 +91,12 @@ export default function ContinuityPanel({
   const [transactions, setTransactions] = useState([]);
   const [correlationId, setCorrelationId] = useState("");
   const [transactionType, setTransactionType] = useState("offline_job_record");
+  const [entityType, setEntityType] = useState("");
+  const [entityId, setEntityId] = useState("");
+  const [snapshotSummary, setSnapshotSummary] = useState("");
+  const [snapshotAmount, setSnapshotAmount] = useState("");
+  const [reconciliationNote, setReconciliationNote] = useState("");
+  const [waiverReason, setWaiverReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
 
@@ -152,16 +158,10 @@ export default function ContinuityPanel({
       setError(null);
       setBusy(true);
       try {
-        const patch = {
+        await updateContinuitySession(session, continuitySession.id, {
           current_status: continuitySession.session_status,
           session_status: nextStatus,
-        };
-        const now = new Date().toISOString();
-        if (nextStatus === "service_restored") patch.service_restored_at = now;
-        if (nextStatus === "reconciling") patch.reconciliation_started_at = now;
-        if (nextStatus === "reconciled") patch.reconciliation_completed_at = now;
-        if (nextStatus === "closed") patch.closed_at = now;
-        await updateContinuitySession(session, continuitySession.id, patch);
+        });
         if (onChanged) await onChanged();
       } catch (err) {
         setError(formatErrorMessage(err));
@@ -172,18 +172,63 @@ export default function ContinuityPanel({
     [session, onChanged]
   );
 
+  const handleRecordWaiver = useCallback(
+    async (continuitySession) => {
+      if (!waiverReason.trim()) {
+        setError("Waiver rationale/evidence is required.");
+        return;
+      }
+      setError(null);
+      setBusy(true);
+      try {
+        await updateContinuitySession(session, continuitySession.id, {
+          waiver_recorded: true,
+          waiver_reason: waiverReason.trim(),
+          current_status: continuitySession.session_status,
+        });
+        setWaiverReason("");
+        if (onChanged) await onChanged();
+      } catch (err) {
+        setError(formatErrorMessage(err));
+      } finally {
+        setBusy(false);
+      }
+    },
+    [session, waiverReason, onChanged]
+  );
+
   const handleRecordTransaction = useCallback(async () => {
     setError(null);
+    const selectedSession = sessions.find((row) => row.id === selectedSessionId) ?? null;
+    if (!selectedSession) {
+      setError("Select a continuity session first.");
+      return;
+    }
+    if (!snapshotSummary.trim()) {
+      setError("Transaction snapshot summary is required.");
+      return;
+    }
     setBusy(true);
     try {
       await recordContinuityTransaction(session, {
-        continuity_session_id: selectedSessionId,
+        continuity_session_id: selectedSession.id,
         offline_correlation_id: correlationId.trim(),
-        organization_id: organizationId,
-        business_unit_id: businessUnitId ?? null,
+        organization_id: selectedSession.organization_id,
+        business_unit_id: selectedSession.business_unit_id ?? null,
         transaction_type: transactionType.trim(),
+        serviceos_entity_type: entityType.trim() || null,
+        serviceos_entity_id: entityId.trim() || null,
+        transaction_data: {
+          summary: snapshotSummary.trim(),
+          amount_observed: snapshotAmount.trim() === "" ? null : Number(snapshotAmount),
+          captured_source: "continuity_panel",
+        },
       });
       setCorrelationId("");
+      setSnapshotSummary("");
+      setSnapshotAmount("");
+      setEntityType("");
+      setEntityId("");
       await refreshTransactions(selectedSessionId);
     } catch (err) {
       setError(formatErrorMessage(err));
@@ -194,25 +239,34 @@ export default function ContinuityPanel({
     session,
     selectedSessionId,
     correlationId,
-    organizationId,
-    businessUnitId,
     transactionType,
+    entityType,
+    entityId,
+    snapshotSummary,
+    snapshotAmount,
+    sessions,
     refreshTransactions,
   ]);
 
   const handleReconcile = useCallback(
     async (transaction, status) => {
       setError(null);
+      const note = reconciliationNote.trim();
+      if (status === "discrepancy" && !note) {
+        setError("Discrepancy notes are required.");
+        return;
+      }
+      if (status === "waived" && !note) {
+        setError("Waiver rationale/evidence is required.");
+        return;
+      }
       setBusy(true);
       try {
         const reconciliation = { reconciliation_status: status };
-        if (status === "discrepancy") {
-          reconciliation.discrepancy_notes = "Recorded from continuity panel — needs review";
-        }
-        if (status === "waived") {
-          reconciliation.waiver_evidence = "Waiver recorded from continuity panel";
-        }
+        if (status === "discrepancy") reconciliation.discrepancy_notes = note;
+        if (status === "waived") reconciliation.waiver_evidence = note;
         await reconcileContinuityTransaction(session, transaction.id, reconciliation);
+        setReconciliationNote("");
         await refreshTransactions(selectedSessionId);
       } catch (err) {
         setError(formatErrorMessage(err));
@@ -220,12 +274,15 @@ export default function ContinuityPanel({
         setBusy(false);
       }
     },
-    [session, selectedSessionId, refreshTransactions]
+    [session, selectedSessionId, reconciliationNote, refreshTransactions]
   );
 
   const canDeclare = !busy && sessionCode.trim() !== "" && Boolean(organizationId);
   const canRecord =
-    !busy && Boolean(selectedSessionId) && isValidOfflineCorrelationId(correlationId.trim());
+    !busy &&
+    Boolean(selectedSessionId) &&
+    isValidOfflineCorrelationId(correlationId.trim()) &&
+    snapshotSummary.trim() !== "";
   const selectedSession = sessions.find((s) => s.id === selectedSessionId) ?? null;
 
   return (
@@ -263,7 +320,7 @@ export default function ContinuityPanel({
       <div style={styles.section}>
         <div style={styles.label}>Continuity sessions ({sessions.length})</div>
         {sessions.length === 0 && (
-          <div style={styles.note}>No continuity sessions declared for this organization.</div>
+          <div style={styles.note}>No continuity sessions declared for this business-unit scope.</div>
         )}
         {sessions.map((continuitySession) => {
           const isSelected = continuitySession.id === selectedSessionId;
@@ -303,6 +360,24 @@ export default function ContinuityPanel({
                   );
                 })}
               </div>
+              {!continuitySession.waiver_recorded && (
+                <>
+                  <input
+                    style={styles.input}
+                    placeholder="Continuity-session waiver rationale/evidence"
+                    value={waiverReason}
+                    onChange={(e) => setWaiverReason(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    style={busy ? styles.buttonDisabled : styles.button}
+                    disabled={busy || waiverReason.trim() === ""}
+                    onClick={() => handleRecordWaiver(continuitySession)}
+                  >
+                    Record session waiver
+                  </button>
+                </>
+              )}
               {isSelected && pending.length > 0 && (
                 <div style={styles.note}>
                   {pending.length} transaction(s) still pending reconciliation — closure requires
@@ -331,6 +406,30 @@ export default function ContinuityPanel({
             value={transactionType}
             onChange={(e) => setTransactionType(e.target.value)}
           />
+          <input
+            style={styles.input}
+            placeholder="ServiceOS entity type (optional)"
+            value={entityType}
+            onChange={(e) => setEntityType(e.target.value)}
+          />
+          <input
+            style={styles.input}
+            placeholder="ServiceOS entity id (optional UUID)"
+            value={entityId}
+            onChange={(e) => setEntityId(e.target.value)}
+          />
+          <input
+            style={styles.input}
+            placeholder="Structured snapshot summary (required)"
+            value={snapshotSummary}
+            onChange={(e) => setSnapshotSummary(e.target.value)}
+          />
+          <input
+            style={styles.input}
+            placeholder="Amount observed (optional)"
+            value={snapshotAmount}
+            onChange={(e) => setSnapshotAmount(e.target.value)}
+          />
           <button
             type="button"
             style={canRecord ? styles.button : styles.buttonDisabled}
@@ -347,6 +446,12 @@ export default function ContinuityPanel({
           {transactions.length === 0 && (
             <div style={styles.note}>No offline transactions recorded for this session.</div>
           )}
+          <input
+            style={styles.input}
+            placeholder="Reconciliation discrepancy/waiver evidence"
+            value={reconciliationNote}
+            onChange={(e) => setReconciliationNote(e.target.value)}
+          />
           {transactions.map((transaction) => (
             <div key={transaction.id} style={styles.row}>
               <div style={styles.rowTitle}>{transaction.offline_correlation_id}</div>

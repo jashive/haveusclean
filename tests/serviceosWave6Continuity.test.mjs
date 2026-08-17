@@ -232,13 +232,13 @@ test("reconciliation rejects an unknown status and a missing transaction", () =>
   );
 });
 
-test("reconciliation stamps reconciled_at when the caller omits it", () => {
+test("reconciliation leaves reconciled_at DB-owned when caller omits it", () => {
   const result = resolveContinuityReconciliation(
     { id: "t1", reconciliation_status: "pending" },
     { reconciliation_status: "matched" }
   );
   assert.equal(result.applied, true);
-  assert.ok(!Number.isNaN(Date.parse(result.transaction.reconciled_at)));
+  assert.equal(result.transaction.reconciled_at, undefined);
 });
 
 // ── Migration + client contracts ─────────────────────────────────────────────

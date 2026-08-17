@@ -194,7 +194,6 @@ function CreateReviewForm({ session, organizationId, businessUnitId, periodType,
         timezone,
         summary: summary.trim() || null,
         review_status: "draft",
-        opened_at: new Date().toISOString(),
       };
       const created = await createManagementReview(session, payload);
       onCreated(Array.isArray(created) ? created[0] : created);
@@ -271,7 +270,12 @@ function SnapshotCaptureButton({
       if (kpi.unavailable === true) continue;
       if (kpi.value === null || kpi.value === undefined) continue;
 
-      const { definition, error: definitionError } = resolveDefinition(kpiDefinitions, kpi.kpiCode);
+      const { definition, error: definitionError } = resolveDefinition(kpiDefinitions, kpi.kpiCode, {
+        organizationId,
+        periodType: review?.period_type,
+        periodStart: review?.period_start,
+        periodEnd: review?.period_end,
+      });
       if (!definition) {
         skipped.push(`${kpi.kpiCode} (${definitionError})`);
         continue;
@@ -422,6 +426,7 @@ function AddItemForm({ label, placeholder, onAdd }) {
 function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, timezone, onChanged }) {
   const [editing, setEditing] = useState(false);
   const [summary, setSummary] = useState(review.summary ?? "");
+  const [waiverReason, setWaiverReason] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
 
@@ -432,6 +437,10 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
   const currentExceptions = Array.isArray(review.exceptions) ? review.exceptions : [];
   const currentDecisions = Array.isArray(review.decisions) ? review.decisions : [];
   const currentActions = Array.isArray(review.actions) ? review.actions : [];
+  const reviewPeriod = {
+    periodStart: new Date(review.period_start),
+    periodEnd: new Date(review.period_end),
+  };
 
   const handleSaveSummary = useCallback(async () => {
     setSaving(true);
@@ -456,12 +465,6 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
       review_status: toStatus,
       current_status: review.review_status,
     };
-    if (toStatus === "closed") {
-      patch.closed_at = new Date().toISOString();
-    }
-    if (toStatus === "in_review" && !review.opened_at) {
-      patch.opened_at = new Date().toISOString();
-    }
     setSaving(true);
     setError(null);
     try {
@@ -513,12 +516,18 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
   }, [session, review.id, review.review_status, currentActions, onChanged]);
 
   const handleRecordWaiver = useCallback(async () => {
+    if (!waiverReason.trim()) {
+      setError("Waiver rationale/evidence is required.");
+      return;
+    }
     await updateManagementReview(session, review.id, {
       waiver_recorded: true,
+      waiver_reason: waiverReason.trim(),
       current_status: review.review_status,
     });
+    setWaiverReason("");
     if (onChanged) onChanged();
-  }, [session, review.id, review.review_status, onChanged]);
+  }, [session, review.id, review.review_status, waiverReason, onChanged]);
 
   return (
     <div style={styles.row}>
@@ -639,7 +648,7 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
             organizationId={review.organization_id}
             businessUnitId={review.business_unit_id}
             periodType={review.period_type}
-            period={period}
+            period={reviewPeriod}
             kpis={kpis}
             kpiDefinitions={kpiDefinitions}
             timezone={review.timezone}
@@ -699,15 +708,23 @@ function ReviewRow({ session, review, kpis, kpiDefinitions, periodType, period, 
 
           {/* Record waiver */}
           {!review.waiver_recorded && (
-            <button
-              type="button"
-              style={styles.buttonWarning}
-              onClick={handleRecordWaiver}
-              data-testid="record-waiver-btn"
-              title="Record an explicit governance waiver for this review period"
-            >
-              Record Waiver
-            </button>
+            <>
+              <input
+                style={{ ...styles.input, marginBottom: 0 }}
+                placeholder="Waiver rationale/evidence"
+                value={waiverReason}
+                onChange={(event) => setWaiverReason(event.target.value)}
+              />
+              <button
+                type="button"
+                style={styles.buttonWarning}
+                onClick={handleRecordWaiver}
+                data-testid="record-waiver-btn"
+                title="Record an explicit governance waiver for this review period"
+              >
+                Record Waiver
+              </button>
+            </>
           )}
         </div>
       )}
@@ -748,16 +765,30 @@ export default function ManagementReviewPanel({
   const handleChanged = useCallback(async () => {
     // Reload reviews for current period after any mutation.
     try {
-      const fresh = await loadManagementReviews(session, { organizationId, periodType });
+      const fresh = await loadManagementReviews(session, {
+        organizationId,
+        businessUnitId,
+        periodType,
+        periodStart: period?.periodStart,
+        periodEnd: period?.periodEnd,
+        timezone,
+      });
       setReviews(Array.isArray(fresh) ? fresh : []);
     } catch (err) {
       setLoadError(formatErrorMessage(err));
     }
     if (onChanged) onChanged();
-  }, [session, organizationId, periodType, onChanged]);
+  }, [session, organizationId, businessUnitId, periodType, period, timezone, onChanged]);
 
   const periodReviews = Array.isArray(reviews)
-    ? reviews.filter((r) => r.period_type === periodType)
+    ? reviews.filter((r) => {
+        if (r.period_type !== periodType) return false;
+        if ((r.business_unit_id ?? null) !== (businessUnitId ?? null)) return false;
+        if (String(r.timezone ?? "") !== String(timezone ?? "")) return false;
+        if (new Date(r.period_start).toISOString() !== period.periodStart.toISOString()) return false;
+        if (new Date(r.period_end).toISOString() !== period.periodEnd.toISOString()) return false;
+        return true;
+      })
     : [];
 
   const hasOpen = periodReviews.some((r) => r.review_status !== "closed");

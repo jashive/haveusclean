@@ -187,11 +187,18 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
           periodEnd: period.periodEnd,
         }),
         loadCanonicalEvents(session, { organizationId, businessUnitId, limit: 100 }),
-        loadChangeControlRecords(session, { organizationId }),
-        loadContinuitySessions(session, { organizationId }),
+        loadChangeControlRecords(session, { organizationId, businessUnitId }),
+        loadContinuitySessions(session, { organizationId, businessUnitId }),
         loadServiceModuleProfiles(session, { organizationId }),
         loadReleaseGates(session, { organizationId }),
-        loadManagementReviews(session, { organizationId, periodType }),
+        loadManagementReviews(session, {
+          organizationId,
+          businessUnitId,
+          periodType,
+          periodStart: period.periodStart,
+          periodEnd: period.periodEnd,
+          timezone,
+        }),
       ]);
       setState({
         definitions,
@@ -313,6 +320,10 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
         <KpiReviewPanel
           kpis={state.kpis}
           definitions={state.definitions}
+          organizationId={organizationId}
+          periodType={periodType}
+          periodStart={period.periodStart.toISOString()}
+          periodEnd={period.periodEnd.toISOString()}
           periodLabel={periodLabel}
           timezone={timezone}
         />

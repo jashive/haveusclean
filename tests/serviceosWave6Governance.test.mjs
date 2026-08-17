@@ -125,13 +125,22 @@ test("material change closes with complete evidence", () => {
   );
 });
 
-test("non-material change closes with empty assessment", () => {
+test("non-material change still requires validation evidence before closure", () => {
   assert.equal(
     canCloseChangeControlRecord({
       change_status: "validate",
       material_change: false,
       impact_assessment: {},
       validation_result: {},
+    }),
+    false
+  );
+  assert.equal(
+    canCloseChangeControlRecord({
+      change_status: "validate",
+      material_change: false,
+      impact_assessment: {},
+      validation_result: { passed: false, evidence: "observed anomaly retained for follow-up" },
     }),
     true
   );

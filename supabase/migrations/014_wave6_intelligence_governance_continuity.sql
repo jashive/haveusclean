@@ -23,7 +23,7 @@
 -- View created (1):
 --   wave6_canonical_event  (security_invoker)
 --
--- Trigger functions created (6):
+-- Trigger functions created (17):
 --   trg_enforce_management_review_fsm   — management_review BEFORE UPDATE
 --   trg_enforce_ccr_fsm                 — change_control_record BEFORE UPDATE
 --   trg_enforce_continuity_fsm          — continuity_session BEFORE UPDATE
@@ -31,13 +31,24 @@
 --   trg_set_continuity_payload_hash     — continuity_transaction BEFORE INSERT
 --   trg_immute_continuity_transaction_fields — continuity_transaction BEFORE UPDATE
 --
--- Triggers created (6):
+-- Triggers created (17):
 --   trig_management_review_fsm
 --   trig_ccr_fsm
 --   trig_continuity_fsm
 --   trig_release_gate_sequence
 --   trig_continuity_payload_hash
 --   trig_immute_continuity_transaction_fields
+--   trig_wave6_mr_insert_guard
+--   trig_wave6_mr_update_stamp
+--   trig_wave6_ccr_insert_guard
+--   trig_wave6_ccr_update_stamp
+--   trig_wave6_cs_insert_guard
+--   trig_wave6_cs_update_stamp
+--   trig_wave6_ct_insert_guard
+--   trig_wave6_ct_reconciliation_fsm
+--   trig_wave6_kpi_snapshot_scope
+--   trig_wave6_management_review_manifest
+--   trig_wave6_ccr_manifest
 --
 -- Terminal marker on success: M014_WAVE6_INTELLIGENCE_PASS
 -- =============================================================================
@@ -216,13 +227,12 @@ CREATE TABLE public.management_review (
   opened_at                 timestamptz NULL,
   closed_at                 timestamptz NULL,
   waiver_recorded           boolean     NOT NULL DEFAULT false,
+  waiver_reason             text        NULL,
+  waiver_actor_app_user_id  uuid        NULL,
+  waiver_recorded_at        timestamptz NULL,
 
   created_at                timestamptz NOT NULL DEFAULT now(),
   created_by_app_user_id    uuid        NULL,
-
-  CONSTRAINT uq_mr_period UNIQUE (
-    organization_id, period_type, period_start, timezone, review_version
-  ),
 
   CONSTRAINT ck_mr_status CHECK (
     review_status IN ('draft', 'in_review', 'actions_open', 'closed')
@@ -235,16 +245,19 @@ CREATE TABLE public.management_review (
   CONSTRAINT ck_mr_version_positive CHECK (review_version >= 1),
   CONSTRAINT ck_mr_closed_requires_timestamp CHECK (
     review_status <> 'closed' OR closed_at IS NOT NULL
+  ),
+  CONSTRAINT ck_mr_waiver_evidence CHECK (
+    waiver_recorded = false OR (
+      waiver_reason IS NOT NULL
+      AND waiver_actor_app_user_id IS NOT NULL
+      AND waiver_recorded_at IS NOT NULL
+    )
   )
 );
 
--- NOTE (governance): a review may only be closed when every entry in actions[]
--- has is_resolved = true, OR waiver_recorded = true. That rule is enforced in
--- the application layer (canCloseManagementReview) because the JSONB action
--- array cannot be evaluated by an immutable CHECK expression.
 COMMENT ON TABLE public.management_review IS
   'Wave 6: Governed management review per period. Closure with unresolved actions '
-  'requires waiver_recorded = true (application-enforced: canCloseManagementReview). '
+  'requires waiver evidence and is enforced by database trigger functions. '
   'SOURCE ONLY — not executed.';
 
 -- ============================================================
@@ -260,6 +273,7 @@ CREATE TABLE public.change_control_record (
   reason                    text        NULL,
 
   source_kpi_codes          text[]      NOT NULL DEFAULT '{}',
+  source_kpi_snapshot_manifest jsonb    NOT NULL DEFAULT '[]'::jsonb,
   impact_assessment         jsonb       NOT NULL DEFAULT '{}'::jsonb,
   affected_dependencies     text[]      NOT NULL DEFAULT '{}',
 
@@ -284,8 +298,6 @@ CREATE TABLE public.change_control_record (
   created_by_app_user_id    uuid        NULL,
   updated_at                timestamptz NOT NULL DEFAULT now(),
 
-  CONSTRAINT uq_ccr_change_code UNIQUE (change_code),
-
   CONSTRAINT ck_ccr_change_type CHECK (
     change_type IN ('process', 'pricing', 'sop', 'training', 'system', 'hems_model')
   ),
@@ -306,10 +318,14 @@ CREATE TABLE public.change_control_record (
   -- validation result that explicitly passed.
   CONSTRAINT ck_ccr_material_close_evidence CHECK (
     change_status <> 'closed'
-    OR material_change = false
     OR (
+      validation_result <> '{}'::jsonb
+      AND (
+        material_change = false OR (
       impact_assessment <> '{}'::jsonb
       AND (validation_result ->> 'passed') = 'true'
+        )
+      )
     )
   ),
   CONSTRAINT ck_ccr_approval_pair CHECK (
@@ -375,11 +391,12 @@ CREATE TABLE public.continuity_session (
   closed_by_app_user_id         uuid        NULL,
 
   waiver_recorded               boolean     NOT NULL DEFAULT false,
+  waiver_reason                 text        NULL,
+  waiver_actor_app_user_id      uuid        NULL,
+  waiver_recorded_at            timestamptz NULL,
   notes                         text        NULL,
 
   created_at                    timestamptz NOT NULL DEFAULT now(),
-
-  CONSTRAINT uq_cs_session_code UNIQUE (session_code),
 
   CONSTRAINT ck_cs_fallback_type CHECK (
     fallback_type IN ('serviceos_outage', 'partial_degradation', 'planned_maintenance')
@@ -398,6 +415,13 @@ CREATE TABLE public.continuity_session (
   ),
   CONSTRAINT ck_cs_closed_requires_timestamp CHECK (
     session_status <> 'closed' OR closed_at IS NOT NULL
+  ),
+  CONSTRAINT ck_cs_waiver_evidence CHECK (
+    waiver_recorded = false OR (
+      waiver_reason IS NOT NULL
+      AND waiver_actor_app_user_id IS NOT NULL
+      AND waiver_recorded_at IS NOT NULL
+    )
   )
 );
 
@@ -453,13 +477,16 @@ CREATE TABLE public.continuity_transaction (
   CONSTRAINT ck_ct_correlation_nonempty CHECK (offline_correlation_id <> ''),
   CONSTRAINT ck_ct_transaction_type_nonempty CHECK (transaction_type <> ''),
   CONSTRAINT ck_ct_discrepancy_requires_notes CHECK (
-    reconciliation_status <> 'discrepancy' OR discrepancy_notes IS NOT NULL
+    reconciliation_status <> 'discrepancy' OR NULLIF(btrim(discrepancy_notes), '') IS NOT NULL
   ),
   CONSTRAINT ck_ct_waived_requires_evidence CHECK (
-    reconciliation_status <> 'waived' OR waiver_evidence IS NOT NULL
+    reconciliation_status <> 'waived' OR NULLIF(btrim(waiver_evidence), '') IS NOT NULL
   ),
   CONSTRAINT ck_ct_reconciled_requires_timestamp CHECK (
     reconciliation_status = 'pending' OR reconciled_at IS NOT NULL
+  ),
+  CONSTRAINT ck_ct_transaction_data_nonempty CHECK (
+    jsonb_typeof(transaction_data) = 'object' AND transaction_data <> '{}'::jsonb
   ),
   -- Payload hash is a 64-character lowercase hex string (SHA-256). NOT NULL.
   CONSTRAINT ck_ct_payload_hash_format CHECK (
@@ -548,15 +575,9 @@ CREATE TABLE public.release_gate (
   )
 );
 
--- NOTE (governance): cross-row gate sequencing (e.g. CUTOVER may not pass until
--- ACCEPTANCE has passed; LEGACY_RETIREMENT requires CUTOVER; SCALE requires
--- LEGACY_RETIREMENT) is a cross-row rule. A table CHECK cannot query other rows,
--- and a CONSTRAINT TRIGGER would need to be executed against live data, which is
--- out of scope for this source-only migration. The sequencing rule is enforced in
--- the application layer by canPassReleaseGate() in serviceosIntelligenceUtils.js.
 COMMENT ON TABLE public.release_gate IS
-  'Wave 6: Release sequencing gate. Cross-gate prerequisites are enforced in the '
-  'application layer (canPassReleaseGate). SOURCE ONLY — not executed.';
+  'Wave 6: Release sequencing gate. Cross-gate prerequisites are enforced by '
+  'database trigger function trg_enforce_release_gate_sequence. SOURCE ONLY — not executed.';
 
 -- ---------------------------------------------------------------------------
 -- SECTION 2: INDEXES
@@ -571,9 +592,25 @@ CREATE INDEX idx_ks_captured_at       ON public.kpi_snapshot (captured_at DESC);
 
 CREATE INDEX idx_mr_scope             ON public.management_review (organization_id, business_unit_id);
 CREATE INDEX idx_mr_status            ON public.management_review (review_status);
+CREATE UNIQUE INDEX uq_mr_period_scope
+  ON public.management_review (
+    organization_id,
+    COALESCE(business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    period_type,
+    period_start,
+    period_end,
+    timezone,
+    review_version
+  );
 
 CREATE INDEX idx_ccr_scope            ON public.change_control_record (organization_id, business_unit_id);
 CREATE INDEX idx_ccr_status           ON public.change_control_record (change_status);
+CREATE UNIQUE INDEX uq_ccr_change_code_scope
+  ON public.change_control_record (
+    organization_id,
+    COALESCE(business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    change_code
+  );
 
 CREATE INDEX idx_de_from_node         ON public.dependency_edge (from_node);
 CREATE INDEX idx_de_to_node           ON public.dependency_edge (to_node);
@@ -581,6 +618,12 @@ CREATE INDEX idx_de_kg_id             ON public.dependency_edge (kg_id);
 
 CREATE INDEX idx_cs_scope             ON public.continuity_session (organization_id, business_unit_id);
 CREATE INDEX idx_cs_status            ON public.continuity_session (session_status);
+CREATE UNIQUE INDEX uq_cs_session_code_scope
+  ON public.continuity_session (
+    organization_id,
+    COALESCE(business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid),
+    session_code
+  );
 
 CREATE INDEX idx_ct_session           ON public.continuity_transaction (continuity_session_id);
 CREATE INDEX idx_ct_status            ON public.continuity_transaction (reconciliation_status);
@@ -889,8 +932,7 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 BEGIN
-  -- Canonical representation: transaction_data::text (JSONB to text, stable
-  -- within a PostgreSQL version for the same in-memory value).
+  -- Canonical representation includes identity envelope + transaction_data.
   -- Algorithm: SHA-256 via extensions.digest() (pgcrypto in schema extensions,
   -- as installed in the Have Us Clean Supabase project). Encoded as hex (64 chars).
   -- Schema-qualified to guarantee resolution regardless of search_path.
@@ -898,7 +940,19 @@ BEGIN
   -- FAIL CLOSED: if extensions.digest is unavailable the exception propagates
   -- and the INSERT is aborted. payload_hash is NOT NULL on continuity_transaction.
   NEW.payload_hash := encode(
-    extensions.digest(NEW.transaction_data::text, 'sha256'),
+    extensions.digest(
+      jsonb_build_object(
+        'continuity_session_id', NEW.continuity_session_id,
+        'offline_correlation_id', NEW.offline_correlation_id,
+        'organization_id', NEW.organization_id,
+        'business_unit_id', NEW.business_unit_id,
+        'transaction_type', NEW.transaction_type,
+        'serviceos_entity_type', NEW.serviceos_entity_type,
+        'serviceos_entity_id', NEW.serviceos_entity_id,
+        'transaction_data', NEW.transaction_data
+      )::text,
+      'sha256'
+    ),
     'hex'
   );
   RETURN NEW;
@@ -947,6 +1001,36 @@ BEGIN
       'continuity_transaction: offline_correlation_id is immutable after insertion (row id=%)', OLD.id
       USING ERRCODE = 'P0001';
   END IF;
+  IF NEW.continuity_session_id IS DISTINCT FROM OLD.continuity_session_id THEN
+    RAISE EXCEPTION
+      'continuity_transaction: continuity_session_id is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.organization_id IS DISTINCT FROM OLD.organization_id THEN
+    RAISE EXCEPTION
+      'continuity_transaction: organization_id is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.business_unit_id IS DISTINCT FROM OLD.business_unit_id THEN
+    RAISE EXCEPTION
+      'continuity_transaction: business_unit_id is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.transaction_type IS DISTINCT FROM OLD.transaction_type THEN
+    RAISE EXCEPTION
+      'continuity_transaction: transaction_type is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.serviceos_entity_type IS DISTINCT FROM OLD.serviceos_entity_type THEN
+    RAISE EXCEPTION
+      'continuity_transaction: serviceos_entity_type is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.serviceos_entity_id IS DISTINCT FROM OLD.serviceos_entity_id THEN
+    RAISE EXCEPTION
+      'continuity_transaction: serviceos_entity_id is immutable after insertion (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
   RETURN NEW;
 END;
 $$;
@@ -964,6 +1048,405 @@ COMMENT ON FUNCTION public.trg_immute_continuity_transaction_fields() IS
   'Wave 6: Prevents post-insertion mutation of payload_hash, transaction_data, and '
   'offline_correlation_id on continuity_transaction. The hash must remain bound to the '
   'captured payload. Raises P0001 on any attempt to modify these fields. SOURCE ONLY.';
+
+-- ── Wave 6 INSERT guards + DB-owned actor/timestamp ownership ────────────────
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_guard_management_review_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'management_review: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.review_status <> 'draft' THEN
+    RAISE EXCEPTION 'management_review: insert must start at draft (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.closed_at IS NOT NULL OR NEW.waiver_recorded = true OR NEW.waiver_reason IS NOT NULL THEN
+    RAISE EXCEPTION 'management_review: insert cannot pre-populate closure/waiver evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.created_by_app_user_id IS NOT NULL AND NEW.created_by_app_user_id <> v_actor THEN
+    RAISE EXCEPTION 'management_review: created_by_app_user_id spoof rejected (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.owner_app_user_id IS NOT NULL AND NEW.owner_app_user_id <> v_actor THEN
+    RAISE EXCEPTION 'management_review: owner_app_user_id spoof rejected (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  NEW.created_by_app_user_id := v_actor;
+  NEW.owner_app_user_id := COALESCE(NEW.owner_app_user_id, v_actor);
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_management_review_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'management_review: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.created_by_app_user_id IS DISTINCT FROM OLD.created_by_app_user_id THEN
+    RAISE EXCEPTION 'management_review: created_by_app_user_id is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.review_status = 'in_review' AND OLD.review_status <> 'in_review' THEN
+    NEW.opened_at := COALESCE(OLD.opened_at, now());
+  END IF;
+  IF NEW.review_status = 'closed' AND OLD.review_status <> 'closed' THEN
+    NEW.closed_at := now();
+  END IF;
+  IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
+    IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
+      RAISE EXCEPTION 'management_review: waiver requires waiver_reason evidence (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
+    NEW.waiver_actor_app_user_id := v_actor;
+    NEW.waiver_recorded_at := now();
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_guard_ccr_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'change_control_record: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.change_status <> 'measure' THEN
+    RAISE EXCEPTION 'change_control_record: insert must start at measure (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.approval_at IS NOT NULL OR NEW.approval_actor_id IS NOT NULL THEN
+    RAISE EXCEPTION 'change_control_record: insert cannot pre-populate approval evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.created_by_app_user_id IS NOT NULL AND NEW.created_by_app_user_id <> v_actor THEN
+    RAISE EXCEPTION 'change_control_record: created_by_app_user_id spoof rejected (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  NEW.created_by_app_user_id := v_actor;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_ccr_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'change_control_record: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.created_by_app_user_id IS DISTINCT FROM OLD.created_by_app_user_id THEN
+    RAISE EXCEPTION 'change_control_record: created_by_app_user_id is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.change_status = 'approve' AND OLD.change_status <> 'approve' THEN
+    NEW.approval_actor_id := v_actor;
+    NEW.approval_at := now();
+  ELSIF NEW.approval_actor_id IS DISTINCT FROM OLD.approval_actor_id THEN
+    RAISE EXCEPTION 'change_control_record: approval_actor_id is DB-owned (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.change_status = 'closed' AND NEW.validation_result = '{}'::jsonb THEN
+    RAISE EXCEPTION 'change_control_record: validation_result evidence is required before closure (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  NEW.updated_at := now();
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_guard_continuity_session_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'continuity_session: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.session_status <> 'declared' THEN
+    RAISE EXCEPTION 'continuity_session: insert must start at declared (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.service_restored_at IS NOT NULL OR NEW.reconciliation_started_at IS NOT NULL
+     OR NEW.reconciliation_completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: insert cannot pre-populate transition-owned timestamps (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  NEW.declared_by_app_user_id := v_actor;
+  NEW.declared_at := COALESCE(NEW.declared_at, now());
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_continuity_session_update()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'continuity_session: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.declared_by_app_user_id IS DISTINCT FROM OLD.declared_by_app_user_id THEN
+    RAISE EXCEPTION 'continuity_session: declared_by_app_user_id is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.session_status = 'service_restored' AND OLD.session_status <> 'service_restored' THEN
+    NEW.service_restored_at := now();
+  END IF;
+  IF NEW.session_status = 'reconciling' AND OLD.session_status <> 'reconciling' THEN
+    NEW.reconciliation_started_at := now();
+  END IF;
+  IF NEW.session_status = 'reconciled' AND OLD.session_status <> 'reconciled' THEN
+    NEW.reconciliation_completed_at := now();
+  END IF;
+  IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
+    IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
+      RAISE EXCEPTION 'continuity_session: waiver requires rationale/evidence (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
+    NEW.waiver_actor_app_user_id := v_actor;
+    NEW.waiver_recorded_at := now();
+  END IF;
+  IF NEW.session_status = 'closed' AND OLD.session_status <> 'closed' THEN
+    NEW.closed_at := now();
+    NEW.closed_by_app_user_id := v_actor;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_guard_continuity_transaction_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_parent public.continuity_session%ROWTYPE;
+BEGIN
+  IF NEW.reconciliation_status <> 'pending' THEN
+    RAISE EXCEPTION 'continuity_transaction: insert must start pending (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.reconciled_at IS NOT NULL OR NEW.reconciled_by_app_user_id IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_transaction: insert cannot pre-populate reconciliation evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  SELECT * INTO v_parent FROM public.continuity_session WHERE id = NEW.continuity_session_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'continuity_transaction: parent continuity_session does not exist (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.organization_id <> v_parent.organization_id THEN
+    RAISE EXCEPTION 'continuity_transaction: organization must match parent continuity_session (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF COALESCE(NEW.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid)
+     <> COALESCE(v_parent.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid) THEN
+    RAISE EXCEPTION 'continuity_transaction: business_unit_id must match parent continuity_session (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'continuity_transaction: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  IF OLD.reconciliation_status IN ('matched','discrepancy','waived')
+     AND NEW.reconciliation_status IS DISTINCT FROM OLD.reconciliation_status THEN
+    RAISE EXCEPTION 'continuity_transaction: terminal reconciliation state is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  IF OLD.reconciliation_status = 'pending'
+     AND NEW.reconciliation_status IN ('matched','discrepancy','waived') THEN
+    NEW.reconciled_at := now();
+    NEW.reconciled_by_app_user_id := v_actor;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trig_wave6_mr_insert_guard
+  BEFORE INSERT ON public.management_review
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_guard_management_review_insert();
+
+CREATE TRIGGER trig_wave6_mr_update_stamp
+  BEFORE UPDATE ON public.management_review
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_stamp_management_review_update();
+
+CREATE TRIGGER trig_wave6_ccr_insert_guard
+  BEFORE INSERT ON public.change_control_record
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_guard_ccr_insert();
+
+CREATE TRIGGER trig_wave6_ccr_update_stamp
+  BEFORE UPDATE ON public.change_control_record
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_stamp_ccr_update();
+
+CREATE TRIGGER trig_wave6_cs_insert_guard
+  BEFORE INSERT ON public.continuity_session
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_guard_continuity_session_insert();
+
+CREATE TRIGGER trig_wave6_cs_update_stamp
+  BEFORE UPDATE ON public.continuity_session
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_stamp_continuity_session_update();
+
+CREATE TRIGGER trig_wave6_ct_insert_guard
+  BEFORE INSERT ON public.continuity_transaction
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_guard_continuity_transaction_insert();
+
+CREATE TRIGGER trig_wave6_ct_reconciliation_fsm
+  BEFORE UPDATE ON public.continuity_transaction
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm();
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_validate_kpi_snapshot_scope()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_definition_org uuid;
+BEGIN
+  SELECT kd.organization_id INTO v_definition_org
+  FROM public.kpi_definition kd
+  WHERE kd.id = NEW.kpi_definition_id;
+  IF v_definition_org IS NOT NULL AND v_definition_org <> NEW.organization_id THEN
+    RAISE EXCEPTION 'kpi_snapshot: definition organization scope mismatch (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_validate_management_review_manifest()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_item jsonb;
+  v_snapshot public.kpi_snapshot%ROWTYPE;
+BEGIN
+  IF jsonb_typeof(NEW.kpi_snapshot_manifest) <> 'array' THEN
+    RAISE EXCEPTION 'management_review: kpi_snapshot_manifest must be an array (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  FOR v_item IN SELECT * FROM jsonb_array_elements(NEW.kpi_snapshot_manifest)
+  LOOP
+    SELECT * INTO v_snapshot
+    FROM public.kpi_snapshot ks
+    WHERE ks.id = (v_item->>'kpi_snapshot_id')::uuid;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'management_review: manifest references missing kpi_snapshot_id % (row id=%)', v_item->>'kpi_snapshot_id', NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    IF v_snapshot.kpi_code <> v_item->>'kpi_code'
+       OR v_snapshot.definition_version <> v_item->>'definition_version' THEN
+      RAISE EXCEPTION 'management_review: manifest code/version mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    IF v_snapshot.organization_id <> NEW.organization_id
+       OR COALESCE(v_snapshot.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid)
+          <> COALESCE(NEW.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid)
+       OR v_snapshot.period_type <> NEW.period_type
+       OR v_snapshot.period_start <> NEW.period_start
+       OR v_snapshot.period_end <> NEW.period_end
+       OR v_snapshot.timezone <> NEW.timezone THEN
+      RAISE EXCEPTION 'management_review: manifest snapshot scope mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END;
+$$;
+
+CREATE OR REPLACE FUNCTION public.trg_wave6_validate_ccr_kpi_manifest()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_item jsonb;
+  v_snapshot public.kpi_snapshot%ROWTYPE;
+BEGIN
+  IF jsonb_typeof(NEW.source_kpi_snapshot_manifest) <> 'array' THEN
+    RAISE EXCEPTION 'change_control_record: source_kpi_snapshot_manifest must be an array (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF array_length(NEW.source_kpi_codes, 1) IS NOT NULL
+     AND array_length(NEW.source_kpi_codes, 1) > 0
+     AND jsonb_array_length(NEW.source_kpi_snapshot_manifest) = 0 THEN
+    RAISE EXCEPTION 'change_control_record: source_kpi_codes require real kpi_snapshot manifest references (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  FOR v_item IN SELECT * FROM jsonb_array_elements(NEW.source_kpi_snapshot_manifest)
+  LOOP
+    SELECT * INTO v_snapshot
+    FROM public.kpi_snapshot ks
+    WHERE ks.id = (v_item->>'kpi_snapshot_id')::uuid;
+    IF NOT FOUND THEN
+      RAISE EXCEPTION 'change_control_record: manifest references missing kpi_snapshot_id % (row id=%)', v_item->>'kpi_snapshot_id', NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    IF v_snapshot.kpi_code <> v_item->>'kpi_code'
+       OR v_snapshot.definition_version <> v_item->>'definition_version' THEN
+      RAISE EXCEPTION 'change_control_record: manifest code/version mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    IF v_snapshot.organization_id <> NEW.organization_id
+       OR COALESCE(v_snapshot.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid)
+          <> COALESCE(NEW.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid) THEN
+      RAISE EXCEPTION 'change_control_record: manifest scope mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+  RETURN NEW;
+END;
+$$;
+
+CREATE TRIGGER trig_wave6_kpi_snapshot_scope
+  BEFORE INSERT OR UPDATE ON public.kpi_snapshot
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_validate_kpi_snapshot_scope();
+
+CREATE TRIGGER trig_wave6_management_review_manifest
+  BEFORE INSERT OR UPDATE ON public.management_review
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_validate_management_review_manifest();
+
+CREATE TRIGGER trig_wave6_ccr_manifest
+  BEFORE INSERT OR UPDATE ON public.change_control_record
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_validate_ccr_kpi_manifest();
 
 
 
@@ -1924,7 +2407,18 @@ BEGIN
       'trg_enforce_continuity_fsm',
       'trg_enforce_release_gate_sequence',
       'trg_set_continuity_payload_hash',
-      'trg_immute_continuity_transaction_fields'
+      'trg_immute_continuity_transaction_fields',
+      'trg_wave6_guard_management_review_insert',
+      'trg_wave6_stamp_management_review_update',
+      'trg_wave6_guard_ccr_insert',
+      'trg_wave6_stamp_ccr_update',
+      'trg_wave6_guard_continuity_session_insert',
+      'trg_wave6_stamp_continuity_session_update',
+      'trg_wave6_guard_continuity_transaction_insert',
+      'trg_wave6_enforce_continuity_transaction_fsm',
+      'trg_wave6_validate_kpi_snapshot_scope',
+      'trg_wave6_validate_management_review_manifest',
+      'trg_wave6_validate_ccr_kpi_manifest'
     ])
     LOOP
       SELECT COUNT(*) INTO v_count

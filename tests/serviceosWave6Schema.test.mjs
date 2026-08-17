@@ -457,9 +457,11 @@ test("management_review FSM trigger fires BEFORE UPDATE", () => {
   assert.match(sql, /BEFORE UPDATE ON public\.management_review\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_management_review_fsm/);
 });
 
-test("migration header truthfully documents 6 trigger functions and 6 triggers", () => {
-  assert.match(sql, /Trigger functions created \(6\):/);
-  assert.match(sql, /Triggers created \(6\):/);
+test("migration header truthfully documents expanded trigger coverage", () => {
+  assert.match(sql, /Trigger functions created \(17\):/);
+  assert.match(sql, /Triggers created \(17\):/);
+  assert.match(sql, /trig_wave6_mr_insert_guard/);
+  assert.match(sql, /trig_wave6_ccr_insert_guard/);
 });
 
 test("change_control_record FSM trigger fires BEFORE UPDATE", () => {

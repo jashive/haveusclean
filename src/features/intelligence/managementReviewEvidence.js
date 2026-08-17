@@ -1,30 +1,13 @@
-export function resolveDefinition(kpiDefinitions, kpiCode, { asOf = Date.now() } = {}) {
-  if (!Array.isArray(kpiDefinitions) || !kpiCode) {
-    return { definition: null, error: "missing definition inputs" };
-  }
-  const applicable = kpiDefinitions.filter((definition) => {
-    if (!definition || definition.code !== kpiCode || definition.active === false) return false;
-    const effectiveFrom = definition.effective_from ? Date.parse(definition.effective_from) : null;
-    const effectiveTo = definition.effective_to ? Date.parse(definition.effective_to) : null;
-    if (effectiveFrom !== null && Number.isFinite(effectiveFrom) && effectiveFrom > asOf) return false;
-    if (effectiveTo !== null && Number.isFinite(effectiveTo) && effectiveTo <= asOf) return false;
-    return true;
+import { resolveGovernedKpiDefinition } from "../../lib/wave6DefinitionResolver.js";
+
+export function resolveDefinition(kpiDefinitions, kpiCode, scope) {
+  return resolveGovernedKpiDefinition(kpiDefinitions, {
+    organizationId: scope?.organizationId,
+    kpiCode,
+    periodType: scope?.periodType,
+    periodStart: scope?.periodStart,
+    periodEnd: scope?.periodEnd,
   });
-  const orgScoped = applicable.filter((definition) => definition.organization_id);
-  const globalScoped = applicable.filter((definition) => !definition.organization_id);
-  const preferredPool = orgScoped.length > 0 ? orgScoped : globalScoped;
-  if (preferredPool.length === 0) {
-    return { definition: null, error: `no active applicable definition for ${kpiCode}` };
-  }
-  if (preferredPool.length > 1) {
-    return {
-      definition: null,
-      error: `ambiguous active definition for ${kpiCode}: ${preferredPool
-        .map((definition) => definition.definition_version ?? "1")
-        .join(", ")}`,
-    };
-  }
-  return { definition: preferredPool[0], error: null };
 }
 
 function isPopulatedObject(value) {

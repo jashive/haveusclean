@@ -124,8 +124,8 @@ async function patchRowById(resource, id, patch) {
 function periodFilters({ periodType, periodStart, periodEnd }) {
   const filters = [];
   if (periodType) filters.push(eq("period_type", periodType));
-  if (periodStart) filters.push(`period_start=gte.${encodeURIComponent(periodStart)}`);
-  if (periodEnd) filters.push(`period_end=lte.${encodeURIComponent(periodEnd)}`);
+  if (periodStart) filters.push(`period_start=eq.${encodeURIComponent(periodStart)}`);
+  if (periodEnd) filters.push(`period_end=eq.${encodeURIComponent(periodEnd)}`);
   return filters;
 }
 
@@ -361,6 +361,7 @@ function buildSourceQueryParts(source, scope) {
     eq("organization_id", organizationId),
     `${source.timestampColumn}=gte.${encodeURIComponent(startIso)}`,
     `${source.timestampColumn}=lte.${encodeURIComponent(endIso)}`,
+    `order=${source.timestampColumn}.asc,id.asc`,
     `limit=${limit}`,
     `offset=${offset}`,
   ];
@@ -721,11 +722,22 @@ export async function loadCanonicalEvents(
 
 // ── Management reviews ───────────────────────────────────────────────────────
 
-export async function loadManagementReviews(session, { organizationId, periodType } = {}) {
+export async function loadManagementReviews(
+  session,
+  { organizationId, businessUnitId, periodType, periodStart, periodEnd, timezone } = {}
+) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
-  const filters = ["select=*", eq("organization_id", organizationId), "order=period_start.desc"];
+  const filters = ["select=*", eq("organization_id", organizationId), "order=period_start.desc,id.desc"];
+  if (businessUnitId) {
+    filters.push(eq("business_unit_id", businessUnitId));
+  } else if (businessUnitId === null) {
+    filters.push("business_unit_id=is.null");
+  }
   if (periodType) filters.push(eq("period_type", periodType));
+  if (periodStart) filters.push(`period_start=eq.${encodeURIComponent(toIso(periodStart))}`);
+  if (periodEnd) filters.push(`period_end=eq.${encodeURIComponent(toIso(periodEnd))}`);
+  if (timezone) filters.push(eq("timezone", timezone));
   return selectRows("management_review", filters.join("&"));
 }
 
@@ -754,10 +766,18 @@ export async function updateManagementReview(session, id, patch) {
 
 // ── Change control ───────────────────────────────────────────────────────────
 
-export async function loadChangeControlRecords(session, { organizationId, changeStatus } = {}) {
+export async function loadChangeControlRecords(
+  session,
+  { organizationId, businessUnitId, changeStatus } = {}
+) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
   const filters = ["select=*", eq("organization_id", organizationId), "order=created_at.desc"];
+  if (businessUnitId) {
+    filters.push(eq("business_unit_id", businessUnitId));
+  } else if (businessUnitId === null) {
+    filters.push("business_unit_id=is.null");
+  }
   if (changeStatus) filters.push(eq("change_status", changeStatus));
   return selectRows("change_control_record", filters.join("&"));
 }
@@ -781,10 +801,7 @@ export async function updateChangeControlRecord(session, id, patch) {
     }
   }
   const { current_status: _ignored, ...persistable } = patch ?? {};
-  return patchRowById("change_control_record", id, {
-    ...persistable,
-    updated_at: new Date().toISOString(),
-  });
+  return patchRowById("change_control_record", id, persistable);
 }
 
 // ── Dependency impact ────────────────────────────────────────────────────────
@@ -803,7 +820,7 @@ export async function loadDependencyEdges(session, { kgId } = {}) {
 export async function loadDependencyImpact(session, { fromNode, maxDepth = 5 } = {}) {
   assertEnabled();
   requireValue(fromNode, "fromNode");
-  const edges = await selectRows("dependency_edge", "select=*");
+  const edges = await loadDependencyEdges(session, {});
   return {
     fromNode,
     maxDepth,
@@ -814,10 +831,18 @@ export async function loadDependencyImpact(session, { fromNode, maxDepth = 5 } =
 
 // ── Continuity ───────────────────────────────────────────────────────────────
 
-export async function loadContinuitySessions(session, { organizationId, sessionStatus } = {}) {
+export async function loadContinuitySessions(
+  session,
+  { organizationId, businessUnitId, sessionStatus } = {}
+) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
   const filters = ["select=*", eq("organization_id", organizationId), "order=declared_at.desc"];
+  if (businessUnitId) {
+    filters.push(eq("business_unit_id", businessUnitId));
+  } else if (businessUnitId === null) {
+    filters.push("business_unit_id=is.null");
+  }
   if (sessionStatus) filters.push(eq("session_status", sessionStatus));
   return selectRows("continuity_session", filters.join("&"));
 }
@@ -858,6 +883,10 @@ export async function recordContinuityTransaction(session, payload) {
   requireValue(payload?.organization_id, "organization_id");
   requireValue(payload?.transaction_type, "transaction_type");
   requireValue(payload?.offline_correlation_id, "offline_correlation_id");
+  const txData = payload?.transaction_data;
+  if (!txData || typeof txData !== "object" || Array.isArray(txData) || Object.keys(txData).length === 0) {
+    throw new Error("Wave 6: transaction_data must be a non-empty structured payload");
+  }
   if (!isValidOfflineCorrelationId(payload.offline_correlation_id)) {
     throw new Error(
       "Wave 6: offline_correlation_id must be 4-64 chars of letters, digits, dot, dash or underscore"
@@ -889,22 +918,12 @@ export async function reconcileContinuityTransaction(session, id, reconciliation
 
   const patch = {
     reconciliation_status: resolved.transaction.reconciliation_status,
-    reconciled_at: resolved.transaction.reconciled_at,
   };
   if (resolved.transaction.discrepancy_notes !== undefined) {
     patch.discrepancy_notes = resolved.transaction.discrepancy_notes;
   }
   if (resolved.transaction.waiver_evidence !== undefined) {
     patch.waiver_evidence = resolved.transaction.waiver_evidence;
-  }
-  if (resolved.transaction.reconciled_by_app_user_id !== undefined) {
-    patch.reconciled_by_app_user_id = resolved.transaction.reconciled_by_app_user_id;
-  }
-  if (resolved.transaction.serviceos_entity_type !== undefined) {
-    patch.serviceos_entity_type = resolved.transaction.serviceos_entity_type;
-  }
-  if (resolved.transaction.serviceos_entity_id !== undefined) {
-    patch.serviceos_entity_id = resolved.transaction.serviceos_entity_id;
   }
 
   const transaction = await patchRowById("continuity_transaction", id, patch);

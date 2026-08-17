@@ -792,6 +792,38 @@ test(">1000 source records cannot be silently truncated", async () => {
   assert.equal(results[0].rowCounts.service_request, 1250);
 });
 
+test("pagination query is deterministic with timestamp+id ordering", async () => {
+  const queries = [];
+  await computePeriodKpis(
+    null,
+    {
+      organizationId: "org-1",
+      businessUnitId: "bu-1",
+      jurisdictionId: null,
+      periodType: "YEARLY",
+      periodStart: "2026-01-01T00:00:00.000Z",
+      periodEnd: "2026-12-31T23:59:59.999Z",
+      timezone: TORONTO,
+      kpiCodes: ["sales.leads_created"],
+    },
+    {
+      selectRowsImpl: async (_table, query) => {
+        queries.push(query);
+        return [];
+      },
+    }
+  );
+  assert.match(queries[0], /order=created_at\.asc,id\.asc/);
+});
+
+test("loadManagementReviews source includes exact scope filters", () => {
+  assert.match(clientSource, /export async function loadManagementReviews/);
+  assert.match(clientSource, /period_start=eq\./);
+  assert.match(clientSource, /period_end=eq\./);
+  assert.match(clientSource, /eq\(\"timezone\", timezone\)/);
+  assert.match(clientSource, /business_unit_id/);
+});
+
 test("KPI source query does not use select=*", async () => {
   const queries = [];
   await fetchKpiSourceData(

@@ -2,20 +2,17 @@
 //
 // Lists HEMS change control records and drives the governed FSM.
 // Every control performs a real persisted action through
-// serviceosIntelligenceClient.js. Only legal transitions are offered, and a
-// material change cannot be closed without impact assessment + passed
-// validation evidence.
+// serviceosIntelligenceClient.js.
 
-import React, { useCallback, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
   createChangeControlRecord,
+  loadDependencyEdges,
+  loadDependencyImpact,
   updateChangeControlRecord,
 } from "../../lib/serviceosIntelligenceClient.js";
-import {
-  canCloseChangeControlRecord,
-  nextCcrStatuses,
-} from "../../lib/serviceosIntelligenceUtils.js";
+import { canCloseChangeControlRecord, nextCcrStatuses } from "../../lib/serviceosIntelligenceUtils.js";
 import { formatErrorMessage, formatStatusLabel, formatTimestamp } from "./wave6Formatters.js";
 
 const CHANGE_TYPES = ["process", "pricing", "sop", "training", "system", "hems_model"];
@@ -75,6 +72,11 @@ const styles = {
   note: { color: "#94a3b8", fontSize: "0.68rem", marginTop: 4, lineHeight: 1.4 },
 };
 
+function toJson(value, fallback) {
+  if (!value || value.trim() === "") return fallback;
+  return JSON.parse(value);
+}
+
 export default function ChangeControlPanel({
   session,
   organizationId,
@@ -89,6 +91,51 @@ export default function ChangeControlPanel({
   const [material, setMaterial] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
+  const [dependencyEdges, setDependencyEdges] = useState([]);
+  const [drafts, setDrafts] = useState({});
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDependencyEdges(session, {})
+      .then((rows) => {
+        if (!cancelled) setDependencyEdges(Array.isArray(rows) ? rows : []);
+      })
+      .catch(() => {
+        if (!cancelled) setDependencyEdges([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session]);
+
+  const edgeSources = useMemo(
+    () => [...new Set(dependencyEdges.map((edge) => edge?.from_node).filter(Boolean))].sort(),
+    [dependencyEdges]
+  );
+
+  const resolveDraft = useCallback((record) => {
+    const existing = drafts[record.id];
+    if (existing) return existing;
+    return {
+      impact_assessment: JSON.stringify(record.impact_assessment ?? {}, null, 2),
+      implementation_plan: record.implementation_plan ?? "",
+      training_required: Boolean(record.training_required),
+      training_status: record.training_status ?? "",
+      validation_result: JSON.stringify(record.validation_result ?? {}, null, 2),
+      hems_decision_reference: record.hems_decision_reference ?? "",
+      release_reference: record.release_reference ?? "",
+      source_kpi_codes: Array.isArray(record.source_kpi_codes) ? record.source_kpi_codes.join(",") : "",
+      source_kpi_snapshot_manifest: JSON.stringify(record.source_kpi_snapshot_manifest ?? [], null, 2),
+      dependency_source_node: "",
+    };
+  }, [drafts]);
+
+  const setDraftField = useCallback((recordId, field, value) => {
+    setDrafts((prev) => {
+      const baseline = prev[recordId] ?? {};
+      return { ...prev, [recordId]: { ...baseline, [field]: value } };
+    });
+  }, []);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -130,14 +177,10 @@ export default function ChangeControlPanel({
       setError(null);
       setBusy(true);
       try {
-        const patch = {
+        await updateChangeControlRecord(session, record.id, {
           current_status: record.change_status,
           change_status: nextStatus,
-        };
-        if (nextStatus === "approve") {
-          patch.approval_at = new Date().toISOString();
-        }
-        await updateChangeControlRecord(session, record.id, patch);
+        });
         if (onChanged) await onChanged();
       } catch (err) {
         setError(formatErrorMessage(err));
@@ -147,6 +190,67 @@ export default function ChangeControlPanel({
     },
     [session, onChanged]
   );
+
+  const handlePersistEvidence = useCallback(async (record) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const draft = resolveDraft(record);
+      await updateChangeControlRecord(session, record.id, {
+        current_status: record.change_status,
+        source_kpi_codes: draft.source_kpi_codes
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean),
+        source_kpi_snapshot_manifest: toJson(draft.source_kpi_snapshot_manifest, []),
+        impact_assessment: toJson(draft.impact_assessment, {}),
+        implementation_plan: draft.implementation_plan.trim() || null,
+        training_required: Boolean(draft.training_required),
+        training_status: draft.training_status.trim() || null,
+        validation_result: toJson(draft.validation_result, {}),
+        hems_decision_reference: draft.hems_decision_reference.trim() || null,
+        release_reference: draft.release_reference.trim() || null,
+      });
+      if (onChanged) await onChanged();
+    } catch (err) {
+      setError(formatErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [onChanged, resolveDraft, session]);
+
+  const handleLoadImpact = useCallback(async (record) => {
+    setError(null);
+    setBusy(true);
+    try {
+      const draft = resolveDraft(record);
+      const node = draft.dependency_source_node;
+      if (!node) throw new Error("Select a dependency graph source node first.");
+      const result = await loadDependencyImpact(session, { fromNode: node, maxDepth: 8 });
+      const impacted = Array.isArray(result?.impacted) ? result.impacted : [];
+      const affected = impacted.map((entry) => entry.node).filter(Boolean);
+      await updateChangeControlRecord(session, record.id, {
+        current_status: record.change_status,
+        affected_dependencies: affected,
+        impact_assessment: {
+          ...(record.impact_assessment ?? {}),
+          dependency_graph_source: node,
+          dependency_edge_count: impacted.length,
+          dependency_paths: impacted.map((entry) => ({
+            from_node: entry.from_node,
+            to_node: entry.node,
+            edge_type: entry.edge_type,
+            depth: entry.depth,
+          })),
+        },
+      });
+      if (onChanged) await onChanged();
+    } catch (err) {
+      setError(formatErrorMessage(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [onChanged, resolveDraft, session]);
 
   const canCreate =
     !busy && changeCode.trim() !== "" && title.trim() !== "" && Boolean(organizationId);
@@ -206,30 +310,116 @@ export default function ChangeControlPanel({
       <div style={styles.section}>
         <div style={styles.label}>Change control records ({records.length})</div>
         {records.length === 0 && (
-          <div style={styles.note}>
-            No change control records for this organization yet.
-          </div>
+          <div style={styles.note}>No change control records for this business-unit scope yet.</div>
         )}
         {records.map((record) => {
           const transitions = nextCcrStatuses(record.change_status);
+          const draft = resolveDraft(record);
           return (
             <div key={record.id} style={styles.row}>
               <div style={styles.rowTitle}>
                 {record.change_code} — {record.title}
               </div>
               <div style={styles.rowMeta}>
-                {formatStatusLabel(record.change_status)} ·{" "}
-                {formatStatusLabel(record.change_type)} ·{" "}
+                {formatStatusLabel(record.change_status)} · {formatStatusLabel(record.change_type)} ·{" "}
                 {record.material_change ? "Material" : "Non-material"} ·{" "}
                 {formatTimestamp(record.created_at)}
               </div>
+
+              <input
+                style={styles.input}
+                placeholder="Source KPI codes (comma separated)"
+                value={draft.source_kpi_codes}
+                onChange={(e) => setDraftField(record.id, "source_kpi_codes", e.target.value)}
+              />
+              <textarea
+                style={styles.input}
+                placeholder='Source KPI snapshot manifest JSON (e.g. [{"kpi_snapshot_id":"...","kpi_code":"...","definition_version":"1"}])'
+                value={draft.source_kpi_snapshot_manifest}
+                onChange={(e) =>
+                  setDraftField(record.id, "source_kpi_snapshot_manifest", e.target.value)
+                }
+              />
+              <textarea
+                style={styles.input}
+                placeholder="Impact assessment JSON"
+                value={draft.impact_assessment}
+                onChange={(e) => setDraftField(record.id, "impact_assessment", e.target.value)}
+              />
+              <input
+                style={styles.input}
+                placeholder="Implementation plan"
+                value={draft.implementation_plan}
+                onChange={(e) => setDraftField(record.id, "implementation_plan", e.target.value)}
+              />
+              <label style={{ ...styles.note, display: "block" }}>
+                <input
+                  type="checkbox"
+                  checked={Boolean(draft.training_required)}
+                  onChange={(e) => setDraftField(record.id, "training_required", e.target.checked)}
+                />{" "}
+                Training required
+              </label>
+              <input
+                style={styles.input}
+                placeholder="Training status"
+                value={draft.training_status}
+                onChange={(e) => setDraftField(record.id, "training_status", e.target.value)}
+              />
+              <textarea
+                style={styles.input}
+                placeholder='Validation result JSON (must include passed true for closure, plus evidence/ref)'
+                value={draft.validation_result}
+                onChange={(e) => setDraftField(record.id, "validation_result", e.target.value)}
+              />
+              <input
+                style={styles.input}
+                placeholder="HEMS decision reference"
+                value={draft.hems_decision_reference}
+                onChange={(e) => setDraftField(record.id, "hems_decision_reference", e.target.value)}
+              />
+              <input
+                style={styles.input}
+                placeholder="Release reference"
+                value={draft.release_reference}
+                onChange={(e) => setDraftField(record.id, "release_reference", e.target.value)}
+              />
+
+              <select
+                style={styles.input}
+                value={draft.dependency_source_node}
+                onChange={(e) => setDraftField(record.id, "dependency_source_node", e.target.value)}
+              >
+                <option value="">Select dependency source node</option>
+                {edgeSources.map((node) => (
+                  <option key={node} value={node}>
+                    {node}
+                  </option>
+                ))}
+              </select>
+
               <div style={styles.actions}>
+                <button
+                  type="button"
+                  style={busy ? styles.buttonDisabled : styles.button}
+                  disabled={busy}
+                  onClick={() => handlePersistEvidence(record)}
+                >
+                  Save workflow evidence
+                </button>
+                <button
+                  type="button"
+                  style={busy ? styles.buttonDisabled : styles.button}
+                  disabled={busy || !draft.dependency_source_node}
+                  onClick={() => handleLoadImpact(record)}
+                >
+                  Load & persist dependency impact
+                </button>
                 {transitions.length === 0 && (
                   <span style={styles.note}>Terminal state — no further transition.</span>
                 )}
                 {transitions.map((nextStatus) => {
-                  const blocked =
-                    nextStatus === "closed" && !canCloseChangeControlRecord(record);
+                  const blocked = nextStatus === "closed" && !canCloseChangeControlRecord(record);
                   return (
                     <button
                       key={nextStatus}
@@ -245,7 +435,7 @@ export default function ChangeControlPanel({
               </div>
               {record.material_change && !canCloseChangeControlRecord(record) && (
                 <div style={styles.note}>
-                  Closure blocked: material change needs a non-empty impact assessment and a
+                  Closure blocked: material change needs dependency/impact evidence and a
                   validation result with passed = true.
                 </div>
               )}

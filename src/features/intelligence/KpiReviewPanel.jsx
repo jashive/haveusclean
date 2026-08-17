@@ -6,6 +6,7 @@
 
 import React from "react";
 
+import { resolveGovernedKpiDefinition } from "../../lib/wave6DefinitionResolver.js";
 import {
   NO_DATA,
   describeRateBasis,
@@ -52,6 +53,10 @@ function domainOf(kpiCode) {
 export default function KpiReviewPanel({
   kpis = [],
   definitions = [],
+  organizationId,
+  periodType,
+  periodStart,
+  periodEnd,
   periodLabel = "",
   timezone = "America/Toronto",
   currency = "CAD",
@@ -65,10 +70,6 @@ export default function KpiReviewPanel({
     );
   }
 
-  const definitionByCode = new Map(
-    (Array.isArray(definitions) ? definitions : []).map((d) => [d.code, d])
-  );
-
   return (
     <div>
       {DOMAIN_ORDER.map((domain) => {
@@ -79,7 +80,14 @@ export default function KpiReviewPanel({
             <div style={styles.groupLabel}>{formatDomainLabel(domain)}</div>
             <div style={styles.grid}>
               {domainKpis.map((kpi) => {
-                const definition = definitionByCode.get(kpi.kpiCode) ?? null;
+                const resolved = resolveGovernedKpiDefinition(definitions, {
+                  organizationId,
+                  kpiCode: kpi.kpiCode,
+                  periodType,
+                  periodStart,
+                  periodEnd,
+                });
+                const definition = resolved.definition;
                 const unit = definition?.unit ?? null;
                 const isRate = unit === "ratio";
                 const unavailable = kpi.unavailable === true;
@@ -92,11 +100,13 @@ export default function KpiReviewPanel({
                 return (
                   <div key={kpi.kpiCode} style={styles.card}>
                     <div style={styles.cardName}>{definition?.name ?? kpi.kpiCode}</div>
-                    <div style={styles.cardValue}>
-                      {formatKpiValue(kpi.value, unit, currency)}
-                    </div>
+                    <div style={styles.cardValue}>{formatKpiValue(kpi.value, unit, currency)}</div>
                     <div style={styles.cardMeta}>
                       {periodLabel ? `${periodLabel} · ${timezone}` : timezone}
+                      <br />
+                      {definition?.definition_version
+                        ? `Definition v${definition.definition_version}`
+                        : `Definition: ${resolved.error ?? NO_DATA}`}
                       <br />
                       {unavailable
                         ? `Source unavailable: ${formatLineage(kpi.unavailableSources)}`

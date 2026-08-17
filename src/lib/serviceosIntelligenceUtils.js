@@ -485,12 +485,15 @@ export function nextCcrStatuses(fromStatus) {
 export function canCloseChangeControlRecord(record) {
   if (!record) return false;
   if (!canTransitionCcr(record.change_status, "closed")) return false;
+  const validation = record.validation_result;
+  const hasValidationEvidence =
+    validation && typeof validation === "object" && Object.keys(validation).length > 0;
+  if (!hasValidationEvidence) return false;
+
   if (!record.material_change) return true;
 
   const impact = record.impact_assessment;
-  const hasImpact =
-    impact && typeof impact === "object" && Object.keys(impact).length > 0;
-  const validation = record.validation_result;
+  const hasImpact = impact && typeof impact === "object" && Object.keys(impact).length > 0;
   const passed =
     validation &&
     typeof validation === "object" &&
@@ -711,7 +714,6 @@ export function resolveContinuityReconciliation(existing, reconciliation) {
     transaction: {
       ...existing,
       ...reconciliation,
-      reconciled_at: reconciliation.reconciled_at ?? new Date().toISOString(),
     },
   };
 }
