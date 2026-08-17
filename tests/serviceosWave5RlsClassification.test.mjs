@@ -13,7 +13,9 @@ import { fileURLToPath } from "url";
 import {
   classifyDenyPatchProbe,
   classifyDenyMutationProbe,
+  classifyDenyRetainedDuplicateInsertProbe,
   buildIdentityAudit,
+  makeRetainedDuplicateInsertPayload,
   resolveNormalizedTokenMap,
 } from "../src/server/wave5RlsAcceptanceHarness.js";
 
@@ -41,13 +43,13 @@ const CANONICAL_ROW = Object.freeze({
   metadata: { probe: "test" },
 });
 
-function makeResult(status, body) {
+function makeResult(status, body, method = "PATCH") {
   return {
     ok: status >= 200 && status < 300,
     status,
     body,
     raw_text: typeof body === "string" ? body : JSON.stringify(body ?? ""),
-    method: "PATCH",
+    method,
     table: TABLE,
   };
 }
@@ -180,7 +182,7 @@ test("W5RC-7. expected-deny INSERT: HTTP 200 → UNEXPECTED_ALLOW / FAIL", () =>
     role: ROLE,
     operation: `INSERT ${TABLE} (safe validation probe)`,
     table: TABLE,
-    result: makeResult(200, [{ id: "new-id" }]),
+    result: makeResult(200, [{ id: "new-id" }], "POST"),
     expected_scope: SCOPE,
   });
   assert.equal(probe.classification, "unexpected_allow", "INSERT 2xx must be unexpected_allow");
@@ -192,7 +194,7 @@ test("W5RC-7b. expected-deny INSERT: HTTP 200 empty array → UNEXPECTED_ALLOW /
     role: ROLE,
     operation: `INSERT ${TABLE} (safe validation probe)`,
     table: TABLE,
-    result: makeResult(200, []),
+    result: makeResult(200, [], "POST"),
     expected_scope: SCOPE,
   });
   assert.equal(probe.classification, "unexpected_allow", "INSERT 2xx with empty array must still be unexpected_allow");
@@ -218,6 +220,252 @@ test("W5RC-8. expected-deny INSERT: DB validation reached → VALIDATION_FAILURE
   });
   assert.equal(probe.classification, "validation_failure");
   assert.equal(probe.pass, false);
+});
+
+test("W5RC-8b. retained duplicate INSERT: explicit RLS 42501 denial → PROVEN_RLS_DENY / PASS", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT contractor_payable (retained duplicate PK RLS probe)",
+    table: "contractor_payable",
+    result: {
+      ok: false,
+      status: 403,
+      body: { code: "42501", message: "row-level security policy violation" },
+      raw_text: '{"code":"42501","message":"row-level security policy violation"}',
+      method: "POST",
+      table: "contractor_payable",
+    },
+    expected_scope: { id: "cp-id" },
+    beforeRow: { id: "cp-id", metadata: { a: 1 } },
+    afterRow: { id: "cp-id", metadata: { a: 1 } },
+  });
+  assert.equal(probe.classification, "proven_rls_deny");
+  assert.equal(probe.pass, true);
+});
+
+test("W5RC-8c. retained duplicate INSERT: table permission denial → PROVEN_AUTHZ_DENY / PASS", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT contractor_payable (retained duplicate PK RLS probe)",
+    table: "contractor_payable",
+    result: {
+      ok: false,
+      status: 403,
+      body: { message: "permission denied for table contractor_payable" },
+      raw_text: '{"message":"permission denied for table contractor_payable"}',
+      method: "POST",
+      table: "contractor_payable",
+    },
+    expected_scope: { id: "cp-id" },
+    beforeRow: { id: "cp-id", metadata: { a: 1 } },
+    afterRow: { id: "cp-id", metadata: { a: 1 } },
+  });
+  assert.equal(probe.classification, "proven_authz_deny");
+  assert.equal(probe.pass, true);
+});
+
+test("W5RC-8d. retained duplicate INSERT: duplicate PK 23505 → UNEXPECTED_ALLOW / FAIL", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT invoice_request (retained duplicate PK RLS probe)",
+    table: "invoice_request",
+    result: {
+      ok: false,
+      status: 409,
+      body: { code: "23505", message: "duplicate key value violates unique constraint" },
+      raw_text: '{"code":"23505","message":"duplicate key value violates unique constraint"}',
+      method: "POST",
+      table: "invoice_request",
+    },
+    expected_scope: { id: "ir-id" },
+    beforeRow: { id: "ir-id", metadata: { a: 1 } },
+    afterRow: { id: "ir-id", metadata: { a: 1 } },
+  });
+  assert.equal(probe.classification, "unexpected_allow");
+  assert.equal(probe.pass, false);
+  assert.equal(probe.proof_detail, "uniqueness_reached_after_authorization");
+});
+
+test("W5RC-8e. retained duplicate INSERT: HTTP 2xx → UNEXPECTED_ALLOW / FAIL", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT job_profitability_snapshot (retained duplicate PK RLS probe)",
+    table: "job_profitability_snapshot",
+    result: makeResult(201, [{ id: "jps-id" }], "POST"),
+    expected_scope: { id: "jps-id" },
+    beforeRow: { id: "jps-id", metadata: { a: 1 } },
+    afterRow: { id: "jps-id", metadata: { a: 1 } },
+  });
+  assert.equal(probe.classification, "unexpected_allow");
+  assert.equal(probe.pass, false);
+});
+
+test("W5RC-8f. retained duplicate INSERT: retained row must remain unchanged", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT billing_readiness_gate (retained duplicate PK RLS probe)",
+    table: "billing_readiness_gate",
+    result: {
+      ok: false,
+      status: 403,
+      body: { code: "42501", message: "row-level security policy violation" },
+      raw_text: '{"code":"42501","message":"row-level security policy violation"}',
+      method: "POST",
+      table: "billing_readiness_gate",
+    },
+    expected_scope: { id: "brg-id" },
+    beforeRow: { id: "brg-id", metadata: { a: 1 } },
+    afterRow: { id: "brg-id", metadata: { a: 2 } },
+  });
+  assert.equal(probe.classification, "unexpected_allow");
+  assert.equal(probe.pass, false);
+});
+
+test("W5RC-8g. retained duplicate INSERT: BEFORE-trigger validation error is NOT_PROVEN / FAIL", () => {
+  const probe = classifyDenyRetainedDuplicateInsertProbe({
+    role: ROLE,
+    operation: "INSERT contractor_payable (retained duplicate PK RLS probe)",
+    table: "contractor_payable",
+    result: {
+      ok: false,
+      status: 400,
+      body: { code: "23514", message: "violates check constraint payable_basis_check" },
+      raw_text: '{"code":"23514","message":"violates check constraint payable_basis_check"}',
+      method: "POST",
+      table: "contractor_payable",
+    },
+    expected_scope: { id: "cp-id" },
+    beforeRow: { id: "cp-id", metadata: { a: 1 } },
+    afterRow: { id: "cp-id", metadata: { a: 1 } },
+  });
+  assert.equal(probe.classification, "not_proven");
+  assert.equal(probe.pass, false);
+  assert.ok(probe.note.includes("payable_basis_check"));
+});
+
+test("W5RC-8h. retained duplicate payload: billing_readiness_gate uses exact retained lineage fields", () => {
+  const retained = {
+    id: "brg-id",
+    organization_id: "org",
+    business_unit_id: "bu",
+    jurisdiction_id: "jur",
+    operational_job_id: "job",
+    work_order_id: "wo",
+    operational_handoff_id: "oh",
+    pricing_snapshot_id: "ps",
+    quote_version_id: "qv",
+    gate_status: "ready",
+    gate_assessment: { ok: true },
+    blocking_reasons: [],
+    assessed_at: "2025-01-01T00:00:00Z",
+    assessed_by_app_user_id: "app",
+    metadata: { m: 1 },
+    created_at: "2025-01-01T00:00:00Z",
+    created_by_app_user_id: "creator",
+    ignored_column: "must-not-be-inserted",
+  };
+  const payload = makeRetainedDuplicateInsertPayload("billing_readiness_gate", retained);
+  assert.equal(payload.id, retained.id);
+  assert.equal(payload.operational_handoff_id, retained.operational_handoff_id);
+  assert.equal(payload.created_by_app_user_id, retained.created_by_app_user_id);
+  assert.ok(!Object.hasOwn(payload, "ignored_column"));
+});
+
+test("W5RC-8i. retained duplicate payload: invoice_request keeps SAME canonical id and monetary lineage", () => {
+  const retained = {
+    id: "invoice-id",
+    organization_id: "org",
+    business_unit_id: "bu",
+    jurisdiction_id: "jur",
+    billing_readiness_gate_id: "brg",
+    operational_job_id: "job",
+    work_order_id: "wo",
+    operational_handoff_id: "oh",
+    customer_id: "cust",
+    service_location_id: "sl",
+    pricing_snapshot_id: "ps",
+    quote_version_id: "qv",
+    quote_response_id: "qr",
+    conversion_record_id: "conv",
+    currency_code: "CAD",
+    subtotal_amount: 100,
+    tax_amount: 13,
+    total_amount: 113,
+    tax_name: "HST",
+    tax_rate: 0.13,
+    financial_snapshot: { line: 1 },
+    request_status: "submitted",
+    accounting_provider: "xero",
+    provider_reference_id: "ref",
+    provider_acknowledged_at: "2025-01-01T00:00:00Z",
+    provider_response_snapshot: { ok: true },
+    submitted_at: "2025-01-01T00:00:00Z",
+    acknowledged_at: "2025-01-02T00:00:00Z",
+    metadata: { m: 1 },
+    created_at: "2025-01-01T00:00:00Z",
+    created_by_app_user_id: "creator",
+    updated_by_app_user_id: "updater",
+  };
+  const payload = makeRetainedDuplicateInsertPayload("invoice_request", retained);
+  assert.equal(payload.id, retained.id);
+  assert.equal(payload.subtotal_amount, retained.subtotal_amount);
+  assert.equal(payload.tax_amount, retained.tax_amount);
+  assert.equal(payload.total_amount, retained.total_amount);
+});
+
+test("W5RC-8j. retained duplicate payload: contractor_payable uses canonical basis/computed values", () => {
+  const retained = {
+    id: "cp-id",
+    organization_id: "org",
+    business_unit_id: "bu",
+    worker_id: "worker",
+    worker_assignment_id: "wa",
+    operational_job_id: "job",
+    work_order_id: "wo",
+    contractor_compensation_version_id: "ccv",
+    compensation_method: "flat_amount",
+    currency_code: "CAD",
+    basis_value: 80,
+    computed_amount: 80,
+    payable_status: "approved",
+    eligibility_assessment: { ok: true },
+    eligibility_passed: true,
+    approved_by_app_user_id: "approver",
+    approved_at: "2025-01-01T00:00:00Z",
+    metadata: { m: 1 },
+    created_at: "2025-01-01T00:00:00Z",
+    created_by_app_user_id: "creator",
+  };
+  const payload = makeRetainedDuplicateInsertPayload("contractor_payable", retained);
+  assert.equal(payload.basis_value, 80);
+  assert.equal(payload.computed_amount, 80);
+  assert.notEqual(payload.basis_value, -1);
+});
+
+test("W5RC-8k. retained duplicate payload: profitability uses canonical lineage and excludes gross_contribution", () => {
+  const retained = {
+    id: "jps-id",
+    organization_id: "org",
+    business_unit_id: "bu",
+    operational_job_id: "job",
+    invoice_request_id: "inv",
+    currency_code: "CAD",
+    recognized_revenue_amount: 220,
+    tax_amount: 0,
+    direct_labor_cost: 80,
+    other_direct_cost: 30,
+    gross_margin_percent: 0.5,
+    source_lineage: { exact: true },
+    snapshot_taken_at: "2025-01-01T00:00:00Z",
+    metadata: { m: 1 },
+    created_at: "2025-01-01T00:00:00Z",
+    created_by_app_user_id: "creator",
+    gross_contribution: 110,
+  };
+  const payload = makeRetainedDuplicateInsertPayload("job_profitability_snapshot", retained);
+  assert.deepEqual(payload.source_lineage, retained.source_lineage);
+  assert.equal(payload.other_direct_cost, retained.other_direct_cost);
+  assert.ok(!Object.hasOwn(payload, "gross_contribution"));
 });
 
 // ── CASE 9/10: UI stores/displays full 422 payload with failed role names ─────
@@ -345,6 +593,11 @@ test("W5RC-S3. console.warn diagnostic log is emitted on passed=false", () => {
       `warning block must not contain ${forbidden}`
     );
   }
+});
+
+test("W5RC-S4. exactly seven denied inserts use retained duplicate PK strategy", () => {
+  const matches = wave5RlsHarnessSrc.match(/await denyRetainedDuplicateInsertProbe\(/g) || [];
+  assert.equal(matches.length, 7, "must replace only seven denied insert probes");
 });
 
 // =============================================================================
@@ -738,4 +991,3 @@ test("W5RC-ID-18. overall passed requires identity audit pass + all mandatory pr
     "passed must require every section to pass"
   );
 });
-

@@ -848,6 +848,111 @@ function makeProfitabilityInsertPayload(id) {
   };
 }
 
+function makeRetainedDuplicateInsertPayload(table, retainedRow) {
+  if (!retainedRow?.id) return null;
+  switch (table) {
+    case "billing_readiness_gate":
+      return {
+        id: retainedRow.id,
+        organization_id: retainedRow.organization_id,
+        business_unit_id: retainedRow.business_unit_id,
+        jurisdiction_id: retainedRow.jurisdiction_id,
+        operational_job_id: retainedRow.operational_job_id,
+        work_order_id: retainedRow.work_order_id,
+        operational_handoff_id: retainedRow.operational_handoff_id,
+        pricing_snapshot_id: retainedRow.pricing_snapshot_id,
+        quote_version_id: retainedRow.quote_version_id,
+        gate_status: retainedRow.gate_status,
+        gate_assessment: retainedRow.gate_assessment,
+        blocking_reasons: retainedRow.blocking_reasons,
+        assessed_at: retainedRow.assessed_at,
+        assessed_by_app_user_id: retainedRow.assessed_by_app_user_id,
+        metadata: retainedRow.metadata,
+        created_at: retainedRow.created_at,
+        created_by_app_user_id: retainedRow.created_by_app_user_id,
+      };
+    case "invoice_request":
+      return {
+        id: retainedRow.id,
+        organization_id: retainedRow.organization_id,
+        business_unit_id: retainedRow.business_unit_id,
+        jurisdiction_id: retainedRow.jurisdiction_id,
+        billing_readiness_gate_id: retainedRow.billing_readiness_gate_id,
+        operational_job_id: retainedRow.operational_job_id,
+        work_order_id: retainedRow.work_order_id,
+        operational_handoff_id: retainedRow.operational_handoff_id,
+        customer_id: retainedRow.customer_id,
+        service_location_id: retainedRow.service_location_id,
+        pricing_snapshot_id: retainedRow.pricing_snapshot_id,
+        quote_version_id: retainedRow.quote_version_id,
+        quote_response_id: retainedRow.quote_response_id,
+        conversion_record_id: retainedRow.conversion_record_id,
+        currency_code: retainedRow.currency_code,
+        subtotal_amount: retainedRow.subtotal_amount,
+        tax_amount: retainedRow.tax_amount,
+        total_amount: retainedRow.total_amount,
+        tax_name: retainedRow.tax_name,
+        tax_rate: retainedRow.tax_rate,
+        financial_snapshot: retainedRow.financial_snapshot,
+        request_status: retainedRow.request_status,
+        accounting_provider: retainedRow.accounting_provider,
+        provider_reference_id: retainedRow.provider_reference_id,
+        provider_acknowledged_at: retainedRow.provider_acknowledged_at,
+        provider_response_snapshot: retainedRow.provider_response_snapshot,
+        submitted_at: retainedRow.submitted_at,
+        acknowledged_at: retainedRow.acknowledged_at,
+        metadata: retainedRow.metadata,
+        created_at: retainedRow.created_at,
+        created_by_app_user_id: retainedRow.created_by_app_user_id,
+        updated_by_app_user_id: retainedRow.updated_by_app_user_id,
+      };
+    case "contractor_payable":
+      return {
+        id: retainedRow.id,
+        organization_id: retainedRow.organization_id,
+        business_unit_id: retainedRow.business_unit_id,
+        worker_id: retainedRow.worker_id,
+        worker_assignment_id: retainedRow.worker_assignment_id,
+        operational_job_id: retainedRow.operational_job_id,
+        work_order_id: retainedRow.work_order_id,
+        contractor_compensation_version_id: retainedRow.contractor_compensation_version_id,
+        compensation_method: retainedRow.compensation_method,
+        currency_code: retainedRow.currency_code,
+        basis_value: retainedRow.basis_value,
+        computed_amount: retainedRow.computed_amount,
+        payable_status: retainedRow.payable_status,
+        eligibility_assessment: retainedRow.eligibility_assessment,
+        eligibility_passed: retainedRow.eligibility_passed,
+        approved_by_app_user_id: retainedRow.approved_by_app_user_id,
+        approved_at: retainedRow.approved_at,
+        metadata: retainedRow.metadata,
+        created_at: retainedRow.created_at,
+        created_by_app_user_id: retainedRow.created_by_app_user_id,
+      };
+    case "job_profitability_snapshot":
+      return {
+        id: retainedRow.id,
+        organization_id: retainedRow.organization_id,
+        business_unit_id: retainedRow.business_unit_id,
+        operational_job_id: retainedRow.operational_job_id,
+        invoice_request_id: retainedRow.invoice_request_id,
+        currency_code: retainedRow.currency_code,
+        recognized_revenue_amount: retainedRow.recognized_revenue_amount,
+        tax_amount: retainedRow.tax_amount,
+        direct_labor_cost: retainedRow.direct_labor_cost,
+        other_direct_cost: retainedRow.other_direct_cost,
+        gross_margin_percent: retainedRow.gross_margin_percent,
+        source_lineage: retainedRow.source_lineage,
+        snapshot_taken_at: retainedRow.snapshot_taken_at,
+        metadata: retainedRow.metadata,
+        created_at: retainedRow.created_at,
+        created_by_app_user_id: retainedRow.created_by_app_user_id,
+      };
+    default:
+      return null;
+  }
+}
+
 function makeNoOpPatch(table, row) {
   switch (table) {
     case "billing_readiness_gate":
@@ -1094,6 +1199,171 @@ function classifyDenyMutationProbe({ role, operation, table, result, expected_sc
     result,
     expected_scope,
     integrity,
+    note: `HTTP ${result.status} did not prove authorization/RLS denial`,
+  });
+}
+
+function isTablePermissionDeniedResponse(result) {
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return text.includes("permission denied for table");
+}
+
+function isUniqueConstraintViolationResponse(result) {
+  const text = `${bodyText(result.body)} ${result.raw_text || ""}`.toLowerCase();
+  return text.includes('"code":"23505"') || text.includes("duplicate key value violates unique constraint");
+}
+
+function safeDbErrorDetail(result) {
+  const body = result?.body;
+  const code = body && typeof body === "object" ? body.code : null;
+  const message = body && typeof body === "object" ? body.message : null;
+  const fromText = result?.raw_text ? String(result.raw_text).slice(0, 200) : "";
+  return {
+    code: code || null,
+    message: message || fromText || `HTTP ${result?.status ?? 0}`,
+  };
+}
+
+function classifyDenyRetainedDuplicateInsertProbe({
+  role,
+  operation,
+  table,
+  result,
+  expected_scope,
+  beforeRow,
+  afterRow,
+}) {
+  if (!beforeRow) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: false },
+      note: "Canonical retained row did not exist before duplicate insert probe; RLS denial cannot be proven.",
+    });
+  }
+  const beforeStable = stableStringify(beforeRow);
+  const afterStable = stableStringify(afterRow ?? null);
+  if (beforeStable !== afterStable) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: false },
+      note: "Retained row changed after duplicate insert probe; integrity failure.",
+    });
+  }
+  if (isTransportFailure(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.TRANSPORT_FAILURE,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      note: result.error || "Transport failure",
+    });
+  }
+  if (result.ok) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      note: "Duplicate retained-row INSERT returned 2xx; unexpected allow",
+    });
+  }
+  if (isTablePermissionDeniedResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.PROVEN_AUTHZ_DENY,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      note: "Table-level permission denial proven",
+    });
+  }
+  if (isRlsDeniedResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.PROVEN_RLS_DENY,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      note: "Authorization/RLS denial proven",
+    });
+  }
+  if (isAuthorizationGuardResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.PROVEN_AUTHZ_DENY,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      note: "Authorization guard denial proven",
+    });
+  }
+  if (isUniqueConstraintViolationResponse(result)) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.UNEXPECTED_ALLOW,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      proof_detail: "uniqueness_reached_after_authorization",
+      note: "Duplicate PK/unique constraint reached after business validation; unexpected authorization progression.",
+    });
+  }
+  if (isValidationFailureResponse(result)) {
+    const detail = safeDbErrorDetail(result);
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      result,
+      expected_scope,
+      integrity: { retained_row_unchanged: true },
+      proof_detail: `before_trigger_validation:${detail.code || "none"}`,
+      note: `Business validation triggered before RLS proof (${detail.message})`,
+    });
+  }
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "deny",
+    classification: CLASSIFICATION.NOT_PROVEN,
+    result,
+    expected_scope,
+    integrity: { retained_row_unchanged: true },
     note: `HTTP ${result.status} did not prove authorization/RLS denial`,
   });
 }
@@ -1385,6 +1655,51 @@ async function denyInsertProbe(role, token, table, payload) {
   });
 }
 
+async function denyRetainedDuplicateInsertProbe(role, token, table, retainedId) {
+  const beforeRow = await serviceRoleExactRow(table, retainedId);
+  if (!beforeRow) {
+    return classifyDenyRetainedDuplicateInsertProbe({
+      role,
+      operation: `INSERT ${table} (retained duplicate PK RLS probe)`,
+      table,
+      result: { ok: false, status: 0, body: null, raw_text: "", method: "POST", table },
+      expected_scope: { id: retainedId },
+      beforeRow: null,
+      afterRow: null,
+    });
+  }
+  const payload = makeRetainedDuplicateInsertPayload(table, beforeRow);
+  if (!payload) {
+    return buildProbe({
+      role,
+      operation: `INSERT ${table} (retained duplicate PK RLS probe)`,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      expected_scope: { id: retainedId },
+      note: "No retained duplicate payload allowlist exists for this table.",
+    });
+  }
+  const result = await restProbe(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY,
+    token,
+    "POST",
+    table,
+    { body: payload }
+  );
+  const afterRow = await serviceRoleExactRow(table, retainedId);
+  return classifyDenyRetainedDuplicateInsertProbe({
+    role,
+    operation: `INSERT ${table} (retained duplicate PK RLS probe)`,
+    table,
+    result,
+    expected_scope: { id: retainedId },
+    beforeRow,
+    afterRow,
+  });
+}
+
 async function allowInsertNoPersistProbe(role, token, table, payload) {
   const result = await restProbe(
     process.env.SUPABASE_URL,
@@ -1569,17 +1884,17 @@ async function probeOfficeOps(token) {
     await selectExactRowProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id, "deny")
   );
   probes.push(
-    await denyInsertProbe(role, token, "contractor_payable", makePayableInsertPayload(randomUUID()))
+    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
   );
   probes.push(
     await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
   );
   probes.push(
-    await denyInsertProbe(
+    await denyRetainedDuplicateInsertProbe(
       role,
       token,
       "job_profitability_snapshot",
-      makeProfitabilityInsertPayload(randomUUID())
+      CANONICAL.job_profitability_snapshot_id
     )
   );
   probes.push(
@@ -1618,7 +1933,7 @@ async function probeWorker(token, otherWorkerEvidence) {
     await denyPatchProbe(role, token, "contractor_compensation_version", CANONICAL.contractor_compensation_version_id)
   );
   probes.push(
-    await denyInsertProbe(role, token, "contractor_payable", makePayableInsertPayload(randomUUID()))
+    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
   );
   probes.push(
     await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
@@ -1702,9 +2017,18 @@ async function probeQa(token) {
   for (const [table, id] of RETAINED_TABLES) {
     probes.push(await selectExactRowProbe(role, token, table, id, "deny"));
   }
-  probes.push(await denyInsertProbe(role, token, "billing_readiness_gate", makeBrgInsertPayload(randomUUID())));
+  probes.push(
+    await denyRetainedDuplicateInsertProbe(
+      role,
+      token,
+      "billing_readiness_gate",
+      CANONICAL.billing_readiness_gate_id
+    )
+  );
   probes.push(await denyPatchProbe(role, token, "billing_readiness_gate", CANONICAL.billing_readiness_gate_id));
-  probes.push(await denyInsertProbe(role, token, "invoice_request", makeInvoiceInsertPayload(randomUUID())));
+  probes.push(
+    await denyRetainedDuplicateInsertProbe(role, token, "invoice_request", CANONICAL.invoice_request_id)
+  );
   probes.push(await denyPatchProbe(role, token, "invoice_request", CANONICAL.invoice_request_id));
   probes.push(await denyInsertProbe(role, token, "accounting_sync_outbox", makeOutboxInsertPayload(randomUUID())));
   probes.push(await denyPatchProbe(role, token, "accounting_sync_outbox", CANONICAL.accounting_sync_outbox_id));
@@ -1712,9 +2036,18 @@ async function probeQa(token) {
   probes.push(await denyPatchProbe(role, token, "payment_observation", CANONICAL.payment_observation_id));
   probes.push(await denyInsertProbe(role, token, "contractor_compensation_version", makeCompensationInsertPayload(randomUUID())));
   probes.push(await denyPatchProbe(role, token, "contractor_compensation_version", CANONICAL.contractor_compensation_version_id));
-  probes.push(await denyInsertProbe(role, token, "contractor_payable", makePayableInsertPayload(randomUUID())));
+  probes.push(
+    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
+  );
   probes.push(await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id));
-  probes.push(await denyInsertProbe(role, token, "job_profitability_snapshot", makeProfitabilityInsertPayload(randomUUID())));
+  probes.push(
+    await denyRetainedDuplicateInsertProbe(
+      role,
+      token,
+      "job_profitability_snapshot",
+      CANONICAL.job_profitability_snapshot_id
+    )
+  );
   probes.push(await denyPatchProbe(role, token, "job_profitability_snapshot", CANONICAL.job_profitability_snapshot_id));
   return probes;
 }
@@ -2181,11 +2514,16 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
       "No auth users were created.",
       "No retained Wave 5 evidence was intentionally mutated or cleaned up.",
       "Owner_admin probes used the requesting browser bearer token; office_ops / worker / qa tokens were resolved by canonical app_user_id.",
-      "Service role was used only for authoritative before/after integrity verification and optional cross-worker discovery.",
+      "Service role was used for authoritative identity-directory reads, retained-data integrity verification, and optional cross-worker discovery.",
       "Role probes ran sequentially with retained-data integrity verification between each role.",
     ],
   });
 }
 
-export { classifyDenyPatchProbe, classifyDenyMutationProbe };
+export {
+  classifyDenyPatchProbe,
+  classifyDenyMutationProbe,
+  classifyDenyRetainedDuplicateInsertProbe,
+  makeRetainedDuplicateInsertPayload,
+};
 export default runWave5RlsAcceptanceHandler;
