@@ -452,6 +452,7 @@ test("client exposes the governed Wave 6 surface", () => {
     "updateChangeControlRecord",
     "loadDependencyImpact",
     "loadContinuitySessions",
+    "loadContinuityTransactions",
     "createContinuitySession",
     "updateContinuitySession",
     "recordContinuityTransaction",

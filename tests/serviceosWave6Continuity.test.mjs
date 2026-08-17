@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import os from "node:os";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 
 import {
   CONTINUITY_TRANSITIONS,
@@ -49,55 +49,29 @@ function runChecked(command, args, options = {}) {
 async function withTempPostgres(run) {
   const binDir = process.env.PG_BINDIR || "/usr/lib/postgresql/16/bin";
   const initdb = path.join(binDir, "initdb");
-  const postgres = path.join(binDir, "postgres");
+  const pgCtl = path.join(binDir, "pg_ctl");
   const psql = path.join(binDir, "psql");
-  const pgIsReady = path.join(binDir, "pg_isready");
   const rootDir = mkdtempSync(path.join(os.tmpdir(), "wave6-pg-"));
   const dataDir = path.join(rootDir, "data");
   const socketDir = path.join(rootDir, "socket");
   const port = String(56000 + Math.floor(Math.random() * 3000));
+  const logFile = path.join(rootDir, "postgres.log");
   runChecked("mkdir", ["-p", dataDir, socketDir]);
-  let server = null;
   try {
     runChecked(initdb, ["-D", dataDir, "-A", "trust", "-U", "postgres", "--no-locale"]);
-    server = spawn(postgres, ["-D", dataDir, "-k", socketDir, "-p", port], {
-      stdio: "ignore",
-    });
-    const readyDeadline = Date.now() + 15000;
-    while (Date.now() < readyDeadline) {
-      const ready = spawnSync(
-        pgIsReady,
-        ["-h", socketDir, "-p", port, "-U", "postgres"],
-        { encoding: "utf8" }
-      );
-      if (ready.status === 0) break;
-      if (server.exitCode !== null) {
-        throw new Error(`postgres exited early with code ${server.exitCode}`);
-      }
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
-    const finalReady = spawnSync(
-      pgIsReady,
-      ["-h", socketDir, "-p", port, "-U", "postgres"],
-      { encoding: "utf8" }
+    runChecked(
+      pgCtl,
+      ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -p ${port}`, "-w", "start"],
+      { stdio: "ignore" }
     );
-    if (finalReady.status !== 0) {
-      throw new Error(`postgres failed readiness check: ${finalReady.stdout}\n${finalReady.stderr}`);
-    }
     const execSql = (statement) =>
       runChecked(
         psql,
         ["-h", socketDir, "-p", port, "-U", "postgres", "-d", "postgres", "-qAt", "-c", statement]
       ).stdout.trim();
-    return run(execSql);
+    return await run(execSql);
   } finally {
-    if (server && server.exitCode === null) {
-      server.kill("SIGTERM");
-      await new Promise((resolve) => {
-        server.once("exit", resolve);
-        setTimeout(resolve, 3000);
-      });
-    }
+    spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
     rmSync(rootDir, { recursive: true, force: true });
   }
 }
