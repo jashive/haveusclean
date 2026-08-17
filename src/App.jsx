@@ -29,6 +29,27 @@ const MySchedule = lazy(() => import("./pages/MySchedule"));
 const ColdOutreachView = lazy(() => import("./features/leads/ColdOutreachView"));
 const JobsView = lazy(() => import("./features/jobs/JobsView"));
 import LeadDeleteConfirmDrawer from "./features/leads/LeadDeleteConfirmDrawer";
+import { useServiceOSContext } from "./auth/ServiceOSAuthGate";
+
+// ServiceOS Wave 6 — intelligence / governance / continuity (flag-gated, lazy)
+const Wave6IntelligencePanel = lazy(() => import("./features/intelligence/Wave6IntelligencePanel"));
+
+const WAVE6_INTELLIGENCE_UI =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === "true";
+
+function Wave6IntelligenceMount() {
+  const ctx = useServiceOSContext();
+  if (!WAVE6_INTELLIGENCE_UI) return null;
+  return (
+    <Suspense fallback={null}>
+      <Wave6IntelligencePanel
+        session={ctx?.session ?? null}
+        revenueContext={ctx?.revenueContext ?? null}
+      />
+    </Suspense>
+  );
+}
 
 // ─── BRAND CONFIG ─────────────────────────────────────────────────────────────
 const BRAND = {
@@ -1147,7 +1168,7 @@ function Geofencing({ jobs, partners }) {
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <span style={S.badge(a.status==="ok"?"green":"red")}>{a.status==="ok"?"✅ In Range":"⚠️ Outside Range"}</span>
-                {a.status==="alert" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>alert(`Alert reviewed for ${a.partner}`)}>Review</button>}
+                {a.status==="alert" && <span style={{ fontSize:12, color:C.muted }}>Escalate via the partner record</span>}
               </div>
             </div>
           </div>
@@ -1448,9 +1469,8 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
                 <span style={{ fontSize:13, color:C.muted }}>partner logins</span>
               </div>
             </div>
-            <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8 }}>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... 🚀")}>⬆ Upgrade to Pro</button>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>💳 Manage Billing</button>
+            <div style={{ fontSize:12, color:C.muted, lineHeight:1.6 }}>
+              Plan changes and billing are handled directly with Have Us Clean — contact {BRAND.supportEmail}.
             </div>
           </div>
         </div>
@@ -1492,7 +1512,6 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
           {[
             { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
             { icon:"☁️", label:"Cloud Database", status:getCloudStatusLabel(isCloudConnected, dbStatus), color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Supabase writes are active" : "Falling back to local storage" },
-            { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
             { icon:"🔄", label:"Real-Time Sync", status:isCloudConnected ? "Active" : "Offline", color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Live updates across devices" : "Local-only sync" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>
@@ -8092,6 +8111,8 @@ export default function App() {
             />
           </Modal>
         )}
+
+        <Wave6IntelligenceMount />
     </div>
   );
 }
