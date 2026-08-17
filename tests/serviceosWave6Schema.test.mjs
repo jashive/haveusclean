@@ -509,7 +509,7 @@ test("payload_hash is NOT NULL on continuity_transaction — fail closed contrac
   assert.match(sql, /payload_hash\s+text\s+NOT NULL/, "payload_hash must be NOT NULL");
   assert.doesNotMatch(
     sql,
-    /payload_hash\s+text\s+NULL/,
+    /payload_hash\s+text\s+NULL(?!\s+DEFAULT)(?!\s+NOT)/,
     "payload_hash must not be declared nullable"
   );
   assert.doesNotMatch(

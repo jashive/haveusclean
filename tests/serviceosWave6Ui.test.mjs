@@ -30,11 +30,8 @@ const clientSource = read(path.join(libDir, "serviceosIntelligenceClient.js"));
 const utilsSource = read(path.join(libDir, "serviceosIntelligenceUtils.js"));
 const mainSource = read(path.join(here, "..", "src", "main.jsx"));
 const packageJson = JSON.parse(read(path.join(here, "..", "package.json")));
-const {
-  buildSnapshotSourceLineage,
-  mergeSnapshotManifest,
-  resolveDefinition,
-} = await import("../src/features/intelligence/managementReviewEvidence.js");
+const loadManagementReviewEvidence = () =>
+  import("../src/features/intelligence/managementReviewEvidence.js");
 
 const ALL_WAVE6_SOURCES = { ...PANELS, "wave6Formatters.js": formatters };
 
@@ -242,7 +239,7 @@ test("Wave 6 sources never log tokens or session objects", () => {
     ...ALL_WAVE6_SOURCES,
     "serviceosIntelligenceClient.js": clientSource,
   })) {
-    assert.doesNotMatch(source, /console\.(log|info|debug)\(/, `${name} logs to the console`);
+    assert.doesNotMatch(source, /console\.(log|info|debug|warn)\(/, `${name} logs to the console`);
     assert.doesNotMatch(source, /access_token/, `${name} touches an access token`);
     assert.doesNotMatch(source, /refresh_token/, `${name} touches a refresh token`);
   }
@@ -426,7 +423,8 @@ test("definition resolution fails closed on ambiguity instead of choosing the fi
   assert.doesNotMatch(resolveDefinitionBody, /\.find\(/, "definition resolution must not use Array.find guessing");
 });
 
-test("definition resolution fails closed when multiple active versions remain applicable", () => {
+test("definition resolution fails closed when multiple active versions remain applicable", async () => {
+  const { resolveDefinition } = await loadManagementReviewEvidence();
   const resolved = resolveDefinition(
     [
       {
@@ -462,7 +460,8 @@ test("definition resolution fails closed when multiple active versions remain ap
   assert.match(resolved.error, /ambiguous governed definition/i);
 });
 
-test("definition resolution prefers one applicable organization-scoped row over global", () => {
+test("definition resolution prefers one applicable organization-scoped row over global", async () => {
+  const { resolveDefinition } = await loadManagementReviewEvidence();
   const resolved = resolveDefinition(
     [
       {
@@ -497,7 +496,8 @@ test("definition resolution prefers one applicable organization-scoped row over 
   assert.equal(resolved.definition?.id, "org-v1");
 });
 
-test("buildSnapshotSourceLineage combines governed definition lineage and runtime lineage", () => {
+test("buildSnapshotSourceLineage combines governed definition lineage and runtime lineage", async () => {
+  const { buildSnapshotSourceLineage } = await loadManagementReviewEvidence();
   const lineage = buildSnapshotSourceLineage(
     {
       code: "sales.leads_created",
@@ -521,7 +521,8 @@ test("buildSnapshotSourceLineage combines governed definition lineage and runtim
   assert.deepEqual(lineage.runtime.row_counts, { service_request: 2 });
 });
 
-test("mergeSnapshotManifest references real snapshot ids without duplicates", () => {
+test("mergeSnapshotManifest references real snapshot ids without duplicates", async () => {
+  const { mergeSnapshotManifest } = await loadManagementReviewEvidence();
   const merged = mergeSnapshotManifest(
     [
       {

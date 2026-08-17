@@ -1,7 +1,7 @@
 // Wave 6 — intelligence utilities (period math, rates, KPI computation) and
 // the client source contract. Pure tests: no network, no database.
 
-import test from "node:test";
+import test, { before, after } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -40,7 +40,17 @@ const sql = readFileSync(
 const TORONTO = "America/Toronto";
 const PHOENIX = "America/Phoenix";
 
-process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED = "true";
+const previousWave6Flag = process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED;
+before(() => {
+  process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED = "true";
+});
+after(() => {
+  if (previousWave6Flag === undefined) {
+    delete process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED;
+  } else {
+    process.env.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED = previousWave6Flag;
+  }
+});
 
 // ── Period boundaries ────────────────────────────────────────────────────────
 
