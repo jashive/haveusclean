@@ -600,9 +600,9 @@ test("W5RC-S3. console.warn diagnostic log is emitted on passed=false", () => {
   }
 });
 
-test("W5RC-S4. exactly three denied inserts use retained duplicate PK strategy after catalog replacement", () => {
+test("W5RC-S4. no ambiguous denied inserts use retained duplicate PK strategy after catalog replacement", () => {
   const matches = wave5RlsHarnessSrc.match(/await denyRetainedDuplicateInsertProbe\(/g) || [];
-  assert.equal(matches.length, 3, "catalog proof must replace the seven ambiguous denied inserts");
+  assert.equal(matches.length, 0, "catalog proof must replace the seven ambiguous denied inserts");
 });
 
 // =============================================================================

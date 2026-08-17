@@ -1037,16 +1037,18 @@ function validateWave5CatalogAttestation(attestation) {
       force_rls: false,
     };
     const expected = EXPECTED_WAVE5_CATALOG_CONTRACT.tables[tableName];
+    const expectedAuthenticatedPrivileges = sortUniqueStrings(expected.authenticated_privileges);
+    const expectedAnonPrivileges = sortUniqueStrings(expected.anon_privileges);
     if (actualTable.rls_enabled !== expected.rls_enabled) {
       failures.push(`table ${tableName} rls_enabled expected true`);
     }
-    if (stableStringify(authenticatedPrivileges[tableName]) !== stableStringify(expected.authenticated_privileges)) {
+    if (stableStringify(authenticatedPrivileges[tableName]) !== stableStringify(expectedAuthenticatedPrivileges)) {
       failures.push(`table ${tableName} authenticated privileges mismatch`);
     }
     if (anonPrivileges[tableName].length > 0) {
       failures.push(`table ${tableName} anon privileges must be empty`);
     }
-    if (stableStringify(anonPrivileges[tableName]) !== stableStringify(expected.anon_privileges)) {
+    if (stableStringify(anonPrivileges[tableName]) !== stableStringify(expectedAnonPrivileges)) {
       failures.push(`table ${tableName} anon privileges mismatch`);
     }
     return {
