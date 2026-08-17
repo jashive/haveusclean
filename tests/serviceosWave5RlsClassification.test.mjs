@@ -11,12 +11,17 @@ import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
 
 import {
+  EXPECTED_WAVE5_CATALOG_CONTRACT,
   classifyDenyPatchProbe,
+  classifyCatalogPolicyDenyProbe,
   classifyDenyMutationProbe,
   classifyDenyRetainedDuplicateInsertProbe,
   buildIdentityAudit,
   makeRetainedDuplicateInsertPayload,
   resolveNormalizedTokenMap,
+  serviceRoleReadOnlyRpc,
+  summarizeProbes,
+  validateWave5CatalogAttestation,
 } from "../src/server/wave5RlsAcceptanceHarness.js";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -595,9 +600,9 @@ test("W5RC-S3. console.warn diagnostic log is emitted on passed=false", () => {
   }
 });
 
-test("W5RC-S4. exactly seven denied inserts use retained duplicate PK strategy", () => {
+test("W5RC-S4. exactly three denied inserts use retained duplicate PK strategy after catalog replacement", () => {
   const matches = wave5RlsHarnessSrc.match(/await denyRetainedDuplicateInsertProbe\(/g) || [];
-  assert.equal(matches.length, 7, "must replace only seven denied insert probes");
+  assert.equal(matches.length, 3, "catalog proof must replace the seven ambiguous denied inserts");
 });
 
 // =============================================================================
@@ -990,4 +995,261 @@ test("W5RC-ID-18. overall passed requires identity audit pass + all mandatory pr
     wave5RlsHarnessSrc.includes("sections.every((section) => section.passed)"),
     "passed must require every section to pass"
   );
+  assert.ok(
+    wave5RlsHarnessSrc.includes("catalogAttestation.passed"),
+    "passed must require catalogAttestation.passed"
+  );
+});
+
+function makeValidCatalogAttestation() {
+  return {
+    contract_version: "wave5-rls-catalog-v1",
+    tables: Object.entries(EXPECTED_WAVE5_CATALOG_CONTRACT.tables).map(([table_name, expected]) => ({
+      table_name,
+      rls_enabled: expected.rls_enabled,
+      force_rls: false,
+    })),
+    authenticated_privileges: Object.entries(EXPECTED_WAVE5_CATALOG_CONTRACT.tables).flatMap(
+      ([table_name, expected]) =>
+        expected.authenticated_privileges.map((privilege_type) => ({ table_name, privilege_type }))
+    ),
+    anon_privileges: [],
+    policies: [
+      { table_name: "accounting_sync_outbox", policy_name: "pol_aso_office_ops_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role( organization_id, business_unit_id, ARRAY['office_ops'] )", with_check: null },
+      { table_name: "accounting_sync_outbox", policy_name: "pol_aso_owner_admin_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id,business_unit_id,ARRAY['owner_admin'])", with_check: null },
+      { table_name: "billing_readiness_gate", policy_name: "pol_brg_office_ops_insert", command: "INSERT", roles: ["authenticated"], qual: null, with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])" },
+      { table_name: "billing_readiness_gate", policy_name: "pol_brg_office_ops_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])", with_check: null },
+      { table_name: "billing_readiness_gate", policy_name: "pol_brg_owner_admin_all", command: "ALL", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])" },
+      { table_name: "contractor_compensation_version", policy_name: "pol_ccv_owner_admin_all", command: "ALL", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])" },
+      { table_name: "contractor_compensation_version", policy_name: "pol_ccv_worker_own_select", command: "SELECT", roles: ["authenticated"], qual: "worker_id = public.current_worker_id(organization_id)", with_check: null },
+      { table_name: "contractor_payable", policy_name: "pol_cp_owner_admin_all", command: "ALL", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])" },
+      { table_name: "contractor_payable", policy_name: "pol_cp_worker_own_select", command: "SELECT", roles: ["authenticated"], qual: "worker_id = public.current_worker_id(organization_id)", with_check: null },
+      { table_name: "invoice_request", policy_name: "pol_ir_office_ops_insert", command: "INSERT", roles: ["authenticated"], qual: null, with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])" },
+      { table_name: "invoice_request", policy_name: "pol_ir_office_ops_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])", with_check: null },
+      { table_name: "invoice_request", policy_name: "pol_ir_owner_admin_all", command: "ALL", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])" },
+      { table_name: "job_profitability_snapshot", policy_name: "pol_jps_office_ops_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])", with_check: null },
+      { table_name: "job_profitability_snapshot", policy_name: "pol_jps_owner_admin_all", command: "ALL", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])" },
+      { table_name: "payment_observation", policy_name: "pol_po_office_ops_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])", with_check: null },
+      { table_name: "payment_observation", policy_name: "pol_po_owner_admin_select", command: "SELECT", roles: ["authenticated"], qual: "public.has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])", with_check: null },
+    ],
+  };
+}
+
+test("W5RC-CAT-1. catalog RPC is service-role only", () => {
+  const migration013 = readFileSync(resolve(ROOT, "supabase/migrations/013_wave5_rls_catalog_attestation.sql"), "utf8");
+  assert.ok(migration013.includes("REVOKE ALL ON FUNCTION public.wave5_rls_catalog_attestation() FROM authenticated;"));
+  assert.ok(migration013.includes("GRANT EXECUTE ON FUNCTION public.wave5_rls_catalog_attestation() TO service_role;"));
+  assert.ok(wave5RlsHarnessSrc.includes('serviceRoleReadOnlyRpc("wave5_rls_catalog_attestation", {})'));
+});
+
+test("W5RC-CAT-2. browser authenticated token is never used to call catalog RPC", async () => {
+  assert.ok(!wave5RlsHarnessSrc.includes('serviceRoleReadOnlyRpc(bearerToken'));
+  await assert.rejects(() => serviceRoleReadOnlyRpc("other_rpc", {}), /Unsupported read-only service-role RPC/);
+});
+
+test("W5RC-CAT-3. service role is never used for owner/office/worker/qa probes", () => {
+  assert.ok(wave5RlsHarnessSrc.includes("probeOwnerAdmin(bearerToken)"));
+  assert.ok(wave5RlsHarnessSrc.includes("probeOfficeOps(normalizedTokens.office_ops, catalogAttestation, identityAudit)"));
+  assert.ok(wave5RlsHarnessSrc.includes("probeWorker("));
+  assert.ok(wave5RlsHarnessSrc.includes("probeQa(normalizedTokens.qa, catalogAttestation, identityAudit)"));
+  assert.ok(!wave5RlsHarnessSrc.includes("probeOfficeOps(process.env.SUPABASE_SERVICE_ROLE_KEY"));
+});
+
+test("W5RC-CAT-4. all seven tables require rls_enabled=true", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.tables[0].rls_enabled = false;
+  const result = validateWave5CatalogAttestation(attestation);
+  assert.equal(result.passed, false);
+  assert.ok(result.failures.some((failure) => failure.includes("rls_enabled")));
+});
+
+test("W5RC-CAT-5. exact authenticated privilege sets pass", () => {
+  const result = validateWave5CatalogAttestation(makeValidCatalogAttestation());
+  assert.equal(result.passed, true);
+});
+
+test("W5RC-CAT-6. unexpected DELETE privilege fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.authenticated_privileges.push({ table_name: "contractor_payable", privilege_type: "DELETE" });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-7. unexpected TRUNCATE privilege fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.authenticated_privileges.push({ table_name: "contractor_payable", privilege_type: "TRUNCATE" });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-8. unexpected REFERENCES privilege fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.authenticated_privileges.push({ table_name: "contractor_payable", privilege_type: "REFERENCES" });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-9. unexpected TRIGGER privilege fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.authenticated_privileges.push({ table_name: "contractor_payable", privilege_type: "TRIGGER" });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-10. any anon privilege fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.anon_privileges.push({ table_name: "billing_readiness_gate", privilege_type: "SELECT" });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-11. missing policy fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies = attestation.policies.filter((policy) => policy.policy_name !== "pol_cp_worker_own_select");
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-12. unexpected policy fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies.push({
+    table_name: "billing_readiness_gate",
+    policy_name: "pol_brg_unexpected",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "true",
+    with_check: null,
+  });
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-13. incorrect policy command fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies.find((policy) => policy.policy_name === "pol_po_owner_admin_select").command = "ALL";
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-14. incorrect owner_admin semantic fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies.find((policy) => policy.policy_name === "pol_cp_owner_admin_all").qual =
+    "public.has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])";
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-15. incorrect office_ops semantic fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies.find((policy) => policy.policy_name === "pol_ir_office_ops_insert").with_check =
+    "public.has_bu_role(organization_id, business_unit_id, ARRAY['qa'])";
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-16. incorrect worker-own semantic fails", () => {
+  const attestation = makeValidCatalogAttestation();
+  attestation.policies.find((policy) => policy.policy_name === "pol_ccv_worker_own_select").qual =
+    "worker_id = public.current_worker_id(business_unit_id)";
+  assert.equal(validateWave5CatalogAttestation(attestation).passed, false);
+});
+
+test("W5RC-CAT-17. catalog contract recognizes exactly 16 policies", () => {
+  const result = validateWave5CatalogAttestation(makeValidCatalogAttestation());
+  assert.equal(result.exact_policy_count, 16);
+});
+
+test("W5RC-CAT-18. office_ops contractor_payable INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "office_ops", operation: "INSERT contractor_payable (catalog policy proof)", table: "contractor_payable", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-19. office_ops job_profitability INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "office_ops", operation: "INSERT job_profitability_snapshot (catalog policy proof)", table: "job_profitability_snapshot", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-20. worker contractor_payable INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "worker", operation: "INSERT contractor_payable (catalog policy proof)", table: "contractor_payable", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-21. QA BRG INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "qa", operation: "INSERT billing_readiness_gate (catalog policy proof)", table: "billing_readiness_gate", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-22. QA invoice INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "qa", operation: "INSERT invoice_request (catalog policy proof)", table: "invoice_request", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-23. QA payable INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "qa", operation: "INSERT contractor_payable (catalog policy proof)", table: "contractor_payable", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-24. QA profitability INSERT becomes PROVEN_CATALOG_POLICY_DENY", () => {
+  const probe = classifyCatalogPolicyDenyProbe({ role: "qa", operation: "INSERT job_profitability_snapshot (catalog policy proof)", table: "job_profitability_snapshot", catalogValidation: validateWave5CatalogAttestation(makeValidCatalogAttestation()), identityPassed: true });
+  assert.equal(probe.classification, "proven_catalog_policy_deny");
+});
+
+test("W5RC-CAT-25. catalog failure makes all dependent catalog probes fail closed", () => {
+  const probe = classifyCatalogPolicyDenyProbe({
+    role: "qa",
+    operation: "INSERT billing_readiness_gate (catalog policy proof)",
+    table: "billing_readiness_gate",
+    catalogValidation: { passed: false, policies: [] },
+    identityPassed: true,
+  });
+  assert.equal(probe.classification, "not_proven");
+  assert.equal(probe.pass, false);
+});
+
+test("W5RC-CAT-26. optional cross-worker absence becomes NOT_APPLICABLE", () => {
+  const summary = summarizeProbes("worker", [
+    {
+      role: "worker",
+      operation: "SELECT contractor_payable (another worker row if any exist)",
+      table: "contractor_payable",
+      expected: "deny",
+      mandatory: false,
+      classification: "not_applicable",
+      pass: false,
+    },
+  ]);
+  assert.equal(summary.not_proven_count, 0);
+});
+
+test("W5RC-CAT-27. NOT_APPLICABLE is excluded from not_proven_count", () => {
+  const summary = summarizeProbes("worker", [
+    { role: "worker", operation: "a", table: "contractor_payable", expected: "deny", mandatory: false, classification: "not_applicable", pass: false },
+    { role: "worker", operation: "b", table: "contractor_payable", expected: "deny", mandatory: true, classification: "proven_rls_deny", pass: true },
+  ]);
+  assert.equal(summary.failed_count, 0);
+  assert.equal(summary.not_proven_count, 0);
+});
+
+test("W5RC-CAT-28. retained-data integrity behavior unchanged", () => {
+  assert.ok(wave5RlsHarnessSrc.includes("captureRetainedSnapshots()"));
+  assert.ok(wave5RlsHarnessSrc.includes("compareRetainedSnapshots(beforeSnapshots, afterAnon)"));
+});
+
+test("W5RC-CAT-29. identity resolution tests unchanged", () => {
+  assert.ok(wave5RlsHarnessSrc.includes("buildIdentityAudit"));
+  assert.ok(wave5RlsHarnessSrc.includes("resolveNormalizedTokenMap"));
+});
+
+test("W5RC-CAT-30. existing PATCH classifier tests unchanged", () => {
+  const probe = classifyDenyPatchProbe({
+    role: "worker",
+    operation: "UPDATE billing_readiness_gate",
+    table: "billing_readiness_gate",
+    result: makeResult(403, { code: "42501", message: "permission denied for table billing_readiness_gate" }),
+    expected_scope: { id: ID },
+    beforeRow: { ...CANONICAL_ROW },
+    afterRow: { ...CANONICAL_ROW },
+  });
+  assert.equal(probe.classification, "proven_rls_deny");
+});
+
+test("W5RC-CAT-31. existing role visibility tests unchanged", () => {
+  assert.ok(wave5RlsHarnessSrc.includes("selectExactRowProbe(role, token, \"billing_readiness_gate\""));
+  assert.ok(wave5RlsHarnessSrc.includes("selectExactRowProbe(role, null, table, id, \"deny\")"));
+});
+
+test("W5RC-CAT-32. no credential data appears in response/log serialization", () => {
+  assert.ok(!wave5RlsHarnessSrc.includes("SUPABASE_SERVICE_ROLE_KEY\","));
+  assert.ok(!wave5RlsHarnessSrc.includes("Authorization: bearerToken"));
+  assert.ok(wave5RlsHarnessSrc.includes("catalog_attestation"));
 });

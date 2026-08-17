@@ -16,6 +16,17 @@
 import { randomUUID } from "node:crypto";
 
 const CONTRACT_VERSION = "wave5-rls-acceptance-v1";
+const CATALOG_CONTRACT_VERSION = "wave5-rls-catalog-v1";
+
+const WAVE5_TABLE_NAMES = Object.freeze([
+  "billing_readiness_gate",
+  "invoice_request",
+  "accounting_sync_outbox",
+  "payment_observation",
+  "contractor_compensation_version",
+  "contractor_payable",
+  "job_profitability_snapshot",
+]);
 
 const CANONICAL = Object.freeze({
   organization_id: "5614e474-7334-4c15-b430-52597c103e18",
@@ -43,14 +54,188 @@ const RETAINED_TABLES = Object.freeze([
   ["job_profitability_snapshot", CANONICAL.job_profitability_snapshot_id],
 ]);
 
+const RAW_EXPECTED_WAVE5_POLICIES = Object.freeze([
+  {
+    table_name: "accounting_sync_outbox",
+    policy_name: "pol_aso_office_ops_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+    with_check: null,
+  },
+  {
+    table_name: "accounting_sync_outbox",
+    policy_name: "pol_aso_owner_admin_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: null,
+  },
+  {
+    table_name: "billing_readiness_gate",
+    policy_name: "pol_brg_office_ops_insert",
+    command: "INSERT",
+    roles: ["authenticated"],
+    qual: null,
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+  },
+  {
+    table_name: "billing_readiness_gate",
+    policy_name: "pol_brg_office_ops_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+    with_check: null,
+  },
+  {
+    table_name: "billing_readiness_gate",
+    policy_name: "pol_brg_owner_admin_all",
+    command: "ALL",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+  },
+  {
+    table_name: "contractor_compensation_version",
+    policy_name: "pol_ccv_owner_admin_all",
+    command: "ALL",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+  },
+  {
+    table_name: "contractor_compensation_version",
+    policy_name: "pol_ccv_worker_own_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "worker_id = current_worker_id(organization_id)",
+    with_check: null,
+  },
+  {
+    table_name: "contractor_payable",
+    policy_name: "pol_cp_owner_admin_all",
+    command: "ALL",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+  },
+  {
+    table_name: "contractor_payable",
+    policy_name: "pol_cp_worker_own_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "worker_id = current_worker_id(organization_id)",
+    with_check: null,
+  },
+  {
+    table_name: "invoice_request",
+    policy_name: "pol_ir_office_ops_insert",
+    command: "INSERT",
+    roles: ["authenticated"],
+    qual: null,
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+  },
+  {
+    table_name: "invoice_request",
+    policy_name: "pol_ir_office_ops_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+    with_check: null,
+  },
+  {
+    table_name: "invoice_request",
+    policy_name: "pol_ir_owner_admin_all",
+    command: "ALL",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+  },
+  {
+    table_name: "job_profitability_snapshot",
+    policy_name: "pol_jps_office_ops_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+    with_check: null,
+  },
+  {
+    table_name: "job_profitability_snapshot",
+    policy_name: "pol_jps_owner_admin_all",
+    command: "ALL",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+  },
+  {
+    table_name: "payment_observation",
+    policy_name: "pol_po_office_ops_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['office_ops'])",
+    with_check: null,
+  },
+  {
+    table_name: "payment_observation",
+    policy_name: "pol_po_owner_admin_select",
+    command: "SELECT",
+    roles: ["authenticated"],
+    qual: "has_bu_role(organization_id, business_unit_id, ARRAY['owner_admin'])",
+    with_check: null,
+  },
+]);
+
+const EXPECTED_WAVE5_CATALOG_CONTRACT = Object.freeze({
+  contract_version: CATALOG_CONTRACT_VERSION,
+  tables: Object.freeze({
+    billing_readiness_gate: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT", "INSERT", "UPDATE"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    invoice_request: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT", "INSERT", "UPDATE"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    accounting_sync_outbox: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    payment_observation: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    contractor_compensation_version: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT", "INSERT", "UPDATE"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    contractor_payable: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT", "INSERT", "UPDATE"]),
+      anon_privileges: Object.freeze([]),
+    }),
+    job_profitability_snapshot: Object.freeze({
+      rls_enabled: true,
+      authenticated_privileges: Object.freeze(["SELECT", "INSERT", "UPDATE"]),
+      anon_privileges: Object.freeze([]),
+    }),
+  }),
+});
+
 const CLASSIFICATION = Object.freeze({
   PROVEN_ALLOW: "proven_allow",
   PROVEN_RLS_DENY: "proven_rls_deny",
   PROVEN_AUTHZ_DENY: "proven_authz_deny",
+  PROVEN_CATALOG_POLICY_DENY: "proven_catalog_policy_deny",
   UNEXPECTED_ALLOW: "unexpected_allow",
   UNEXPECTED_DENY: "unexpected_deny",
   VALIDATION_FAILURE: "validation_failure",
   NOT_PROVEN: "not_proven",
+  NOT_APPLICABLE: "not_applicable",
   TRANSPORT_FAILURE: "transport_failure",
 });
 
@@ -153,7 +338,8 @@ function buildProbe({
   const pass =
     classification === CLASSIFICATION.PROVEN_ALLOW ||
     classification === CLASSIFICATION.PROVEN_RLS_DENY ||
-    classification === CLASSIFICATION.PROVEN_AUTHZ_DENY;
+    classification === CLASSIFICATION.PROVEN_AUTHZ_DENY ||
+    classification === CLASSIFICATION.PROVEN_CATALOG_POLICY_DENY;
   return {
     role,
     operation,
@@ -175,8 +361,12 @@ function buildProbe({
 function summarizeProbes(role, probes) {
   const mandatory = probes.filter((probe) => probe.mandatory);
   const provenCount = probes.filter((probe) => probe.pass).length;
+  const excludedFailureClassifications = new Set([
+    CLASSIFICATION.NOT_PROVEN,
+    CLASSIFICATION.NOT_APPLICABLE,
+  ]);
   const failedCount = probes.filter(
-    (probe) => !probe.pass && probe.classification !== CLASSIFICATION.NOT_PROVEN
+    (probe) => !probe.pass && !excludedFailureClassifications.has(probe.classification)
   ).length;
   const notProvenCount = probes.filter(
     (probe) => probe.classification === CLASSIFICATION.NOT_PROVEN
@@ -187,7 +377,11 @@ function summarizeProbes(role, probes) {
   return {
     role,
     probes,
-    passed: mandatory.every((probe) => probe.pass),
+    passed: mandatory.every(
+      (probe) =>
+        probe.pass ||
+        probe.classification === CLASSIFICATION.NOT_APPLICABLE
+    ),
     proven_count: provenCount,
     failed_count: failedCount,
     not_proven_count: notProvenCount,
@@ -320,6 +514,29 @@ async function serviceRoleRestRows(path) {
   }
   const rows = await res.json().catch(() => []);
   return Array.isArray(rows) ? rows : [];
+}
+
+async function serviceRoleReadOnlyRpc(functionName, body = {}) {
+  if (functionName !== "wave5_rls_catalog_attestation") {
+    throw new Error("Unsupported read-only service-role RPC");
+  }
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  const res = await fetch(`${supabaseUrl}/rest/v1/rpc/wave5_rls_catalog_attestation`, {
+    method: "POST",
+    headers: {
+      apikey: serviceKey,
+      Authorization: "Bearer " + serviceKey,
+      "Content-Type": "application/json",
+      Accept: "application/json",
+    },
+    body: JSON.stringify(body && typeof body === "object" ? body : {}),
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Service-role read-only RPC failed: HTTP ${res.status} ${text}`);
+  }
+  return res.json();
 }
 
 async function loadActiveAppUser(accessToken, authUserId) {
@@ -692,6 +909,295 @@ function compareRetainedSnapshots(before, after) {
     if (left !== right) drift.push(table);
   }
   return { unchanged: drift.length === 0, drift_tables: drift };
+}
+
+function sortUniqueStrings(values) {
+  return [...new Set(values.filter(Boolean).map((value) => String(value).trim()).filter(Boolean))].sort();
+}
+
+function stripBalancedOuterParens(value) {
+  let current = value;
+  while (current.startsWith("(") && current.endsWith(")")) {
+    let depth = 0;
+    let balanced = true;
+    for (let index = 0; index < current.length; index += 1) {
+      const char = current[index];
+      if (char === "(") depth += 1;
+      if (char === ")") depth -= 1;
+      if (depth === 0 && index < current.length - 1) {
+        balanced = false;
+        break;
+      }
+      if (depth < 0) {
+        balanced = false;
+        break;
+      }
+    }
+    if (!balanced || depth !== 0) break;
+    current = current.slice(1, -1);
+  }
+  return current;
+}
+
+function normalizePolicyExpression(expression) {
+  if (expression == null) return null;
+  const lowered = String(expression)
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "")
+    .replace(/\bpublic\./g, "")
+    .replace(/::[a-z_][a-z0-9_\[\]]*/g, "");
+  return stripBalancedOuterParens(lowered);
+}
+
+function normalizePolicyRoles(roles) {
+  if (Array.isArray(roles)) return sortUniqueStrings(roles.map((role) => String(role).toLowerCase()));
+  if (typeof roles === "string") {
+    const trimmed = roles.trim();
+    if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
+      return sortUniqueStrings(
+        trimmed
+          .slice(1, -1)
+          .split(",")
+          .map((role) => role.replace(/^"|"$/g, "").toLowerCase())
+      );
+    }
+    return sortUniqueStrings([trimmed.toLowerCase()]);
+  }
+  return [];
+}
+
+function normalizePolicyRecord(policy) {
+  return {
+    table_name: String(policy?.table_name || ""),
+    policy_name: String(policy?.policy_name || ""),
+    command: String(policy?.command || "").toUpperCase(),
+    roles: normalizePolicyRoles(policy?.roles),
+    qual: normalizePolicyExpression(policy?.qual),
+    with_check: normalizePolicyExpression(policy?.with_check),
+  };
+}
+
+function normalizePrivilegeEntries(entries) {
+  const byTable = Object.fromEntries(WAVE5_TABLE_NAMES.map((table) => [table, []]));
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const tableName = String(entry?.table_name || "");
+    if (!Object.hasOwn(byTable, tableName)) continue;
+    const privilege = String(entry?.privilege_type || "").trim().toUpperCase();
+    if (!privilege) continue;
+    byTable[tableName].push(privilege);
+  }
+  for (const tableName of WAVE5_TABLE_NAMES) {
+    byTable[tableName] = sortUniqueStrings(byTable[tableName]);
+  }
+  return byTable;
+}
+
+const EXPECTED_WAVE5_POLICY_MAP = Object.freeze(
+  Object.fromEntries(
+    RAW_EXPECTED_WAVE5_POLICIES
+      .map((policy) => normalizePolicyRecord(policy))
+      .map((policy) => [policy.policy_name, Object.freeze(policy)])
+  )
+);
+
+function validateWave5CatalogAttestation(attestation) {
+  const failures = [];
+  const tableRows = Array.isArray(attestation?.tables) ? attestation.tables : [];
+  const normalizedTableMap = new Map(
+    tableRows
+      .filter((table) => table?.table_name)
+      .map((table) => [
+        String(table.table_name),
+        {
+          table_name: String(table.table_name),
+          rls_enabled: table.rls_enabled === true,
+          force_rls: table.force_rls === true,
+        },
+      ])
+  );
+  const unexpectedTables = [...normalizedTableMap.keys()].filter(
+    (tableName) => !WAVE5_TABLE_NAMES.includes(tableName)
+  );
+  const missingTables = WAVE5_TABLE_NAMES.filter((tableName) => !normalizedTableMap.has(tableName));
+  if (unexpectedTables.length > 0) {
+    failures.push(`unexpected tables: ${unexpectedTables.join(", ")}`);
+  }
+  if (missingTables.length > 0) {
+    failures.push(`missing tables: ${missingTables.join(", ")}`);
+  }
+
+  const authenticatedPrivileges = normalizePrivilegeEntries(attestation?.authenticated_privileges);
+  const anonPrivileges = normalizePrivilegeEntries(attestation?.anon_privileges);
+
+  const tableSummary = WAVE5_TABLE_NAMES.map((tableName) => {
+    const actualTable = normalizedTableMap.get(tableName) || {
+      table_name: tableName,
+      rls_enabled: false,
+      force_rls: false,
+    };
+    const expected = EXPECTED_WAVE5_CATALOG_CONTRACT.tables[tableName];
+    if (actualTable.rls_enabled !== expected.rls_enabled) {
+      failures.push(`table ${tableName} rls_enabled expected true`);
+    }
+    if (stableStringify(authenticatedPrivileges[tableName]) !== stableStringify(expected.authenticated_privileges)) {
+      failures.push(`table ${tableName} authenticated privileges mismatch`);
+    }
+    if (anonPrivileges[tableName].length > 0) {
+      failures.push(`table ${tableName} anon privileges must be empty`);
+    }
+    if (stableStringify(anonPrivileges[tableName]) !== stableStringify(expected.anon_privileges)) {
+      failures.push(`table ${tableName} anon privileges mismatch`);
+    }
+    return {
+      table_name: tableName,
+      rls_enabled: actualTable.rls_enabled,
+      force_rls: actualTable.force_rls,
+      authenticated_privileges: authenticatedPrivileges[tableName],
+      anon_privileges: anonPrivileges[tableName],
+    };
+  });
+
+  const policyRows = Array.isArray(attestation?.policies) ? attestation.policies : [];
+  const normalizedPolicies = policyRows
+    .map((policy) => normalizePolicyRecord(policy))
+    .filter((policy) => WAVE5_TABLE_NAMES.includes(policy.table_name));
+  const actualPolicyMap = new Map(normalizedPolicies.map((policy) => [policy.policy_name, policy]));
+  const missingPolicies = Object.keys(EXPECTED_WAVE5_POLICY_MAP).filter(
+    (policyName) => !actualPolicyMap.has(policyName)
+  );
+  const unexpectedPolicies = normalizedPolicies
+    .map((policy) => policy.policy_name)
+    .filter((policyName) => !Object.hasOwn(EXPECTED_WAVE5_POLICY_MAP, policyName))
+    .sort();
+  if (missingPolicies.length > 0) failures.push(`missing policies: ${missingPolicies.join(", ")}`);
+  if (unexpectedPolicies.length > 0) failures.push(`unexpected policies: ${unexpectedPolicies.join(", ")}`);
+  for (const [policyName, expectedPolicy] of Object.entries(EXPECTED_WAVE5_POLICY_MAP)) {
+    const actualPolicy = actualPolicyMap.get(policyName);
+    if (!actualPolicy) continue;
+    if (actualPolicy.command !== expectedPolicy.command) {
+      failures.push(`policy ${policyName} command mismatch`);
+    }
+    if (stableStringify(actualPolicy.roles) !== stableStringify(expectedPolicy.roles)) {
+      failures.push(`policy ${policyName} roles mismatch`);
+    }
+    if (actualPolicy.qual !== expectedPolicy.qual) {
+      failures.push(`policy ${policyName} qual mismatch`);
+    }
+    if (actualPolicy.with_check !== expectedPolicy.with_check) {
+      failures.push(`policy ${policyName} with_check mismatch`);
+    }
+  }
+
+  return {
+    contract_version: String(attestation?.contract_version || ""),
+    expected_contract_version: CATALOG_CONTRACT_VERSION,
+    passed:
+      String(attestation?.contract_version || "") === CATALOG_CONTRACT_VERSION &&
+      failures.length === 0 &&
+      normalizedPolicies.length === Object.keys(EXPECTED_WAVE5_POLICY_MAP).length,
+    failures,
+    tables: tableSummary,
+    authenticated_privileges: authenticatedPrivileges,
+    anon_privileges: anonPrivileges,
+    policies: normalizedPolicies.sort((left, right) => left.policy_name.localeCompare(right.policy_name)),
+    exact_policy_count: normalizedPolicies.length,
+  };
+}
+
+function classifyCatalogPolicyDenyProbe({
+  role,
+  operation,
+  table,
+  catalogValidation,
+  identityPassed,
+}) {
+  if (!identityPassed) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      note: "Identity audit did not pass; catalog-backed deny proof is unavailable.",
+    });
+  }
+  if (!catalogValidation?.passed) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      proof_detail: "catalog_attestation_failed_closed",
+      note: "Catalog attestation did not pass; catalog-backed deny proof failed closed.",
+    });
+  }
+
+  const actualPolicyNames = new Set((catalogValidation.policies || []).map((policy) => policy.policy_name));
+  const denyProofMap = {
+    office_ops: {
+      contractor_payable:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin mutation policy and worker own SELECT only; no office_ops INSERT/ALL policy exists.",
+      job_profitability_snapshot:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin mutation policy and office_ops SELECT only; no office_ops INSERT/ALL policy exists.",
+    },
+    worker: {
+      contractor_payable:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin mutation policy and worker own SELECT only; no worker INSERT/ALL policy exists.",
+    },
+    qa: {
+      billing_readiness_gate:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin ALL and office_ops INSERT/SELECT policies only; no qa INSERT/ALL policy exists.",
+      invoice_request:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin ALL and office_ops INSERT/SELECT policies only; no qa INSERT/ALL policy exists.",
+      contractor_payable:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin mutation policy and worker own SELECT only; no qa INSERT/ALL policy exists.",
+      job_profitability_snapshot:
+        "authenticated INSERT grant exists; RLS enabled; exact policy contract contains owner_admin mutation policy and office_ops SELECT only; no qa INSERT/ALL policy exists.",
+    },
+  };
+  const proofDetail = denyProofMap[role]?.[table];
+  if (!proofDetail) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      note: "No catalog-backed deny proof contract exists for this role/table combination.",
+    });
+  }
+  const expectedPolicyNames = new Set(
+    Object.values(EXPECTED_WAVE5_POLICY_MAP)
+      .filter((policy) => policy.table_name === table)
+      .map((policy) => policy.policy_name)
+  );
+  const exactPolicyMatch =
+    actualPolicyNames.size >= expectedPolicyNames.size &&
+    [...expectedPolicyNames].every((policyName) => actualPolicyNames.has(policyName));
+  if (!exactPolicyMatch) {
+    return buildProbe({
+      role,
+      operation,
+      table,
+      expected: "deny",
+      classification: CLASSIFICATION.NOT_PROVEN,
+      proof_detail: "table_policy_contract_incomplete",
+      note: "Catalog attestation passed globally but target table policy list was incomplete.",
+    });
+  }
+  return buildProbe({
+    role,
+    operation,
+    table,
+    expected: "deny",
+    classification: CLASSIFICATION.PROVEN_CATALOG_POLICY_DENY,
+    proof_detail: proofDetail,
+    note: "Read-only catalog attestation proves the role lacks INSERT/ALL access on the target table.",
+    actual_row_count: 0,
+    expected_scope: { table },
+  });
 }
 
 async function discoverOtherWorkerEvidence() {
@@ -1793,7 +2299,7 @@ async function probeOwnerAdmin(requesterToken) {
   return probes;
 }
 
-async function probeOfficeOps(token) {
+async function probeOfficeOps(token, catalogValidation, identityAudit) {
   const role = "office_ops";
   const probes = [];
   probes.push(
@@ -1884,18 +2390,25 @@ async function probeOfficeOps(token) {
     await selectExactRowProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id, "deny")
   );
   probes.push(
-    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
+    classifyCatalogPolicyDenyProbe({
+      role,
+      operation: "INSERT contractor_payable (catalog policy proof)",
+      table: "contractor_payable",
+      catalogValidation,
+      identityPassed: identityAudit?.office_ops?.passed === true,
+    })
   );
   probes.push(
     await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
   );
   probes.push(
-    await denyRetainedDuplicateInsertProbe(
+    classifyCatalogPolicyDenyProbe({
       role,
-      token,
-      "job_profitability_snapshot",
-      CANONICAL.job_profitability_snapshot_id
-    )
+      operation: "INSERT job_profitability_snapshot (catalog policy proof)",
+      table: "job_profitability_snapshot",
+      catalogValidation,
+      identityPassed: identityAudit?.office_ops?.passed === true,
+    })
   );
   probes.push(
     await denyPatchProbe(role, token, "job_profitability_snapshot", CANONICAL.job_profitability_snapshot_id)
@@ -1903,7 +2416,7 @@ async function probeOfficeOps(token) {
   return probes;
 }
 
-async function probeWorker(token, otherWorkerEvidence) {
+async function probeWorker(token, otherWorkerEvidence, catalogValidation, identityAudit) {
   const role = "worker";
   const probes = [];
   probes.push(
@@ -1933,7 +2446,13 @@ async function probeWorker(token, otherWorkerEvidence) {
     await denyPatchProbe(role, token, "contractor_compensation_version", CANONICAL.contractor_compensation_version_id)
   );
   probes.push(
-    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
+    classifyCatalogPolicyDenyProbe({
+      role,
+      operation: "INSERT contractor_payable (catalog policy proof)",
+      table: "contractor_payable",
+      catalogValidation,
+      identityPassed: identityAudit?.worker?.passed === true,
+    })
   );
   probes.push(
     await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
@@ -1986,8 +2505,8 @@ async function probeWorker(token, otherWorkerEvidence) {
         table: "contractor_compensation_version",
         expected: "deny",
         mandatory: false,
-        classification: CLASSIFICATION.NOT_PROVEN,
-        note: "No distinct contractor_compensation_version for another worker was discoverable for cross-worker visibility proof",
+        classification: CLASSIFICATION.NOT_APPLICABLE,
+        note: "No distinct second-worker retained evidence exists; cross-worker probe is not applicable to the current retained dataset.",
       })
     );
   }
@@ -2003,31 +2522,38 @@ async function probeWorker(token, otherWorkerEvidence) {
         table: "contractor_payable",
         expected: "deny",
         mandatory: false,
-        classification: CLASSIFICATION.NOT_PROVEN,
-        note: "No distinct contractor_payable for another worker was discoverable for cross-worker visibility proof",
+        classification: CLASSIFICATION.NOT_APPLICABLE,
+        note: "No distinct second-worker retained evidence exists; cross-worker probe is not applicable to the current retained dataset.",
       })
     );
   }
   return probes;
 }
 
-async function probeQa(token) {
+async function probeQa(token, catalogValidation, identityAudit) {
   const role = "qa";
   const probes = [];
   for (const [table, id] of RETAINED_TABLES) {
     probes.push(await selectExactRowProbe(role, token, table, id, "deny"));
   }
   probes.push(
-    await denyRetainedDuplicateInsertProbe(
+    classifyCatalogPolicyDenyProbe({
       role,
-      token,
-      "billing_readiness_gate",
-      CANONICAL.billing_readiness_gate_id
-    )
+      operation: "INSERT billing_readiness_gate (catalog policy proof)",
+      table: "billing_readiness_gate",
+      catalogValidation,
+      identityPassed: identityAudit?.qa?.passed === true,
+    })
   );
   probes.push(await denyPatchProbe(role, token, "billing_readiness_gate", CANONICAL.billing_readiness_gate_id));
   probes.push(
-    await denyRetainedDuplicateInsertProbe(role, token, "invoice_request", CANONICAL.invoice_request_id)
+    classifyCatalogPolicyDenyProbe({
+      role,
+      operation: "INSERT invoice_request (catalog policy proof)",
+      table: "invoice_request",
+      catalogValidation,
+      identityPassed: identityAudit?.qa?.passed === true,
+    })
   );
   probes.push(await denyPatchProbe(role, token, "invoice_request", CANONICAL.invoice_request_id));
   probes.push(await denyInsertProbe(role, token, "accounting_sync_outbox", makeOutboxInsertPayload(randomUUID())));
@@ -2037,16 +2563,23 @@ async function probeQa(token) {
   probes.push(await denyInsertProbe(role, token, "contractor_compensation_version", makeCompensationInsertPayload(randomUUID())));
   probes.push(await denyPatchProbe(role, token, "contractor_compensation_version", CANONICAL.contractor_compensation_version_id));
   probes.push(
-    await denyRetainedDuplicateInsertProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id)
+    classifyCatalogPolicyDenyProbe({
+      role,
+      operation: "INSERT contractor_payable (catalog policy proof)",
+      table: "contractor_payable",
+      catalogValidation,
+      identityPassed: identityAudit?.qa?.passed === true,
+    })
   );
   probes.push(await denyPatchProbe(role, token, "contractor_payable", CANONICAL.contractor_payable_id));
   probes.push(
-    await denyRetainedDuplicateInsertProbe(
+    classifyCatalogPolicyDenyProbe({
       role,
-      token,
-      "job_profitability_snapshot",
-      CANONICAL.job_profitability_snapshot_id
-    )
+      operation: "INSERT job_profitability_snapshot (catalog policy proof)",
+      table: "job_profitability_snapshot",
+      catalogValidation,
+      identityPassed: identityAudit?.qa?.passed === true,
+    })
   );
   probes.push(await denyPatchProbe(role, token, "job_profitability_snapshot", CANONICAL.job_profitability_snapshot_id));
   return probes;
@@ -2283,6 +2816,24 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   // Build the normalized token map (tokens keyed by canonical role)
   const normalizedTokens = resolveNormalizedTokenMap(candidates, identities, tokensByLabel);
 
+  let catalogAttestation;
+  try {
+    const catalogPayload = await serviceRoleReadOnlyRpc("wave5_rls_catalog_attestation", {});
+    catalogAttestation = validateWave5CatalogAttestation(catalogPayload);
+  } catch (error) {
+    catalogAttestation = {
+      contract_version: "",
+      expected_contract_version: CATALOG_CONTRACT_VERSION,
+      passed: false,
+      failures: [error.message],
+      tables: [],
+      authenticated_privileges: normalizePrivilegeEntries([]),
+      anon_privileges: normalizePrivilegeEntries([]),
+      policies: [],
+      exact_policy_count: 0,
+    };
+  }
+
   // ── G: Sequential probe execution with per-role retained snapshot ───────────
   const beforeSnapshots = await captureRetainedSnapshots();
   const otherWorkerEvidence = await discoverOtherWorkerEvidence();
@@ -2316,7 +2867,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   }
 
   // 2. office_ops
-  const officeOpsProbes = await probeOfficeOps(normalizedTokens.office_ops);
+  const officeOpsProbes = await probeOfficeOps(normalizedTokens.office_ops, catalogAttestation, identityAudit);
   const afterOfficeOps = await captureRetainedSnapshots();
   const retainedAfterOfficeOps = compareRetainedSnapshots(beforeSnapshots, afterOfficeOps);
   if (!retainedAfterOfficeOps.unchanged) {
@@ -2346,7 +2897,12 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   }
 
   // 3. worker
-  const workerProbes = await probeWorker(normalizedTokens.worker, otherWorkerEvidence);
+  const workerProbes = await probeWorker(
+    normalizedTokens.worker,
+    otherWorkerEvidence,
+    catalogAttestation,
+    identityAudit
+  );
   const afterWorker = await captureRetainedSnapshots();
   const retainedAfterWorker = compareRetainedSnapshots(beforeSnapshots, afterWorker);
   if (!retainedAfterWorker.unchanged) {
@@ -2378,7 +2934,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   }
 
   // 4. qa
-  const qaProbes = await probeQa(normalizedTokens.qa);
+  const qaProbes = await probeQa(normalizedTokens.qa, catalogAttestation, identityAudit);
   const afterQa = await captureRetainedSnapshots();
   const retainedAfterQa = compareRetainedSnapshots(beforeSnapshots, afterQa);
   if (!retainedAfterQa.unchanged) {
@@ -2433,6 +2989,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
   const notProvenCount = sections.reduce((sum, section) => sum + section.not_proven_count, 0);
   const passed =
     sections.every((section) => section.passed) &&
+    catalogAttestation.passed &&
     retainedIntegrity.unchanged &&
     failedCount === 0 &&
     identityAudit.office_ops.passed &&
@@ -2465,6 +3022,7 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
       failed_roles: sections.filter((s) => !s.passed).map((s) => s.role),
       failed_count: failedCount,
       not_proven_count: notProvenCount,
+      catalog_attestation_passed: catalogAttestation.passed,
       retained_data_unchanged: retainedIntegrity.unchanged,
       identity_audit_summary: identityAuditSummary,
       failed_probe_summary: failedMandatoryProbes.map((p) => ({
@@ -2480,8 +3038,18 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
 
   return res.status(passed ? 200 : 422).json({
     contract_version: CONTRACT_VERSION,
+    catalog_contract_version: CATALOG_CONTRACT_VERSION,
     environment: env,
     canonical_job_id: CANONICAL.operational_job_id,
+    catalog_attestation: {
+      passed: catalogAttestation.passed,
+      contract_version: catalogAttestation.contract_version,
+      expected_contract_version: catalogAttestation.expected_contract_version,
+      failures: catalogAttestation.failures,
+      exact_policy_count: catalogAttestation.exact_policy_count,
+      tables: catalogAttestation.tables,
+      policies: catalogAttestation.policies,
+    },
     identity_audit: identityAudit,
     identity_audit_summary: identityAuditSummary,
     owner_admin,
@@ -2509,11 +3077,13 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
       qa: identityAudit.qa.credential_source,
     },
     passed,
+    overall: passed ? "PASS" : "FAIL",
     run_at: runAt,
     notes: [
       "No auth users were created.",
       "No retained Wave 5 evidence was intentionally mutated or cleaned up.",
       "Owner_admin probes used the requesting browser bearer token; office_ops / worker / qa tokens were resolved by canonical app_user_id.",
+      "Service role was used for a read-only catalog attestation RPC that is not callable by browser authenticated users.",
       "Service role was used for authoritative identity-directory reads, retained-data integrity verification, and optional cross-worker discovery.",
       "Role probes ran sequentially with retained-data integrity verification between each role.",
     ],
@@ -2521,9 +3091,14 @@ export async function runWave5RlsAcceptanceHandler(req, res) {
 }
 
 export {
+  EXPECTED_WAVE5_CATALOG_CONTRACT,
+  classifyCatalogPolicyDenyProbe,
   classifyDenyPatchProbe,
   classifyDenyMutationProbe,
   classifyDenyRetainedDuplicateInsertProbe,
   makeRetainedDuplicateInsertPayload,
+  serviceRoleReadOnlyRpc,
+  summarizeProbes,
+  validateWave5CatalogAttestation,
 };
 export default runWave5RlsAcceptanceHandler;
