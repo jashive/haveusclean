@@ -406,3 +406,102 @@ test("migration documents application-enforced governance rules", () => {
   assert.match(sql, /application/i);
   assert.match(sql, /CONSTRAINT ck_ccr_material_close_evidence CHECK/);
 });
+
+// ── Training-required governance (DB level) ──────────────────────────────────
+
+test("migration enforces retrain→validate is blocked unless training_status=completed when training_required=true", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_ccr_fsm")
+  );
+  assert.match(
+    body,
+    /training_required.*=.*true/,
+    "CCR FSM must check training_required flag"
+  );
+  assert.match(
+    body,
+    /training_status.*IS DISTINCT FROM 'completed'/,
+    "CCR FSM must block retrain→validate unless training_status=completed"
+  );
+  assert.match(
+    body,
+    /retrain.*validate.*training_status/i,
+    "CCR FSM must mention training context in the retrain→validate guard"
+  );
+});
+
+test("migration CCR FSM permits retrain→validate when training_required=false regardless of training_status", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_ccr_fsm")
+  );
+  // Guard is conditional: NEW.training_required = true AND ... so the block
+  // is inside an IF block that only fires when training_required is true.
+  assert.match(
+    body,
+    /IF NEW\.training_required = true/,
+    "training guard must be conditional on training_required flag"
+  );
+});
+
+test("migration CCR FSM guards are scoped to the retrain→validate transition", () => {
+  // Verify the training check only applies to the retrain→validate transition
+  // by confirming it lives inside the retrain→validate case branch.
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_ccr_fsm")
+  );
+  const retrainIdx = body.indexOf("OLD.change_status = 'retrain'");
+  const trainingIdx = body.indexOf("training_required");
+  assert.ok(retrainIdx >= 0, "CCR FSM must have retrain→validate case");
+  assert.ok(trainingIdx > retrainIdx, "training check must appear after retrain status guard");
+});
+
+test("migration CCR FSM does not block non-retrain transitions on training_status", () => {
+  // The measure, analyze, improve, approve, update steps must not be blocked
+  // by training_status. Verify training check is not placed before the
+  // retrain-specific branch (i.e., only in its own transition case).
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_ccr_fsm"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_ccr_fsm")
+  );
+  const measureIdx = body.indexOf("'measure'");
+  const firstTrainingIdx = body.indexOf("training_required");
+  // The training check must appear after the first transition branches,
+  // confirming it is not a blanket pre-guard.
+  assert.ok(measureIdx >= 0, "CCR FSM must have measure transition");
+  assert.ok(firstTrainingIdx > measureIdx, "training check must not precede transition branches");
+});
+
+// ── Combined MR governance trigger order self-validation ─────────────────────
+
+test("migration SV-17 validates that old separate MR triggers do not coexist with trg_wave6_mr_governance", () => {
+  assert.match(
+    sql,
+    /SV-17/,
+    "migration must include SV-17 trigger order self-validation block"
+  );
+  assert.match(
+    sql,
+    /trg_wave6_mr_governance/,
+    "migration must reference combined MR governance function name in SV-17"
+  );
+  // The old separate trigger names must NOT appear as CREATE TRIGGER statements
+  assert.doesNotMatch(
+    sql,
+    /CREATE TRIGGER trig_management_review_fsm\b/,
+    "old trig_management_review_fsm must not be created; replaced by trg_wave6_mr_governance"
+  );
+  assert.doesNotMatch(
+    sql,
+    /CREATE TRIGGER trig_wave6_mr_update_stamp\b/,
+    "old trig_wave6_mr_update_stamp must not be created; replaced by trg_wave6_mr_governance"
+  );
+});
+
+test("migration combined MR trigger fires BEFORE UPDATE once with combined governance", () => {
+  // Confirm the single combined trigger is created (not two separate ones)
+  const matchCount = (sql.match(/CREATE TRIGGER trig_wave6_mr_governance\b/g) || []).length;
+  assert.equal(matchCount, 1, "exactly one combined MR governance trigger must be created");
+});

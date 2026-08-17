@@ -100,7 +100,11 @@ export default function KpiReviewPanel({
                 return (
                   <div key={kpi.kpiCode} style={styles.card}>
                     <div style={styles.cardName}>{definition?.name ?? kpi.kpiCode}</div>
-                    <div style={styles.cardValue}>{formatKpiValue(kpi.value, unit, currency)}</div>
+                    <div style={styles.cardValue}>
+                      {definition === null
+                        ? NO_DATA
+                        : formatKpiValue(kpi.value, unit, currency)}
+                    </div>
                     <div style={styles.cardMeta}>
                       {periodLabel ? `${periodLabel} · ${timezone}` : timezone}
                       <br />
@@ -108,15 +112,19 @@ export default function KpiReviewPanel({
                         ? `Definition v${definition.definition_version}`
                         : `Definition: ${resolved.error ?? NO_DATA}`}
                       <br />
-                      {unavailable
-                        ? `Source unavailable: ${formatLineage(kpi.unavailableSources)}`
-                        : isRate
-                          ? describeRateBasis(kpi.numerator, kpi.denominator)
-                          : `Rows: ${
-                              knownRowCounts.length > 0
-                                ? knownRowCounts.reduce((a, b) => a + b, 0)
-                                : NO_DATA
-                            }`}
+                      {definition === null ? (
+                        <>Governed value unavailable — {resolved.error ?? "no applicable definition"}</>
+                      ) : unavailable ? (
+                        `Source unavailable: ${formatLineage(kpi.unavailableSources)}`
+                      ) : isRate ? (
+                        describeRateBasis(kpi.numerator, kpi.denominator)
+                      ) : (
+                        `Rows: ${
+                          knownRowCounts.length > 0
+                            ? knownRowCounts.reduce((a, b) => a + b, 0)
+                            : NO_DATA
+                        }`
+                      )}
                       <br />
                       Source: {formatLineage(runtimeSourceTables ?? kpi.sourceTables ?? definition?.source_lineage?.tables)}
                       <br />

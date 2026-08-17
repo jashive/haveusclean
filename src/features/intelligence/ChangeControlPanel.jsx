@@ -132,10 +132,17 @@ export default function ChangeControlPanel({
 
   const setDraftField = useCallback((recordId, field, value) => {
     setDrafts((prev) => {
-      const baseline = prev[recordId] ?? {};
-      return { ...prev, [recordId]: { ...baseline, [field]: value } };
+      // On first edit of a record, initialize from the full record baseline so
+      // that save never submits undefined-field payloads for untouched fields.
+      const existing = prev[recordId];
+      if (!existing) {
+        const record = records.find((r) => r.id === recordId);
+        const baseline = record ? resolveDraft(record) : {};
+        return { ...prev, [recordId]: { ...baseline, [field]: value } };
+      }
+      return { ...prev, [recordId]: { ...existing, [field]: value } };
     });
-  }, []);
+  }, [records, resolveDraft]);
 
   const handleCreate = useCallback(async () => {
     setError(null);
@@ -228,21 +235,66 @@ export default function ChangeControlPanel({
       if (!node) throw new Error("Select a dependency graph source node first.");
       const result = await loadDependencyImpact(session, { fromNode: node, maxDepth: 8 });
       const impacted = Array.isArray(result?.impacted) ? result.impacted : [];
+      if (impacted.length === 0) throw new Error(`No downstream nodes reachable from ${node}.`);
       const affected = impacted.map((entry) => entry.node).filter(Boolean);
+
+      // Build structured dependency assessment preserving control_rule.
+      const dependencyPaths = impacted.map((entry) => ({
+        kg_id: entry.kg_id ?? null,
+        from_node: entry.from_node,
+        to_node: entry.to_node ?? entry.node,
+        edge_type: entry.edge_type ?? "depends_on",
+        control_rule: entry.control_rule ?? null,
+        depth: entry.depth,
+      }));
+
+      // Validate structured assessment: each affected node must be a real graph node.
+      const knownNodes = new Set([
+        ...dependencyEdges.map((e) => e.from_node),
+        ...dependencyEdges.map((e) => e.to_node),
+      ]);
+      for (const n of affected) {
+        if (!knownNodes.has(n)) {
+          throw new Error(`Impact node "${n}" does not exist in the dependency graph.`);
+        }
+      }
+
+      // Merge with the current draft's existing impact_assessment, not only the
+      // stale persisted record, so unsaved operator assessment is not discarded.
+      let existingAssessment = {};
+      try {
+        existingAssessment = toJson(draft.impact_assessment, {});
+      } catch {
+        existingAssessment = {};
+      }
+
+      const newAssessment = {
+        ...existingAssessment,
+        dependency_graph_source: node,
+        dependency_edge_count: impacted.length,
+        dependency_paths: dependencyPaths,
+        affected_node_count: affected.length,
+      };
+
+      // Show the operator a preview of impacted nodes and control rules before persisting.
+      const controlRuleSummary = dependencyPaths
+        .filter((p) => p.control_rule)
+        .map((p) => `  ${p.from_node} → ${p.to_node} [${p.control_rule}]`)
+        .join("\n");
+      const preview =
+        `Dependency impact from "${node}":\n` +
+        `  ${affected.length} affected node(s): ${affected.slice(0, 8).join(", ")}${affected.length > 8 ? "…" : ""}\n` +
+        (controlRuleSummary ? `Control rules:\n${controlRuleSummary}\n` : "") +
+        `\nPersist this impact assessment?`;
+      if (!window.confirm(preview)) {
+        setBusy(false);
+        return;
+      }
+
       await updateChangeControlRecord(session, record.id, {
         current_status: record.change_status,
         affected_dependencies: affected,
-        impact_assessment: {
-          ...(record.impact_assessment ?? {}),
-          dependency_graph_source: node,
-          dependency_edge_count: impacted.length,
-          dependency_paths: impacted.map((entry) => ({
-            from_node: entry.from_node,
-            to_node: entry.node,
-            edge_type: entry.edge_type,
-            depth: entry.depth,
-          })),
-        },
+        impact_assessment: newAssessment,
       });
       if (onChanged) await onChanged();
     } catch (err) {
@@ -250,7 +302,7 @@ export default function ChangeControlPanel({
     } finally {
       setBusy(false);
     }
-  }, [onChanged, resolveDraft, session]);
+  }, [dependencyEdges, onChanged, resolveDraft, session]);
 
   const canCreate =
     !busy && changeCode.trim() !== "" && title.trim() !== "" && Boolean(organizationId);

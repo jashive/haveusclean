@@ -308,11 +308,22 @@ function SnapshotCaptureButton({
         if (!snapshot?.id) {
           throw new Error(`Wave 6: snapshot capture for ${kpi.kpiCode} returned no id`);
         }
+        // Fail closed: the DB always stamps captured_at; never fall back to a
+        // browser-side timestamp.  If any required manifest field is absent, skip
+        // this snapshot and report the error — do not fabricate metadata.
+        if (!snapshot.captured_at || !snapshot.kpi_code || !snapshot.definition_version) {
+          errors.push(
+            `${kpi.kpiCode}: snapshot ${snapshot.id} missing required manifest fields ` +
+            `(captured_at=${snapshot.captured_at ?? "absent"}, kpi_code=${snapshot.kpi_code ?? "absent"}, ` +
+            `definition_version=${snapshot.definition_version ?? "absent"}) — manifest entry skipped`
+          );
+          continue;
+        }
         manifestEntries.push({
           kpi_snapshot_id: snapshot.id,
-          kpi_code: snapshot.kpi_code ?? kpi.kpiCode,
-          definition_version: snapshot.definition_version ?? definition.definition_version ?? "1",
-          captured_at: snapshot.captured_at ?? new Date().toISOString(),
+          kpi_code: snapshot.kpi_code,
+          definition_version: snapshot.definition_version,
+          captured_at: snapshot.captured_at,
         });
       } catch (err) {
         errors.push(`${kpi.kpiCode}: ${formatErrorMessage(err)}`);

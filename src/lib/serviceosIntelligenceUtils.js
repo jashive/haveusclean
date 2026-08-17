@@ -563,7 +563,9 @@ export function releaseGateBlockers(gateCode, gates) {
 
 /**
  * Breadth-first downstream traversal of dependency edges with cycle safety.
- * Returns [{ node, depth, kg_id, edge_type, from_node }] excluding the origin.
+ * Returns [{ node, depth, kg_id, from_node, to_node, edge_type, control_rule }]
+ * excluding the origin.  control_rule is preserved from the DB edge so that
+ * impact assessments can display the full governance context.
  */
 export function traverseDependencyImpact(edges, fromNode, maxDepth = 5) {
   const list = Array.isArray(edges) ? edges : [];
@@ -591,8 +593,10 @@ export function traverseDependencyImpact(edges, fromNode, maxDepth = 5) {
           node: edge.to_node,
           depth,
           kg_id: edge.kg_id ?? null,
-          edge_type: edge.edge_type ?? "depends_on",
           from_node: edge.from_node,
+          to_node: edge.to_node,
+          edge_type: edge.edge_type ?? "depends_on",
+          control_rule: edge.control_rule ?? null,
         });
         nextFrontier.push(edge.to_node);
       }

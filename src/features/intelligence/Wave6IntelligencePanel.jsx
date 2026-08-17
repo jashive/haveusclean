@@ -186,7 +186,7 @@ export default function Wave6IntelligencePanel({ session, revenueContext }) {
           periodStart: period.periodStart,
           periodEnd: period.periodEnd,
         }),
-        loadCanonicalEvents(session, { organizationId, businessUnitId, limit: 100 }),
+        loadCanonicalEvents(session, { organizationId, businessUnitId, periodStart: period.periodStart, periodEnd: period.periodEnd }),
         loadChangeControlRecords(session, { organizationId, businessUnitId }),
         loadContinuitySessions(session, { organizationId, businessUnitId }),
         loadServiceModuleProfiles(session, { organizationId }),

@@ -703,7 +703,7 @@ export async function loadKpiSnapshots(
 
 export async function loadCanonicalEvents(
   session,
-  { organizationId, businessUnitId, eventNames, limit = 100 } = {}
+  { organizationId, businessUnitId, eventNames, periodStart, periodEnd, limit = 1000 } = {}
 ) {
   assertEnabled();
   requireValue(organizationId, "organizationId");
@@ -711,11 +711,17 @@ export async function loadCanonicalEvents(
     "select=*",
     eq("organization_id", organizationId),
     "order=occurred_at.desc",
-    `limit=${Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 100}`,
+    `limit=${Number.isFinite(limit) && limit > 0 ? Math.min(limit, 1000) : 1000}`,
   ];
   if (businessUnitId) filters.push(eq("business_unit_id", businessUnitId));
   if (Array.isArray(eventNames) && eventNames.length > 0) {
     filters.push(`event_name=in.(${eventNames.map((n) => encodeURIComponent(n)).join(",")})`);
+  }
+  if (periodStart) {
+    filters.push(`occurred_at=gte.${encodeURIComponent(toIso(periodStart))}`);
+  }
+  if (periodEnd) {
+    filters.push(`occurred_at=lte.${encodeURIComponent(toIso(periodEnd))}`);
   }
   return selectRows("wave6_canonical_event", filters.join("&"));
 }

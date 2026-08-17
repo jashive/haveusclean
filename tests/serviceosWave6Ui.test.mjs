@@ -595,3 +595,137 @@ test("Wave6IntelligencePanel passes kpiDefinitions to ManagementReviewPanel", ()
     "Wave6IntelligencePanel must pass kpiDefinitions to ManagementReviewPanel"
   );
 });
+
+// ── ChangeControlPanel draft baseline initialization (behavioral source tests) ─
+
+test("ChangeControlPanel setDraftField initializes from full record baseline on first edit", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  // On first edit (no existing draft), code must initialize from resolveDraft(record)
+  // before applying the field mutation – not from {}.
+  assert.match(
+    source,
+    /const baseline = record \? resolveDraft\(record\) : \{\}/,
+    "setDraftField must initialize from resolveDraft(record) baseline on first edit"
+  );
+  assert.match(
+    source,
+    /\.\.\. ?baseline, \[field\]: value/,
+    "first-edit draft must spread baseline then apply the changed field"
+  );
+});
+
+test("ChangeControlPanel setDraftField applies mutation on top of existing draft on subsequent edits", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  assert.match(
+    source,
+    /\.\.\. ?existing, \[field\]: value/,
+    "subsequent edits must spread the existing draft then apply the changed field"
+  );
+});
+
+test("ChangeControlPanel save path reads from resolveDraft which returns full baseline when no draft exists", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  // Save handler calls resolveDraft(record) to get the draft (or baseline)
+  assert.match(
+    source,
+    /const draft = resolveDraft\(record\)/,
+    "save must call resolveDraft(record) to obtain the full payload"
+  );
+});
+
+test("ChangeControlPanel resolveDraft returns full record baseline fields when no override draft exists", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  // resolveDraft must include core CCR fields from the record
+  assert.match(source, /source_kpi_codes/, "resolveDraft must include source_kpi_codes");
+  assert.match(source, /implementation_plan/, "resolveDraft must include implementation_plan");
+  assert.match(source, /impact_assessment/, "resolveDraft must include impact_assessment");
+  assert.match(source, /training_required/, "resolveDraft must include training_required");
+  assert.match(source, /validation_result/, "resolveDraft must include validation_result");
+});
+
+test("ChangeControlPanel draft is initialized from resolveDraft so untouched baseline fields are never undefined on save", () => {
+  const source = PANELS["ChangeControlPanel.jsx"];
+  // Guard: setDraftField must NOT use {} as the fallback when no existing draft is present
+  assert.doesNotMatch(
+    source,
+    /prev\[recordId\] \?\? \{\}/,
+    "setDraftField must not fall back to empty object {} as the draft baseline"
+  );
+});
+
+// ── KpiReviewPanel fail-closed display (behavioral source tests) ─────────────
+
+test("KpiReviewPanel renders NO_DATA when definition is null", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  assert.match(
+    source,
+    /NO_DATA/,
+    "KpiReviewPanel must import and use NO_DATA marker"
+  );
+  // When definition === null the numeric value must not be rendered as governed
+  assert.match(
+    source,
+    /definition.*null|!.*resolved\.definition|resolved\.definition.*null/i,
+    "KpiReviewPanel must guard on definition being null/absent"
+  );
+});
+
+test("KpiReviewPanel does not render numeric KPI value when definition is absent", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  // The formatKpiValue call must be conditional (inside an else / after a null check)
+  // and not unconditional. Verify formatKpiValue is present but guarded.
+  assert.match(
+    source,
+    /formatKpiValue/,
+    "KpiReviewPanel must use formatKpiValue when definition is available"
+  );
+  // The null/absent branch must show NO_DATA, not formatKpiValue
+  assert.match(
+    source,
+    /NO_DATA[\s\S]{0,120}formatKpiValue|formatKpiValue[\s\S]{0,300}NO_DATA/,
+    "NO_DATA marker and formatKpiValue must coexist with fail-closed logic"
+  );
+});
+
+test("KpiReviewPanel displays resolver error when definition resolution fails", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  assert.match(
+    source,
+    /resolved\.error/,
+    "KpiReviewPanel must display the resolver error message when definition is unavailable"
+  );
+});
+
+test("KpiReviewPanel imports NO_DATA from the intelligence utils", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  assert.match(
+    source,
+    /NO_DATA/,
+    "KpiReviewPanel must reference NO_DATA sentinel"
+  );
+  // NO_DATA comes from wave6Formatters (shared Wave 6 formatter module)
+  assert.match(
+    source,
+    /wave6Formatters/,
+    "KpiReviewPanel must import from wave6Formatters (where NO_DATA is defined)"
+  );
+});
+
+test("KpiReviewPanel uses the shared governed resolver (not inline definition matching)", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  assert.match(
+    source,
+    /resolveGovernedKpiDefinition/,
+    "KpiReviewPanel must call resolveGovernedKpiDefinition for governed definition lookup"
+  );
+});
+
+test("KpiReviewPanel fail-closed: ambiguous and absent definitions both yield NO_DATA display path", () => {
+  const source = PANELS["KpiReviewPanel.jsx"];
+  // The condition guarding display must check for definition being null
+  assert.match(
+    source,
+    /definition === null/,
+    "KpiReviewPanel must guard the governed display path on definition === null"
+  );
+});

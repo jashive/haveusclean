@@ -390,7 +390,7 @@ test("seed inserts are idempotent", () => {
 // ── Blocker 1: DB-level governance triggers (structural source check) ─────────
 
 const GOVERNANCE_TRIGGER_FUNCTIONS = [
-  "trg_enforce_management_review_fsm",
+  "trg_wave6_mr_governance",
   "trg_enforce_ccr_fsm",
   "trg_enforce_continuity_fsm",
   "trg_enforce_release_gate_sequence",
@@ -399,7 +399,7 @@ const GOVERNANCE_TRIGGER_FUNCTIONS = [
 ];
 
 const GOVERNANCE_TRIGGERS = [
-  "trig_management_review_fsm",
+  "trig_wave6_mr_governance",
   "trig_ccr_fsm",
   "trig_continuity_fsm",
   "trig_release_gate_sequence",
@@ -454,12 +454,12 @@ test("governance trigger functions have EXECUTE revoked from PUBLIC and anon", (
 });
 
 test("management_review FSM trigger fires BEFORE UPDATE", () => {
-  assert.match(sql, /BEFORE UPDATE ON public\.management_review\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_enforce_management_review_fsm/);
+  assert.match(sql, /BEFORE UPDATE ON public\.management_review\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.trg_wave6_mr_governance/);
 });
 
 test("migration header truthfully documents expanded trigger coverage", () => {
-  assert.match(sql, /Trigger functions created \(17\):/);
-  assert.match(sql, /Triggers created \(17\):/);
+  assert.match(sql, /Trigger functions created \(18\):/);
+  assert.match(sql, /Triggers created \(19\):/);
   assert.match(sql, /trig_wave6_mr_insert_guard/);
   assert.match(sql, /trig_wave6_ccr_insert_guard/);
 });
@@ -716,8 +716,8 @@ test("self-validation confirms pgcrypto extensions.digest is available", () => {
 test("management_review FSM blocks any update to a closed row", () => {
   // Criterion N: terminal governance evidence cannot be silently rewritten
   const body = sql.slice(
-    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_management_review_fsm"),
-    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_management_review_fsm")
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_wave6_mr_governance"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_wave6_mr_governance")
   );
   assert.match(
     body,

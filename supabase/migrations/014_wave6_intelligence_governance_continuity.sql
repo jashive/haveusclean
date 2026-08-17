@@ -23,23 +23,24 @@
 -- View created (1):
 --   wave6_canonical_event  (security_invoker)
 --
--- Trigger functions created (17):
---   trg_enforce_management_review_fsm   — management_review BEFORE UPDATE
+-- Trigger functions created (18):
+--   trg_wave6_mr_governance             — management_review BEFORE UPDATE
+--     (combined authoritative stamp + FSM; deterministic single-trigger design)
 --   trg_enforce_ccr_fsm                 — change_control_record BEFORE UPDATE
 --   trg_enforce_continuity_fsm          — continuity_session BEFORE UPDATE
 --   trg_enforce_release_gate_sequence   — release_gate BEFORE UPDATE
 --   trg_set_continuity_payload_hash     — continuity_transaction BEFORE INSERT
 --   trg_immute_continuity_transaction_fields — continuity_transaction BEFORE UPDATE
+--   trg_wave6_stamp_kpi_snapshot_insert — kpi_snapshot BEFORE INSERT
 --
--- Triggers created (17):
---   trig_management_review_fsm
+-- Triggers created (19):
+--   trig_wave6_mr_governance
 --   trig_ccr_fsm
 --   trig_continuity_fsm
 --   trig_release_gate_sequence
 --   trig_continuity_payload_hash
 --   trig_immute_continuity_transaction_fields
 --   trig_wave6_mr_insert_guard
---   trig_wave6_mr_update_stamp
 --   trig_wave6_ccr_insert_guard
 --   trig_wave6_ccr_update_stamp
 --   trig_wave6_cs_insert_guard
@@ -47,6 +48,7 @@
 --   trig_wave6_ct_insert_guard
 --   trig_wave6_ct_reconciliation_fsm
 --   trig_wave6_kpi_snapshot_scope
+--   trig_wave6_kpi_snapshot_stamp
 --   trig_wave6_management_review_manifest
 --   trig_wave6_ccr_manifest
 --
@@ -647,80 +649,156 @@ CREATE INDEX idx_rg_sequence          ON public.release_gate (sequence_order);
 -- Payload hash trigger uses BEFORE INSERT (INSERT-only, immutable).
 -- ---------------------------------------------------------------------------
 
--- ── management_review FSM ────────────────────────────────────────────────────
+-- ── management_review combined governance (stamp first, validate second) ──────
+--
+-- Design rationale: PostgreSQL 17 fires multiple same-event triggers
+-- alphabetically by trigger name.  A separate FSM trigger and stamp trigger
+-- on the same BEFORE UPDATE event would fire in name order, meaning the FSM
+-- could reject closed_at IS NULL before the stamp trigger sets it.
+-- Combining both responsibilities into a single deterministic function
+-- eliminates the ordering dependency entirely.
+--
+-- Order of operations inside this function:
+--   1. Terminal immutability guard (short-circuit)
+--   2. DB-owned field stamping (opened_at, closed_at, waiver evidence)
+--   3. Immutability guards on DB-owned identity fields
+--   4. FSM transition validation
+--   5. Closure prerequisite checks (waiver / unresolved actions)
 
-CREATE OR REPLACE FUNCTION public.trg_enforce_management_review_fsm()
+CREATE OR REPLACE FUNCTION public.trg_wave6_mr_governance()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
+DECLARE
+  v_actor uuid;
 BEGIN
-  -- Terminal immutability: a closed review cannot be modified at all.
+  -- ── 1. Terminal immutability ─────────────────────────────────────────────────
   IF OLD.review_status = 'closed' THEN
     RAISE EXCEPTION
       'management_review: terminal row is immutable (row id=%)', OLD.id
       USING ERRCODE = 'P0001';
   END IF;
 
-  -- Status unchanged: allow (only non-status field changes).
-  IF NEW.review_status = OLD.review_status THEN
-    RETURN NEW;
-  END IF;
-
-  -- Validate OLD → NEW using the locked FSM:
-  --   draft → in_review
-  --   in_review → actions_open | closed
-  --   actions_open → closed
-  --   closed → (terminal)
-  IF NOT (
-    (OLD.review_status = 'draft'        AND NEW.review_status = 'in_review')   OR
-    (OLD.review_status = 'in_review'    AND NEW.review_status = 'actions_open') OR
-    (OLD.review_status = 'in_review'    AND NEW.review_status = 'closed')       OR
-    (OLD.review_status = 'actions_open' AND NEW.review_status = 'closed')
-  ) THEN
-    RAISE EXCEPTION
-      'management_review FSM: illegal transition % → % (row id=%)',
-      OLD.review_status, NEW.review_status, OLD.id
+  -- ── 2. DB-owned field stamping ───────────────────────────────────────────────
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'management_review: current_app_user_id() returned NULL'
       USING ERRCODE = 'P0001';
   END IF;
 
-  -- Closure prerequisite: all actions resolved or waiver recorded.
-  IF NEW.review_status = 'closed' AND NEW.waiver_recorded IS NOT TRUE THEN
-    IF EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements(NEW.actions) AS a
-      WHERE (a->>'is_resolved')::boolean IS NOT TRUE
-    ) THEN
+  -- opened_at: stamped only on legal entry to in_review; immutable thereafter.
+  IF NEW.review_status = 'in_review' AND OLD.review_status <> 'in_review' THEN
+    NEW.opened_at := COALESCE(OLD.opened_at, now());
+  END IF;
+
+  -- closed_at: stamped only on legal close; immutable thereafter.
+  IF NEW.review_status = 'closed' AND OLD.review_status <> 'closed' THEN
+    NEW.closed_at := now();
+  END IF;
+
+  -- Waiver is one-way: once recorded, evidence becomes immutable.
+  IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
+    IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
       RAISE EXCEPTION
-        'management_review: cannot close with unresolved actions unless waiver_recorded=true (row id=%)',
-        OLD.id
+        'management_review: waiver requires waiver_reason evidence (row id=%)', OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+    NEW.waiver_actor_app_user_id := v_actor;
+    NEW.waiver_recorded_at := now();
+  ELSIF OLD.waiver_recorded = true THEN
+    -- Once waiver is recorded, its evidence fields are immutable.
+    IF NEW.waiver_reason IS DISTINCT FROM OLD.waiver_reason
+       OR NEW.waiver_actor_app_user_id IS DISTINCT FROM OLD.waiver_actor_app_user_id
+       OR NEW.waiver_recorded_at IS DISTINCT FROM OLD.waiver_recorded_at THEN
+      RAISE EXCEPTION
+        'management_review: waiver evidence is immutable once recorded (row id=%)', OLD.id
         USING ERRCODE = 'P0001';
     END IF;
   END IF;
 
-  -- closed_at must be set when closing (belt-and-suspenders; CHECK also enforces this).
-  IF NEW.review_status = 'closed' AND NEW.closed_at IS NULL THEN
+  -- ── 3. Immutability guards on DB-owned identity fields ──────────────────────
+  IF NEW.created_by_app_user_id IS DISTINCT FROM OLD.created_by_app_user_id THEN
     RAISE EXCEPTION
-      'management_review: closed_at must be set when closing (row id=%)', OLD.id
+      'management_review: created_by_app_user_id is immutable (row id=%)', OLD.id
       USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.owner_app_user_id IS DISTINCT FROM OLD.owner_app_user_id THEN
+    RAISE EXCEPTION
+      'management_review: owner_app_user_id cannot be silently reassigned (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  -- opened_at must not be overridden by the caller once set.
+  IF OLD.opened_at IS NOT NULL AND NEW.opened_at IS DISTINCT FROM OLD.opened_at THEN
+    RAISE EXCEPTION
+      'management_review: opened_at is DB-owned and immutable once set (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+  -- closed_at must not be overridden by the caller once set.
+  IF OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
+    RAISE EXCEPTION
+      'management_review: closed_at is DB-owned and immutable once set (row id=%)', OLD.id
+      USING ERRCODE = 'P0001';
+  END IF;
+
+  -- ── 4. FSM transition validation ────────────────────────────────────────────
+  IF NEW.review_status <> OLD.review_status THEN
+    -- Locked FSM: draft → in_review → actions_open | closed; actions_open → closed.
+    IF NOT (
+      (OLD.review_status = 'draft'        AND NEW.review_status = 'in_review')    OR
+      (OLD.review_status = 'in_review'    AND NEW.review_status = 'actions_open') OR
+      (OLD.review_status = 'in_review'    AND NEW.review_status = 'closed')        OR
+      (OLD.review_status = 'actions_open' AND NEW.review_status = 'closed')
+    ) THEN
+      RAISE EXCEPTION
+        'management_review FSM: illegal transition % → % (row id=%)',
+        OLD.review_status, NEW.review_status, OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+  END IF;
+
+  -- ── 5. Closure prerequisites ─────────────────────────────────────────────────
+  IF NEW.review_status = 'closed' THEN
+    -- closed_at must be set (was stamped above; belt-and-suspenders).
+    IF NEW.closed_at IS NULL THEN
+      RAISE EXCEPTION
+        'management_review: closed_at must be set when closing (row id=%)', OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
+    -- Unresolved actions require a waiver.
+    IF NEW.waiver_recorded IS NOT TRUE THEN
+      IF EXISTS (
+        SELECT 1
+        FROM jsonb_array_elements(NEW.actions) AS a
+        WHERE (a->>'is_resolved')::boolean IS NOT TRUE
+      ) THEN
+        RAISE EXCEPTION
+          'management_review: cannot close with unresolved actions unless waiver_recorded=true (row id=%)',
+          OLD.id
+          USING ERRCODE = 'P0001';
+      END IF;
+    END IF;
   END IF;
 
   RETURN NEW;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM anon;
-REVOKE ALL ON FUNCTION public.trg_enforce_management_review_fsm() FROM authenticated;
+REVOKE ALL ON FUNCTION public.trg_wave6_mr_governance() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_mr_governance() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_mr_governance() FROM authenticated;
 
-CREATE TRIGGER trig_management_review_fsm
+CREATE TRIGGER trig_wave6_mr_governance
   BEFORE UPDATE ON public.management_review
   FOR EACH ROW
-  EXECUTE FUNCTION public.trg_enforce_management_review_fsm();
+  EXECUTE FUNCTION public.trg_wave6_mr_governance();
 
-COMMENT ON FUNCTION public.trg_enforce_management_review_fsm() IS
-  'Wave 6: DB-level management_review FSM. Illegal transitions raise P0001. '
+COMMENT ON FUNCTION public.trg_wave6_mr_governance() IS
+  'Wave 6: Combined management_review governance trigger. '
+  'Stamps DB-owned fields first (opened_at, closed_at, waiver evidence), '
+  'then enforces FSM transitions and closure prerequisites. '
+  'Single-function design eliminates alphabetical trigger-order dependency. '
   'Closure requires resolved actions or waiver_recorded=true. SOURCE ONLY.';
 
 -- ── change_control_record FSM ────────────────────────────────────────────────
@@ -757,6 +835,17 @@ BEGIN
       'change_control_record FSM: illegal transition % → % (row id=%)',
       OLD.change_status, NEW.change_status, OLD.id
       USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Training-required governance: retrain → validate requires training_status = 'completed'.
+  IF OLD.change_status = 'retrain' AND NEW.change_status = 'validate' THEN
+    IF NEW.training_required = true
+       AND NEW.training_status IS DISTINCT FROM 'completed' THEN
+      RAISE EXCEPTION
+        'change_control_record: retrain→validate requires training_status=completed when training_required=true (row id=%)',
+        OLD.id
+        USING ERRCODE = 'P0001';
+    END IF;
   END IF;
 
   -- Material-change closure prerequisites: impact_assessment + validation_result.passed=true.
@@ -1078,42 +1167,19 @@ BEGIN
   END IF;
   NEW.created_by_app_user_id := v_actor;
   NEW.owner_app_user_id := COALESCE(NEW.owner_app_user_id, v_actor);
+  -- opened_at must not be pre-populated on INSERT.
+  IF NEW.opened_at IS NOT NULL THEN
+    RAISE EXCEPTION 'management_review: opened_at must not be set on insert (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
   RETURN NEW;
 END;
 $$;
 
-CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_management_review_update()
-RETURNS trigger
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public, pg_catalog
-AS $$
-DECLARE
-  v_actor uuid;
-BEGIN
-  v_actor := public.current_app_user_id();
-  IF v_actor IS NULL THEN
-    RAISE EXCEPTION 'management_review: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
-  END IF;
-  IF NEW.created_by_app_user_id IS DISTINCT FROM OLD.created_by_app_user_id THEN
-    RAISE EXCEPTION 'management_review: created_by_app_user_id is immutable (row id=%)', OLD.id USING ERRCODE = 'P0001';
-  END IF;
-  IF NEW.review_status = 'in_review' AND OLD.review_status <> 'in_review' THEN
-    NEW.opened_at := COALESCE(OLD.opened_at, now());
-  END IF;
-  IF NEW.review_status = 'closed' AND OLD.review_status <> 'closed' THEN
-    NEW.closed_at := now();
-  END IF;
-  IF NEW.waiver_recorded = true AND OLD.waiver_recorded = false THEN
-    IF NULLIF(btrim(COALESCE(NEW.waiver_reason, '')), '') IS NULL THEN
-      RAISE EXCEPTION 'management_review: waiver requires waiver_reason evidence (row id=%)', OLD.id USING ERRCODE = 'P0001';
-    END IF;
-    NEW.waiver_actor_app_user_id := v_actor;
-    NEW.waiver_recorded_at := now();
-  END IF;
-  RETURN NEW;
-END;
-$$;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_management_review_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_management_review_insert() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_management_review_insert() FROM authenticated;
+
+-- trg_wave6_stamp_management_review_update has been merged into trg_wave6_mr_governance.
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_guard_ccr_insert()
 RETURNS trigger
@@ -1143,6 +1209,10 @@ BEGIN
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_ccr_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_ccr_insert() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_ccr_insert() FROM authenticated;
+
 CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_ccr_update()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -1168,10 +1238,18 @@ BEGIN
   IF NEW.change_status = 'closed' AND NEW.validation_result = '{}'::jsonb THEN
     RAISE EXCEPTION 'change_control_record: validation_result evidence is required before closure (row id=%)', OLD.id USING ERRCODE = 'P0001';
   END IF;
+  -- approval_at is immutable once set.
+  IF OLD.approval_at IS NOT NULL AND NEW.approval_at IS DISTINCT FROM OLD.approval_at THEN
+    RAISE EXCEPTION 'change_control_record: approval_at is immutable after approval (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
   NEW.updated_at := now();
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_ccr_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_ccr_update() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_ccr_update() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_guard_continuity_session_insert()
 RETURNS trigger
@@ -1193,11 +1271,19 @@ BEGIN
      OR NEW.reconciliation_completed_at IS NOT NULL OR NEW.closed_at IS NOT NULL THEN
     RAISE EXCEPTION 'continuity_session: insert cannot pre-populate transition-owned timestamps (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
+  -- declared_at must not be pre-populated: DB always stamps it.
+  IF NEW.declared_at IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_session: declared_at is DB-owned and must not be set on insert (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
   NEW.declared_by_app_user_id := v_actor;
-  NEW.declared_at := COALESCE(NEW.declared_at, now());
+  NEW.declared_at := now();
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_session_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_session_insert() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_session_insert() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_continuity_session_update()
 RETURNS trigger
@@ -1234,10 +1320,24 @@ BEGIN
   IF NEW.session_status = 'closed' AND OLD.session_status <> 'closed' THEN
     NEW.closed_at := now();
     NEW.closed_by_app_user_id := v_actor;
+  ELSIF OLD.closed_at IS NOT NULL AND NEW.closed_at IS DISTINCT FROM OLD.closed_at THEN
+    RAISE EXCEPTION 'continuity_session: closed_at is DB-owned and immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
+  END IF;
+  -- Waiver evidence is immutable once recorded.
+  IF OLD.waiver_recorded = true THEN
+    IF NEW.waiver_reason IS DISTINCT FROM OLD.waiver_reason
+       OR NEW.waiver_actor_app_user_id IS DISTINCT FROM OLD.waiver_actor_app_user_id
+       OR NEW.waiver_recorded_at IS DISTINCT FROM OLD.waiver_recorded_at THEN
+      RAISE EXCEPTION 'continuity_session: waiver evidence is immutable once recorded (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
   END IF;
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_continuity_session_update() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_continuity_session_update() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_continuity_session_update() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_guard_continuity_transaction_insert()
 RETURNS trigger
@@ -1265,9 +1365,20 @@ BEGIN
      <> COALESCE(v_parent.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid) THEN
     RAISE EXCEPTION 'continuity_transaction: business_unit_id must match parent continuity_session (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
+  -- INSERT must not pre-populate reconciliation evidence.
+  IF NEW.discrepancy_notes IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_transaction: insert cannot pre-populate discrepancy_notes (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF NEW.waiver_evidence IS NOT NULL THEN
+    RAISE EXCEPTION 'continuity_transaction: insert cannot pre-populate waiver_evidence (row id=%)', NEW.id USING ERRCODE = 'P0001';
+  END IF;
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_transaction_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_transaction_insert() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_guard_continuity_transaction_insert() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm()
 RETURNS trigger
@@ -1290,20 +1401,29 @@ BEGIN
      AND NEW.reconciliation_status IN ('matched','discrepancy','waived') THEN
     NEW.reconciled_at := now();
     NEW.reconciled_by_app_user_id := v_actor;
+  ELSIF OLD.reconciliation_status IN ('matched','discrepancy','waived') THEN
+    -- Immutability: reconciliation evidence cannot change once terminal.
+    IF NEW.discrepancy_notes IS DISTINCT FROM OLD.discrepancy_notes
+       OR NEW.waiver_evidence IS DISTINCT FROM OLD.waiver_evidence
+       OR NEW.reconciled_at IS DISTINCT FROM OLD.reconciled_at
+       OR NEW.reconciled_by_app_user_id IS DISTINCT FROM OLD.reconciled_by_app_user_id THEN
+      RAISE EXCEPTION 'continuity_transaction: reconciliation evidence is immutable once set (row id=%)', OLD.id USING ERRCODE = 'P0001';
+    END IF;
   END IF;
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm() FROM authenticated;
 
 CREATE TRIGGER trig_wave6_mr_insert_guard
   BEFORE INSERT ON public.management_review
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_wave6_guard_management_review_insert();
 
-CREATE TRIGGER trig_wave6_mr_update_stamp
-  BEFORE UPDATE ON public.management_review
-  FOR EACH ROW
-  EXECUTE FUNCTION public.trg_wave6_stamp_management_review_update();
+-- trig_wave6_mr_update_stamp removed: replaced by trig_wave6_mr_governance above.
 
 CREATE TRIGGER trig_wave6_ccr_insert_guard
   BEFORE INSERT ON public.change_control_record
@@ -1335,6 +1455,73 @@ CREATE TRIGGER trig_wave6_ct_reconciliation_fsm
   FOR EACH ROW
   EXECUTE FUNCTION public.trg_wave6_enforce_continuity_transaction_fsm();
 
+-- kpi_snapshot BEFORE INSERT: DB-stamp captured_at / captured_by_app_user_id
+-- and validate governed definition applicability.
+CREATE OR REPLACE FUNCTION public.trg_wave6_stamp_kpi_snapshot_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_catalog
+AS $$
+DECLARE
+  v_actor uuid;
+  v_def   public.kpi_definition%ROWTYPE;
+BEGIN
+  v_actor := public.current_app_user_id();
+  IF v_actor IS NULL THEN
+    RAISE EXCEPTION 'kpi_snapshot: current_app_user_id() returned NULL' USING ERRCODE = 'P0001';
+  END IF;
+  -- DB owns captured_at: always override any caller-supplied value.
+  NEW.captured_at := now();
+  -- DB owns captured_by_app_user_id: always override any caller-supplied value.
+  NEW.captured_by_app_user_id := v_actor;
+
+  -- Load and validate the referenced kpi_definition.
+  SELECT * INTO v_def FROM public.kpi_definition WHERE id = NEW.kpi_definition_id;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'kpi_snapshot: kpi_definition % not found (row id=%)',
+      NEW.kpi_definition_id, NEW.id USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Organization scope: org-specific definition must match snapshot org.
+  IF v_def.organization_id IS NOT NULL AND v_def.organization_id <> NEW.organization_id THEN
+    RAISE EXCEPTION 'kpi_snapshot: definition organization scope mismatch (row id=%)',
+      NEW.id USING ERRCODE = 'P0001';
+  END IF;
+
+  -- Definition must be active.
+  IF v_def.active = false THEN
+    RAISE EXCEPTION 'kpi_snapshot: kpi_definition % is inactive (row id=%)',
+      NEW.kpi_definition_id, NEW.id USING ERRCODE = 'P0001';
+  END IF;
+
+  -- period_support must contain the snapshot period_type.
+  IF NOT (NEW.period_type = ANY(v_def.period_support)) THEN
+    RAISE EXCEPTION 'kpi_snapshot: definition % does not support period_type % (row id=%)',
+      NEW.kpi_definition_id, NEW.period_type, NEW.id USING ERRCODE = 'P0001';
+  END IF;
+
+  -- effective_from / effective_to must cover the FULL snapshot period.
+  IF v_def.effective_from IS NOT NULL AND v_def.effective_from > NEW.period_start THEN
+    RAISE EXCEPTION
+      'kpi_snapshot: definition effective_from % is after snapshot period_start % (row id=%)',
+      v_def.effective_from, NEW.period_start, NEW.id USING ERRCODE = 'P0001';
+  END IF;
+  IF v_def.effective_to IS NOT NULL AND v_def.effective_to < NEW.period_end THEN
+    RAISE EXCEPTION
+      'kpi_snapshot: definition effective_to % is before snapshot period_end % (row id=%)',
+      v_def.effective_to, NEW.period_end, NEW.id USING ERRCODE = 'P0001';
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_kpi_snapshot_insert() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_kpi_snapshot_insert() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_stamp_kpi_snapshot_insert() FROM authenticated;
+
+-- Scope/lineage validation (fires on INSERT and UPDATE).
 CREATE OR REPLACE FUNCTION public.trg_wave6_validate_kpi_snapshot_scope()
 RETURNS trigger
 LANGUAGE plpgsql
@@ -1353,6 +1540,10 @@ BEGIN
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_kpi_snapshot_scope() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_kpi_snapshot_scope() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_kpi_snapshot_scope() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_validate_management_review_manifest()
 RETURNS trigger
@@ -1388,10 +1579,25 @@ BEGIN
        OR v_snapshot.timezone <> NEW.timezone THEN
       RAISE EXCEPTION 'management_review: manifest snapshot scope mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
     END IF;
+    -- captured_at in the manifest must equal the actual snapshot captured_at.
+    IF v_item->>'captured_at' IS NULL THEN
+      RAISE EXCEPTION
+        'management_review: manifest entry must include captured_at for snapshot % (row id=%)',
+        v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    IF (v_item->>'captured_at')::timestamptz IS DISTINCT FROM v_snapshot.captured_at THEN
+      RAISE EXCEPTION
+        'management_review: manifest captured_at does not match snapshot captured_at for snapshot % (row id=%)',
+        v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
   END LOOP;
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_management_review_manifest() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_management_review_manifest() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_management_review_manifest() FROM authenticated;
 
 CREATE OR REPLACE FUNCTION public.trg_wave6_validate_ccr_kpi_manifest()
 RETURNS trigger
@@ -1400,24 +1606,43 @@ SECURITY DEFINER
 SET search_path = public, pg_catalog
 AS $$
 DECLARE
-  v_item jsonb;
-  v_snapshot public.kpi_snapshot%ROWTYPE;
+  v_item           jsonb;
+  v_snapshot       public.kpi_snapshot%ROWTYPE;
+  v_snapshot_ids   uuid[];
+  v_snap_id        uuid;
+  v_manifest_codes text[];
+  v_manifest_code  text;
+  v_source_code    text;
 BEGIN
   IF jsonb_typeof(NEW.source_kpi_snapshot_manifest) <> 'array' THEN
     RAISE EXCEPTION 'change_control_record: source_kpi_snapshot_manifest must be an array (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
+
+  -- Require non-empty manifest when source_kpi_codes is non-empty.
   IF array_length(NEW.source_kpi_codes, 1) IS NOT NULL
      AND array_length(NEW.source_kpi_codes, 1) > 0
      AND jsonb_array_length(NEW.source_kpi_snapshot_manifest) = 0 THEN
     RAISE EXCEPTION 'change_control_record: source_kpi_codes require real kpi_snapshot manifest references (row id=%)', NEW.id USING ERRCODE = 'P0001';
   END IF;
+
+  v_snapshot_ids   := ARRAY[]::uuid[];
+  v_manifest_codes := ARRAY[]::text[];
+
   FOR v_item IN SELECT * FROM jsonb_array_elements(NEW.source_kpi_snapshot_manifest)
   LOOP
-    SELECT * INTO v_snapshot
-    FROM public.kpi_snapshot ks
-    WHERE ks.id = (v_item->>'kpi_snapshot_id')::uuid;
+    v_snap_id := (v_item->>'kpi_snapshot_id')::uuid;
+
+    -- Reject duplicate snapshot IDs in the manifest.
+    IF v_snap_id = ANY(v_snapshot_ids) THEN
+      RAISE EXCEPTION
+        'change_control_record: duplicate kpi_snapshot_id % in manifest (row id=%)',
+        v_snap_id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+    v_snapshot_ids := v_snapshot_ids || v_snap_id;
+
+    SELECT * INTO v_snapshot FROM public.kpi_snapshot ks WHERE ks.id = v_snap_id;
     IF NOT FOUND THEN
-      RAISE EXCEPTION 'change_control_record: manifest references missing kpi_snapshot_id % (row id=%)', v_item->>'kpi_snapshot_id', NEW.id USING ERRCODE = 'P0001';
+      RAISE EXCEPTION 'change_control_record: manifest references missing kpi_snapshot_id % (row id=%)', v_snap_id, NEW.id USING ERRCODE = 'P0001';
     END IF;
     IF v_snapshot.kpi_code <> v_item->>'kpi_code'
        OR v_snapshot.definition_version <> v_item->>'definition_version' THEN
@@ -1428,10 +1653,54 @@ BEGIN
           <> COALESCE(NEW.business_unit_id, '00000000-0000-0000-0000-000000000000'::uuid) THEN
       RAISE EXCEPTION 'change_control_record: manifest scope mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
     END IF;
+
+    -- Governed lineage required.
+    IF v_snapshot.governed_lineage IS NULL OR v_snapshot.governed_lineage = 'null'::jsonb THEN
+      RAISE EXCEPTION
+        'change_control_record: manifest snapshot % lacks governed lineage (row id=%)',
+        v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+
+    -- Accumulate manifest KPI codes for cross-set validation.
+    IF NOT (v_snapshot.kpi_code = ANY(v_manifest_codes)) THEN
+      v_manifest_codes := v_manifest_codes || v_snapshot.kpi_code;
+    END IF;
   END LOOP;
+
+  -- Exact binding: every source_kpi_code must appear in at least one manifest snapshot.
+  IF array_length(NEW.source_kpi_codes, 1) IS NOT NULL THEN
+    FOREACH v_source_code IN ARRAY NEW.source_kpi_codes
+    LOOP
+      IF NOT (v_source_code = ANY(v_manifest_codes)) THEN
+        RAISE EXCEPTION
+          'change_control_record: source_kpi_code % has no corresponding manifest snapshot (row id=%)',
+          v_source_code, NEW.id USING ERRCODE = 'P0001';
+      END IF;
+    END LOOP;
+  END IF;
+
+  -- Exact binding: every manifest KPI code must exist in source_kpi_codes.
+  FOREACH v_manifest_code IN ARRAY v_manifest_codes
+  LOOP
+    IF NOT (v_manifest_code = ANY(NEW.source_kpi_codes)) THEN
+      RAISE EXCEPTION
+        'change_control_record: manifest kpi_code % is not in source_kpi_codes (row id=%)',
+        v_manifest_code, NEW.id USING ERRCODE = 'P0001';
+    END IF;
+  END LOOP;
+
   RETURN NEW;
 END;
 $$;
+
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_ccr_kpi_manifest() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_ccr_kpi_manifest() FROM anon;
+REVOKE ALL ON FUNCTION public.trg_wave6_validate_ccr_kpi_manifest() FROM authenticated;
+
+CREATE TRIGGER trig_wave6_kpi_snapshot_stamp
+  BEFORE INSERT ON public.kpi_snapshot
+  FOR EACH ROW
+  EXECUTE FUNCTION public.trg_wave6_stamp_kpi_snapshot_insert();
 
 CREATE TRIGGER trig_wave6_kpi_snapshot_scope
   BEFORE INSERT OR UPDATE ON public.kpi_snapshot
@@ -2398,18 +2667,20 @@ BEGIN
   END IF;
 
   -- [SV-16] governance trigger functions exist
+  --         (trg_wave6_mr_governance replaces former trg_enforce_management_review_fsm
+  --          + trg_wave6_stamp_management_review_update)
   DECLARE
     v_required_fn text;
   BEGIN
     FOR v_required_fn IN SELECT unnest(ARRAY[
-      'trg_enforce_management_review_fsm',
+      'trg_wave6_mr_governance',
       'trg_enforce_ccr_fsm',
       'trg_enforce_continuity_fsm',
       'trg_enforce_release_gate_sequence',
       'trg_set_continuity_payload_hash',
       'trg_immute_continuity_transaction_fields',
+      'trg_wave6_stamp_kpi_snapshot_insert',
       'trg_wave6_guard_management_review_insert',
-      'trg_wave6_stamp_management_review_update',
       'trg_wave6_guard_ccr_insert',
       'trg_wave6_stamp_ccr_update',
       'trg_wave6_guard_continuity_session_insert',
@@ -2428,6 +2699,83 @@ BEGIN
       IF v_count = 0 THEN
         RAISE EXCEPTION 'M014 SV-16 FAIL: governance trigger function public.% not found',
           v_required_fn;
+      END IF;
+    END LOOP;
+  END;
+
+  -- [SV-17] Trigger order safety: deprecated per-concern triggers must not exist on
+  --         management_review.  Only trig_wave6_mr_governance should handle BEFORE UPDATE.
+  DECLARE
+    v_bad_trig text;
+  BEGIN
+    FOR v_bad_trig IN
+      SELECT t.tgname
+      FROM pg_trigger t
+      JOIN pg_class c ON c.oid = t.tgrelid
+      JOIN pg_namespace n ON n.oid = c.relnamespace
+      WHERE n.nspname = 'public'
+        AND c.relname = 'management_review'
+        AND t.tgname IN ('trig_management_review_fsm', 'trig_wave6_mr_update_stamp')
+        AND NOT t.tgisinternal
+    LOOP
+      RAISE EXCEPTION
+        'M014 SV-17 FAIL: deprecated trigger % found on management_review — '
+        'combined trig_wave6_mr_governance must be the sole BEFORE UPDATE governance trigger',
+        v_bad_trig;
+    END LOOP;
+
+    SELECT COUNT(*) INTO v_count
+    FROM pg_trigger t
+    JOIN pg_class c ON c.oid = t.tgrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'management_review'
+      AND t.tgname = 'trig_wave6_mr_governance'
+      AND NOT t.tgisinternal;
+    IF v_count = 0 THEN
+      RAISE EXCEPTION 'M014 SV-17 FAIL: trig_wave6_mr_governance not found on management_review';
+    END IF;
+  END;
+
+  -- [SV-18] All internal trg_wave6_* SECURITY DEFINER trigger functions must not
+  --         be directly executable by PUBLIC, anon, or authenticated.
+  DECLARE
+    v_fn_name   text;
+    v_has_exec  boolean;
+  BEGIN
+    FOR v_fn_name IN SELECT unnest(ARRAY[
+      'trg_wave6_mr_governance',
+      'trg_wave6_stamp_kpi_snapshot_insert',
+      'trg_wave6_guard_management_review_insert',
+      'trg_wave6_guard_ccr_insert',
+      'trg_wave6_stamp_ccr_update',
+      'trg_wave6_guard_continuity_session_insert',
+      'trg_wave6_stamp_continuity_session_update',
+      'trg_wave6_guard_continuity_transaction_insert',
+      'trg_wave6_enforce_continuity_transaction_fsm',
+      'trg_wave6_validate_kpi_snapshot_scope',
+      'trg_wave6_validate_management_review_manifest',
+      'trg_wave6_validate_ccr_kpi_manifest'
+    ])
+    LOOP
+      SELECT EXISTS (
+        SELECT 1
+        FROM pg_proc p
+        JOIN pg_namespace n ON n.oid = p.pronamespace
+        CROSS JOIN LATERAL unnest(COALESCE(p.proacl, ARRAY[]::aclitem[])) AS acl(entry)
+        WHERE n.nspname = 'public'
+          AND p.proname = v_fn_name
+          AND (
+            acl.entry::text LIKE '%anon%=%X%'
+            OR acl.entry::text LIKE '%authenticated%=%X%'
+            OR acl.entry::text LIKE '=%X%'
+          )
+      ) INTO v_has_exec;
+      IF v_has_exec THEN
+        RAISE EXCEPTION
+          'M014 SV-18 FAIL: EXECUTE on internal trigger function public.% '
+          'is accessible to PUBLIC/anon/authenticated',
+          v_fn_name;
       END IF;
     END LOOP;
   END;
