@@ -472,6 +472,40 @@ test("loadKpiSnapshots reads the append-only evidence table", () => {
   assert.doesNotMatch(clientSource, /method: "DELETE"/);
 });
 
+test("loadCanonicalEvents builds occurred_at range filters when periodStart/periodEnd are supplied", () => {
+  // Source-level: confirm the client constructs the filter strings correctly
+  assert.match(
+    clientSource,
+    /occurred_at=gte\.\$\{encodeURIComponent|occurred_at.*gte.*periodStart/,
+    "loadCanonicalEvents must add occurred_at >= periodStart filter"
+  );
+  assert.match(
+    clientSource,
+    /occurred_at=lte\.\$\{encodeURIComponent|occurred_at.*lte.*periodEnd/,
+    "loadCanonicalEvents must add occurred_at <= periodEnd filter"
+  );
+});
+
+test("loadCanonicalEvents accepts and applies periodStart/periodEnd parameters", () => {
+  // Source-level: confirm the function signature declares the new parameters
+  const fnBody = clientSource.slice(
+    clientSource.indexOf("export async function loadCanonicalEvents("),
+    clientSource.indexOf("return selectRows(\"wave6_canonical_event\"")
+  );
+  assert.match(fnBody, /periodStart/, "loadCanonicalEvents must accept periodStart parameter");
+  assert.match(fnBody, /periodEnd/, "loadCanonicalEvents must accept periodEnd parameter");
+  assert.match(
+    fnBody,
+    /if \(periodStart\)|if\(periodStart\)/,
+    "loadCanonicalEvents must conditionally apply periodStart filter"
+  );
+  assert.match(
+    fnBody,
+    /if \(periodEnd\)|if\(periodEnd\)/,
+    "loadCanonicalEvents must conditionally apply periodEnd filter"
+  );
+});
+
 test("client never references a service-role credential", () => {
   for (const source of [clientSource, utilsSource]) {
     assert.doesNotMatch(source, /SERVICE_ROLE/i);

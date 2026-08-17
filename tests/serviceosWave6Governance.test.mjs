@@ -335,9 +335,9 @@ test("KG-001 origin reaches its full downstream chain", () => {
 
 test("dependency traversal finds direct and indirect impact with depth", () => {
   const edges = [
-    { kg_id: "KG-TEST", from_node: "A", to_node: "B", edge_type: "depends_on" },
-    { kg_id: "KG-TEST", from_node: "B", to_node: "C", edge_type: "depends_on" },
-    { kg_id: "KG-TEST", from_node: "C", to_node: "D", edge_type: "depends_on" },
+    { kg_id: "KG-TEST", from_node: "A", to_node: "B", edge_type: "depends_on", control_rule: "rule-AB" },
+    { kg_id: "KG-TEST", from_node: "B", to_node: "C", edge_type: "depends_on", control_rule: "rule-BC" },
+    { kg_id: "KG-TEST", from_node: "C", to_node: "D", edge_type: "depends_on", control_rule: "rule-CD" },
   ];
   const impacted = traverseDependencyImpact(edges, "A", 5);
   assert.deepEqual(
@@ -348,6 +348,11 @@ test("dependency traversal finds direct and indirect impact with depth", () => {
       ["D", 3],
     ]
   );
+  // Each hop must carry the edge metadata needed for impact display
+  assert.equal(impacted[0].to_node, "B", "first hop must carry to_node");
+  assert.equal(impacted[0].control_rule, "rule-AB", "first hop must carry control_rule from edge");
+  assert.equal(impacted[1].control_rule, "rule-BC");
+  assert.equal(impacted[2].control_rule, "rule-CD");
 });
 
 test("dependency traversal honours maxDepth", () => {
