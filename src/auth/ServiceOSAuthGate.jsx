@@ -131,6 +131,9 @@ function LoginForm({ onSuccess }) {
         const validationResult = await validateServiceOSContext(session);
         onSuccess(session, validationResult);
       } catch (err) {
+        // Password exchange stores the Supabase session before canonical role
+        // validation; fail closed so a rejected identity cannot retain it.
+        clearSession();
         setError(err?.message ?? "Authentication failed");
       } finally {
         setLoading(false);
