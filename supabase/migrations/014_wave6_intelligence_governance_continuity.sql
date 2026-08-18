@@ -33,9 +33,10 @@
 --   trg_immute_continuity_transaction_fields — continuity_transaction BEFORE UPDATE
 --   trg_wave6_stamp_kpi_snapshot_insert — kpi_snapshot BEFORE INSERT
 --
--- Triggers created (19):
+-- Triggers created (18):
 --   trig_wave6_mr_governance
 --   trig_ccr_fsm
+--   trig_ccr_dependency_impact_validate
 --   trig_continuity_fsm
 --   trig_release_gate_sequence
 --   trig_continuity_payload_hash
@@ -1911,10 +1912,12 @@ BEGIN
       RAISE EXCEPTION 'change_control_record: manifest scope mismatch for snapshot % (row id=%)', v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
     END IF;
 
-    -- Governed lineage required.
-    IF v_snapshot.governed_lineage IS NULL OR v_snapshot.governed_lineage = 'null'::jsonb THEN
+    -- source_lineage must be a populated object; fail closed on NULL, non-object, or empty.
+    IF v_snapshot.source_lineage IS NULL
+       OR jsonb_typeof(v_snapshot.source_lineage) <> 'object'
+       OR v_snapshot.source_lineage = '{}'::jsonb THEN
       RAISE EXCEPTION
-        'change_control_record: manifest snapshot % lacks governed lineage (row id=%)',
+        'change_control_record: manifest snapshot % lacks populated source_lineage (row id=%)',
         v_snapshot.id, NEW.id USING ERRCODE = 'P0001';
     END IF;
 
@@ -2932,6 +2935,7 @@ BEGIN
     FOR v_required_fn IN SELECT unnest(ARRAY[
       'trg_wave6_mr_governance',
       'trg_enforce_ccr_fsm',
+      'trg_validate_ccr_dependency_impact',
       'trg_enforce_continuity_fsm',
       'trg_enforce_release_gate_sequence',
       'trg_set_continuity_payload_hash',
@@ -2994,7 +2998,7 @@ BEGIN
     END IF;
   END;
 
-  -- [SV-18] All internal trg_wave6_* SECURITY DEFINER trigger functions must not
+  -- [SV-18] All internal SECURITY DEFINER trigger functions must not
   --         be directly executable by PUBLIC, anon, or authenticated.
   DECLARE
     v_fn_name   text;
@@ -3002,6 +3006,12 @@ BEGIN
   BEGIN
     FOR v_fn_name IN SELECT unnest(ARRAY[
       'trg_wave6_mr_governance',
+      'trg_enforce_ccr_fsm',
+      'trg_validate_ccr_dependency_impact',
+      'trg_enforce_continuity_fsm',
+      'trg_enforce_release_gate_sequence',
+      'trg_set_continuity_payload_hash',
+      'trg_immute_continuity_transaction_fields',
       'trg_wave6_stamp_kpi_snapshot_insert',
       'trg_wave6_guard_management_review_insert',
       'trg_wave6_guard_ccr_insert',

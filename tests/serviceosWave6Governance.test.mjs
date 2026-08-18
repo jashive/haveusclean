@@ -4,9 +4,11 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
+import os from "node:os";
+import { spawnSync } from "node:child_process";
 
 import {
   CCR_TRANSITIONS,
@@ -35,6 +37,54 @@ const sql = readFileSync(
   ),
   "utf8"
 );
+
+function runChecked(command, args, options = {}) {
+  const result = spawnSync(command, args, { encoding: "utf8", ...options });
+  if (result.status !== 0) {
+    throw new Error(
+      `${command} ${args.join(" ")} failed:\n${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim()
+    );
+  }
+  return result;
+}
+
+async function withTempPostgres(run) {
+  const binDir = process.env.PG_BINDIR || "/usr/lib/postgresql/16/bin";
+  const initdb = path.join(binDir, "initdb");
+  const pgCtl = path.join(binDir, "pg_ctl");
+  const psql = path.join(binDir, "psql");
+  const rootDir = mkdtempSync(path.join(os.tmpdir(), "wave6-governance-pg-"));
+  const dataDir = path.join(rootDir, "data");
+  const socketDir = path.join(rootDir, "socket");
+  const port = String(59000 + Math.floor(Math.random() * 2000));
+  const logFile = path.join(rootDir, "postgres.log");
+  runChecked("mkdir", ["-p", dataDir, socketDir]);
+  try {
+    runChecked(initdb, ["-D", dataDir, "-A", "trust", "-U", "postgres", "--no-locale"]);
+    runChecked(
+      pgCtl,
+      ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -p ${port}`, "-w", "start"],
+      { stdio: "ignore" }
+    );
+    const execSql = (statement) =>
+      runChecked(
+        psql,
+        ["-h", socketDir, "-p", port, "-U", "postgres", "-d", "postgres", "-qAt", "-c", statement]
+      ).stdout.trim();
+    return await run(execSql);
+  } finally {
+    spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
+    rmSync(rootDir, { recursive: true, force: true });
+  }
+}
+
+function sliceSql(startMarker, endMarker) {
+  const start = sql.indexOf(startMarker);
+  const end = sql.indexOf(endMarker, start);
+  assert.notEqual(start, -1, `missing SQL marker: ${startMarker}`);
+  assert.notEqual(end, -1, `missing SQL marker: ${endMarker}`);
+  return sql.slice(start, end).trim();
+}
 
 // ── Change control FSM ───────────────────────────────────────────────────────
 
@@ -576,4 +626,199 @@ test("dependency impact validator has explicit fail-closed guards for invented/i
   assert.match(body, /dependency_paths includes edge that does not exist or is not visible/i);
   assert.match(body, /affected dependency .* is not downstream-reachable from source/i);
   assert.match(body, /v_requires_assessment := \(\s*NEW\.material_change = true[\s\S]*approve', 'update', 'retrain', 'validate', 'closed'/);
+});
+
+test("CCR KPI manifest validation uses source_lineage, rejects empty lineage, and bad rowtype fields raise SQLSTATE 42703", async () => {
+  assert.doesNotMatch(
+    sql,
+    /v_snapshot\.governed_lineage/,
+    "migration must not reference nonexistent v_snapshot.governed_lineage"
+  );
+
+  await withTempPostgres((execSql) => {
+    execSql("CREATE EXTENSION IF NOT EXISTS pgcrypto;");
+    execSql(sliceSql("CREATE TABLE public.kpi_definition (", "COMMENT ON TABLE public.kpi_definition IS"));
+    execSql(sliceSql("CREATE TABLE public.kpi_snapshot (", "COMMENT ON TABLE public.kpi_snapshot IS"));
+    execSql(sliceSql("CREATE TABLE public.change_control_record (", "COMMENT ON TABLE public.change_control_record IS"));
+    execSql(
+      sliceSql(
+        "CREATE OR REPLACE FUNCTION public.trg_wave6_validate_ccr_kpi_manifest()",
+        "REVOKE ALL ON FUNCTION public.trg_wave6_validate_ccr_kpi_manifest()"
+      )
+    );
+    execSql(
+      sliceSql("CREATE TRIGGER trig_wave6_ccr_manifest", "-- ---------------------------------------------------------------------------")
+    );
+
+    const definitionId = execSql(`
+      INSERT INTO public.kpi_definition (
+        code, name, domain, aggregation_type, period_support, source_lineage, definition_version
+      )
+      VALUES (
+        'ops.qa_pass_rate',
+        'QA Pass Rate',
+        'operations',
+        'rate',
+        ARRAY['MONTHLY']::text[],
+        '{"tables":["quality_inspection"]}'::jsonb,
+        '1'
+      )
+      RETURNING id::text;
+    `);
+    const orgId = "00000000-0000-0000-0000-0000000000aa";
+    const goodSnapshotId = execSql(`
+      INSERT INTO public.kpi_snapshot (
+        kpi_definition_id, kpi_code, definition_version, organization_id,
+        period_type, period_start, period_end, timezone, numeric_value, source_lineage
+      )
+      VALUES (
+        '${definitionId}'::uuid,
+        'ops.qa_pass_rate',
+        '1',
+        '${orgId}'::uuid,
+        'MONTHLY',
+        '2026-08-01T00:00:00Z'::timestamptz,
+        '2026-09-01T00:00:00Z'::timestamptz,
+        'UTC',
+        0.98,
+        '{"tables":["quality_inspection"],"filters":{"status":"passed"}}'::jsonb
+      )
+      RETURNING id::text;
+    `);
+
+    const accepted = execSql(`
+      INSERT INTO public.change_control_record (
+        change_code,
+        change_type,
+        title,
+        source_kpi_codes,
+        source_kpi_snapshot_manifest,
+        organization_id
+      )
+      VALUES (
+        'CCR-LINEAGE-OK',
+        'process',
+        'Accept populated source lineage',
+        ARRAY['ops.qa_pass_rate']::text[],
+        jsonb_build_array(
+          jsonb_build_object(
+            'kpi_snapshot_id', '${goodSnapshotId}'::uuid,
+            'kpi_code', 'ops.qa_pass_rate',
+            'definition_version', '1'
+          )
+        ),
+        '${orgId}'::uuid
+      )
+      RETURNING change_code;
+    `);
+    assert.equal(
+      accepted,
+      "CCR-LINEAGE-OK",
+      "actual trigger must accept populated source_lineage on the real kpi_snapshot row shape"
+    );
+
+    const emptySnapshotId = execSql(`
+      INSERT INTO public.kpi_snapshot (
+        kpi_definition_id, kpi_code, definition_version, organization_id,
+        period_type, period_start, period_end, timezone, numeric_value, source_lineage
+      )
+      VALUES (
+        '${definitionId}'::uuid,
+        'ops.qa_pass_rate',
+        '1',
+        '${orgId}'::uuid,
+        'MONTHLY',
+        '2026-09-01T00:00:00Z'::timestamptz,
+        '2026-10-01T00:00:00Z'::timestamptz,
+        'UTC',
+        NULL,
+        '{}'::jsonb
+      )
+      RETURNING id::text;
+    `);
+
+    const rejectedEmptyLineage = execSql(`
+      DO $$
+      DECLARE
+        v_state text;
+        v_message text;
+        v_rejected boolean := false;
+      BEGIN
+        BEGIN
+          INSERT INTO public.change_control_record (
+            change_code,
+            change_type,
+            title,
+            source_kpi_codes,
+            source_kpi_snapshot_manifest,
+            organization_id
+          )
+          VALUES (
+            'CCR-LINEAGE-EMPTY',
+            'process',
+            'Reject empty source lineage',
+            ARRAY['ops.qa_pass_rate']::text[],
+            jsonb_build_array(
+              jsonb_build_object(
+                'kpi_snapshot_id', '${emptySnapshotId}'::uuid,
+                'kpi_code', 'ops.qa_pass_rate',
+                'definition_version', '1'
+              )
+            ),
+            '${orgId}'::uuid
+          );
+        EXCEPTION WHEN OTHERS THEN
+          GET STACKED DIAGNOSTICS
+            v_state = RETURNED_SQLSTATE,
+            v_message = MESSAGE_TEXT;
+          IF v_state <> 'P0001' THEN
+            RAISE EXCEPTION 'expected SQLSTATE P0001, got %', v_state;
+          END IF;
+          IF position('source_lineage' in v_message) = 0 THEN
+            RAISE EXCEPTION 'expected source_lineage rejection message, got %', v_message;
+          END IF;
+          v_rejected := true;
+        END;
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION 'expected empty source_lineage rejection';
+        END IF;
+      END;
+      $$;
+      SELECT 'rejected_empty_lineage';
+    `);
+    assert.equal(rejectedEmptyLineage, "rejected_empty_lineage");
+
+    const rowtype42703 = execSql(`
+      CREATE OR REPLACE FUNCTION public.wave6_rowtype_42703_probe()
+      RETURNS void
+      LANGUAGE plpgsql
+      AS $$
+      DECLARE
+        v_snapshot public.kpi_snapshot%ROWTYPE;
+      BEGIN
+        SELECT * INTO v_snapshot FROM public.kpi_snapshot LIMIT 1;
+        PERFORM v_snapshot.governed_lineage;
+      END;
+      $$;
+
+      DO $$
+      DECLARE
+        v_state text;
+      BEGIN
+        BEGIN
+          PERFORM public.wave6_rowtype_42703_probe();
+          RAISE EXCEPTION 'expected nonexistent field probe to fail';
+        EXCEPTION WHEN OTHERS THEN
+          GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+          IF v_state <> '42703' THEN
+            RAISE EXCEPTION 'expected SQLSTATE 42703, got %', v_state;
+          END IF;
+        END;
+      END;
+      $$;
+
+      SELECT 'rowtype_42703_verified';
+    `);
+    assert.equal(rowtype42703, "rowtype_42703_verified");
+  });
 });

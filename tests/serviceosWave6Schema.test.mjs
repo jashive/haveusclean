@@ -392,6 +392,7 @@ test("seed inserts are idempotent", () => {
 const GOVERNANCE_TRIGGER_FUNCTIONS = [
   "trg_wave6_mr_governance",
   "trg_enforce_ccr_fsm",
+  "trg_validate_ccr_dependency_impact",
   "trg_enforce_continuity_fsm",
   "trg_enforce_release_gate_sequence",
   "trg_set_continuity_payload_hash",
@@ -401,13 +402,81 @@ const GOVERNANCE_TRIGGER_FUNCTIONS = [
 const GOVERNANCE_TRIGGERS = [
   "trig_wave6_mr_governance",
   "trig_ccr_fsm",
+  "trig_ccr_dependency_impact_validate",
   "trig_continuity_fsm",
   "trig_release_gate_sequence",
   "trig_continuity_payload_hash",
   "trig_immute_continuity_transaction_fields",
 ];
 
-test("all 6 governance trigger functions are declared in the migration", () => {
+const ALL_WAVE6_TRIGGER_FUNCTIONS = [
+  "trg_wave6_mr_governance",
+  "trg_enforce_ccr_fsm",
+  "trg_validate_ccr_dependency_impact",
+  "trg_enforce_continuity_fsm",
+  "trg_enforce_release_gate_sequence",
+  "trg_set_continuity_payload_hash",
+  "trg_immute_continuity_transaction_fields",
+  "trg_wave6_guard_management_review_insert",
+  "trg_wave6_guard_ccr_insert",
+  "trg_wave6_stamp_ccr_update",
+  "trg_wave6_guard_continuity_session_insert",
+  "trg_wave6_stamp_continuity_session_update",
+  "trg_wave6_guard_continuity_transaction_insert",
+  "trg_wave6_enforce_continuity_transaction_fsm",
+  "trg_wave6_stamp_kpi_snapshot_insert",
+  "trg_wave6_validate_kpi_snapshot_scope",
+  "trg_wave6_validate_management_review_manifest",
+  "trg_wave6_validate_ccr_kpi_manifest",
+];
+
+const ALL_WAVE6_TRIGGERS = [
+  "trig_wave6_mr_governance",
+  "trig_ccr_fsm",
+  "trig_ccr_dependency_impact_validate",
+  "trig_continuity_fsm",
+  "trig_release_gate_sequence",
+  "trig_continuity_payload_hash",
+  "trig_immute_continuity_transaction_fields",
+  "trig_wave6_mr_insert_guard",
+  "trig_wave6_ccr_insert_guard",
+  "trig_wave6_ccr_update_stamp",
+  "trig_wave6_cs_insert_guard",
+  "trig_wave6_cs_update_stamp",
+  "trig_wave6_ct_insert_guard",
+  "trig_wave6_ct_reconciliation_fsm",
+  "trig_wave6_kpi_snapshot_stamp",
+  "trig_wave6_kpi_snapshot_scope",
+  "trig_wave6_management_review_manifest",
+  "trig_wave6_ccr_manifest",
+];
+
+function extractTableColumns(tableName) {
+  const tableBody = sql.slice(
+    sql.indexOf(`CREATE TABLE public.${tableName} (`),
+    sql.indexOf(`COMMENT ON TABLE public.${tableName} IS`)
+  );
+  return new Set([...tableBody.matchAll(/^\s{2}([a-z_][a-z0-9_]*)\s+/gm)].map((match) => match[1]));
+}
+
+function extractFieldReferences(variableName) {
+  return new Set(
+    [...sql.matchAll(new RegExp(`\\b${variableName}\\.([a-z_][a-z0-9_]*)`, "g"))].map(
+      (match) => match[1]
+    )
+  );
+}
+
+function extractBlock(startMarker, endMarker, fromIndex = 0) {
+  const start = sql.indexOf(startMarker, fromIndex);
+  assert.notEqual(start, -1, `missing block start marker: ${startMarker}`);
+  const end = sql.indexOf(endMarker, start + startMarker.length);
+  assert.notEqual(end, -1, `missing block end marker: ${endMarker}`);
+  assert.ok(end > start, `invalid block range: ${startMarker} -> ${endMarker}`);
+  return sql.slice(start, end);
+}
+
+test("all 7 governance trigger functions are declared in the migration", () => {
   for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
     assert.match(
       sql,
@@ -417,7 +486,7 @@ test("all 6 governance trigger functions are declared in the migration", () => {
   }
 });
 
-test("all 6 governance triggers are created in the migration", () => {
+test("all 7 governance triggers are created in the migration", () => {
   for (const trig of GOVERNANCE_TRIGGERS) {
     assert.match(
       sql,
@@ -438,7 +507,7 @@ test("governance trigger functions are SECURITY DEFINER with fixed search_path",
   }
 });
 
-test("governance trigger functions have EXECUTE revoked from PUBLIC and anon", () => {
+test("governance trigger functions have EXECUTE revoked from PUBLIC, anon, and authenticated", () => {
   for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
     assert.match(
       sql,
@@ -450,6 +519,11 @@ test("governance trigger functions have EXECUTE revoked from PUBLIC and anon", (
       new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn}\\(\\) FROM anon`),
       `${fn} must revoke anon EXECUTE`
     );
+    assert.match(
+      sql,
+      new RegExp(`REVOKE ALL ON FUNCTION public\\.${fn}\\(\\) FROM authenticated`),
+      `${fn} must revoke authenticated EXECUTE`
+    );
   }
 });
 
@@ -459,7 +533,8 @@ test("management_review FSM trigger fires BEFORE UPDATE", () => {
 
 test("migration header truthfully documents expanded trigger coverage", () => {
   assert.match(sql, /Trigger functions created \(18\):/);
-  assert.match(sql, /Triggers created \(19\):/);
+  assert.match(sql, /Triggers created \(18\):/);
+  assert.match(sql, /trig_ccr_dependency_impact_validate/);
   assert.match(sql, /trig_wave6_mr_insert_guard/);
   assert.match(sql, /trig_wave6_ccr_insert_guard/);
 });
@@ -610,7 +685,8 @@ test("canonical event view includes all verified Wave 3/4/5 events", () => {
 test("Wave 1/2 exclusion is documented selectively — verified tables are included", () => {
   // After independent verification (2026-08-17), service_request and quote_response
   // are INCLUDED in the canonical view. The stale blanket-exclusion comment is gone.
-  // Remaining unverified Wave 1-2 tables (opportunity, quote, conversion_record) stay out.
+  // Opportunity, quote, and conversion_record stay out because no locked canonical
+  // event name currently requires them.
   const viewBody = sql.slice(
     sql.indexOf("CREATE VIEW public.wave6_canonical_event"),
     sql.indexOf("ALTER VIEW public.wave6_canonical_event SET")
@@ -618,9 +694,13 @@ test("Wave 1/2 exclusion is documented selectively — verified tables are inclu
   // Confirmed included
   assert.ok(viewBody.includes("'sales.lead.created'"), "sales.lead.created must be in view");
   assert.ok(viewBody.includes("'sales.quote.accepted'"), "sales.quote.accepted must be in view");
-  // Unverified Wave 1-2 tables still excluded
+  // Remaining absent Wave 1-2 tables still excluded
   assert.doesNotMatch(viewBody, /'sales\.lead\.created'.*opportunity|FROM public\.opportunity/);
-  assert.doesNotMatch(viewBody, /FROM public\.quote(?![a-z_])/, "quote table not verified — must remain excluded");
+  assert.doesNotMatch(
+    viewBody,
+    /FROM public\.quote(?![a-z_])/,
+    "quote must remain excluded until a locked canonical event name requires it"
+  );
   assert.ok(!viewBody.includes("FROM public.conversion_record"), "conversion_record must remain excluded");
 });
 
@@ -673,14 +753,57 @@ test("self-validation SV-7 checks each individual KPI code", () => {
 });
 
 test("self-validation SV-16 verifies governance trigger functions exist", () => {
-  assert.match(sql, /SV-16/, "SV-16 governance trigger check must exist");
-  for (const fn of GOVERNANCE_TRIGGER_FUNCTIONS) {
+  const sv16Block = extractBlock("-- [SV-16]", "-- [SV-17]");
+  assert.equal(ALL_WAVE6_TRIGGER_FUNCTIONS.length, 18, "SV-16 inventory must cover all 18 trigger functions");
+  for (const fn of ALL_WAVE6_TRIGGER_FUNCTIONS) {
     assert.ok(
-      sql.includes(fn),
+      sv16Block.includes(fn),
       `SV-16 must check for trigger function ${fn}`
     );
   }
-  assert.match(sql, /payload_hash column missing/, "SV-16 must verify payload_hash column");
+});
+
+test("self-validation SV-18 validates all 18 internal trigger functions deny direct EXECUTE", () => {
+  const sv18Start = sql.indexOf("-- [SV-18]");
+  assert.notEqual(sv18Start, -1, "SV-18 block start marker must exist");
+  const sv18Block = extractBlock("-- [SV-18]", "-- [SV-16b]", sv18Start);
+  assert.equal(ALL_WAVE6_TRIGGER_FUNCTIONS.length, 18, "SV-18 inventory must cover all 18 trigger functions");
+  for (const fn of ALL_WAVE6_TRIGGER_FUNCTIONS) {
+    assert.ok(sv18Block.includes(fn), `SV-18 must cover trigger function ${fn}`);
+  }
+  assert.match(sv18Block, /PUBLIC\/anon\/authenticated/, "SV-18 must verify all three role classes");
+  assert.match(sv18Block, /%anon%=%X%/, "SV-18 must deny direct EXECUTE for anon");
+  assert.match(sv18Block, /%authenticated%=%X%/, "SV-18 must deny direct EXECUTE for authenticated");
+  assert.match(sv18Block, /=%X%/, "SV-18 must deny direct EXECUTE for PUBLIC");
+});
+
+test("header and trigger inventory cover all 18 actual CREATE TRIGGER statements", () => {
+  const beginIndex = sql.indexOf("BEGIN;");
+  assert.notEqual(beginIndex, -1, "migration must contain BEGIN;");
+  const headerBlock = sql.slice(0, beginIndex);
+  const executableSql = sql.slice(beginIndex);
+  assert.match(headerBlock, /Triggers created \(18\)/, "header must declare Triggers created (18)");
+  assert.equal(ALL_WAVE6_TRIGGERS.length, 18, "test vector must cover all 18 triggers");
+  for (const trig of ALL_WAVE6_TRIGGERS) {
+    assert.ok(executableSql.includes(`CREATE TRIGGER ${trig}`), `missing CREATE TRIGGER for ${trig}`);
+    assert.ok(headerBlock.includes(trig), `migration header must mention ${trig}`);
+  }
+  const createTriggerCount = (executableSql.match(/^\s*CREATE TRIGGER\b/gm) ?? []).length;
+  assert.equal(createTriggerCount, 18, "executable SQL must contain exactly 18 CREATE TRIGGER statements");
+});
+
+test("all migration 014 %ROWTYPE field references resolve to declared table columns", () => {
+  const rowtypeAudits = [
+    ["kpi_definition", extractFieldReferences("v_def")],
+    ["kpi_snapshot", extractFieldReferences("v_snapshot")],
+    ["continuity_session", extractFieldReferences("v_parent")],
+  ];
+  for (const [tableName, refs] of rowtypeAudits) {
+    const columns = extractTableColumns(tableName);
+    for (const fieldName of refs) {
+      assert.ok(columns.has(fieldName), `${tableName}%ROWTYPE has no column named ${fieldName}`);
+    }
+  }
 });
 
 // ── Correction area 5: Continuity closure with unresolved transactions (M) ───
