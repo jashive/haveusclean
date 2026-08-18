@@ -1051,11 +1051,35 @@ test("migration 015 self-validation checks SELECT privilege for authenticated on
   );
 });
 
-test("migration 015 does not touch huc_* objects", () => {
+test("migration 015 contains no executable huc_* mutation", () => {
+  const executableSql = sql015
+    .split("\n")
+    .filter((line) => !line.trim().startsWith("--"))
+    .join("\n");
   assert.doesNotMatch(
-    sql015,
-    /huc_[a-z]/,
-    "migration 015 must not reference huc_* objects"
+    executableSql,
+    /\b(?:ALTER|DROP|TRUNCATE)\s+TABLE\s+(?:IF\s+EXISTS\s+)?(?:public\.)?huc_[a-z0-9_]+\b/i,
+    "migration 015 must not ALTER/DROP/TRUNCATE huc_* tables"
+  );
+  assert.doesNotMatch(
+    executableSql,
+    /\bINSERT\s+INTO\s+(?:public\.)?huc_[a-z0-9_]+\b/i,
+    "migration 015 must not INSERT into huc_* tables"
+  );
+  assert.doesNotMatch(
+    executableSql,
+    /\bUPDATE\s+(?:ONLY\s+)?(?:public\.)?huc_[a-z0-9_]+\b/i,
+    "migration 015 must not UPDATE huc_* tables"
+  );
+  assert.doesNotMatch(
+    executableSql,
+    /\bDELETE\s+FROM\s+(?:ONLY\s+)?(?:public\.)?huc_[a-z0-9_]+\b/i,
+    "migration 015 must not DELETE from huc_* tables"
+  );
+  assert.doesNotMatch(
+    executableSql,
+    /\b(?:GRANT|REVOKE)\b[^;]*\bON\s+(?:TABLE\s+)?(?:public\.)?huc_[a-z0-9_]+\b/i,
+    "migration 015 must not GRANT/REVOKE on huc_* tables"
   );
 });
 

@@ -37,6 +37,16 @@ const sql = readFileSync(
   ),
   "utf8"
 );
+const sql015 = readFileSync(
+  path.join(
+    here,
+    "..",
+    "supabase",
+    "migrations",
+    "015_wave6_live_acceptance_hardening.sql"
+  ),
+  "utf8"
+);
 
 function runChecked(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -1185,5 +1195,54 @@ test("PostgreSQL regression F: duplicate sequence_order is rejected by UNIQUE co
       SELECT 'regression_F_passed';
     `);
     assert.equal(result, "regression_F_passed");
+  });
+});
+
+test("PostgreSQL regression G: M015 coexists with retained legacy huc_* tables", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          CREATE ROLE authenticated;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          CREATE ROLE anon;
+        END IF;
+      END $$;
+    `);
+    execSql(`
+      CREATE TABLE public.release_gate (
+        id bigserial PRIMARY KEY,
+        gate_code text NOT NULL,
+        gate_name text NOT NULL,
+        gate_status text NOT NULL,
+        sequence_order integer NOT NULL,
+        evidence_manifest jsonb NOT NULL DEFAULT '{}'::jsonb,
+        passed_at timestamptz,
+        release_sha text
+      );
+      CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$ BEGIN RETURN NEW; END; $$;
+      CREATE TABLE public._m015_src (id bigint PRIMARY KEY);
+      CREATE VIEW public.wave6_canonical_event AS SELECT id FROM public._m015_src;
+      CREATE TABLE public.huc_jobs (
+        id bigint PRIMARY KEY,
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb
+      );
+      INSERT INTO public.huc_jobs (id, payload)
+      VALUES (1, '{"legacy":"retain"}'::jsonb);
+    `);
+
+    const result = execSql(sql015);
+    assert.equal(result, "M015_WAVE6_HARDENING_PASS");
+
+    const legacyPayload = execSql(`
+      SELECT payload->>'legacy'
+      FROM public.huc_jobs
+      WHERE id = 1;
+    `);
+    assert.equal(legacyPayload, "retain", "M015 must not mutate retained huc_* rows");
   });
 });
