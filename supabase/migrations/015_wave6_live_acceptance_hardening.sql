@@ -285,18 +285,14 @@ BEGIN
       'M015 SV-6 FAIL: anon holds privilege(s) on public.wave6_canonical_event — expected none';
   END IF;
 
-  -- [SV-015-7] No huc_* table was touched.
+  -- [SV-015-7] No Wave 6 table name accidentally collides with the huc_* prefix.
   SELECT COUNT(*) INTO v_count
   FROM information_schema.tables
   WHERE table_schema = 'public'
-    AND table_name LIKE 'huc\_%'
-    AND table_name IN (
-      'kpi_definition', 'kpi_snapshot', 'management_review',
-      'change_control_record', 'dependency_edge', 'continuity_session',
-      'continuity_transaction', 'service_module_profile', 'release_gate'
-    );
+    AND table_name LIKE 'huc\_%';
   IF v_count > 0 THEN
-    RAISE EXCEPTION 'M015 SV-7 FAIL: Wave 6 namespace collides with a huc_* table';
+    RAISE EXCEPTION 'M015 SV-7 FAIL: a huc_* table exists in public schema — '
+      'Wave 6 namespace may collide with huc_* objects';
   END IF;
 
   -- [SV-015-8] PUBLIC must have no privilege on wave6_canonical_event.

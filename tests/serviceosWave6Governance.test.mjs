@@ -938,27 +938,34 @@ test("PostgreSQL regression C: ACCEPTANCE cannot pass if PILOT row is absent", a
       VALUES ('ACCEPTANCE', 'Acceptance', 'pending', 2, '{}'::jsonb);
     `);
     // Attempting to pass ACCEPTANCE with no predecessor row must fail (fail closed).
+    // Use a boolean rejection flag so the sentinel cannot satisfy its own handler.
     const result = execSql(`
       DO $$
       DECLARE
-        v_state text;
-        v_msg   text;
+        v_rejected boolean := false;
+        v_state    text;
+        v_msg      text;
       BEGIN
         BEGIN
           UPDATE public.release_gate
           SET gate_status = 'passed', passed_at = now(), release_sha = 'sha-no-pilot'
           WHERE gate_code = 'ACCEPTANCE';
-          RAISE EXCEPTION 'expected rejection did not occur';
+          -- Trigger did NOT fire — fall through to post-handler check.
         EXCEPTION WHEN OTHERS THEN
+          v_rejected := true;
           GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
           GET STACKED DIAGNOSTICS v_msg   = MESSAGE_TEXT;
           IF v_state <> 'P0001' THEN
-            RAISE EXCEPTION 'expected SQLSTATE P0001, got %', v_state;
+            RAISE EXCEPTION 'expected SQLSTATE P0001 from trigger, got %', v_state;
           END IF;
           IF v_msg NOT LIKE '%predecessor%absent%' THEN
             RAISE EXCEPTION 'expected absent-predecessor message, got: %', v_msg;
           END IF;
         END;
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION
+            'regression C FAIL: trigger did not reject UPDATE — fail closed check failed';
+        END IF;
       END;
       $$;
       SELECT 'regression_C_passed';
