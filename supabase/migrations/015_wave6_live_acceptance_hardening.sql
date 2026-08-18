@@ -285,6 +285,9 @@ BEGIN
       'M015 SV-6 FAIL: anon holds privilege(s) on public.wave6_canonical_event — expected none';
   END IF;
 
+  -- [SV-015-7] Removed intentionally:
+  -- existence of retained legacy huc_* tables is valid and must not block M015.
+
   -- [SV-015-8] PUBLIC must have no privilege on wave6_canonical_event.
   -- information_schema does not reliably expose PUBLIC entries; use pg_catalog ACL.
   -- ACL entries for PUBLIC have no role name before the '=', e.g. '=r/grantor'.
