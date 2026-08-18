@@ -61,6 +61,23 @@ BEGIN
       'M015 PREFLIGHT FAIL: trigger function public.trg_enforce_release_gate_sequence '
       'does not exist — apply migration 014 before 015';
   END IF;
+
+  -- Fail closed if duplicate sequence_order values already exist in release_gate.
+  -- Duplicates would make predecessor resolution ambiguous; this migration must not
+  -- proceed until the live data is clean.
+  SELECT COUNT(*) INTO v_count
+  FROM (
+    SELECT sequence_order
+    FROM public.release_gate
+    GROUP BY sequence_order
+    HAVING COUNT(*) > 1
+  ) dups;
+  IF v_count > 0 THEN
+    RAISE EXCEPTION
+      'M015 PREFLIGHT FAIL: public.release_gate contains % duplicate sequence_order '
+      'value(s) — resolve duplicates before applying this migration',
+      v_count;
+  END IF;
 END;
 $$;
 
@@ -138,13 +155,46 @@ COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence() IS
   'predecessor is absent (fail closed) or not yet passed.';
 
 -- ---------------------------------------------------------------------------
+-- B1 FIX: Enforce uniqueness of sequence_order on release_gate.
+--
+-- Migration 014 defined only a plain index on sequence_order.  A UNIQUE
+-- constraint is required so that predecessor resolution via
+-- WHERE sequence_order = N is always unambiguous (exactly one row).
+-- This block is idempotent: it adds the constraint only if absent.
+-- ---------------------------------------------------------------------------
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint c
+    JOIN pg_class r ON r.oid = c.conrelid
+    JOIN pg_namespace n ON n.oid = r.relnamespace
+    WHERE n.nspname = 'public'
+      AND r.relname = 'release_gate'
+      AND c.contype = 'u'
+      AND c.conname = 'uq_rg_sequence_order'
+  ) THEN
+    ALTER TABLE public.release_gate
+      ADD CONSTRAINT uq_rg_sequence_order UNIQUE (sequence_order);
+  END IF;
+END;
+$$;
+
+-- ---------------------------------------------------------------------------
 -- L2 FIX: Restore wave6_canonical_event to SELECT-only for authenticated.
 --
 -- Migration 014 revoked PUBLIC and anon but did not REVOKE ALL from
 -- authenticated before granting SELECT.  Inherited/default privileges left
 -- DELETE, INSERT, UPDATE, REFERENCES, TRIGGER, and TRUNCATE exposed.
+-- This block reasserts the complete final view privilege contract:
+--   PUBLIC        = none
+--   anon          = none
+--   authenticated = SELECT only
 -- ---------------------------------------------------------------------------
 
+REVOKE ALL ON public.wave6_canonical_event FROM PUBLIC;
+REVOKE ALL ON public.wave6_canonical_event FROM anon;
 REVOKE ALL ON public.wave6_canonical_event FROM authenticated;
 GRANT SELECT ON public.wave6_canonical_event TO authenticated;
 
@@ -210,13 +260,14 @@ BEGIN
       'M015 SV-4 FAIL: authenticated does not have SELECT on public.wave6_canonical_event';
   END IF;
 
-  -- [SV-015-5] authenticated must NOT have INSERT/UPDATE/DELETE on wave6_canonical_event.
+  -- [SV-015-5] authenticated must NOT have any non-SELECT privilege on wave6_canonical_event,
+  -- including REFERENCES (which information_schema does expose for named roles).
   SELECT COUNT(*) INTO v_count
   FROM information_schema.role_table_grants
   WHERE table_schema  = 'public'
     AND table_name    = 'wave6_canonical_event'
     AND grantee       = 'authenticated'
-    AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER');
+    AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER', 'REFERENCES');
   IF v_count > 0 THEN
     RAISE EXCEPTION
       'M015 SV-5 FAIL: authenticated has write/mutating privilege(s) on '
@@ -246,6 +297,37 @@ BEGIN
     );
   IF v_count > 0 THEN
     RAISE EXCEPTION 'M015 SV-7 FAIL: Wave 6 namespace collides with a huc_* table';
+  END IF;
+
+  -- [SV-015-8] PUBLIC must have no privilege on wave6_canonical_event.
+  -- information_schema does not reliably expose PUBLIC entries; use pg_catalog ACL.
+  -- ACL entries for PUBLIC have no role name before the '=', e.g. '=r/grantor'.
+  SELECT COALESCE(
+    (SELECT bool_or(a.acl::text ~ '^=')
+     FROM pg_class c
+     JOIN pg_namespace n ON n.oid = c.relnamespace
+     CROSS JOIN LATERAL unnest(COALESCE(c.relacl, ARRAY[]::aclitem[])) AS a(acl)
+     WHERE n.nspname = 'public' AND c.relname = 'wave6_canonical_event'),
+    false
+  ) INTO v_has_priv;
+  IF v_has_priv THEN
+    RAISE EXCEPTION
+      'M015 SV-8 FAIL: PUBLIC holds privilege(s) on public.wave6_canonical_event — expected none';
+  END IF;
+
+  -- [SV-015-9] release_gate.sequence_order uniqueness constraint must exist.
+  SELECT COUNT(*) INTO v_count
+  FROM pg_constraint c
+  JOIN pg_class r ON r.oid = c.conrelid
+  JOIN pg_namespace n ON n.oid = r.relnamespace
+  WHERE n.nspname = 'public'
+    AND r.relname = 'release_gate'
+    AND c.contype = 'u'
+    AND c.conname = 'uq_rg_sequence_order';
+  IF v_count = 0 THEN
+    RAISE EXCEPTION
+      'M015 SV-9 FAIL: uq_rg_sequence_order unique constraint not found on '
+      'public.release_gate — predecessor resolution would be ambiguous';
   END IF;
 
   RAISE NOTICE 'M015_WAVE6_HARDENING_PASS';

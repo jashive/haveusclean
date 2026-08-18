@@ -562,6 +562,7 @@ CREATE TABLE public.release_gate (
   updated_at                timestamptz NOT NULL DEFAULT now(),
 
   CONSTRAINT uq_rg_gate_code UNIQUE (gate_code),
+  CONSTRAINT uq_rg_sequence_order UNIQUE (sequence_order),
 
   CONSTRAINT ck_rg_gate_code CHECK (
     gate_code IN ('PILOT', 'ACCEPTANCE', 'CUTOVER', 'LEGACY_RETIREMENT', 'SCALE')
