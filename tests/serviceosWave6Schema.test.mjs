@@ -886,11 +886,19 @@ test("release_gate FSM blocks any update to a passed gate", () => {
     sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence"),
     sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence")
   );
-  // The terminal immutability block must appear before the more specific reversal check
+  // Terminal immutability block must exist.
   const terminalIdx = body.indexOf("terminal evidence is immutable");
-  const reversalIdx = body.indexOf("cannot be reverted");
   assert.ok(terminalIdx >= 0, "release_gate FSM must protect terminal evidence");
-  assert.ok(terminalIdx < reversalIdx, "immutability block must appear before reversal check");
+  // Fail-closed: missing predecessor must be explicitly rejected.
+  assert.ok(
+    body.indexOf("predecessor at sequence % is absent") >= 0,
+    "release_gate FSM must fail closed when predecessor row is absent"
+  );
+  // Pending predecessor must also be rejected.
+  assert.ok(
+    body.indexOf("before predecessor (sequence %) is passed") >= 0,
+    "release_gate FSM must reject pending predecessor"
+  );
 });
 
 test("continuity_session FSM blocks any update to a closed session", () => {
@@ -905,4 +913,169 @@ test("continuity_session FSM blocks any update to a closed session", () => {
     "continuity FSM must block updates when already closed"
   );
   assert.match(body, /terminal row is immutable/i);
+});
+
+// ── L2: wave6_canonical_event privilege hardening (migration 014 source) ─────
+
+test("migration 014 revokes ALL on wave6_canonical_event from authenticated before granting SELECT", () => {
+  // The revoke-all must precede the grant-select in the file so that inherited
+  // default privileges are stripped before SELECT is re-granted.
+  const revokeAllPattern = /REVOKE ALL ON public\.wave6_canonical_event\s+FROM authenticated;/;
+  const grantSelectPattern = /GRANT SELECT\s+ON public\.wave6_canonical_event\s+TO authenticated;/;
+
+  assert.match(
+    sql,
+    revokeAllPattern,
+    "migration 014 must REVOKE ALL ON wave6_canonical_event FROM authenticated"
+  );
+  assert.match(
+    sql,
+    grantSelectPattern,
+    "migration 014 must GRANT SELECT ON wave6_canonical_event TO authenticated"
+  );
+
+  // Revoke must precede the grant in source order.
+  const revokeIdx = sql.search(revokeAllPattern);
+  const grantIdx  = sql.search(grantSelectPattern);
+  assert.ok(
+    revokeIdx < grantIdx,
+    "REVOKE ALL FROM authenticated must appear before GRANT SELECT TO authenticated"
+  );
+});
+
+test("migration 014 does not grant INSERT/UPDATE/DELETE on wave6_canonical_event to authenticated", () => {
+  assert.doesNotMatch(
+    sql,
+    /GRANT[^;]*(?:INSERT|UPDATE|DELETE|TRUNCATE|TRIGGER)[^;]*wave6_canonical_event[^;]*TO authenticated/,
+    "wave6_canonical_event must not be granted write privileges to authenticated"
+  );
+  assert.doesNotMatch(
+    sql,
+    /GRANT[^;]*wave6_canonical_event[^;]*(?:INSERT|UPDATE|DELETE|TRUNCATE|TRIGGER)[^;]*TO authenticated/,
+    "wave6_canonical_event must not be granted write privileges to authenticated (alt order)"
+  );
+});
+
+test("migration 014 release_gate trigger fails closed on absent predecessor — source check", () => {
+  const body = sql.slice(
+    sql.indexOf("CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence"),
+    sql.indexOf("COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence")
+  );
+  // Must check NOT FOUND (absent predecessor) explicitly.
+  assert.ok(
+    body.indexOf("NOT FOUND") >= 0,
+    "trigger function must explicitly handle NOT FOUND for absent predecessor"
+  );
+  // Must use sequence_order > 1 guard so PILOT is exempted.
+  assert.ok(
+    body.indexOf("sequence_order > 1") >= 0,
+    "trigger function must exempt PILOT (sequence_order > 1 guard)"
+  );
+  // The old silent-allow pattern must be absent.
+  assert.ok(
+    body.indexOf("IF FOUND AND") < 0,
+    "trigger function must not use 'IF FOUND AND' which silently allows missing predecessor"
+  );
+});
+
+// ── Migration 015 source contract tests ──────────────────────────────────────
+
+const sql015 = readFileSync(
+  path.join(migrationsDir, "015_wave6_live_acceptance_hardening.sql"),
+  "utf8"
+);
+
+test("migration 015 file exists and is non-empty", () => {
+  assert.ok(sql015.length > 0, "migration 015 must not be empty");
+});
+
+test("migration 015 is wrapped in a transaction", () => {
+  assert.match(sql015, /^\s*(--[^\n]*\n|\s)*BEGIN;/m);
+  assert.match(sql015, /\nCOMMIT;/);
+});
+
+test("migration 015 contains preflight guards for Wave 6 objects", () => {
+  assert.ok(
+    sql015.indexOf("PREFLIGHT") >= 0,
+    "migration 015 must contain preflight guards"
+  );
+  assert.ok(
+    sql015.indexOf("release_gate") >= 0,
+    "migration 015 must reference release_gate"
+  );
+  assert.ok(
+    sql015.indexOf("wave6_canonical_event") >= 0,
+    "migration 015 must reference wave6_canonical_event"
+  );
+});
+
+test("migration 015 replaces the trigger function with fail-closed predecessor logic", () => {
+  assert.match(
+    sql015,
+    /CREATE OR REPLACE FUNCTION public\.trg_enforce_release_gate_sequence/,
+    "migration 015 must replace the release_gate trigger function"
+  );
+  assert.ok(
+    sql015.indexOf("NOT FOUND") >= 0,
+    "migration 015 trigger must explicitly handle NOT FOUND"
+  );
+  assert.ok(
+    sql015.indexOf("predecessor at sequence % is absent") >= 0,
+    "migration 015 trigger must reject absent predecessor with clear message"
+  );
+  assert.ok(
+    sql015.indexOf("sequence_order > 1") >= 0,
+    "migration 015 trigger must exempt PILOT (sequence_order > 1)"
+  );
+});
+
+test("migration 015 revokes ALL on wave6_canonical_event from authenticated before granting SELECT", () => {
+  const revokePattern = /REVOKE ALL ON public\.wave6_canonical_event FROM authenticated;/;
+  const grantPattern  = /GRANT SELECT ON public\.wave6_canonical_event TO authenticated;/;
+  assert.match(sql015, revokePattern, "migration 015 must REVOKE ALL FROM authenticated");
+  assert.match(sql015, grantPattern,  "migration 015 must GRANT SELECT TO authenticated");
+
+  const revokeIdx = sql015.search(revokePattern);
+  const grantIdx  = sql015.search(grantPattern);
+  assert.ok(revokeIdx < grantIdx, "REVOKE ALL must precede GRANT SELECT in migration 015");
+});
+
+test("migration 015 self-validation checks SELECT privilege for authenticated on canonical event view", () => {
+  assert.ok(
+    sql015.indexOf("SV-015-4") >= 0,
+    "migration 015 must include SV-015-4 (SELECT privilege check)"
+  );
+  assert.ok(
+    sql015.indexOf("SV-015-5") >= 0,
+    "migration 015 must include SV-015-5 (write privilege absent check)"
+  );
+});
+
+test("migration 015 does not touch huc_* objects", () => {
+  assert.doesNotMatch(
+    sql015,
+    /huc_[a-z]/,
+    "migration 015 must not reference huc_* objects"
+  );
+});
+
+test("migration 015 emits M015_WAVE6_HARDENING_PASS terminal marker", () => {
+  assert.ok(
+    sql015.indexOf("M015_WAVE6_HARDENING_PASS") >= 0,
+    "migration 015 must include terminal pass marker"
+  );
+});
+
+test("migration 015 does not contain Wave 6 seed INSERT statements", () => {
+  // No business evidence seeds should be in the corrective migration.
+  assert.doesNotMatch(
+    sql015,
+    /INSERT INTO public\.release_gate/,
+    "migration 015 must not insert release_gate seeds"
+  );
+  assert.doesNotMatch(
+    sql015,
+    /INSERT INTO public\.kpi_definition/,
+    "migration 015 must not insert kpi_definition seeds"
+  );
 });

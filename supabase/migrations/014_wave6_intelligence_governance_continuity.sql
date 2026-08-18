@@ -1166,26 +1166,31 @@ BEGIN
       USING ERRCODE = 'P0001';
   END IF;
 
-  -- Passed is terminal for a single gate: cannot be reverted.
-  IF OLD.gate_status = 'passed' AND NEW.gate_status <> 'passed' THEN
-    RAISE EXCEPTION
-      'release_gate: gate % (id=%) is passed and cannot be reverted',
-      OLD.gate_code, OLD.id
-      USING ERRCODE = 'P0001';
-  END IF;
-
-  -- When moving to passed, verify the predecessor gate (if any) is also passed.
+  -- When moving to passed, enforce the linear predecessor chain.
+  -- PILOT (sequence 1) has no predecessor and may proceed freely.
+  -- Any gate with sequence_order > 1 MUST have exactly one predecessor at
+  -- sequence_order - 1 that is already 'passed'.  A missing predecessor is
+  -- rejected (fail closed), not silently allowed.
   IF NEW.gate_status = 'passed' AND OLD.gate_status <> 'passed' THEN
-    SELECT rg.gate_status INTO v_prev_status
-    FROM public.release_gate rg
-    WHERE rg.sequence_order = (NEW.sequence_order - 1)
-    LIMIT 1;
+    IF NEW.sequence_order > 1 THEN
+      SELECT rg.gate_status INTO v_prev_status
+      FROM public.release_gate rg
+      WHERE rg.sequence_order = (NEW.sequence_order - 1)
+      LIMIT 1;
 
-    IF FOUND AND v_prev_status <> 'passed' THEN
-      RAISE EXCEPTION
-        'release_gate: cannot pass gate % (sequence %) before predecessor (sequence %) is passed',
-        NEW.gate_code, NEW.sequence_order, (NEW.sequence_order - 1)
-        USING ERRCODE = 'P0001';
+      IF NOT FOUND THEN
+        RAISE EXCEPTION
+          'release_gate: cannot pass gate % (sequence %) — predecessor at sequence % is absent',
+          NEW.gate_code, NEW.sequence_order, (NEW.sequence_order - 1)
+          USING ERRCODE = 'P0001';
+      END IF;
+
+      IF v_prev_status <> 'passed' THEN
+        RAISE EXCEPTION
+          'release_gate: cannot pass gate % (sequence %) before predecessor (sequence %) is passed',
+          NEW.gate_code, NEW.sequence_order, (NEW.sequence_order - 1)
+          USING ERRCODE = 'P0001';
+      END IF;
     END IF;
   END IF;
 
@@ -1204,7 +1209,8 @@ CREATE TRIGGER trig_release_gate_sequence
 
 COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence() IS
   'Wave 6: DB-level release_gate sequence enforcement. '
-  'Passed gates cannot be reverted. A gate cannot be passed before its predecessor. SOURCE ONLY.';
+  'Passed gates are immutable. A gate with sequence_order > 1 cannot pass if its '
+  'predecessor is absent (fail closed) or not yet passed. SOURCE ONLY.';
 
 -- ── continuity_transaction payload hash (INSERT-only, immutable) ─────────────
 
@@ -2263,6 +2269,7 @@ REVOKE ALL ON public.release_gate            FROM authenticated;
 
 REVOKE ALL ON public.wave6_canonical_event   FROM PUBLIC;
 REVOKE ALL ON public.wave6_canonical_event   FROM anon;
+REVOKE ALL ON public.wave6_canonical_event   FROM authenticated;
 
 -- ---------------------------------------------------------------------------
 -- SECTION 6: GRANTS to authenticated (least privilege)
