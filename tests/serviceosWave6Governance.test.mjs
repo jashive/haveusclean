@@ -37,6 +37,16 @@ const sql = readFileSync(
   ),
   "utf8"
 );
+const sql015 = readFileSync(
+  path.join(
+    here,
+    "..",
+    "supabase",
+    "migrations",
+    "015_wave6_live_acceptance_hardening.sql"
+  ),
+  "utf8"
+);
 
 function runChecked(command, args, options = {}) {
   const result = spawnSync(command, args, { encoding: "utf8", ...options });
@@ -820,5 +830,419 @@ test("CCR KPI manifest validation uses source_lineage, rejects empty lineage, an
       SELECT 'rowtype_42703_verified';
     `);
     assert.equal(rowtype42703, "rowtype_42703_verified");
+  });
+});
+
+// ── Real PostgreSQL regression: release_gate trigger fail-closed ──────────────
+//
+// These tests execute the actual trigger function against a real temporary
+// PostgreSQL instance to prove the runtime behaviour specified in the Wave 6
+// live acceptance contract:
+//
+//   A. ACCEPTANCE cannot pass while PILOT is pending.
+//   B. ACCEPTANCE can pass after PILOT passes.
+//   C. ACCEPTANCE cannot pass if PILOT row is absent.
+//   D. Passed gates are immutable.
+//   E. Sequence: PILOT → ACCEPTANCE → CUTOVER → LEGACY_RETIREMENT → SCALE.
+
+function sliceReleaseGateSql() {
+  // Table DDL (everything from CREATE TABLE through its comment).
+  const tableBlock = sliceSql(
+    "CREATE TABLE public.release_gate (",
+    "COMMENT ON TABLE public.release_gate IS"
+  );
+  // Trigger function body.
+  const fnBlock = sliceSql(
+    "CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence()",
+    "REVOKE ALL ON FUNCTION public.trg_enforce_release_gate_sequence() FROM PUBLIC;"
+  );
+  // Trigger attachment.
+  const trigBlock = sliceSql(
+    "CREATE TRIGGER trig_release_gate_sequence",
+    "COMMENT ON FUNCTION public.trg_enforce_release_gate_sequence() IS"
+  );
+  return `${tableBlock}\n${fnBlock}\n${trigBlock}`;
+}
+
+test("PostgreSQL regression A: ACCEPTANCE cannot pass while PILOT is pending", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    // Seed minimal rows: PILOT pending (seq 1), ACCEPTANCE pending (seq 2).
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES
+        ('PILOT',      'Pilot',      'pending', 1, '{}'::jsonb),
+        ('ACCEPTANCE', 'Acceptance', 'pending', 2, '{}'::jsonb);
+    `);
+    // Attempting to pass ACCEPTANCE while PILOT is still pending must fail.
+    // Use a boolean rejection flag so the sentinel RAISE EXCEPTION cannot
+    // satisfy its own expected-error handler (which would cause a false pass).
+    const result = execSql(`
+      DO $$
+      DECLARE
+        v_rejected boolean := false;
+        v_state    text;
+        v_msg      text;
+      BEGIN
+        BEGIN
+          UPDATE public.release_gate
+          SET gate_status = 'passed', passed_at = now(), release_sha = 'abc123'
+          WHERE gate_code = 'ACCEPTANCE';
+          -- Trigger did NOT fire — fall through to the post-handler check.
+        EXCEPTION WHEN OTHERS THEN
+          v_rejected := true;
+          GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+          GET STACKED DIAGNOSTICS v_msg   = MESSAGE_TEXT;
+          IF v_state <> 'P0001' THEN
+            RAISE EXCEPTION 'expected SQLSTATE P0001 from trigger, got %', v_state;
+          END IF;
+          IF v_msg NOT LIKE '%predecessor%' THEN
+            RAISE EXCEPTION 'unexpected trigger rejection message: %', v_msg;
+          END IF;
+        END;
+        -- Assert outside the handler: the UPDATE must have been rejected.
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION
+            'regression A FAIL: trigger did not reject UPDATE — fail closed check failed';
+        END IF;
+      END;
+      $$;
+      SELECT 'regression_A_passed';
+    `);
+    assert.equal(result, "regression_A_passed");
+  });
+});
+
+test("PostgreSQL regression B: ACCEPTANCE can pass after PILOT passes", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES
+        ('PILOT',      'Pilot',      'pending', 1, '{}'::jsonb),
+        ('ACCEPTANCE', 'Acceptance', 'pending', 2, '{}'::jsonb);
+    `);
+    // Pass PILOT first.
+    execSql(`
+      UPDATE public.release_gate
+      SET gate_status = 'passed', passed_at = now(), release_sha = 'sha-pilot'
+      WHERE gate_code = 'PILOT';
+    `);
+    // Now ACCEPTANCE must be passable.
+    const result = execSql(`
+      UPDATE public.release_gate
+      SET gate_status = 'passed', passed_at = now(), release_sha = 'sha-acceptance'
+      WHERE gate_code = 'ACCEPTANCE'
+      RETURNING gate_code;
+    `);
+    assert.equal(result, "ACCEPTANCE", "ACCEPTANCE must pass once PILOT is passed");
+  });
+});
+
+test("PostgreSQL regression C: ACCEPTANCE cannot pass if PILOT row is absent", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    // Only seed ACCEPTANCE — no PILOT row at all.
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES ('ACCEPTANCE', 'Acceptance', 'pending', 2, '{}'::jsonb);
+    `);
+    // Attempting to pass ACCEPTANCE with no predecessor row must fail (fail closed).
+    // Use a boolean rejection flag so the sentinel cannot satisfy its own handler.
+    const result = execSql(`
+      DO $$
+      DECLARE
+        v_rejected boolean := false;
+        v_state    text;
+        v_msg      text;
+      BEGIN
+        BEGIN
+          UPDATE public.release_gate
+          SET gate_status = 'passed', passed_at = now(), release_sha = 'sha-no-pilot'
+          WHERE gate_code = 'ACCEPTANCE';
+          -- Trigger did NOT fire — fall through to post-handler check.
+        EXCEPTION WHEN OTHERS THEN
+          v_rejected := true;
+          GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+          GET STACKED DIAGNOSTICS v_msg   = MESSAGE_TEXT;
+          IF v_state <> 'P0001' THEN
+            RAISE EXCEPTION 'expected SQLSTATE P0001 from trigger, got %', v_state;
+          END IF;
+          IF v_msg NOT LIKE '%predecessor%absent%' THEN
+            RAISE EXCEPTION 'expected absent-predecessor message, got: %', v_msg;
+          END IF;
+        END;
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION
+            'regression C FAIL: trigger did not reject UPDATE — fail closed check failed';
+        END IF;
+      END;
+      $$;
+      SELECT 'regression_C_passed';
+    `);
+    assert.equal(result, "regression_C_passed");
+  });
+});
+
+test("PostgreSQL regression D: passed gates are immutable", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES ('PILOT', 'Pilot', 'pending', 1, '{}'::jsonb);
+    `);
+    execSql(`
+      UPDATE public.release_gate
+      SET gate_status = 'passed', passed_at = now(), release_sha = 'sha-pilot'
+      WHERE gate_code = 'PILOT';
+    `);
+    // Any further UPDATE on a passed gate must be rejected.
+    // Use a boolean rejection flag so the sentinel RAISE EXCEPTION cannot
+    // satisfy its own expected-error handler (which would cause a false pass).
+    const result = execSql(`
+      DO $$
+      DECLARE
+        v_rejected boolean := false;
+        v_state    text;
+        v_msg      text;
+      BEGIN
+        BEGIN
+          UPDATE public.release_gate
+          SET gate_name = 'modified'
+          WHERE gate_code = 'PILOT';
+          -- Trigger did NOT fire — fall through to the post-handler check.
+        EXCEPTION WHEN OTHERS THEN
+          v_rejected := true;
+          GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+          GET STACKED DIAGNOSTICS v_msg   = MESSAGE_TEXT;
+          IF v_state <> 'P0001' THEN
+            RAISE EXCEPTION 'expected SQLSTATE P0001 from trigger, got %', v_state;
+          END IF;
+          IF v_msg NOT LIKE '%immutable%' AND v_msg NOT LIKE '%passed%' THEN
+            RAISE EXCEPTION 'unexpected trigger rejection message: %', v_msg;
+          END IF;
+        END;
+        -- Assert outside the handler: the UPDATE must have been rejected.
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION
+            'regression D FAIL: trigger did not reject UPDATE — immutability check failed';
+        END IF;
+      END;
+      $$;
+      SELECT 'regression_D_passed';
+    `);
+    assert.equal(result, "regression_D_passed");
+  });
+});
+
+test("PostgreSQL regression E: full sequence PILOT→ACCEPTANCE→CUTOVER→LEGACY_RETIREMENT→SCALE", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES
+        ('PILOT',             'Pilot',             'pending', 1, '{}'::jsonb),
+        ('ACCEPTANCE',        'Acceptance',        'pending', 2, '{}'::jsonb),
+        ('CUTOVER',           'Cutover',           'pending', 3, '{}'::jsonb),
+        ('LEGACY_RETIREMENT', 'Legacy Retirement', 'pending', 4, '{}'::jsonb),
+        ('SCALE',             'Scale',             'pending', 5, '{}'::jsonb);
+    `);
+    const sha = (g) => `sha-${g.toLowerCase()}`;
+    for (const gate of ["PILOT", "ACCEPTANCE", "CUTOVER", "LEGACY_RETIREMENT", "SCALE"]) {
+      execSql(`
+        UPDATE public.release_gate
+        SET gate_status = 'passed', passed_at = now(), release_sha = '${sha(gate)}'
+        WHERE gate_code = '${gate}';
+      `);
+    }
+    const count = execSql(`
+      SELECT COUNT(*)::text FROM public.release_gate WHERE gate_status = 'passed';
+    `);
+    assert.equal(count, "5", "all 5 gates must be passed after full sequence traversal");
+  });
+});
+
+// ── Privilege runtime regression: wave6_canonical_event is SELECT-only ───────
+
+test("PostgreSQL privilege regression: wave6_canonical_event authenticated is SELECT-only after REVOKE/GRANT", async () => {
+  await withTempPostgres((execSql) => {
+    // Minimal setup: create the authenticated and anon roles and a trivial view.
+    execSql(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          CREATE ROLE authenticated;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          CREATE ROLE anon;
+        END IF;
+      END $$;
+    `);
+    execSql(`CREATE TABLE public._priv_test_src (id serial);`);
+    execSql(`CREATE VIEW public.wave6_canonical_event AS SELECT id FROM public._priv_test_src;`);
+
+    // Simulate the incorrect migration 014 state: grant without prior revoke.
+    execSql(`GRANT ALL ON public.wave6_canonical_event TO authenticated;`);
+    execSql(`GRANT ALL ON public.wave6_canonical_event TO anon;`);
+    execSql(`GRANT ALL ON public.wave6_canonical_event TO PUBLIC;`);
+
+    // Apply the B3 / L2 fix: REVOKE ALL from everyone, then GRANT SELECT to authenticated only.
+    execSql(`REVOKE ALL ON public.wave6_canonical_event FROM PUBLIC;`);
+    execSql(`REVOKE ALL ON public.wave6_canonical_event FROM anon;`);
+    execSql(`REVOKE ALL ON public.wave6_canonical_event FROM authenticated;`);
+    execSql(`GRANT SELECT ON public.wave6_canonical_event TO authenticated;`);
+
+    // Verify authenticated has SELECT.
+    const hasSelect = execSql(`
+      SELECT COUNT(*)::text
+      FROM information_schema.role_table_grants
+      WHERE table_schema   = 'public'
+        AND table_name     = 'wave6_canonical_event'
+        AND grantee        = 'authenticated'
+        AND privilege_type = 'SELECT';
+    `);
+    assert.equal(hasSelect, "1", "authenticated must have SELECT on wave6_canonical_event");
+
+    // Verify authenticated has no non-SELECT privilege (including REFERENCES).
+    const nonSelectPrivs = execSql(`
+      SELECT COUNT(*)::text
+      FROM information_schema.role_table_grants
+      WHERE table_schema   = 'public'
+        AND table_name     = 'wave6_canonical_event'
+        AND grantee        = 'authenticated'
+        AND privilege_type IN ('INSERT', 'UPDATE', 'DELETE', 'TRUNCATE', 'TRIGGER', 'REFERENCES');
+    `);
+    assert.equal(nonSelectPrivs, "0",
+      "authenticated must have no INSERT/UPDATE/DELETE/TRUNCATE/TRIGGER/REFERENCES on wave6_canonical_event");
+
+    // Verify authenticated has exactly ONE privilege row (SELECT and nothing else).
+    const totalPrivs = execSql(`
+      SELECT COUNT(*)::text
+      FROM information_schema.role_table_grants
+      WHERE table_schema = 'public'
+        AND table_name   = 'wave6_canonical_event'
+        AND grantee      = 'authenticated';
+    `);
+    assert.equal(totalPrivs, "1",
+      "authenticated must have exactly SELECT — no other privilege on wave6_canonical_event");
+
+    // Verify anon has no privilege via information_schema.
+    const anonPrivs = execSql(`
+      SELECT COUNT(*)::text
+      FROM information_schema.role_table_grants
+      WHERE table_schema = 'public'
+        AND table_name   = 'wave6_canonical_event'
+        AND grantee      = 'anon';
+    `);
+    assert.equal(anonPrivs, "0", "anon must have no privilege on wave6_canonical_event");
+
+    // Verify PUBLIC has no privilege via pg_catalog ACL inspection.
+    // ACL entries for PUBLIC start with '=' (no role name before the '=').
+    const publicHasPriv = execSql(`
+      SELECT COALESCE(
+        (SELECT bool_or(a.acl::text ~ '^=')
+         FROM pg_class c
+         JOIN pg_namespace n ON n.oid = c.relnamespace
+         CROSS JOIN LATERAL unnest(COALESCE(c.relacl, ARRAY[]::aclitem[])) AS a(acl)
+         WHERE n.nspname = 'public' AND c.relname = 'wave6_canonical_event'),
+        false
+      )::text;
+    `);
+    assert.equal(publicHasPriv, "false",
+      "PUBLIC must have no privilege on wave6_canonical_event");
+  });
+});
+
+// ── B1: Duplicate sequence_order must be rejected ────────────────────────────
+
+test("PostgreSQL regression F: duplicate sequence_order is rejected by UNIQUE constraint", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(sliceReleaseGateSql());
+    // Insert the first PILOT gate (seq 1) — must succeed.
+    execSql(`
+      INSERT INTO public.release_gate (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+      VALUES ('PILOT', 'Pilot', 'pending', 1, '{}'::jsonb);
+    `);
+    // Attempting to insert a second gate with sequence_order 1 must be rejected
+    // by the uq_rg_sequence_order UNIQUE constraint.
+    const result = execSql(`
+      DO $$
+      DECLARE
+        v_rejected boolean := false;
+        v_state    text;
+        v_msg      text;
+      BEGIN
+        BEGIN
+          INSERT INTO public.release_gate
+            (gate_code, gate_name, gate_status, sequence_order, evidence_manifest)
+          VALUES ('ACCEPTANCE', 'Acceptance', 'pending', 1, '{}'::jsonb);
+          -- Constraint did NOT fire — fall through to post-handler check.
+        EXCEPTION WHEN OTHERS THEN
+          v_rejected := true;
+          GET STACKED DIAGNOSTICS v_state = RETURNED_SQLSTATE;
+          -- 23505 = unique_violation
+          IF v_state <> '23505' THEN
+            RAISE EXCEPTION
+              'expected SQLSTATE 23505 (unique_violation) from duplicate sequence_order, got %', v_state;
+          END IF;
+        END;
+        IF NOT v_rejected THEN
+          RAISE EXCEPTION
+            'regression F FAIL: duplicate sequence_order was not rejected — '
+            'uq_rg_sequence_order constraint is missing';
+        END IF;
+      END;
+      $$;
+      SELECT 'regression_F_passed';
+    `);
+    assert.equal(result, "regression_F_passed");
+  });
+});
+
+test("PostgreSQL regression G: M015 coexists with retained legacy huc_* tables", async () => {
+  await withTempPostgres((execSql) => {
+    execSql(`
+      DO $$ BEGIN
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+          CREATE ROLE authenticated;
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+          CREATE ROLE anon;
+        END IF;
+      END $$;
+    `);
+    execSql(`
+      CREATE TABLE public.release_gate (
+        id bigserial PRIMARY KEY,
+        gate_code text NOT NULL,
+        gate_name text NOT NULL,
+        gate_status text NOT NULL,
+        sequence_order integer NOT NULL,
+        evidence_manifest jsonb NOT NULL DEFAULT '{}'::jsonb,
+        passed_at timestamptz,
+        release_sha text
+      );
+      CREATE OR REPLACE FUNCTION public.trg_enforce_release_gate_sequence()
+      RETURNS trigger
+      LANGUAGE plpgsql
+      AS $$ BEGIN RETURN NEW; END; $$;
+      CREATE TABLE public._m015_src (id bigint PRIMARY KEY);
+      CREATE VIEW public.wave6_canonical_event AS SELECT id FROM public._m015_src;
+      CREATE TABLE public.huc_jobs (
+        id bigint PRIMARY KEY,
+        payload jsonb NOT NULL DEFAULT '{}'::jsonb
+      );
+      INSERT INTO public.huc_jobs (id, payload)
+      VALUES (1, '{"legacy":"retain"}'::jsonb);
+    `);
+
+    const result = execSql(sql015);
+    assert.equal(result, "M015_WAVE6_HARDENING_PASS");
+
+    const legacyPayload = execSql(`
+      SELECT payload->>'legacy'
+      FROM public.huc_jobs
+      WHERE id = 1;
+    `);
+    assert.equal(legacyPayload, "retain", "M015 must not mutate retained huc_* rows");
   });
 });
