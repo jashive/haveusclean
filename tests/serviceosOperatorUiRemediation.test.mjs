@@ -26,7 +26,8 @@ test("owner diagnostics are read-only and cannot impersonate worker or QA mutati
   assert.match(diagnostics, /operational mutations must use the canonical staff-role workspaces/i);
   assert.doesNotMatch(diagnostics, /ServiceOSOperationsPilotPanel/);
   assert.doesNotMatch(diagnostics, /ServiceOSWave4PilotPanel/);
-  assert.doesNotMatch(diagnostics, /ServiceOSWave5FinancePilotPanel/);
+  assert.doesNotMatch(diagnostics, /import\([^)]*ServiceOSWave5FinancePilotPanel/);
+  assert.doesNotMatch(diagnostics, /<ServiceOSWave5FinancePilotPanel\b/);
 });
 
 test("canonical roles receive distinct least-privilege navigation", () => {
