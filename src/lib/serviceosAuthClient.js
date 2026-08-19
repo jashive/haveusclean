@@ -40,6 +40,20 @@ function storeSession({ access_token, refresh_token, expires_at, expires_in, use
   return payload;
 }
 
+async function parseAuthResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function authErrorMessage(data, fallback) {
+  return data?.message ?? data?.error_description ?? data?.msg ?? fallback;
+}
+
 // ── Auth API ─────────────────────────────────────────────────────────────────
 
 export async function signInWithPassword(email, password) {
@@ -53,10 +67,10 @@ export async function signInWithPassword(email, password) {
     body: JSON.stringify({ email, password }),
   });
 
-  const data = await response.json();
+  const data = await parseAuthResponse(response);
 
   if (!response.ok) {
-    throw new Error(data?.error_description ?? data?.msg ?? "Sign-in failed");
+    throw new Error(authErrorMessage(data, "Sign-in failed"));
   }
 
   return storeSession(data);
@@ -73,11 +87,11 @@ export async function refreshSession(refreshToken) {
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
-  const data = await response.json();
+  const data = await parseAuthResponse(response);
 
   if (!response.ok) {
     clearSession();
-    throw new Error(data?.error_description ?? data?.msg ?? "Session refresh failed");
+    throw new Error(authErrorMessage(data, "Session refresh failed"));
   }
 
   return storeSession(data);
@@ -253,7 +267,6 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: visible business-unit scope is invalid");
   }
 
-  // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID + jurisdiction
   const businessUnitByCode = {};
   for (const bu of bus) {
     businessUnitByCode[bu.code] = {
@@ -263,8 +276,6 @@ export async function validateServiceOSContext(session) {
       jurisdictionId: bu.jurisdiction_id ?? null,
     };
   }
-  // Prefer the established Ontario unit when visible; isolated acceptance
-  // projects use their single synthetic unit instead.
   const primaryBusinessUnit = businessUnitByCode["HUC-ON"] ?? bus[0];
   const primaryBusinessUnitId = primaryBusinessUnit?.id ?? null;
   const primaryJurisdictionId = primaryBusinessUnit?.jurisdictionId ?? primaryBusinessUnit?.jurisdiction_id ?? null;
@@ -307,7 +318,6 @@ export async function validateServiceOSContext(session) {
   }
 
   // 5. Validate active user_membership: matching app_user and organization.
-  //    Enterprise-wide memberships have business_unit_id null — that is valid.
   const memberRes = await authenticatedRestFetch(
     `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&status=eq.active`,
     access_token
@@ -340,26 +350,20 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: customer access validation failed");
   }
 
-  // All checks passed
   return {
     orgId,
     appUserId,
     roleId,
     roleCode,
-    // Backward-compat: array of codes for any code still checking businessUnits
     businessUnits: buCodes,
-    // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id + jurisdictionId)
     businessUnitByCode,
-    // Full array of { id, code, name, jurisdictionId } records
     businessUnitRecords: bus.map((b) => ({
       id: b.id,
       code: b.code,
       name: b.name,
       jurisdictionId: b.jurisdiction_id ?? null,
     })),
-    // Primary canonical business_unit.id (HUC-ON pilot default)
     primaryBusinessUnitId,
-    // HUC-ON jurisdiction_id for service_location — from live DB, never invented
     primaryJurisdictionId,
   };
 }
