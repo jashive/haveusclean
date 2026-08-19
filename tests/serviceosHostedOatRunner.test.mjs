@@ -1,7 +1,12 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { ACCEPTANCE_PROJECT_REF, PRODUCTION_PROJECT_REF, validateHostedOatEnvironment } from "../scripts/serviceos-hosted-oat.mjs";
+import {
+  ACCEPTANCE_PROJECT_REF,
+  PRODUCTION_PROJECT_REF,
+  redactHostedOatError,
+  validateHostedOatEnvironment,
+} from "../scripts/serviceos-hosted-oat.mjs";
 
 const source = fs.readFileSync("scripts/serviceos-hosted-oat.mjs", "utf8");
 const complete = {
@@ -74,10 +79,31 @@ test("failure evidence clears all credential inputs before screenshot", () => {
   assert.ok(source.indexOf("node.value = \"\"") < source.indexOf("await page.screenshot"));
 });
 
+test("hosted OAT redacts Preview access URLs, query credentials, and role credentials from errors", () => {
+  const rawPreviewUrl = "https://preview-protected.vercel.app/path?_vercel_share=temporary-share-token&token=query-secret";
+  const raw = `goto ${rawPreviewUrl} failed for owner@example.test using secret`;
+  const redacted = redactHostedOatError(raw, [rawPreviewUrl, "owner@example.test", "secret"]);
+
+  assert.doesNotMatch(redacted, /temporary-share-token/);
+  assert.doesNotMatch(redacted, /query-secret/);
+  assert.doesNotMatch(redacted, /owner@example\.test/);
+  assert.doesNotMatch(redacted, /using secret/);
+  assert.match(redacted, /\[REDACTED\]/);
+
+  const queryOnly = redactHostedOatError("request failed: https://preview-protected.vercel.app/path?token=query-secret");
+  assert.doesNotMatch(queryOnly, /query-secret/);
+  assert.match(queryOnly, /https:\/\/preview-protected\.vercel\.app\/path\?\[REDACTED\]/);
+});
+
 test("role failures are collected across all four roles before hosted OAT fails", () => {
-  assert.match(source, /return \{ role, status: "FAIL", reason: error\.message, evidencePath \}/);
+  assert.match(source, /reason: redactHostedOatError\(error, credentialValuesFromConfig\(config\)\)/);
   assert.match(source, /const failed = results\.filter/);
   assert.match(source, /failed\.map\(\(result\) => result\.role\)/);
+});
+
+test("terminal hosted OAT failures are sanitized before stderr output", () => {
+  assert.match(source, /const reason = redactHostedOatError\(error, credentialValuesFromEnv\(process\.env\)\)/);
+  assert.match(source, /ServiceOS hosted OAT failed: \$\{reason\}/);
 });
 
 test("hosted OAT detects explicit authentication rejection before workspace timeout", () => {

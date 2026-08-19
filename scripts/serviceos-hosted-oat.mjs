@@ -11,6 +11,46 @@ function isVercelHost(hostname) {
   return hostname.toLowerCase().endsWith(".vercel.app");
 }
 
+function credentialValuesFromConfig(config) {
+  return [
+    config?.previewAccessUrl,
+    ...Object.values(config?.credentials || {}).flatMap((credential) => [credential?.email, credential?.password]),
+  ].filter((value) => String(value || "").length > 0);
+}
+
+function credentialValuesFromEnv(env = process.env) {
+  const credentialKey = (role, field) => `SERVICEOS_OAT_${role.toUpperCase()}_${field}`;
+  return [
+    env.SERVICEOS_OAT_PREVIEW_ACCESS_URL,
+    ...roles.flatMap((role) => [env[credentialKey(role, "EMAIL")], env[credentialKey(role, "PASSWORD")]]),
+  ].filter((value) => String(value || "").length > 0);
+}
+
+export function redactHostedOatError(value, credentialValues = []) {
+  let message = value instanceof Error ? value.message : String(value ?? "");
+  for (const rawValue of credentialValues) {
+    const secret = String(rawValue || "");
+    if (secret) message = message.split(secret).join("[REDACTED]");
+  }
+
+  message = message.replace(/https:\/\/[^\s"'<>]*\.vercel\.app(?:\/[^\s"'<>]*)?/gi, (rawUrl) => {
+    try {
+      const parsed = new URL(rawUrl);
+      const path = parsed.pathname === "/" ? "" : parsed.pathname;
+      const query = parsed.search ? "?[REDACTED]" : "";
+      const hash = parsed.hash ? "#[REDACTED]" : "";
+      return `${parsed.origin}${path}${query}${hash}`;
+    } catch {
+      return "[REDACTED_PREVIEW_URL]";
+    }
+  });
+
+  return message.replace(
+    /([?&](?:_vercel_share|token|access_token|refresh_token|apikey|api_key|key|password|secret|credential)=)[^&#\s"'<>]*/gi,
+    "$1[REDACTED]",
+  );
+}
+
 export function validateHostedOatEnvironment(env = process.env) {
   const credentialKey = (role, field) => `SERVICEOS_OAT_${role.toUpperCase()}_${field}`;
   const missing = ["BASE_URL", ...roles.flatMap((role) => [credentialKey(role, "EMAIL"), credentialKey(role, "PASSWORD")])]
@@ -141,7 +181,12 @@ async function runRoleSmoke(browser, config, role) {
     return { role, status: "PASS" };
   } catch (error) {
     await safeFailureScreenshot(page, evidencePath);
-    return { role, status: "FAIL", reason: error.message, evidencePath };
+    return {
+      role,
+      status: "FAIL",
+      reason: redactHostedOatError(error, credentialValuesFromConfig(config)),
+      evidencePath,
+    };
   } finally {
     await context.close();
   }
@@ -174,7 +219,8 @@ export async function runHostedOat(env = process.env) {
 
 if (import.meta.url === pathToFileURL(process.argv[1]).href) {
   runHostedOat().catch((error) => {
-    process.stderr.write(`ServiceOS hosted OAT failed: ${error.message}\n`);
+    const reason = redactHostedOatError(error, credentialValuesFromEnv(process.env));
+    process.stderr.write(`ServiceOS hosted OAT failed: ${reason}\n`);
     process.exitCode = 1;
   });
 }
