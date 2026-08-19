@@ -1,0 +1,11 @@
+{
+  "contractVersion": 1,
+  "boundary": "objects required before 007_wave3_operations.sql",
+  "foundation": ["organization","jurisdiction","business_unit","app_user","app_role","user_membership","customer","contact","service_location","worker","marketing_source","campaign","configuration_version","external_reference","idempotency_key","audit_event","migration_lineage","service_request","opportunity","estimate","pricing_snapshot","quote","quote_version","quote_response","conversion_record","job_handoff"],
+  "wave3": ["operational_job","schedule_window","worker_assignment","work_order","work_order_event","completion_evidence","service_checklist_result","qa_inspection","corrective_action","operational_handoff"],
+  "wave4": ["required_evidence_policy","work_order_governance_link","work_order_wave4_applicability","work_order_evidence_requirement","service_exception","customer_outcome"],
+  "wave5": ["billing_readiness_gate","invoice_request","accounting_sync_outbox","payment_observation","contractor_compensation_version","contractor_payable","job_profitability_snapshot"],
+  "wave6": ["kpi_definition","kpi_snapshot","management_review","change_control_record","dependency_edge","continuity_session","continuity_transaction","service_module_profile","release_gate"],
+  "hardening": ["huc_enforce_serviceos_work_order_actor"],
+  "excludedLegacyPrefix": "huc_"
+}
