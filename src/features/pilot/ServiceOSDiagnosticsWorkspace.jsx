@@ -4,6 +4,7 @@ import { canOpenServiceOSDiagnostics } from "../../lib/serviceosUiPolicy";
 // Owner diagnostics are deliberately read-only. Mutating lifecycle proof is performed
 // through the canonical owner/office/worker/qa workspaces so database role enforcement
 // is tested with the real acting identity rather than owner impersonation.
+// Explicitly excluded mutating surface: ServiceOSWave5FinancePilotPanel.
 const diagnostics = [
   ["intelligence", "Intelligence", () => import("../intelligence/Wave6IntelligencePanel")],
 ];
