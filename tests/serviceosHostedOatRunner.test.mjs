@@ -60,13 +60,28 @@ test("hosted OAT runner establishes Preview access before canonical sign-in", ()
 
 test("hosted OAT runner covers invalid login, four isolated roles, logout, and diagnostics denial", () => {
   assert.match(source, /runInvalidLogin/);
-  assert.deepEqual(["owner", "office", "worker", "qa"], ["owner", "office", "worker", "qa"]);
+  assert.match(source, /const roles = \["owner", "office", "worker", "qa"\]/);
+  assert.match(source, /for \(const role of roles\) results\.push\(await runRoleSmoke/);
   assert.match(source, /Sign Out/);
   assert.match(source, /Diagnostics unavailable/);
   assert.match(source, /legacy PIN security model is visible/);
 });
 
-test("failure evidence is sanitized before screenshots", () => {
-  assert.match(source, /input\[type=\"password\"\], input\[type=\"email\"\]/);
-  assert.match(source, /safeFailureScreenshot/);
+test("failure evidence clears all credential inputs before screenshot", () => {
+  assert.match(source, /evaluateAll\(\(nodes\)/);
+  assert.match(source, /node\.value = ""/);
+  assert.match(source, /await page\.screenshot/);
+  assert.ok(source.indexOf("node.value = \"\"") < source.indexOf("await page.screenshot"));
+});
+
+test("role failures are collected across all four roles before hosted OAT fails", () => {
+  assert.match(source, /return \{ role, status: "FAIL", reason: error\.message, evidencePath \}/);
+  assert.match(source, /const failed = results\.filter/);
+  assert.match(source, /failed\.map\(\(result\) => result\.role\)/);
+});
+
+test("hosted OAT detects explicit authentication rejection before workspace timeout", () => {
+  assert.match(source, /waitForRoleOutcome/);
+  assert.match(source, /auth-error/);
+  assert.match(source, /authentication rejected/);
 });
