@@ -17,8 +17,18 @@ export function validateHostedOatEnvironment(env = process.env) {
   const localAllowed = env.SERVICEOS_OAT_ALLOW_LOCALHOST === "true" && ["localhost", "127.0.0.1"].includes(baseUrl.hostname);
   if (baseUrl.protocol !== "https:" && !localAllowed) throw new Error("BASE_URL must use HTTPS");
   if (baseUrl.href.includes(PRODUCTION_PROJECT_REF)) throw new Error("production Supabase target is prohibited");
+
+  let previewAccessUrl = "";
+  if (String(env.SERVICEOS_OAT_PREVIEW_ACCESS_URL || "").trim()) {
+    const access = new URL(String(env.SERVICEOS_OAT_PREVIEW_ACCESS_URL).trim());
+    if (access.protocol !== "https:") throw new Error("SERVICEOS_OAT_PREVIEW_ACCESS_URL must use HTTPS");
+    if (access.hostname !== baseUrl.hostname) throw new Error("preview access URL must target the same host as BASE_URL");
+    previewAccessUrl = access.href;
+  }
+
   return {
     baseUrl: baseUrl.href.replace(/\/$/, ""),
+    previewAccessUrl,
     evidenceDir: String(env.SERVICEOS_OAT_EVIDENCE_DIR || "artifacts/serviceos-hosted-oat"),
     headless: env.SERVICEOS_OAT_HEADED !== "true",
     credentials: Object.fromEntries(roles.map((role) => [role, {
@@ -41,6 +51,13 @@ function createNetworkGuard(page) {
     await route.continue();
   });
   return state;
+}
+
+async function establishPreviewAccess(page, config) {
+  if (config.previewAccessUrl) {
+    await page.goto(config.previewAccessUrl, { waitUntil: "networkidle" });
+  }
+  await page.goto(config.baseUrl, { waitUntil: "networkidle" });
 }
 
 async function safeFailureScreenshot(page, path) {
@@ -81,7 +98,7 @@ async function runRoleSmoke(browser, config, role) {
   const network = createNetworkGuard(page);
   const evidencePath = `${config.evidenceDir}/${role}-failure.png`;
   try {
-    await page.goto(config.baseUrl, { waitUntil: "networkidle" });
+    await establishPreviewAccess(page, config);
     await expectCanonicalSignIn(page);
     await login(page, config.credentials[role]);
     await page.getByText(roleExpectations[role].label, { exact: true }).waitFor({ state: "visible" });
@@ -114,7 +131,7 @@ export async function runHostedOat(env = process.env) {
     const invalidContext = await browser.newContext();
     const invalidPage = await invalidContext.newPage();
     const invalidNetwork = createNetworkGuard(invalidPage);
-    await invalidPage.goto(config.baseUrl, { waitUntil: "networkidle" });
+    await establishPreviewAccess(invalidPage, config);
     await expectCanonicalSignIn(invalidPage);
     await runInvalidLogin(invalidPage, config.credentials.owner);
     if (invalidNetwork.productionObserved || !invalidNetwork.acceptanceObserved) throw new Error("invalid-login target verification failed");
