@@ -22,12 +22,26 @@ test("hosted OAT runner rejects non-HTTPS and production targets", () => {
   assert.throws(() => validateHostedOatEnvironment({ ...complete, BASE_URL: `https://${PRODUCTION_PROJECT_REF}.supabase.co` }), /production/);
 });
 
+test("protected Preview access URL is optional, HTTPS-only, and same-host", () => {
+  assert.equal(validateHostedOatEnvironment(complete).previewAccessUrl, "");
+  const withAccess = validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://preview.example.test/?_vercel_share=temporary" });
+  assert.match(withAccess.previewAccessUrl, /_vercel_share=temporary/);
+  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "http://preview.example.test/?x=1" }), /HTTPS/);
+  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://other.example.test/?x=1" }), /same host/);
+});
+
 test("hosted OAT runner pins acceptance network traffic and never logs secrets", () => {
   assert.match(source, new RegExp(ACCEPTANCE_PROJECT_REF));
   assert.match(source, /supabase\.co/);
   assert.match(source, /route\.abort\("blockedbyclient"\)/);
   assert.match(source, /production Supabase traffic detected/);
   assert.doesNotMatch(source, /console\.log\(.*password|JSON\.stringify\(config/i);
+});
+
+test("hosted OAT runner establishes Preview access before canonical sign-in", () => {
+  assert.match(source, /establishPreviewAccess/);
+  assert.match(source, /SERVICEOS_OAT_PREVIEW_ACCESS_URL/);
+  assert.match(source, /await establishPreviewAccess\(page, config\)/);
 });
 
 test("hosted OAT runner covers invalid login, four isolated roles, logout, and diagnostics denial", () => {
