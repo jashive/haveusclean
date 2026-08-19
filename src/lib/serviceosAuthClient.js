@@ -247,9 +247,10 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: business unit validation failed");
   }
   const buCodes = bus.map((b) => b.code);
-  if (!buCodes.includes("HUC-ON") || !buCodes.includes("HUC-AZ")) {
+  const supportedBusinessUnits = new Set(["HUC-ON", "HUC-AZ"]);
+  if (!buCodes.length || buCodes.some((code) => !supportedBusinessUnits.has(code))) {
     throw new Error(
-      `ServiceOS access denied: required business units not found (found: ${buCodes.join(", ")})`
+      `ServiceOS access denied: visible business-unit scope is invalid (found: ${buCodes.join(", ")})`
     );
   }
 
@@ -291,35 +292,43 @@ export async function validateServiceOSContext(session) {
   }
   const appUserId = appUser.id;
 
-  // 4. Validate app_role with code = owner_admin
+  // 4. Resolve the user's one active canonical role. Never infer a role from
+  //    the client, and reject mixed-role memberships.
   const roleRes = await authenticatedRestFetch(
-    "app_role?select=id,code,name&code=eq.owner_admin&limit=1",
+    "app_role?select=id,code,name&code=in.(owner_admin,office_ops,worker,qa)",
     access_token
   );
   if (!roleRes || !roleRes.ok) {
     throw new Error("ServiceOS access denied: role validation failed");
   }
   const roles = await roleRes.json();
-  if (!Array.isArray(roles) || roles.length === 0) {
-    throw new Error("ServiceOS access denied: owner_admin role not found");
+  if (!Array.isArray(roles) || roles.length !== 4) {
+    throw new Error("ServiceOS access denied: canonical roles are incomplete");
   }
-  const roleId = roles[0].id;
 
-  // 5. Validate active user_membership: matching app_user, org, and owner_admin role
+  // 5. Validate active user_membership: matching app_user and organization.
   //    Enterprise-wide memberships have business_unit_id null — that is valid.
   const memberRes = await authenticatedRestFetch(
-    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&role_id=eq.${encodeURIComponent(roleId)}`,
+    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&status=eq.active`,
     access_token
   );
   if (!memberRes || !memberRes.ok) {
     throw new Error("ServiceOS access denied: membership validation failed");
   }
   const memberships = await memberRes.json();
-  const activeMembership = Array.isArray(memberships)
-    ? memberships.find((m) => m.status === "active")
-    : null;
-  if (!activeMembership) {
-    throw new Error("ServiceOS access denied: active owner_admin membership not found");
+  const activeMemberships = Array.isArray(memberships) ? memberships.filter((m) => m.status === "active") : [];
+  if (!activeMemberships.length) {
+    throw new Error("ServiceOS access denied: active canonical membership not found");
+  }
+  const roleById = new Map(roles.map((role) => [role.id, role.code]));
+  const roleCodes = new Set(activeMemberships.map((membership) => roleById.get(membership.role_id)));
+  if (roleCodes.size !== 1 || roleCodes.has(undefined)) throw new Error("ServiceOS access denied: mixed or unsupported canonical role");
+  const roleCode = [...roleCodes][0];
+  const roleId = roles.find((role) => role.code === roleCode).id;
+
+  const visibleBusinessUnitIds = new Set(bus.map((businessUnit) => businessUnit.id));
+  if (activeMemberships.some((membership) => membership.business_unit_id && !visibleBusinessUnitIds.has(membership.business_unit_id))) {
+    throw new Error("ServiceOS access denied: membership business unit is outside visible scope");
   }
 
   // 6. Authenticated customer SELECT (zero rows is acceptable; auth failure is not)
@@ -336,6 +345,7 @@ export async function validateServiceOSContext(session) {
     orgId,
     appUserId,
     roleId,
+    roleCode,
     // Backward-compat: array of codes for any code still checking businessUnits
     businessUnits: buCodes,
     // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id + jurisdictionId)

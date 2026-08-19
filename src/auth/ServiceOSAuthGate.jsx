@@ -7,6 +7,7 @@ import {
   signOut,
   validateServiceOSContext,
 } from "../lib/serviceosAuthClient";
+import { isServiceOSAcceptance } from "../lib/serviceosUiPolicy";
 
 // ── Revenue context ───────────────────────────────────────────────────────────
 // Carries business_unit_id and canonical context for Wave 2 revenue features.
@@ -20,6 +21,7 @@ export function useServiceOSContext() {
 }
 
 const AUTH_ENABLED = import.meta.env.VITE_SERVICEOS_AUTH_ENABLED === "true";
+const ACCEPTANCE_MODE = isServiceOSAcceptance(import.meta.env);
 const PILOT_BADGE = import.meta.env.VITE_SERVICEOS_AUTH_PILOT_BADGE === "true";
 
 // ── Inline styles (minimal, isolated) ────────────────────────────────────────
@@ -226,6 +228,7 @@ function AuthenticatedGate({ children }) {
       orgId: validationResult?.orgId ?? null,
       appUserId: validationResult?.appUserId ?? null,
       roleId: validationResult?.roleId ?? null,
+      roleCode: validationResult?.roleCode ?? null,
       // Backward compat: array of code strings
       businessUnits: validationResult?.businessUnits ?? [],
       // Structured UUID-bearing records for Wave 2
@@ -339,6 +342,14 @@ function AuthenticatedGate({ children }) {
 
 export default function ServiceOSAuthGate({ children }) {
   if (!AUTH_ENABLED) {
+    if (ACCEPTANCE_MODE) {
+      return (
+        <AccessDenied
+          message="ServiceOS acceptance is unavailable because canonical authentication is not enabled. Legacy PIN portals are disabled in this environment."
+          onRetry={() => window.location.reload()}
+        />
+      );
+    }
     return children;
   }
   return <AuthenticatedGate>{children}</AuthenticatedGate>;

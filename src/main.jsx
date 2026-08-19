@@ -1,106 +1,27 @@
-import React, { lazy, Suspense } from 'react'
-import ReactDOM from 'react-dom/client'
-import App from './App'
-import ServiceOSAuthGate, { useServiceOSContext } from './auth/ServiceOSAuthGate'
+import React, { lazy, Suspense } from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import ServiceOSAuthGate, { useServiceOSContext } from "./auth/ServiceOSAuthGate";
+import { SERVICEOS_DIAGNOSTICS_PATH } from "./lib/serviceosUiPolicy";
+import "./styles.css";
 
-const REVENUE_PILOT_UI =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === 'true'
+const ServiceOSDiagnosticsWorkspace = lazy(() => import("./features/pilot/ServiceOSDiagnosticsWorkspace"));
 
-const OPERATIONS_PILOT_UI =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === 'true' &&
-  import.meta.env?.VITE_SERVICEOS_OPERATIONS_PILOT_UI === 'true'
-
-const WAVE4_PILOT_UI =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === 'true' &&
-  import.meta.env?.VITE_SERVICEOS_WAVE4_PILOT_UI === 'true'
-
-// Wave 5: Finance pilot — defaults false; requires both flags
-const WAVE5_PILOT_UI =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === 'true' &&
-  import.meta.env?.VITE_SERVICEOS_WAVE5_PILOT_UI === 'true'
-
-// Wave 6: Intelligence / governance / continuity — defaults false
-const WAVE6_PILOT_UI =
-  typeof import.meta !== 'undefined' &&
-  import.meta.env?.VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === 'true'
-
-const ServiceOSPilotPanel = REVENUE_PILOT_UI
-  ? lazy(() => import('./features/pilot/ServiceOSPilotPanel'))
-  : null
-
-const ServiceOSOperationsPilotPanel = OPERATIONS_PILOT_UI
-  ? lazy(() => import('./features/pilot/ServiceOSOperationsPilotPanel'))
-  : null
-
-const ServiceOSWave4PilotPanel = WAVE4_PILOT_UI
-  ? lazy(() => import('./features/pilot/ServiceOSWave4PilotPanel'))
-  : null
-
-const ServiceOSWave5FinancePilotPanel = WAVE5_PILOT_UI
-  ? lazy(() => import('./features/pilot/ServiceOSWave5FinancePilotPanel'))
-  : null
-
-const Wave6IntelligencePanel = WAVE6_PILOT_UI
-  ? lazy(() => import('./features/intelligence/Wave6IntelligencePanel'))
-  : null
-
-function PilotPanelMount() {
-  const ctx = useServiceOSContext()
-  return (
-    <>
-      {ServiceOSPilotPanel && (
-        <Suspense fallback={null}>
-          <ServiceOSPilotPanel
-            session={ctx?.session ?? null}
-            revenueContext={ctx?.revenueContext ?? null}
-          />
-        </Suspense>
-      )}
-      {ServiceOSOperationsPilotPanel && (
-        <Suspense fallback={null}>
-          <ServiceOSOperationsPilotPanel
-            session={ctx?.session ?? null}
-            revenueContext={ctx?.revenueContext ?? null}
-          />
-        </Suspense>
-      )}
-      {ServiceOSWave4PilotPanel && (
-        <Suspense fallback={null}>
-          <ServiceOSWave4PilotPanel
-            session={ctx?.session ?? null}
-            revenueContext={ctx?.revenueContext ?? null}
-          />
-        </Suspense>
-      )}
-      {ServiceOSWave5FinancePilotPanel && (
-        <Suspense fallback={null}>
-          <ServiceOSWave5FinancePilotPanel
-            session={ctx?.session ?? null}
-            revenueContext={ctx?.revenueContext ?? null}
-          />
-        </Suspense>
-      )}
-      {Wave6IntelligencePanel && (
-        <Suspense fallback={null}>
-          <Wave6IntelligencePanel
-            session={ctx?.session ?? null}
-            revenueContext={ctx?.revenueContext ?? null}
-          />
-        </Suspense>
-      )}
-    </>
-  )
+function ServiceOSRoot() {
+  const context = useServiceOSContext();
+  const diagnosticsRequested = typeof window !== "undefined" && window.location.pathname === SERVICEOS_DIAGNOSTICS_PATH;
+  if (diagnosticsRequested) {
+    return (
+      <Suspense fallback={<div role="status">Loading ServiceOS diagnostics…</div>}>
+        <ServiceOSDiagnosticsWorkspace session={context?.session ?? null} revenueContext={context?.revenueContext ?? null} />
+      </Suspense>
+    );
+  }
+  return <App />;
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(
+ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <ServiceOSAuthGate>
-      <App />
-      <PilotPanelMount />
-    </ServiceOSAuthGate>
+    <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>
   </React.StrictMode>
-)
+);
