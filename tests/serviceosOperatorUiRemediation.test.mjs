@@ -21,6 +21,14 @@ test("diagnostics mounts only the explicitly selected panel", () => {
   assert.match(diagnostics, /canOpenServiceOSDiagnostics\(role\)/);
 });
 
+test("owner diagnostics are read-only and cannot impersonate worker or QA mutations", () => {
+  assert.match(diagnostics, /Read-only acceptance diagnostics/);
+  assert.match(diagnostics, /operational mutations must use the canonical staff-role workspaces/i);
+  assert.doesNotMatch(diagnostics, /ServiceOSOperationsPilotPanel/);
+  assert.doesNotMatch(diagnostics, /ServiceOSWave4PilotPanel/);
+  assert.doesNotMatch(diagnostics, /ServiceOSWave5FinancePilotPanel/);
+});
+
 test("canonical roles receive distinct least-privilege navigation", () => {
   assert.deepEqual([...serviceOSNavigationForRole("worker")], ["schedule"]);
   assert.deepEqual([...serviceOSNavigationForRole("qa")], ["jobs", "schedule"]);
