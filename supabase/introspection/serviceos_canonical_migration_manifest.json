@@ -1,0 +1,16 @@
+{
+  "contractVersion": 1,
+  "scope": "new-environment-only",
+  "migrations": [
+    "supabase/migrations/001_serviceos_foundation_baseline.sql",
+    "supabase/migrations/007_wave3_operations.sql",
+    "supabase/migrations/009_wave4_delivery_quality_gaps.sql",
+    "supabase/migrations/012_wave5_finance.sql",
+    "supabase/migrations/20260817003507_wave5_harden_authenticated_table_grants.sql",
+    "supabase/migrations/013_wave5_rls_catalog_attestation.sql",
+    "supabase/migrations/014_wave6_intelligence_governance_continuity.sql",
+    "supabase/migrations/015_wave6_live_acceptance_hardening.sql",
+    "supabase/migrations/20260818040000_serviceos_role_workflow_hardening.sql"
+  ],
+  "productionHistoryOnly": ["20260817005858_wave5_rls_catalog_attestation", "20260818012756_wave6_intelligence_governance_continuity", "20260818022754_wave6_live_acceptance_hardening"]
+}

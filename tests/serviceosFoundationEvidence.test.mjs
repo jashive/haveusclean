@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';
+const names=JSON.parse(await import('node:fs').then(x=>x.readFileSync('supabase/introspection/serviceos_foundation_manifest.json'))).foundation;
+const evidence=()=>[...names.map(object_name=>({section:'relation',object_name,definition:{rls_enabled:true}})),{section:'column'},{section:'constraint'},{section:'index'},{section:'policy'},{section:'grant'},...Array.from({length:16},(_,i)=>({section:'trigger',object_name:`t${i}`})),...['current_app_user_id()','is_org_member(uuid)','is_business_unit_member(uuid)','has_org_role(uuid,text[])','has_bu_role(uuid,uuid,text[])'].map(identity=>({section:'function',definition:{identity,security_definer:true,configuration:['search_path=public']}}))];
+const run=x=>spawnSync(process.execPath,['scripts/validate-serviceos-foundation-evidence.mjs'],{input:JSON.stringify(x),encoding:'utf8'});
+test('accepts complete structural evidence contract',()=>assert.equal(run(evidence()).status,0));
+test('rejects a missing relation',()=>assert.notEqual(run(evidence().filter(x=>x.object_name!=='organization')).status,0));
+test('rejects disabled RLS',()=>{const x=evidence();x[0].definition.rls_enabled=false;assert.notEqual(run(x).status,0)});
+test('rejects wrong trigger count',()=>{const x=evidence();x.splice(x.findIndex(y=>y.section==='trigger'),1);assert.notEqual(run(x).status,0)});
+test('rejects helper without secure search path',()=>{const x=evidence();x.find(y=>y.section==='function').definition.configuration=[];assert.notEqual(run(x).status,0)});
+test('rejects possible credential material',()=>{const x=evidence();x.push({section:'comment',value:'password'});assert.notEqual(run(x).status,0)});

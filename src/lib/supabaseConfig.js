@@ -1,20 +1,29 @@
-const DEFAULT_SUPABASE_URL = "https://opazwghrohmfykzxxsjk.supabase.co";
-const DEFAULT_SUPABASE_ANON = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9wYXp3Z2hyb2htZnlrenh4c2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY2NjA5MjcsImV4cCI6MjA5MjIzNjkyN30.vVSC4QxREbzAJpAT5wI3DkYFhey5YOuEXIWzFmlP1X4";
+const SUPABASE_HOST = /^https:\/\/([a-z0-9]{20})\.supabase\.co\/?$/i;
+export const PRODUCTION_SUPABASE_PROJECT_REF = "opazwghrohmfykzxxsjk";
+export const ACCEPTANCE_SUPABASE_PROJECT_REF = "hqeamecwdsrjfjybrsox";
 
+function deploymentKind(env) {
+  return String(env.VITE_SERVICEOS_ENVIRONMENT || env.VERCEL_ENV || env.MODE || "development").toLowerCase();
+}
+
+/** Resolve only explicit Supabase configuration. There is deliberately no URL/key fallback. */
 export function getSupabaseConfig(env = {}) {
-  const url = String(env.VITE_SUPABASE_URL || env.SUPABASE_URL || DEFAULT_SUPABASE_URL).trim();
-  const anon = String(env.VITE_SUPABASE_ANON || env.SUPABASE_ANON || DEFAULT_SUPABASE_ANON).trim();
-  const headers = {
-    apikey: anon,
-    Authorization: `Bearer ${anon}`,
-    "Content-Type": "application/json",
-  };
-
+  const url = String(env.VITE_SUPABASE_URL || env.SUPABASE_URL || "").trim().replace(/\/$/, "");
+  const anon = String(env.VITE_SUPABASE_ANON || env.VITE_SUPABASE_ANON_KEY || env.SUPABASE_ANON || env.SUPABASE_ANON_KEY || "").trim();
+  const match = url.match(SUPABASE_HOST);
+  const environment = deploymentKind(env);
+  if (!url && !anon) return { url: "", anon: "", projectRef: null, environment, headers: {}, isConfigured: false, isAcceptance: false };
+  if (!url || !anon) throw new Error("Supabase URL and anonymous key must both be configured");
+  if (!match) throw new Error("Supabase URL must be an HTTPS project URL");
+  const projectRef = match[1].toLowerCase();
+  const productionApproved = environment === "production" && String(env.VITE_SERVICEOS_PRODUCTION_APPROVED).toLowerCase() === "true";
+  if (projectRef === PRODUCTION_SUPABASE_PROJECT_REF && !productionApproved) throw new Error("Production Supabase is forbidden outside an explicitly approved production deployment");
+  if (environment === "acceptance" && projectRef !== ACCEPTANCE_SUPABASE_PROJECT_REF) throw new Error("Acceptance must target the approved acceptance project");
   return {
-    url,
-    anon,
-    headers,
-    isConfigured: Boolean(url && anon && url !== DEFAULT_SUPABASE_URL ? true : Boolean(env.VITE_SUPABASE_URL || env.SUPABASE_URL)),
+    url, anon, projectRef, environment,
+    headers: { apikey: anon, Authorization: `Bearer ${anon}`, "Content-Type": "application/json" },
+    isConfigured: true,
+    isAcceptance: projectRef === ACCEPTANCE_SUPABASE_PROJECT_REF,
   };
 }
 
