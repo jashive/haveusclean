@@ -220,23 +220,25 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: missing credentials");
   }
 
-  // 1. Validate organization HUC
+  // 1. Resolve exactly one organization through RLS. Organization identity is
+  //    data-driven so an isolated acceptance organization does not need to
+  //    impersonate a production organization code.
   const orgRes = await authenticatedRestFetch(
-    "organization?select=id,code,name&code=eq.HUC&limit=1",
+    "organization?select=id,code,name&order=id.asc&limit=2",
     access_token
   );
   if (!orgRes || !orgRes.ok) {
     throw new Error("ServiceOS access denied: organization validation failed");
   }
   const orgs = await orgRes.json();
-  if (!Array.isArray(orgs) || orgs.length === 0) {
-    throw new Error("ServiceOS access denied: organization HUC not found");
+  if (!Array.isArray(orgs) || orgs.length !== 1) {
+    throw new Error(`ServiceOS access denied: expected exactly one visible organization, found ${Array.isArray(orgs) ? orgs.length : "error"}`);
   }
   const orgId = orgs[0].id;
 
-  // 2. Validate both business units HUC-ON and HUC-AZ (include jurisdiction_id for service_location)
+  // 2. Resolve the authenticated identity's visible business-unit scope.
   const buRes = await authenticatedRestFetch(
-    `business_unit?select=id,code,name,jurisdiction_id&code=in.(HUC-ON,HUC-AZ)&order=code.asc`,
+    `business_unit?select=id,organization_id,code,name,jurisdiction_id&organization_id=eq.${encodeURIComponent(orgId)}&order=code.asc`,
     access_token
   );
   if (!buRes || !buRes.ok) {
@@ -247,11 +249,8 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: business unit validation failed");
   }
   const buCodes = bus.map((b) => b.code);
-  const supportedBusinessUnits = new Set(["HUC-ON", "HUC-AZ"]);
-  if (!buCodes.length || buCodes.some((code) => !supportedBusinessUnits.has(code))) {
-    throw new Error(
-      `ServiceOS access denied: visible business-unit scope is invalid (found: ${buCodes.join(", ")})`
-    );
+  if (!buCodes.length || bus.some((businessUnit) => businessUnit.organization_id !== orgId)) {
+    throw new Error("ServiceOS access denied: visible business-unit scope is invalid");
   }
 
   // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID + jurisdiction
@@ -264,10 +263,11 @@ export async function validateServiceOSContext(session) {
       jurisdictionId: bu.jurisdiction_id ?? null,
     };
   }
-  // Primary business unit defaults to HUC-ON (Ontario pilot)
-  const primaryBusinessUnitId = businessUnitByCode["HUC-ON"]?.id ?? null;
-  // Jurisdiction for HUC-ON pilot service locations — derived from live DB, never invented
-  const primaryJurisdictionId = businessUnitByCode["HUC-ON"]?.jurisdictionId ?? null;
+  // Prefer the established Ontario unit when visible; isolated acceptance
+  // projects use their single synthetic unit instead.
+  const primaryBusinessUnit = businessUnitByCode["HUC-ON"] ?? bus[0];
+  const primaryBusinessUnitId = primaryBusinessUnit?.id ?? null;
+  const primaryJurisdictionId = primaryBusinessUnit?.jurisdictionId ?? primaryBusinessUnit?.jurisdiction_id ?? null;
 
   // 3. Validate exactly one active app_user matching the auth user ID
   const userRes = await authenticatedRestFetch(

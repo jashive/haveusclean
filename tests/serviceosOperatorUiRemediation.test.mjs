@@ -7,6 +7,7 @@ const main = fs.readFileSync("src/main.jsx", "utf8");
 const app = fs.readFileSync("src/App.jsx", "utf8");
 const auth = fs.readFileSync("src/auth/ServiceOSAuthGate.jsx", "utf8");
 const diagnostics = fs.readFileSync("src/features/pilot/ServiceOSDiagnosticsWorkspace.jsx", "utf8");
+const authClient = fs.readFileSync("src/lib/serviceosAuthClient.js", "utf8");
 
 test("OAT-UI-001 pilot panels are absent from the global application mount", () => {
   assert.doesNotMatch(main, /PilotPanelMount/);
@@ -51,4 +52,11 @@ test("mobile layout retains viewport and operator-safe overflow protections", ()
 test("disconnected writes cannot claim Saved", () => {
   assert.match(app, /Not saved — the ServiceOS backend is disconnected/);
   assert.match(app, /setDbStatus\(ok \? \(isCloudConnected \? "synced" : "local"\) : "error"\)/);
+});
+
+test("canonical auth resolves organization and business-unit scope through RLS instead of production codes", () => {
+  assert.match(authClient, /expected exactly one visible organization/);
+  assert.match(authClient, /business_unit\?select=id,organization_id,code,name,jurisdiction_id&organization_id=eq/);
+  assert.doesNotMatch(authClient, /organization\?select=.*code=eq\.HUC/);
+  assert.doesNotMatch(authClient, /code=in\.\(HUC-ON,HUC-AZ\)/);
 });

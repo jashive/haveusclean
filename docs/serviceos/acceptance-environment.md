@@ -17,7 +17,25 @@ migration, golden-path, rework, finance, concurrency, or cleanup operation. The 
 requires both the exact acceptance project and explicit mutation approval. Credentials must be
 provisioned through protected environment variables and must never be printed.
 
-Acceptance seed design remains intentionally blocked until the missing canonical baseline schema
-is reviewed. Supabase Auth identities must be externally created from protected per-role email and
-password variables; a seed may then bind their UUIDs to four synthetic app users and exactly one
+The canonical clean-environment migration manifest and synthetic seed are checked into the
+repository. Supabase Auth identities must be externally created from protected per-role email and
+password variables; the seed then binds their UUIDs to four synthetic app users and exactly one
 worker link without embedding passwords or copying production identities.
+
+## Hosted authentication and workspace smoke runner
+
+Install the bundled Chromium once with `npx playwright install chromium`, then run
+`npm run oat:hosted` with these protected runtime variables:
+
+- `BASE_URL`
+- `OWNER_EMAIL`, `OWNER_PASSWORD`
+- `OFFICE_EMAIL`, `OFFICE_PASSWORD`
+- `WORKER_EMAIL`, `WORKER_PASSWORD`
+- `QA_EMAIL`, `QA_PASSWORD`
+
+Optional controls are `SERVICEOS_OAT_HEADED=true` and
+`SERVICEOS_OAT_EVIDENCE_DIR=<path>`. The runner does not print credentials, clears credential
+fields before failure screenshots, blocks any browser request containing the production project
+reference, and requires browser traffic to the approved acceptance project. It covers canonical
+sign-in, invalid-login rejection, per-role workspace resolution, logout isolation, and owner-only
+diagnostics. Run it only after the acceptance database and four synthetic identities are ready.
