@@ -7,6 +7,10 @@ export const ACCEPTANCE_PROJECT_REF = "hqeamecwdsrjfjybrsox";
 export const PRODUCTION_PROJECT_REF = "opazwghrohmfykzxxsjk";
 const roles = ["owner", "office", "worker", "qa"];
 
+function isVercelHost(hostname) {
+  return hostname.toLowerCase().endsWith(".vercel.app");
+}
+
 export function validateHostedOatEnvironment(env = process.env) {
   const credentialKey = (role, field) => `SERVICEOS_OAT_${role.toUpperCase()}_${field}`;
   const missing = ["BASE_URL", ...roles.flatMap((role) => [credentialKey(role, "EMAIL"), credentialKey(role, "PASSWORD")])]
@@ -19,18 +23,23 @@ export function validateHostedOatEnvironment(env = process.env) {
   if (baseUrl.href.includes(PRODUCTION_PROJECT_REF)) throw new Error("production Supabase target is prohibited");
 
   let previewAccessUrl = "";
+  let appBaseUrl = baseUrl.href.replace(/\/$/, "");
   if (String(env.SERVICEOS_OAT_PREVIEW_ACCESS_URL || "").trim()) {
     const access = new URL(String(env.SERVICEOS_OAT_PREVIEW_ACCESS_URL).trim());
     if (access.protocol !== "https:") throw new Error("SERVICEOS_OAT_PREVIEW_ACCESS_URL must use HTTPS");
-    if (access.hostname !== baseUrl.hostname) throw new Error("preview access URL must target the same host as BASE_URL");
+    const sameHost = access.hostname === baseUrl.hostname;
+    const vercelAliasPair = isVercelHost(access.hostname) && isVercelHost(baseUrl.hostname);
+    if (!sameHost && !vercelAliasPair) throw new Error("preview access URL must target the same host or another Vercel Preview alias");
     previewAccessUrl = access.href;
+    appBaseUrl = access.origin;
   }
 
   return {
-    baseUrl: baseUrl.href.replace(/\/$/, ""),
+    baseUrl: appBaseUrl,
     previewAccessUrl,
     evidenceDir: String(env.SERVICEOS_OAT_EVIDENCE_DIR || "artifacts/serviceos-hosted-oat"),
     headless: env.SERVICEOS_OAT_HEADED !== "true",
+    ignoreHTTPSErrors: env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true",
     credentials: Object.fromEntries(roles.map((role) => [role, {
       email: String(env[credentialKey(role, "EMAIL")]),
       password: String(env[credentialKey(role, "PASSWORD")]),
@@ -93,7 +102,7 @@ const roleExpectations = {
 };
 
 async function runRoleSmoke(browser, config, role) {
-  const context = await browser.newContext();
+  const context = await browser.newContext({ ignoreHTTPSErrors: config.ignoreHTTPSErrors });
   const page = await context.newPage();
   const network = createNetworkGuard(page);
   const evidencePath = `${config.evidenceDir}/${role}-failure.png`;
@@ -128,7 +137,7 @@ export async function runHostedOat(env = process.env) {
   await mkdir(config.evidenceDir, { recursive: true });
   const browser = await chromium.launch({ headless: config.headless });
   try {
-    const invalidContext = await browser.newContext();
+    const invalidContext = await browser.newContext({ ignoreHTTPSErrors: config.ignoreHTTPSErrors });
     const invalidPage = await invalidContext.newPage();
     const invalidNetwork = createNetworkGuard(invalidPage);
     await establishPreviewAccess(invalidPage, config);
