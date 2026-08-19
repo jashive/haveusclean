@@ -46,3 +46,17 @@ created. Until that evidence exists, creating a baseline would invent contracts 
 The live timestamped Wave 5 catalog and Wave 6 history entries are historical equivalents or
 predecessors, not additional new-environment files. They must be reconciled by structural parity;
 they are not replayed in addition to numbered 013–015.
+
+## Evidence handoff gate
+
+The control-plane extraction output must be normalized to the extractor row contract as a JSON
+array and validated before baseline DDL is authored:
+
+```sh
+node scripts/validate-serviceos-foundation-evidence.mjs serviceos-foundation-schema.json
+```
+
+The gate requires all 26 relations with RLS enabled, structural evidence sections, exactly 16
+foundation triggers, and all five SECURITY DEFINER membership helpers with explicit search paths.
+It rejects possible credential material. The extracted definitions themselves are still required;
+summary counts cannot establish exact columns, constraints, policies, functions, or lifecycle DDL.
