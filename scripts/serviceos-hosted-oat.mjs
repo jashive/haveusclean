@@ -8,7 +8,8 @@ export const PRODUCTION_PROJECT_REF = "opazwghrohmfykzxxsjk";
 const roles = ["owner", "office", "worker", "qa"];
 
 export function validateHostedOatEnvironment(env = process.env) {
-  const missing = ["BASE_URL", ...roles.flatMap((role) => [`${role.toUpperCase()}_EMAIL`, `${role.toUpperCase()}_PASSWORD`])]
+  const credentialKey = (role, field) => `SERVICEOS_OAT_${role.toUpperCase()}_${field}`;
+  const missing = ["BASE_URL", ...roles.flatMap((role) => [credentialKey(role, "EMAIL"), credentialKey(role, "PASSWORD")])]
     .filter((key) => !String(env[key] || "").trim());
   if (missing.length) throw new Error(`missing required environment variables: ${missing.join(", ")}`);
 
@@ -21,8 +22,8 @@ export function validateHostedOatEnvironment(env = process.env) {
     evidenceDir: String(env.SERVICEOS_OAT_EVIDENCE_DIR || "artifacts/serviceos-hosted-oat"),
     headless: env.SERVICEOS_OAT_HEADED !== "true",
     credentials: Object.fromEntries(roles.map((role) => [role, {
-      email: String(env[`${role.toUpperCase()}_EMAIL`]),
-      password: String(env[`${role.toUpperCase()}_PASSWORD`]),
+      email: String(env[credentialKey(role, "EMAIL")]),
+      password: String(env[credentialKey(role, "PASSWORD")]),
     }])),
   };
 }
