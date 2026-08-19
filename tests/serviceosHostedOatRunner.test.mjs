@@ -5,7 +5,7 @@ import { ACCEPTANCE_PROJECT_REF, PRODUCTION_PROJECT_REF, validateHostedOatEnviro
 
 const source = fs.readFileSync("scripts/serviceos-hosted-oat.mjs", "utf8");
 const complete = {
-  BASE_URL: "https://preview.example.test",
+  BASE_URL: "https://preview-base.vercel.app",
   SERVICEOS_OAT_OWNER_EMAIL: "owner@example.test", SERVICEOS_OAT_OWNER_PASSWORD: "secret",
   SERVICEOS_OAT_OFFICE_EMAIL: "office@example.test", SERVICEOS_OAT_OFFICE_PASSWORD: "secret",
   SERVICEOS_OAT_WORKER_EMAIL: "worker@example.test", SERVICEOS_OAT_WORKER_PASSWORD: "secret",
@@ -22,12 +22,26 @@ test("hosted OAT runner rejects non-HTTPS and production targets", () => {
   assert.throws(() => validateHostedOatEnvironment({ ...complete, BASE_URL: `https://${PRODUCTION_PROJECT_REF}.supabase.co` }), /production/);
 });
 
-test("protected Preview access URL is optional, HTTPS-only, and same-host", () => {
+test("protected Preview access URL is optional, HTTPS-only, and accepts Vercel alias pairs", () => {
   assert.equal(validateHostedOatEnvironment(complete).previewAccessUrl, "");
-  const withAccess = validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://preview.example.test/?_vercel_share=temporary" });
-  assert.match(withAccess.previewAccessUrl, /_vercel_share=temporary/);
-  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "http://preview.example.test/?x=1" }), /HTTPS/);
-  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://other.example.test/?x=1" }), /same host/);
+  const sameHost = validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://preview-base.vercel.app/?_vercel_share=temporary" });
+  assert.match(sameHost.previewAccessUrl, /_vercel_share=temporary/);
+  const aliasPair = validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://preview-protected.vercel.app/?_vercel_share=temporary" });
+  assert.equal(aliasPair.baseUrl, "https://preview-protected.vercel.app");
+  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_PREVIEW_ACCESS_URL: "http://preview-base.vercel.app/?x=1" }), /HTTPS/);
+});
+
+test("protected Preview access URL still rejects unrelated non-Vercel hosts", () => {
+  assert.throws(() => validateHostedOatEnvironment({
+    ...complete,
+    BASE_URL: "https://preview.example.test",
+    SERVICEOS_OAT_PREVIEW_ACCESS_URL: "https://other.example.test/?x=1",
+  }), /same host or another Vercel Preview alias/);
+});
+
+test("HTTPS certificate errors remain strict unless explicitly opted in", () => {
+  assert.equal(validateHostedOatEnvironment(complete).ignoreHTTPSErrors, false);
+  assert.equal(validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_IGNORE_HTTPS_ERRORS: "true" }).ignoreHTTPSErrors, true);
 });
 
 test("hosted OAT runner pins acceptance network traffic and never logs secrets", () => {
