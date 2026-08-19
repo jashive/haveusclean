@@ -6,14 +6,15 @@ import { ACCEPTANCE_PROJECT_REF, PRODUCTION_PROJECT_REF, validateHostedOatEnviro
 const source = fs.readFileSync("scripts/serviceos-hosted-oat.mjs", "utf8");
 const complete = {
   BASE_URL: "https://preview.example.test",
-  OWNER_EMAIL: "owner@example.test", OWNER_PASSWORD: "secret",
-  OFFICE_EMAIL: "office@example.test", OFFICE_PASSWORD: "secret",
-  WORKER_EMAIL: "worker@example.test", WORKER_PASSWORD: "secret",
-  QA_EMAIL: "qa@example.test", QA_PASSWORD: "secret",
+  SERVICEOS_OAT_OWNER_EMAIL: "owner@example.test", SERVICEOS_OAT_OWNER_PASSWORD: "secret",
+  SERVICEOS_OAT_OFFICE_EMAIL: "office@example.test", SERVICEOS_OAT_OFFICE_PASSWORD: "secret",
+  SERVICEOS_OAT_WORKER_EMAIL: "worker@example.test", SERVICEOS_OAT_WORKER_PASSWORD: "secret",
+  SERVICEOS_OAT_QA_EMAIL: "qa@example.test", SERVICEOS_OAT_QA_PASSWORD: "secret",
 };
 
 test("hosted OAT runner fails closed when required environment variables are absent", () => {
   assert.throws(() => validateHostedOatEnvironment({}), /missing required environment variables/);
+  assert.throws(() => validateHostedOatEnvironment({ ...complete, SERVICEOS_OAT_QA_PASSWORD: "" }), /SERVICEOS_OAT_QA_PASSWORD/);
 });
 
 test("hosted OAT runner rejects non-HTTPS and production targets", () => {
