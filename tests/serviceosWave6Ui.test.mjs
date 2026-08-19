@@ -29,6 +29,7 @@ const managementReviewEvidenceSource = read(
 const clientSource = read(path.join(libDir, "serviceosIntelligenceClient.js"));
 const utilsSource = read(path.join(libDir, "serviceosIntelligenceUtils.js"));
 const mainSource = read(path.join(here, "..", "src", "main.jsx"));
+const diagnosticsSource = read(path.join(here, "..", "src", "features", "pilot", "ServiceOSDiagnosticsWorkspace.jsx"));
 const packageJson = JSON.parse(read(path.join(here, "..", "package.json")));
 const workflowSource = read(path.join(here, "..", ".github", "workflows", "pr-acceptance.yml"));
 const loadManagementReviewEvidence = () =>
@@ -40,34 +41,18 @@ const ALL_WAVE6_SOURCES = { ...PANELS, "wave6Formatters.js": formatters };
 
 test("Wave 6 is feature-flagged by VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED", () => {
   assert.match(clientSource, /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
-  assert.match(mainSource, /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
+  assert.match(PANELS["Wave6IntelligencePanel.jsx"], /VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED/);
 });
 
-test("main.jsx mounts Wave6IntelligencePanel lazily behind the flag", () => {
-  // Wave 6 follows the existing pilot-panel mounting pattern in main.jsx:
-  // the lazy import itself is gated so the chunk is never requested when off.
-  assert.match(
-    mainSource,
-    /const WAVE6_PILOT_UI =[\s\S]*?VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED === 'true'/
-  );
-  assert.match(
-    mainSource,
-    /const Wave6IntelligencePanel = WAVE6_PILOT_UI\s*\?\s*lazy\(\(\) => import\('\.\/features\/intelligence\/Wave6IntelligencePanel'\)\)\s*:\s*null/
-  );
-  assert.match(mainSource, /\{Wave6IntelligencePanel && \(/);
-  assert.match(
-    mainSource,
-    /<Wave6IntelligencePanel\s+session=\{ctx\?\.session \?\? null\}\s+revenueContext=\{ctx\?\.revenueContext \?\? null\}/
-  );
+test("Wave6IntelligencePanel is lazy and isolated in diagnostics", () => {
+  assert.match(diagnosticsSource, /import\("\.\.\/intelligence\/Wave6IntelligencePanel"\)/);
+  assert.match(diagnosticsSource, /<SelectedPanel session=\{session\} revenueContext=\{revenueContext\}/);
+  assert.doesNotMatch(mainSource, /<Wave6IntelligencePanel/);
 });
 
-test("Wave 6 mounts inside PilotPanelMount alongside the other pilot panels", () => {
-  const mountBody = mainSource.slice(
-    mainSource.indexOf("function PilotPanelMount()"),
-    mainSource.indexOf("ReactDOM.createRoot")
-  );
-  assert.ok(mountBody.includes("Wave6IntelligencePanel"), "Wave 6 is not in PilotPanelMount");
-  assert.ok(mountBody.includes("ServiceOSWave5FinancePilotPanel"));
+test("Wave 6 does not mount globally alongside other pilot panels", () => {
+  assert.doesNotMatch(mainSource, /PilotPanelMount/);
+  assert.match(diagnosticsSource, /const \[selected, setSelected\] = useState\(null\)/);
 });
 
 test("client fails closed when the Wave 6 flag is off", () => {

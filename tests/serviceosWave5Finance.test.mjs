@@ -66,6 +66,7 @@ const panelSrc = readFileSync(
   "utf8"
 );
 const mainSrc = readFileSync(resolve(ROOT, "src/main.jsx"), "utf8");
+const diagnosticsSrc = readFileSync(resolve(ROOT, "src/features/pilot/ServiceOSDiagnosticsWorkspace.jsx"), "utf8");
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -1001,11 +1002,12 @@ test("49. Wave 5 feature flags default false (VITE_SERVICEOS_FINANCE_ENABLED not
     wave5ClientSrc.includes("VITE_SERVICEOS_FINANCE_ENABLED"),
     "Finance client must check VITE_SERVICEOS_FINANCE_ENABLED feature flag"
   );
-  // main.jsx mounts Wave5 panel ONLY when both flags are true
+  // The finance client and panel fail closed; the panel is isolated from the
+  // global operator application in the diagnostics workspace.
   assert.ok(
-    mainSrc.includes("VITE_SERVICEOS_FINANCE_ENABLED") &&
-    mainSrc.includes("VITE_SERVICEOS_WAVE5_PILOT_UI"),
-    "main.jsx must check both Wave 5 feature flags"
+    diagnosticsSrc.includes("ServiceOSWave5FinancePilotPanel") &&
+      !mainSrc.includes("ServiceOSWave5FinancePilotPanel"),
+    "Wave 5 must be isolated from the global application mount"
   );
 });
 
@@ -2006,15 +2008,15 @@ test("95. Wave5 panel uses revenueContext.appUserId, not session.user.id", () =>
   );
 });
 
-test("96. Wave5 panel accepts revenueContext prop and main.jsx passes it", () => {
+test("96. Wave5 panel accepts revenueContext prop and diagnostics workspace passes it", () => {
   assert.ok(
     panelSrc.includes("{ session, revenueContext }"),
     "Wave5 panel component must accept revenueContext prop"
   );
   assert.ok(
-    mainSrc.includes("revenueContext={ctx?.revenueContext ?? null}") &&
-      mainSrc.includes("ServiceOSWave5FinancePilotPanel"),
-    "main.jsx must pass revenueContext into ServiceOSWave5FinancePilotPanel"
+    diagnosticsSrc.includes("revenueContext={revenueContext}") &&
+      diagnosticsSrc.includes("ServiceOSWave5FinancePilotPanel"),
+    "diagnostics workspace must pass canonical revenueContext to the selected Wave5 panel"
   );
 });
 
