@@ -63,14 +63,19 @@ function createNetworkGuard(page) {
 }
 
 async function establishPreviewAccess(page, config) {
-  if (config.previewAccessUrl) {
-    await page.goto(config.previewAccessUrl, { waitUntil: "networkidle" });
-  }
+  if (config.previewAccessUrl) await page.goto(config.previewAccessUrl, { waitUntil: "networkidle" });
   await page.goto(config.baseUrl, { waitUntil: "networkidle" });
 }
 
-async function safeFailureScreenshot(page, path) {
-  await page.locator('input[type="password"], input[type="email"]').fill("").catch(() => {});
+export async function safeFailureScreenshot(page, path) {
+  const fields = page.locator('input[type="password"], input[type="email"]');
+  await fields.evaluateAll((nodes) => {
+    for (const node of nodes) {
+      node.value = "";
+      node.dispatchEvent(new Event("input", { bubbles: true }));
+      node.dispatchEvent(new Event("change", { bubbles: true }));
+    }
+  }).catch(() => {});
   await page.screenshot({ path, fullPage: true });
 }
 
@@ -101,6 +106,16 @@ const roleExpectations = {
   qa: { label: "qa", diagnostics: false },
 };
 
+async function waitForRoleOutcome(page, role) {
+  const workspace = page.getByText(roleExpectations[role].label, { exact: true });
+  const authError = page.locator("p").filter({ hasText: /invalid|failed|credentials|password|sign-in/i });
+  const outcome = await Promise.race([
+    workspace.waitFor({ state: "visible", timeout: 15000 }).then(() => "workspace"),
+    authError.waitFor({ state: "visible", timeout: 15000 }).then(() => "auth-error"),
+  ]);
+  if (outcome === "auth-error") throw new Error("authentication rejected");
+}
+
 async function runRoleSmoke(browser, config, role) {
   const context = await browser.newContext({ ignoreHTTPSErrors: config.ignoreHTTPSErrors });
   const page = await context.newPage();
@@ -110,7 +125,7 @@ async function runRoleSmoke(browser, config, role) {
     await establishPreviewAccess(page, config);
     await expectCanonicalSignIn(page);
     await login(page, config.credentials[role]);
-    await page.getByText(roleExpectations[role].label, { exact: true }).waitFor({ state: "visible" });
+    await waitForRoleOutcome(page, role);
     if (network.productionObserved) throw new Error("production Supabase traffic detected");
     if (!network.acceptanceObserved) throw new Error("acceptance Supabase traffic was not observed");
 
@@ -126,7 +141,7 @@ async function runRoleSmoke(browser, config, role) {
     return { role, status: "PASS" };
   } catch (error) {
     await safeFailureScreenshot(page, evidencePath);
-    throw new Error(`${role} smoke failed: ${error.message}; sanitized evidence: ${evidencePath}`);
+    return { role, status: "FAIL", reason: error.message, evidencePath };
   } finally {
     await context.close();
   }
@@ -148,7 +163,10 @@ export async function runHostedOat(env = process.env) {
 
     const results = [];
     for (const role of roles) results.push(await runRoleSmoke(browser, config, role));
-    process.stdout.write(`${JSON.stringify({ status: "PASS", acceptanceProjectRef: ACCEPTANCE_PROJECT_REF, invalidLogin: "PASS", roles: results }, null, 2)}\n`);
+    const failed = results.filter((result) => result.status !== "PASS");
+    const payload = { status: failed.length ? "FAIL" : "PASS", acceptanceProjectRef: ACCEPTANCE_PROJECT_REF, invalidLogin: "PASS", roles: results };
+    process.stdout.write(`${JSON.stringify(payload, null, 2)}\n`);
+    if (failed.length) throw new Error(`hosted role acceptance failed for: ${failed.map((result) => result.role).join(", ")}`);
   } finally {
     await browser.close();
   }
