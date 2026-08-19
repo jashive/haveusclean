@@ -1,11 +1,11 @@
 import React, { lazy, Suspense, useState } from "react";
 import { canOpenServiceOSDiagnostics } from "../../lib/serviceosUiPolicy";
 
+// Owner diagnostics are deliberately read-only. Mutating lifecycle proof is performed
+// through the canonical owner/office/worker/qa workspaces so database role enforcement
+// is tested with the real acting identity rather than owner impersonation.
+// Explicitly excluded mutating surface: ServiceOSWave5FinancePilotPanel.
 const diagnostics = [
-  ["revenue", "Revenue", () => import("./ServiceOSPilotPanel")],
-  ["operations", "Operations", () => import("./ServiceOSOperationsPilotPanel")],
-  ["delivery", "Delivery & QA", () => import("./ServiceOSWave4PilotPanel")],
-  ["finance", "Finance", () => import("./ServiceOSWave5FinancePilotPanel")],
   ["intelligence", "Intelligence", () => import("../intelligence/Wave6IntelligencePanel")],
 ];
 
@@ -21,14 +21,14 @@ export default function ServiceOSDiagnosticsWorkspace({ session, revenueContext 
   return (
     <main style={styles.page} data-testid="serviceos-diagnostics-workspace">
       <header style={styles.header}>
-        <div><strong>ServiceOS diagnostics</strong><div style={styles.subtitle}>Acceptance tooling — select one controlled surface at a time.</div></div>
+        <div><strong>ServiceOS diagnostics</strong><div style={styles.subtitle}>Read-only acceptance diagnostics. Operational mutations must use the canonical staff-role workspaces.</div></div>
         <a href="/" style={styles.link}>Return to workspace</a>
       </header>
       <nav aria-label="ServiceOS diagnostic surfaces" style={styles.nav}>
         {diagnostics.map(([id, label]) => <button key={id} type="button" onClick={() => setSelected(id)} aria-pressed={selected === id} style={selected === id ? styles.activeButton : styles.button}>{label}</button>)}
       </nav>
       <section style={styles.content}>
-        {!SelectedPanel && <div style={styles.empty}><h1>Choose a diagnostic surface</h1><p>Pilot and Wave panels are never mounted over the operator workspace.</p></div>}
+        {!SelectedPanel && <div style={styles.empty}><h1>Choose a diagnostic surface</h1><p>Mutating pilot panels are intentionally unavailable here so owner sessions cannot impersonate worker or QA actors.</p></div>}
         {SelectedPanel && <Suspense fallback={<p>Loading selected diagnostic…</p>}><SelectedPanel session={session} revenueContext={revenueContext} /></Suspense>}
       </section>
     </main>
