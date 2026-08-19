@@ -28,10 +28,10 @@ Install the bundled Chromium once with `npx playwright install chromium`, then r
 `npm run oat:hosted` with these protected runtime variables:
 
 - `BASE_URL`
-- `OWNER_EMAIL`, `OWNER_PASSWORD`
-- `OFFICE_EMAIL`, `OFFICE_PASSWORD`
-- `WORKER_EMAIL`, `WORKER_PASSWORD`
-- `QA_EMAIL`, `QA_PASSWORD`
+- `SERVICEOS_OAT_OWNER_EMAIL`, `SERVICEOS_OAT_OWNER_PASSWORD`
+- `SERVICEOS_OAT_OFFICE_EMAIL`, `SERVICEOS_OAT_OFFICE_PASSWORD`
+- `SERVICEOS_OAT_WORKER_EMAIL`, `SERVICEOS_OAT_WORKER_PASSWORD`
+- `SERVICEOS_OAT_QA_EMAIL`, `SERVICEOS_OAT_QA_PASSWORD`
 
 Optional controls are `SERVICEOS_OAT_HEADED=true` and
 `SERVICEOS_OAT_EVIDENCE_DIR=<path>`. The runner does not print credentials, clears credential
