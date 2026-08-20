@@ -1,7 +1,11 @@
 name: ServiceOS Full Live OAT
 
 on:
-  workflow_dispatch:
+  push:
+    branches:
+      - serviceos-oat-runner
+    paths:
+      - .github/serviceos-oat-run.request
 
 permissions:
   contents: read
@@ -59,7 +63,7 @@ jobs:
 
           for path in "${changed[@]}"; do
             case "$path" in
-              .github/workflows/serviceos-hosted-oat.yml|scripts/serviceos-full-live-oat.mjs)
+              .github/workflows/serviceos-hosted-oat.yml|.github/serviceos-oat-run.request|scripts/serviceos-full-live-oat.mjs)
                 ;;
               *)
                 echo "BLOCKED: non-OAT helper change detected: $path"
@@ -160,60 +164,45 @@ jobs:
 
           replacements = [
               (
-                  '  const share = process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL;\n  if (share) text = text.split(share).join("[REDACTED_PREVIEW_URL]");',
-                  '  const oidc = process.env.VERCEL_OIDC_TOKEN;\n  if (oidc) text = text.split(oidc).join("[REDACTED_OIDC_TOKEN]");',
+                  '  const share = process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL;',
+                  '  const oidc = process.env.VERCEL_OIDC_TOKEN;',
+              ),
+              (
+                  '  if (share) text = text.split(share).join("[REDACTED_PREVIEW_URL]");',
+                  '  if (oidc) text = text.split(oidc).join("[REDACTED_OIDC_TOKEN]");',
               ),
               (
                   '  const names = ["BASE_URL", "SERVICEOS_OAT_PREVIEW_ACCESS_URL", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
                   '  const names = ["BASE_URL", "VERCEL_OIDC_TOKEN", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
               ),
               (
-                  '''async function establishPreview(page) {
-            await page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL, { waitUntil: "networkidle" });
-            await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });
-            await page.locator("#sos-email").waitFor({ state: "visible", timeout: 30000 });
-            await page.locator("#sos-password").waitFor({ state: "visible", timeout: 30000 });
-          }''',
-                  '''async function establishPreview(page) {
-            await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });
-            const current = new URL(page.url());
-            assert(current.hostname === EXPECTED_BASE_HOST, `protected Preview navigation escaped authoritative host: ${current.hostname}`, "BLOCKER");
-            await page.locator("#sos-email").waitFor({ state: "visible", timeout: 30000 });
-            await page.locator("#sos-password").waitFor({ state: "visible", timeout: 30000 });
-          }''',
+                  '  await page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL, { waitUntil: "networkidle" });',
+                  '  // GitHub OIDC replaces the temporary Vercel share-link gate.',
               ),
               (
-                  '  const context = await browser.newContext({ ignoreHTTPSErrors: process.env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true" });\n  const page = await context.newPage();',
-                  '''  const context = await browser.newContext({ ignoreHTTPSErrors: process.env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true" });
-            const oidcToken = process.env.VERCEL_OIDC_TOKEN;
-            await context.route(
-              (url) => url.hostname === EXPECTED_BASE_HOST,
-              async (route) => {
-                const headers = {
-                  ...route.request().headers(),
-                  "x-vercel-trusted-oidc-idp-token": oidcToken,
-                };
-                await route.continue({ headers });
-              },
-            );
-            const page = await context.newPage();''',
+                  '  await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });',
+                  '  await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });\n  const current = new URL(page.url());\n  assert(current.hostname === EXPECTED_BASE_HOST, `protected Preview navigation escaped authoritative host: ${current.hostname}`, "BLOCKER");',
+              ),
+              (
+                  '  const page = await context.newPage();',
+                  '  const oidcToken = process.env.VERCEL_OIDC_TOKEN;\n  await context.route((url) => url.hostname === EXPECTED_BASE_HOST, async (route) => {\n    await route.continue({ headers: { ...route.request().headers(), "x-vercel-trusted-oidc-idp-token": oidcToken } });\n  });\n  const page = await context.newPage();',
               ),
           ]
 
           for old, new in replacements:
               count = text.count(old)
               if count != 1:
-                  raise SystemExit(f"BLOCKED: expected exactly one OIDC patch target, found {count}")
+                  raise SystemExit(f"BLOCKED: expected exactly one OIDC patch target, found {count}: {old[:80]}")
               text = text.replace(old, new, 1)
 
           path.write_text(text)
-          print("OIDC helper patch applied with all four static assertions satisfied")
+          print("OIDC helper patch applied with all six static assertions satisfied")
           PY
 
           node --check scripts/serviceos-full-live-oat.mjs
 
-          if grep -q 'page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL' scripts/serviceos-full-live-oat.mjs; then
-            echo "BLOCKED: stale share-link navigation remains in full OAT harness"
+          if grep -q 'SERVICEOS_OAT_PREVIEW_ACCESS_URL' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: stale share-link dependency remains in full OAT harness"
             exit 1
           fi
 
@@ -222,7 +211,12 @@ jobs:
             exit 1
           fi
 
-          echo "PASS: OIDC harness is syntactically valid and host-scoped"
+          if ! grep -q 'x-vercel-trusted-oidc-idp-token' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: OIDC request header injection is missing"
+            exit 1
+          fi
+
+          echo "PASS: OIDC harness is syntactically valid, share-link free, and host-scoped"
 
       - name: Install dependencies
         run: npm ci
