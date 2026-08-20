@@ -45,7 +45,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_SHA="433d4f64f6d7ba34863a03b7421e92543dd28818"
+          EXPECTED_SHA="03eacdf5917ed399e942764a8e001f2cd61b4f3e"
 
           if ! git cat-file -e "$EXPECTED_SHA^{commit}"; then
             echo "BLOCKED: authoritative ServiceOS candidate is not present"
