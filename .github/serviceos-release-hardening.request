@@ -1,0 +1,5 @@
+PR=2
+TARGET_BRANCH=copilot/agentwave1-auth-rls-v2
+EXPECTED_TARGET_SHA=7a3a8a53d2a6cb8073350cf0890c3206e9600800
+ACCEPTED_BASE_SHA=d8f57b5caa23f7bcbe134ddc5555cf6ad1fab7a1
+PURPOSE=final-release-hardening
