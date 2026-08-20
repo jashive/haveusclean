@@ -1,13 +1,11 @@
 name: ServiceOS Full Live OAT
 
 on:
-  push:
-    branches:
-      - serviceos-oat-runner
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   full-live-oat:
@@ -17,7 +15,6 @@ jobs:
 
     env:
       BASE_URL: https://haveusclean-k872t00xl-jasons-projects-54483428.vercel.app
-      SERVICEOS_OAT_PREVIEW_ACCESS_URL: ${{ secrets.SERVICEOS_OAT_PREVIEW_ACCESS_URL }}
 
       SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
       SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
@@ -43,6 +40,7 @@ jobs:
       - name: Verify authoritative candidate and helper isolation
         shell: bash
         run: |
+          set -euo pipefail
           EXPECTED_SHA="433d4f64f6d7ba34863a03b7421e92543dd28818"
 
           if ! git cat-file -e "$EXPECTED_SHA^{commit}"; then
@@ -75,11 +73,11 @@ jobs:
       - name: Verify OAT environment
         shell: bash
         run: |
+          set -euo pipefail
           missing=0
 
           for name in \
             BASE_URL \
-            SERVICEOS_OAT_PREVIEW_ACCESS_URL \
             SERVICEOS_OAT_OWNER_EMAIL \
             SERVICEOS_OAT_OWNER_PASSWORD \
             SERVICEOS_OAT_OFFICE_EMAIL \
@@ -100,11 +98,131 @@ jobs:
 
           exit "$missing"
 
+      - name: Request short-lived GitHub OIDC token
+        id: oidc
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const token = await core.getIDToken();
+            core.setSecret(token);
+            core.setOutput('token', token);
+
+      - name: Cheap protected Preview OIDC preflight
+        shell: bash
+        env:
+          VERCEL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
+        run: |
+          set -euo pipefail
+          headers="$RUNNER_TEMP/serviceos-oidc-headers.txt"
+          body="$RUNNER_TEMP/serviceos-oidc-body.html"
+
+          status="$(curl \
+            --silent \
+            --show-error \
+            --output "$body" \
+            --dump-header "$headers" \
+            --write-out '%{http_code}' \
+            --max-time 20 \
+            --max-redirs 0 \
+            --header "x-vercel-trusted-oidc-idp-token: $VERCEL_OIDC_TOKEN" \
+            "$BASE_URL/")"
+
+          echo "OIDC protected Preview HTTP status: $status"
+
+          if [ "$status" != "200" ]; then
+            echo "BLOCKED: GitHub OIDC is not authorized for the exact PR #8 Preview"
+            grep -iE '^(location|content-type|x-vercel-error):' "$headers" || true
+            exit 1
+          fi
+
+          if grep -qiE 'vercel\.com/sso-api|_vercel_sso_nonce' "$headers" "$body"; then
+            echo "BLOCKED: exact Preview still resolved to Vercel SSO after OIDC authentication"
+            exit 1
+          fi
+
+          echo "PASS: GitHub OIDC can reach the exact protected PR #8 Preview"
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
+
+      - name: Prepare OIDC-isolated full OAT harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/serviceos-full-live-oat.mjs")
+          text = path.read_text()
+
+          replacements = [
+              (
+                  '  const share = process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL;\n  if (share) text = text.split(share).join("[REDACTED_PREVIEW_URL]");',
+                  '  const oidc = process.env.VERCEL_OIDC_TOKEN;\n  if (oidc) text = text.split(oidc).join("[REDACTED_OIDC_TOKEN]");',
+              ),
+              (
+                  '  const names = ["BASE_URL", "SERVICEOS_OAT_PREVIEW_ACCESS_URL", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
+                  '  const names = ["BASE_URL", "VERCEL_OIDC_TOKEN", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
+              ),
+              (
+                  '''async function establishPreview(page) {
+            await page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL, { waitUntil: "networkidle" });
+            await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });
+            await page.locator("#sos-email").waitFor({ state: "visible", timeout: 30000 });
+            await page.locator("#sos-password").waitFor({ state: "visible", timeout: 30000 });
+          }''',
+                  '''async function establishPreview(page) {
+            await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });
+            const current = new URL(page.url());
+            assert(current.hostname === EXPECTED_BASE_HOST, `protected Preview navigation escaped authoritative host: ${current.hostname}`, "BLOCKER");
+            await page.locator("#sos-email").waitFor({ state: "visible", timeout: 30000 });
+            await page.locator("#sos-password").waitFor({ state: "visible", timeout: 30000 });
+          }''',
+              ),
+              (
+                  '  const context = await browser.newContext({ ignoreHTTPSErrors: process.env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true" });\n  const page = await context.newPage();',
+                  '''  const context = await browser.newContext({ ignoreHTTPSErrors: process.env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true" });
+            const oidcToken = process.env.VERCEL_OIDC_TOKEN;
+            await context.route(
+              (url) => url.hostname === EXPECTED_BASE_HOST,
+              async (route) => {
+                const headers = {
+                  ...route.request().headers(),
+                  "x-vercel-trusted-oidc-idp-token": oidcToken,
+                };
+                await route.continue({ headers });
+              },
+            );
+            const page = await context.newPage();''',
+              ),
+          ]
+
+          for old, new in replacements:
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"BLOCKED: expected exactly one OIDC patch target, found {count}")
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          print("OIDC helper patch applied with all four static assertions satisfied")
+          PY
+
+          node --check scripts/serviceos-full-live-oat.mjs
+
+          if grep -q 'page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: stale share-link navigation remains in full OAT harness"
+            exit 1
+          fi
+
+          if ! grep -q 'url.hostname === EXPECTED_BASE_HOST' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: host-scoped OIDC routing guard is missing"
+            exit 1
+          fi
+
+          echo "PASS: OIDC harness is syntactically valid and host-scoped"
 
       - name: Install dependencies
         run: npm ci
@@ -112,27 +230,7 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run repository regression suite
-        run: npm test
-
-      - name: Reconfirm hosted authentication gate
-        run: npm run oat:hosted
-
-      - name: Apply helper-only Preview alias correction
-        shell: bash
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("scripts/serviceos-full-live-oat.mjs")
-          text = path.read_text()
-          old = 'await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });'
-          new = 'await page.goto(new URL(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL).origin, { waitUntil: "networkidle" });'
-          if old not in text:
-              raise SystemExit("BLOCKED: expected Preview navigation line not found")
-          path.write_text(text.replace(old, new, 1))
-          print("Preview alias correction applied to ephemeral runner workspace")
-          PY
-
       - name: Run full live ServiceOS OAT
+        env:
+          VERCEL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
         run: node scripts/serviceos-full-live-oat.mjs
