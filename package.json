@@ -6,10 +6,17 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test tests/serviceosHostedOatRunner.test.mjs tests/serviceosAuthClient.test.mjs tests/serviceosOperatorUiRemediation.test.mjs tests/pricing.test.mjs tests/validateLead.test.mjs tests/validationEngine.test.mjs tests/serviceosRevenue.test.mjs tests/serviceosWave3Schema.test.mjs tests/serviceosWave3OperationsUtils.test.mjs tests/serviceosWave3OperationsClient.test.mjs tests/serviceosWave3WorkerBootstrap.test.mjs tests/serviceosWave4Schema.test.mjs tests/serviceosWave4Runtime.test.mjs tests/serviceosWave4AcceptanceFixture.test.mjs tests/serviceosWave5Schema.test.mjs tests/serviceosWave5Finance.test.mjs tests/serviceosWave4RlsHarness.test.mjs tests/serviceosWave5RlsClassification.test.mjs tests/serviceosWave6Schema.test.mjs tests/serviceosWave6Intelligence.test.mjs tests/serviceosWave6Governance.test.mjs tests/serviceosWave6Continuity.test.mjs tests/serviceosWave6Ui.test.mjs tests/serviceosRecoveryHardening.test.mjs tests/supabaseConfigSafety.test.mjs tests/serviceosAcceptancePreflight.test.mjs tests/serviceosFoundationExtraction.test.mjs tests/serviceosFoundationEvidence.test.mjs tests/serviceosFoundationBaseline.test.mjs",
+    "oat:preflight": "node scripts/serviceos-acceptance-preflight.mjs",
+    "oat:preflight:mutation": "node scripts/serviceos-acceptance-preflight.mjs --mutation",
+    "foundation:extract:contract": "node --test tests/serviceosFoundationExtraction.test.mjs",
+    "foundation:evidence:validate": "node scripts/validate-serviceos-foundation-evidence.mjs",
+    "foundation:contract": "node --test tests/serviceosFoundationBaseline.test.mjs",
+    "oat:hosted": "node scripts/serviceos-hosted-oat.mjs"
   },
   "dependencies": {
-    "nodemailer": "^7.0.5",
+    "nodemailer": "^9.0.5",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-window": "^2.3.0",
@@ -17,6 +24,9 @@
   },
   "devDependencies": {
     "@vitejs/plugin-react": "^4.2.1",
-    "vite": "^5.0.8"
+    "nanoid": "3.3.18",
+    "playwright": "^1.62.1",
+    "postcss": "8.5.26",
+    "vite": "^6.4.3"
   }
 }

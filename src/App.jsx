@@ -23,6 +23,8 @@ import { deleteResidentialLeadWorkflow } from "./features/leads/residentialLeadD
 import { closeLeadEditModal, updateEditLeadFollowUpDate, updateEditLeadStatus } from "./features/leads/leadEditModalActions";
 import ResidentialLeadsToolbar from "./features/leads/ResidentialLeadsToolbar";
 import CommercialLeadsFeature from "./features/leads/CommercialLeads";
+import { useServiceOSContext } from "./auth/ServiceOSAuthGate";
+import { filterServiceOSNavigation, isCanonicalServiceOSMode, SERVICEOS_DIAGNOSTICS_PATH } from "./lib/serviceosUiPolicy";
 
 const BookingWidget = lazy(() => import("./components/BookingWidget"));
 const MySchedule = lazy(() => import("./pages/MySchedule"));
@@ -1147,7 +1149,6 @@ function Geofencing({ jobs, partners }) {
               </div>
               <div style={{ display:"flex", alignItems:"center", gap:10 }}>
                 <span style={S.badge(a.status==="ok"?"green":"red")}>{a.status==="ok"?"✅ In Range":"⚠️ Outside Range"}</span>
-                {a.status==="alert" && <button style={{ ...S.btn("sm"), background:C.gold, color:"#0A0F1E" }} onClick={()=>alert(`Alert reviewed for ${a.partner}`)}>Review</button>}
               </div>
             </div>
           </div>
@@ -1385,10 +1386,17 @@ Provide 3-5 concrete suggestions. reason should be 1 concise sentence.`;
 // ─── WHITE LABEL / LICENSE SETTINGS ──────────────────────────────────────────
 function WhiteLabel({ isCloudConnected, dbStatus }) {
   const [config, setConfig] = useState({ ...BRAND, primaryColor:"#00D4AA", plan:"growth", licenseKey:"CP-XXXX-XXXX-XXXX-XXXX", seats:10 });
-  const [saved, setSaved] = useState(false);
+  const [saveState, setSaveState] = useState("idle");
   const [showLicense, setShowLicense] = useState(false);
 
-  const save = () => { setSaved(true); setTimeout(()=>setSaved(false),2500); };
+  const save = () => {
+    if (!isCloudConnected || dbStatus === "error") {
+      setSaveState("error");
+      return;
+    }
+    setSaveState("saved");
+    setTimeout(() => setSaveState("idle"), 2500);
+  };
 
   const APP_STORE_CHECKLIST = [
     { done:true,  item:"Progressive Web App (PWA) manifest ready",                 note:"installable on iOS & Android home screen" },
@@ -1423,7 +1431,8 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
                 <input style={{ ...S.input, fontFamily:"monospace" }} value={config.primaryColor} onChange={e=>setConfig({...config,primaryColor:e.target.value})} />
               </div>
             </div>
-            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={save}>{saved?"✅ Saved!":"💾 Save Brand Settings"}</button>
+            <button style={{ ...S.btn("primary"), width:"100%" }} onClick={save}>{saveState === "saved" ? "✅ Saved" : "💾 Save Brand Settings"}</button>
+            {saveState === "error" && <div role="alert" style={{ color: C.red, fontSize: 13 }}>Not saved — the ServiceOS backend is disconnected.</div>}
           </div>
         </div>
 
@@ -1449,8 +1458,6 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
               </div>
             </div>
             <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(min(100%,200px),1fr))", gap:8 }}>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Upgrading to Pro plan... 🚀")}>⬆ Upgrade to Pro</button>
-              <button style={{ ...S.btn("ghost"), fontSize:12 }} onClick={()=>alert("Billing portal opening...")}>💳 Manage Billing</button>
             </div>
           </div>
         </div>
@@ -1492,7 +1499,6 @@ function WhiteLabel({ isCloudConnected, dbStatus }) {
           {[
             { icon:"💾", label:"Local State", status:"Active", color:C.accent, note:"Data in React state" },
             { icon:"☁️", label:"Cloud Database", status:getCloudStatusLabel(isCloudConnected, dbStatus), color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Supabase writes are active" : "Falling back to local storage" },
-            { icon:"📱", label:"Partner Logins", status:"Coming Soon", color:C.muted, note:"Unique partner access" },
             { icon:"🔄", label:"Real-Time Sync", status:isCloudConnected ? "Active" : "Offline", color:isCloudConnected ? "#22c55e" : C.muted, note:isCloudConnected ? "Live updates across devices" : "Local-only sync" },
           ].map((item,i)=>(
             <div key={i} style={{ background:C.surface, borderRadius:10, padding:14, textAlign:"center" }}>
@@ -6285,6 +6291,7 @@ const SHOW_PORTAL_HELPER_NOTE = (() => {
     return true;
   }
 })();
+const CANONICAL_SERVICEOS_MODE = isCanonicalServiceOSMode(import.meta.env);
 
 const LAST_ACTIVE_TAB_KEY = "cp:last_active_tab";
 const LEGACY_AGENT_TABS = new Set(["agent_quote", "agent_bidspec", "agent_workorder", "agent_social", "agent_dm", "agent_ops"]);
@@ -6515,6 +6522,8 @@ function RoleSelectionGate({
 }
 
 export default function App() {
+  const serviceOSContext = useServiceOSContext();
+  const canonicalRole = serviceOSContext?.revenueContext?.roleCode || null;
   const currentPath = typeof window !== "undefined" ? window.location.pathname : "/";
   const [tab, setTab] = useState(() => getInitialTab());
   const [accessRole, setAccessRole] = useState(() => getInitialRole());
@@ -6533,6 +6542,9 @@ export default function App() {
     try { return String(localStorage.getItem(PARTNER_PORTAL_PIN_KEY) || ""); } catch { return ""; }
   });
   const [roleGateError, setRoleGateError] = useState("");
+  useEffect(() => {
+    if (canonicalRole) setAccessRole(canonicalRole);
+  }, [canonicalRole]);
   const isMobile                        = useMobileNav();
   const [showRegionBanner, setShowRegionBanner] = useState(() => {
     if (typeof window === "undefined") return true;
@@ -7548,9 +7560,9 @@ export default function App() {
       if (removed.length) logActivity("JOB_DELETED",  removed.map(j => j.client).join(", "));
       if (changed.length) logActivity("JOB_UPDATED",  changed.map(j => `${j.client} → ${j.status}`).join(", "));
       // Write to Supabase immediately so changes persist across refreshes
-      dbSet(DB_KEYS.jobs, nextList).then(() => {
-        setDbStatus(isCloudConnected ? "synced" : "local");
-      }).catch(() => {});
+      dbSet(DB_KEYS.jobs, nextList).then((ok) => {
+        setDbStatus(ok ? (isCloudConnected ? "synced" : "local") : "error");
+      }).catch(() => setDbStatus("error"));
       return nextList;
     });
   }, [isCloudConnected]);
@@ -7562,9 +7574,9 @@ export default function App() {
       const prevList = Array.isArray(prev) ? prev : [];
       const added = nextList.filter(n => !prevList.find(p => p.id === n.id));
       if (added.length) logActivity("PARTNER_ADDED", added.map(p => p.name).join(", "));
-      void dbSet(DB_KEYS.partners, nextList).then(() => {
-        setDbStatus(isCloudConnected ? "synced" : "local");
-      }).catch(() => {});
+      void dbSet(DB_KEYS.partners, nextList).then((ok) => {
+        setDbStatus(ok ? (isCloudConnected ? "synced" : "local") : "error");
+      }).catch(() => setDbStatus("error"));
       return nextList;
     });
   }, [isCloudConnected]);
@@ -7573,9 +7585,9 @@ export default function App() {
     setSalesReps(prev => {
       const next = typeof updater === "function" ? updater(prev) : updater;
       const nextList = Array.isArray(next) ? next : [];
-      void dbSet(DB_KEYS.salesReps, nextList).then(() => {
-        setDbStatus(isCloudConnected ? "synced" : "local");
-      }).catch(() => {});
+      void dbSet(DB_KEYS.salesReps, nextList).then((ok) => {
+        setDbStatus(ok ? (isCloudConnected ? "synced" : "local") : "error");
+      }).catch(() => setDbStatus("error"));
       return nextList;
     });
   }, [isCloudConnected]);
@@ -7640,7 +7652,7 @@ export default function App() {
   // Keep global ACTIVE_REGION in sync for quote engines
   ACTIVE_REGION = activeRegion;
 
-  const isRestrictedRole = accessRole === "partner" || accessRole === "sales";
+  const isRestrictedRole = canonicalRole === "worker" || canonicalRole === "qa" || accessRole === "partner" || accessRole === "sales";
   const roleScopedJobs = useMemo(() => {
     if (!isRestrictedRole) return jobs;
     // Strip financial fields from the rendered state for restricted roles.
@@ -7717,7 +7729,9 @@ export default function App() {
     ]},
   ];
 
-  const visibleNavGroups = filterNavGroupsByRole(NAV_GROUPS, accessRole);
+  const visibleNavGroups = canonicalRole
+    ? filterServiceOSNavigation(NAV_GROUPS, canonicalRole)
+    : filterNavGroupsByRole(NAV_GROUPS, accessRole);
   const activeGroup = visibleNavGroups.find(g => g.tabs.some(t => t.id === tab)) || visibleNavGroups[0] || NAV_GROUPS[0];
   const architectCriticalCount = architectReport?.totals?.critical || 0;
   const architectScore = architectReport?.score;
@@ -7845,7 +7859,7 @@ export default function App() {
     );
   }
 
-  if (currentPath === "/" && showRoleGate && !isAuthenticated) {
+  if (!CANONICAL_SERVICEOS_MODE && currentPath === "/" && showRoleGate && !isAuthenticated) {
     return (
       <RoleSelectionGate
         adminPin={roleGatePin}
@@ -7865,7 +7879,7 @@ export default function App() {
   return (
     <div style={S.app}>
 {/* ── TOP HEADER: Logo + Region + DB status ── */}
-      <header style={{ ...S.header, flexShrink: 0 }}>
+      <header style={{ ...S.header, flexShrink: 0, maxWidth: "100%", minWidth: 0, padding: isMobile ? "0 8px" : S.header.padding }}>
         <div style={S.logo}>
           <div style={S.logoMark}>{BRAND.logoMark}</div>
           <span style={{ display:"flex", flexDirection:"column", lineHeight:1.1 }}>
@@ -7884,8 +7898,9 @@ export default function App() {
           </div>
         )}
 
-        <div style={{ display:"flex", alignItems:"center", gap:8, flexShrink:0 }}>
-          {accessRole === "admin" && (
+        <div style={{ display:"flex", alignItems:"center", gap: isMobile ? 4 : 8, flexShrink:1, minWidth:0 }}>
+          {canonicalRole && <span style={{ fontSize: 11, color: C.accent, fontWeight: 700, whiteSpace: "nowrap" }}>{canonicalRole.replace("_", " ")}</span>}
+          {!isMobile && !canonicalRole && accessRole === "admin" && (
             <button
               style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px" }}
               onClick={() => {
@@ -7903,7 +7918,7 @@ export default function App() {
               Switch Role
             </button>
           )}
-          {accessRole === "admin" && isAuthenticated && (
+          {!isMobile && !canonicalRole && accessRole === "admin" && isAuthenticated && (
             <button
               style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px" }}
               onClick={() => setTabGuarded("admins")}
@@ -7911,7 +7926,7 @@ export default function App() {
               Manage Admins
             </button>
           )}
-          {accessRole === "admin" && (
+          {!isMobile && !canonicalRole && accessRole === "admin" && (
             <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
               <button
                 style={{ ...S.btn(architectCriticalCount > 0 ? "primary" : "ghost"), fontSize: 12, padding: "6px 10px" }}
@@ -7923,6 +7938,7 @@ export default function App() {
               {architectCriticalCount > 0 && <span style={S.badge("red")}>{architectCriticalCount} critical</span>}
             </div>
           )}
+          {!isMobile && canonicalRole === "owner_admin" && <a href={SERVICEOS_DIAGNOSTICS_PATH} style={{ ...S.btn("ghost"), fontSize: 12, padding: "6px 10px", textDecoration: "none" }}>Diagnostics</a>}
           <RegionSwitcher activeRegion={activeRegion} setActiveRegion={setActiveRegion} />
           {/* DB sync pill */}
           <div
@@ -7940,7 +7956,7 @@ export default function App() {
 
       {/* ── NAV ROW 1: Category pills ── */}
       {accessRole !== "partner" && (
-      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0 }}>
+      <div style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, padding: "0 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0, width:"100%", maxWidth:"100%", minWidth:0 }}>
         {visibleNavGroups.map(g => {
           const isActive = g.id === activeGroup.id;
           return (
@@ -7970,7 +7986,7 @@ export default function App() {
 
       {/* ── NAV ROW 2: Active group's tabs ── */}
       {accessRole !== "partner" && (
-      <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "6px 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0, alignItems:"center" }}>
+      <div style={{ background: C.bg, borderBottom: `1px solid ${C.border}`, padding: "6px 16px", display:"flex", gap:4, overflowX:"auto", scrollbarWidth:"none", flexShrink:0, alignItems:"center", width:"100%", maxWidth:"100%", minWidth:0 }}>
         {activeGroup.tabs.map(t => {
           const isActive = tab === t.id;
           return (
@@ -8004,7 +8020,7 @@ export default function App() {
       )}
 
       <style>{`@keyframes dbpulse{0%,100%{opacity:1}50%{opacity:0.25}}`}</style>
-      {SHOW_PORTAL_HELPER_NOTE && (
+      {!CANONICAL_SERVICEOS_MODE && SHOW_PORTAL_HELPER_NOTE && (
         <div style={{ position: "fixed", right: 12, bottom: 12, zIndex: 9999, pointerEvents: "none" }}>
           <div style={{
             background: "#0b1220e6",
@@ -8020,7 +8036,7 @@ export default function App() {
           </div>
         </div>
       )}
-      {isMobile && accessRole === "admin" && <MobileBottomNav activeTab={tab} onTabChange={setTabGuarded} />}
+      {isMobile && (canonicalRole === "owner_admin" || canonicalRole === "office_ops" || accessRole === "admin") && <MobileBottomNav activeTab={tab} onTabChange={setTabGuarded} />}
 
       <main style={{ ...S.main, paddingBottom: isMobile ? MOBILE_NAV_HEIGHT + 16 : undefined }}>
         {tab==="dashboard"      && <DashboardV2      jobs={regionJobs}     partners={regionPartners} region={activeRegion} setTab={setTabGuarded} />}
@@ -8042,9 +8058,9 @@ export default function App() {
         {tab==="cold"           && <ColdOutreachLegacy region={activeRegion} coldLeads={coldLeads} setColdLeads={setColdLeads} page={coldPage} setPage={setColdPage} deletedLeadIds={deletedLeadIds} setDeletedLeadIds={setDeletedLeadIds} filterMktProp={coldFilterMkt} setFilterMktProp={setColdFilterMkt} />}
         {tab==="intake"         && <FormIntake        resLeads={resLeads} setResLeads={setResLeads} region={activeRegion} setTab={setTabGuarded} />}
         {tab==="followup"       && <FollowUpReminders resLeads={resLeads} setResLeads={setResLeads} jobs={regionJobs} region={activeRegion} />}
-        {tab==="pay"            && accessRole === "admin" && <Pay               partners={regionPartners} jobs={regionJobs} />}
-        {tab==="stripe"         && accessRole === "admin" && <StripePayments    jobs={regionJobs}     partners={regionPartners} region={activeRegion} />}
-        {tab==="qb"             && accessRole === "admin" && <QuickBooksSync    jobs={regionJobs}     partners={regionPartners} />}
+        {tab==="pay"            && (canonicalRole === "owner_admin" || canonicalRole === "office_ops" || accessRole === "admin") && <Pay partners={regionPartners} jobs={regionJobs} />}
+        {tab==="stripe"         && (canonicalRole === "owner_admin" || canonicalRole === "office_ops" || accessRole === "admin") && <StripePayments jobs={regionJobs} partners={regionPartners} region={activeRegion} />}
+        {tab==="qb"             && (canonicalRole === "owner_admin" || canonicalRole === "office_ops" || accessRole === "admin") && <QuickBooksSync jobs={regionJobs} partners={regionPartners} />}
         {tab==="portal"         && <ClientPortal      jobs={regionJobs}     resLeads={resLeads} setResLeads={setResLeads} partners={regionPartners} region={activeRegion} setTab={setTabGuarded} setJobs={setJobsDB} />}
         {tab==="clientview"     && <ClientView        jobs={regionJobs}     resLeads={resLeads} region={activeRegion} setTab={setTabGuarded} invoices={invoices} />}
         {tab==="sms"            && <SMSReminders      jobs={regionJobs} />}
@@ -8052,16 +8068,16 @@ export default function App() {
         {tab==="partners"       && <Partners          partners={regionPartners} setPartners={setPartnersDB} jobs={regionJobs} salesReps={salesReps} setSalesReps={setSalesRepsDB} accessRole={accessRole} />}
         {tab==="partnerview"    && <PartnerView       jobs={regionJobs}     partners={regionPartners} region={activeRegion} setJobs={setJobsDB} onboardingProgress={onboardingProgress} onExitRole={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
         {tab==="salesview"      && <SalesView         activeRole={accessRole} onEnterSales={() => setAccessRole("sales")} onExitSales={() => { setAccessRole("admin"); setTab("dashboard"); }} setTab={setTabGuarded} />}
-        {tab==="admins"         && accessRole === "admin" && <AdminAccessManager adminUsers={adminUsers} setAdminUsers={setAdminUsers} />}
+        {tab==="admins"         && !canonicalRole && accessRole === "admin" && <AdminAccessManager adminUsers={adminUsers} setAdminUsers={setAdminUsers} />}
         {tab==="onboarding"     && <Onboarding        partners={regionPartners} setPartners={setPartnersDB} onboardingProgress={onboardingProgress} setOnboardingProgress={setOnboardingProgress} />}
         {tab==="ai"             && <AIScheduling      jobs={regionJobs}     setJobs={setJobsDB}       partners={regionPartners} />}
-        {tab==="tax"            && accessRole === "admin" && <TaxCompliance     region={activeRegion} />}
-        {tab==="db"             && accessRole === "admin" && <DataManager       onReset={handleReset} onExport={handleExport}   activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
-        {tab==="whitelabel"     && accessRole === "admin" && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
-        {tab==="pricing"        && accessRole === "admin" && <PricingStrategy />}
-        {tab==="swot"           && accessRole === "admin" && <SWOTAnalysis />}
+        {tab==="tax"            && (canonicalRole === "owner_admin" || canonicalRole === "office_ops" || accessRole === "admin") && <TaxCompliance region={activeRegion} />}
+        {tab==="db"             && (canonicalRole === "owner_admin" || accessRole === "admin") && <DataManager onReset={handleReset} onExport={handleExport} activityLog={activityLog} dbStatus={dbStatus} lastSaved={lastSaved} />}
+        {tab==="whitelabel"     && (canonicalRole === "owner_admin" || accessRole === "admin") && <WhiteLabel isCloudConnected={isCloudConnected} dbStatus={dbStatus} />}
+        {tab==="pricing"        && (canonicalRole === "owner_admin" || accessRole === "admin") && <PricingStrategy />}
+        {tab==="swot"           && (canonicalRole === "owner_admin" || accessRole === "admin") && <SWOTAnalysis />}
         {tab==="schedule"       && <Suspense fallback={<div style={{ color: C.muted, padding: 16 }}>Loading schedule...</div>}><MySchedule jobs={regionJobs} partners={regionPartners} partner={null} region={activeRegion} S={S} /></Suspense>}
-          {tab==="diagnostic"     && accessRole === "admin" && (
+          {tab==="diagnostic"     && (canonicalRole === "owner_admin" || accessRole === "admin") && (
             <div style={{ maxWidth: 760, margin: "0 auto", padding: 20 }}>
               <div style={{ ...S.card, border: `1px solid ${C.border}` }}>
                 <div style={{ fontSize: 22, fontWeight: 800, marginBottom: 8 }}>🧭 Systems Architect & QA Lead</div>
