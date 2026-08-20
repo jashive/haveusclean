@@ -24,12 +24,12 @@ function redact(value) {
       if (secret) text = text.split(secret).join("[REDACTED]");
     }
   }
-  const share = process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL;
-  if (share) text = text.split(share).join("[REDACTED_PREVIEW_URL]");
-  return text.replace(/([?&](?:_vercel_share|token|access_token|refresh_token|apikey|api_key|key|password|secret)=)[^&#\s"'<>]*/gi, "$1[REDACTED]");
+  const bypass = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (bypass) text = text.split(bypass).join("[REDACTED_VERCEL_BYPASS]");
+  return text.replace(/([?&](?:token|access_token|refresh_token|apikey|api_key|key|password|secret)=)[^&#\s"'<>]*/gi, "$1[REDACTED]");
 }
 function requiredEnv() {
-  const names = ["BASE_URL", "SERVICEOS_OAT_PREVIEW_ACCESS_URL", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];
+  const names = ["BASE_URL", "VERCEL_AUTOMATION_BYPASS_SECRET", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];
   const missing = names.filter((n) => !String(process.env[n] ?? "").trim());
   if (missing.length) fail(`missing required environment variables: ${missing.join(", ")}`, "BLOCKER");
   const base = new URL(process.env.BASE_URL);
@@ -43,14 +43,25 @@ function decodeJwtSub(jwt) {
 }
 
 async function establishPreview(page) {
-  await page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL, { waitUntil: "networkidle" });
   await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });
+  const current = new URL(page.url());
+  assert(current.hostname === EXPECTED_BASE_HOST, `protected Preview navigation escaped authoritative host: ${current.hostname}`, "BLOCKER");
   await page.locator("#sos-email").waitFor({ state: "visible", timeout: 30000 });
   await page.locator("#sos-password").waitFor({ state: "visible", timeout: 30000 });
 }
 
 async function browserLogin(browser, role) {
   const context = await browser.newContext({ ignoreHTTPSErrors: process.env.SERVICEOS_OAT_IGNORE_HTTPS_ERRORS === "true" });
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  await context.route((url) => url.hostname === EXPECTED_BASE_HOST, async (route) => {
+    await route.continue({
+      headers: {
+        ...route.request().headers(),
+        "x-vercel-protection-bypass": bypassSecret,
+        "x-vercel-set-bypass-cookie": "true",
+      },
+    });
+  });
   const page = await context.newPage();
   let apikey = null;
   let jwt = null;
@@ -59,6 +70,9 @@ async function browserLogin(browser, role) {
     if (url.includes(PRODUCTION_REF)) fail("Production Supabase traffic detected", "CRITICAL");
     if (!url.startsWith(SUPABASE_ORIGIN)) return;
     const headers = req.headers();
+    if (headers["x-vercel-protection-bypass"] || headers["x-vercel-set-bypass-cookie"]) {
+      fail("Vercel bypass header leaked to Supabase", "CRITICAL");
+    }
     if (headers.apikey) apikey = headers.apikey;
     const auth = headers.authorization || "";
     if (/^Bearer\s+eyJ/i.test(auth)) {
