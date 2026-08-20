@@ -118,5 +118,21 @@ jobs:
       - name: Reconfirm hosted authentication gate
         run: npm run oat:hosted
 
+      - name: Apply helper-only Preview alias correction
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("scripts/serviceos-full-live-oat.mjs")
+          text = path.read_text()
+          old = 'await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });'
+          new = 'await page.goto(new URL(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL).origin, { waitUntil: "networkidle" });'
+          if old not in text:
+              raise SystemExit("BLOCKED: expected Preview navigation line not found")
+          path.write_text(text.replace(old, new, 1))
+          print("Preview alias correction applied to ephemeral runner workspace")
+          PY
+
       - name: Run full live ServiceOS OAT
         run: node scripts/serviceos-full-live-oat.mjs
