@@ -1,6 +1,7 @@
 ServiceOS 1.0 full live OAT request
 Authoritative candidate: 433d4f64f6d7ba34863a03b7421e92543dd28818
+Audited helper baseline: 4ce681aac37b896009835c84559b751fff9b9558
 Execution channel: Vercel Protection Bypass for Automation
-Requested: 2026-08-19T21:05:00-07:00
-Attempt: 4 after aligning the OAT with the governed operational-job lifecycle
+Requested: 2026-08-20T11:20:00-07:00
+Attempt: 5 after canonical role, rework, and Wave 5 finance boundary audit
 Purpose: one controlled bypass preflight and, only if it passes, full live OAT.
