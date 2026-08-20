@@ -1,0 +1,98 @@
+name: ServiceOS Hosted OAT
+
+on:
+  push:
+    branches:
+      - serviceos-oat-runner
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hosted-oat:
+    name: Hosted authentication acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      BASE_URL: https://haveusclean-k872t00xl-jasons-projects-54483428.vercel.app
+
+      SERVICEOS_OAT_PREVIEW_ACCESS_URL: ${{ secrets.SERVICEOS_OAT_PREVIEW_ACCESS_URL }}
+
+      SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
+      SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
+
+      SERVICEOS_OAT_OFFICE_EMAIL: serviceos.office.acceptance@example.com
+      SERVICEOS_OAT_OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+
+      SERVICEOS_OAT_WORKER_EMAIL: serviceos.worker.acceptance@example.com
+      SERVICEOS_OAT_WORKER_PASSWORD: ${{ secrets.SERVICEOS_OAT_WORKER_PASSWORD }}
+
+      SERVICEOS_OAT_QA_EMAIL: serviceos.qa.acceptance@example.com
+      SERVICEOS_OAT_QA_PASSWORD: ${{ secrets.SERVICEOS_OAT_QA_PASSWORD }}
+
+      SERVICEOS_OAT_IGNORE_HTTPS_ERRORS: "true"
+
+    steps:
+      - name: Checkout exact ServiceOS candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 433d4f64f6d7ba34863a03b7421e92543dd28818
+
+      - name: Verify exact candidate
+        shell: bash
+        run: |
+          ACTUAL_SHA="$(git rev-parse HEAD)"
+          EXPECTED_SHA="433d4f64f6d7ba34863a03b7421e92543dd28818"
+
+          echo "Expected SHA: $EXPECTED_SHA"
+          echo "Actual SHA:   $ACTUAL_SHA"
+
+          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+            echo "BLOCKED: incorrect ServiceOS candidate"
+            exit 1
+          fi
+
+      - name: Verify OAT environment
+        shell: bash
+        run: |
+          missing=0
+
+          for name in \
+            BASE_URL \
+            SERVICEOS_OAT_PREVIEW_ACCESS_URL \
+            SERVICEOS_OAT_OWNER_EMAIL \
+            SERVICEOS_OAT_OWNER_PASSWORD \
+            SERVICEOS_OAT_OFFICE_EMAIL \
+            SERVICEOS_OAT_OFFICE_PASSWORD \
+            SERVICEOS_OAT_WORKER_EMAIL \
+            SERVICEOS_OAT_WORKER_PASSWORD \
+            SERVICEOS_OAT_QA_EMAIL \
+            SERVICEOS_OAT_QA_PASSWORD \
+            SERVICEOS_OAT_IGNORE_HTTPS_ERRORS
+          do
+            if [ -z "${!name}" ]; then
+              echo "$name=MISSING"
+              missing=1
+            else
+              echo "$name=SET"
+            fi
+          done
+
+          exit "$missing"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run hosted OAT
+        run: npm run oat:hosted
