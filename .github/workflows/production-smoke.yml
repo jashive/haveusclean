@@ -1,0 +1,35 @@
+name: Production Dark-Mode Smoke
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/production-smoke-test.mjs'
+      - '.github/workflows/production-smoke.yml'
+  workflow_dispatch:
+
+jobs:
+  smoke:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Production dark-mode smoke
+        env:
+          PRODUCTION_BASE_URL: https://haveusclean.com
+        run: node scripts/production-smoke-test.mjs
