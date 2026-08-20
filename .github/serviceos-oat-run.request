@@ -1,7 +1,8 @@
 ServiceOS 1.0 controlled acceptance request
 Authoritative candidate: 03eacdf5917ed399e942764a8e001f2cd61b4f3e
-Current PR Preview: https://haveusclean-594f3hubv-jasons-projects-54483428.vercel.app
-Execution channel: Vercel Protection Bypass for Automation
-Requested: 2026-08-20T11:50:00-07:00
-Mode: preflight
-Purpose: verify candidate provenance, exact current Preview reachability, and Wave 5 server configuration readiness before any additional full OAT lifecycle run.
+Execution channel: isolated GitHub Actions local runner
+Local application origin: http://localhost:3000
+Acceptance Supabase: hqeamecwdsrjfjybrsox
+Requested: 2026-08-20T11:56:00-07:00
+Mode: full
+Purpose: build and serve the Vite/React candidate locally, mount the Wave 5 server API locally, and execute the full Wave 1-6 OAT against the approved real Acceptance Supabase database before PR #8 merge readiness.
