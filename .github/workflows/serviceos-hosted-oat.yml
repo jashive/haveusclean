@@ -63,7 +63,7 @@ jobs:
 
           for path in "${changed[@]}"; do
             case "$path" in
-              .github/workflows/serviceos-hosted-oat.yml|.github/serviceos-oat-run.request|scripts/serviceos-full-live-oat.mjs|vercel.json)
+              .github/workflows/serviceos-hosted-oat.yml|.github/serviceos-oat-run.request|scripts/serviceos-full-live-oat.mjs)
                 ;;
               *)
                 echo "BLOCKED: non-OAT helper change detected: $path"
@@ -71,11 +71,6 @@ jobs:
                 ;;
             esac
           done
-
-          if ! grep -q '"serviceos-oat-runner": false' vercel.json; then
-            echo "BLOCKED: helper-branch Vercel auto-deployment suppression is missing"
-            exit 1
-          fi
 
           echo "Authoritative application candidate remains: $EXPECTED_SHA"
 
@@ -124,7 +119,6 @@ jobs:
             --max-time 20 \
             --max-redirs 0 \
             --header "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
-            --header "x-vercel-set-bypass-cookie: true" \
             "$BASE_URL/")"
 
           echo "Automation-bypass protected Preview HTTP status: $status"
