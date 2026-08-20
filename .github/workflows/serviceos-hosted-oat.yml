@@ -9,7 +9,6 @@ on:
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
   full-live-oat:
@@ -19,6 +18,7 @@ jobs:
 
     env:
       BASE_URL: https://haveusclean-k872t00xl-jasons-projects-54483428.vercel.app
+      VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
       SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
@@ -82,6 +82,7 @@ jobs:
 
           for name in \
             BASE_URL \
+            VERCEL_AUTOMATION_BYPASS_SECRET \
             SERVICEOS_OAT_OWNER_EMAIL \
             SERVICEOS_OAT_OWNER_PASSWORD \
             SERVICEOS_OAT_OFFICE_EMAIL \
@@ -102,23 +103,12 @@ jobs:
 
           exit "$missing"
 
-      - name: Request short-lived GitHub OIDC token
-        id: oidc
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken();
-            core.setSecret(token);
-            core.setOutput('token', token);
-
-      - name: Cheap protected Preview OIDC preflight
+      - name: Cheap protected Preview automation-bypass preflight
         shell: bash
-        env:
-          VERCEL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
         run: |
           set -euo pipefail
-          headers="$RUNNER_TEMP/serviceos-oidc-headers.txt"
-          body="$RUNNER_TEMP/serviceos-oidc-body.html"
+          headers="$RUNNER_TEMP/serviceos-bypass-headers.txt"
+          body="$RUNNER_TEMP/serviceos-bypass-body.html"
 
           status="$(curl \
             --silent \
@@ -128,23 +118,24 @@ jobs:
             --write-out '%{http_code}' \
             --max-time 20 \
             --max-redirs 0 \
-            --header "x-vercel-trusted-oidc-idp-token: $VERCEL_OIDC_TOKEN" \
+            --header "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            --header "x-vercel-set-bypass-cookie: true" \
             "$BASE_URL/")"
 
-          echo "OIDC protected Preview HTTP status: $status"
+          echo "Automation-bypass protected Preview HTTP status: $status"
 
           if [ "$status" != "200" ]; then
-            echo "BLOCKED: GitHub OIDC is not authorized for the exact PR #8 Preview"
+            echo "BLOCKED: Vercel Protection Bypass for Automation did not authorize the exact PR #8 Preview"
             grep -iE '^(location|content-type|x-vercel-error):' "$headers" || true
             exit 1
           fi
 
           if grep -qiE 'vercel\.com/sso-api|_vercel_sso_nonce' "$headers" "$body"; then
-            echo "BLOCKED: exact Preview still resolved to Vercel SSO after OIDC authentication"
+            echo "BLOCKED: exact Preview still resolved to Vercel SSO after automation bypass"
             exit 1
           fi
 
-          echo "PASS: GitHub OIDC can reach the exact protected PR #8 Preview"
+          echo "PASS: automation bypass can reach the exact protected PR #8 Preview"
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -152,71 +143,44 @@ jobs:
           node-version: "24"
           cache: npm
 
-      - name: Prepare OIDC-isolated full OAT harness
+      - name: Static verify native automation-bypass harness
         shell: bash
         run: |
           set -euo pipefail
-          python - <<'PY'
-          from pathlib import Path
-
-          path = Path("scripts/serviceos-full-live-oat.mjs")
-          text = path.read_text()
-
-          replacements = [
-              (
-                  '  const share = process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL;',
-                  '  const oidc = process.env.VERCEL_OIDC_TOKEN;',
-              ),
-              (
-                  '  if (share) text = text.split(share).join("[REDACTED_PREVIEW_URL]");',
-                  '  if (oidc) text = text.split(oidc).join("[REDACTED_OIDC_TOKEN]");',
-              ),
-              (
-                  '  const names = ["BASE_URL", "SERVICEOS_OAT_PREVIEW_ACCESS_URL", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
-                  '  const names = ["BASE_URL", "VERCEL_OIDC_TOKEN", ...roles.flatMap((r) => [`SERVICEOS_OAT_${r.toUpperCase()}_EMAIL`, `SERVICEOS_OAT_${r.toUpperCase()}_PASSWORD`])];',
-              ),
-              (
-                  '  await page.goto(process.env.SERVICEOS_OAT_PREVIEW_ACCESS_URL, { waitUntil: "networkidle" });',
-                  '  // GitHub OIDC replaces the temporary Vercel share-link gate.',
-              ),
-              (
-                  '  await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });',
-                  '  await page.goto(process.env.BASE_URL, { waitUntil: "networkidle" });\n  const current = new URL(page.url());\n  assert(current.hostname === EXPECTED_BASE_HOST, `protected Preview navigation escaped authoritative host: ${current.hostname}`, "BLOCKER");',
-              ),
-              (
-                  '  const page = await context.newPage();',
-                  '  const oidcToken = process.env.VERCEL_OIDC_TOKEN;\n  await context.route((url) => url.hostname === EXPECTED_BASE_HOST, async (route) => {\n    await route.continue({ headers: { ...route.request().headers(), "x-vercel-trusted-oidc-idp-token": oidcToken } });\n  });\n  const page = await context.newPage();',
-              ),
-          ]
-
-          for old, new in replacements:
-              count = text.count(old)
-              if count != 1:
-                  raise SystemExit(f"BLOCKED: expected exactly one OIDC patch target, found {count}: {old[:80]}")
-              text = text.replace(old, new, 1)
-
-          path.write_text(text)
-          print("OIDC helper patch applied with all six static assertions satisfied")
-          PY
 
           node --check scripts/serviceos-full-live-oat.mjs
 
-          if grep -q 'SERVICEOS_OAT_PREVIEW_ACCESS_URL' scripts/serviceos-full-live-oat.mjs; then
-            echo "BLOCKED: stale share-link dependency remains in full OAT harness"
+          if grep -qE 'SERVICEOS_OAT_PREVIEW_ACCESS_URL|VERCEL_OIDC_TOKEN|x-vercel-trusted-oidc-idp-token|_vercel_share' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: stale share-link or OIDC dependency remains in full OAT harness"
+            exit 1
+          fi
+
+          if ! grep -q 'VERCEL_AUTOMATION_BYPASS_SECRET' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: automation bypass secret is not required by full OAT harness"
             exit 1
           fi
 
           if ! grep -q 'url.hostname === EXPECTED_BASE_HOST' scripts/serviceos-full-live-oat.mjs; then
-            echo "BLOCKED: host-scoped OIDC routing guard is missing"
+            echo "BLOCKED: exact-host route guard is missing"
             exit 1
           fi
 
-          if ! grep -q 'x-vercel-trusted-oidc-idp-token' scripts/serviceos-full-live-oat.mjs; then
-            echo "BLOCKED: OIDC request header injection is missing"
+          if ! grep -q 'x-vercel-protection-bypass' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: Vercel automation bypass header injection is missing"
             exit 1
           fi
 
-          echo "PASS: OIDC harness is syntactically valid, share-link free, and host-scoped"
+          if ! grep -q 'x-vercel-set-bypass-cookie' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: Vercel bypass-cookie request is missing"
+            exit 1
+          fi
+
+          if grep -q 'extraHTTPHeaders' scripts/serviceos-full-live-oat.mjs; then
+            echo "BLOCKED: global browser headers are prohibited because they could leak the Vercel bypass secret"
+            exit 1
+          fi
+
+          echo "PASS: native bypass harness is syntactically valid, share-link free, OIDC free, and exact-host scoped"
 
       - name: Install dependencies
         run: npm ci
@@ -225,6 +189,4 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run full live ServiceOS OAT
-        env:
-          VERCEL_OIDC_TOKEN: ${{ steps.oidc.outputs.token }}
         run: node scripts/serviceos-full-live-oat.mjs
