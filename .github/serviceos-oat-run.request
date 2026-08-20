@@ -1,6 +1,6 @@
 ServiceOS 1.0 full live OAT request
 Authoritative candidate: 433d4f64f6d7ba34863a03b7421e92543dd28818
 Execution channel: Vercel Protection Bypass for Automation
-Requested: 2026-08-19T20:53:00-07:00
-Attempt: 2 after correcting curl preflight cookie handling
+Requested: 2026-08-19T21:00:00-07:00
+Attempt: 3 after making OAT jurisdiction-aware
 Purpose: one controlled bypass preflight and, only if it passes, full live OAT.
