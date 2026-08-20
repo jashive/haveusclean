@@ -71,3 +71,60 @@ create trigger huc_checklist_actor before insert or update on public.service_che
  for each row execute function public.huc_enforce_serviceos_work_order_actor();
 create trigger huc_qa_inspection_actor before insert or update on public.qa_inspection
  for each row execute function public.huc_enforce_serviceos_work_order_actor();
+
+-- Corrective-action scope validation must be able to validate an assigned worker
+-- without widening QA's direct SELECT visibility on public.worker. The validator is
+-- trigger-only, reads only canonical scope records, and rejects cross-org/BU workers.
+create or replace function public.wave3_validate_ca_scope()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_oj public.operational_job%rowtype;
+  v_wo public.work_order%rowtype;
+  v_qi public.qa_inspection%rowtype;
+  v_aw public.worker%rowtype;
+begin
+  select * into v_oj from public.operational_job where id = new.operational_job_id;
+  if not found then raise exception 'corrective_action: operational_job % not found', new.operational_job_id; end if;
+  if v_oj.organization_id is distinct from new.organization_id then raise exception 'corrective_action: organization_id mismatch'; end if;
+  if v_oj.business_unit_id is distinct from new.business_unit_id then raise exception 'corrective_action: business_unit_id mismatch'; end if;
+
+  if new.work_order_id is not null then
+    select * into v_wo from public.work_order where id = new.work_order_id;
+    if not found then raise exception 'corrective_action: work_order % not found', new.work_order_id; end if;
+    if v_wo.operational_job_id is distinct from new.operational_job_id then
+      raise exception 'corrective_action: work_order does not belong to declared operational_job';
+    end if;
+  end if;
+
+  if new.qa_inspection_id is not null then
+    select * into v_qi from public.qa_inspection where id = new.qa_inspection_id;
+    if not found then raise exception 'corrective_action: qa_inspection % not found', new.qa_inspection_id; end if;
+    if v_qi.operational_job_id is distinct from new.operational_job_id then
+      raise exception 'corrective_action: qa_inspection does not belong to declared operational_job';
+    end if;
+    if new.work_order_id is not null and v_qi.work_order_id is not null
+       and v_qi.work_order_id is distinct from new.work_order_id then
+      raise exception 'corrective_action: qa_inspection does not belong to declared work_order';
+    end if;
+  end if;
+
+  if new.assigned_worker_id is not null then
+    select * into v_aw from public.worker where id = new.assigned_worker_id;
+    if not found then raise exception 'corrective_action: assigned_worker % not found', new.assigned_worker_id; end if;
+    if v_aw.organization_id is distinct from new.organization_id then
+      raise exception 'corrective_action: assigned_worker does not belong to same organization';
+    end if;
+    if v_aw.business_unit_id is distinct from new.business_unit_id then
+      raise exception 'corrective_action: assigned_worker does not belong to same business unit';
+    end if;
+  end if;
+
+  return new;
+end $$;
+
+revoke all on function public.wave3_validate_ca_scope() from public,anon,authenticated;
+grant execute on function public.wave3_validate_ca_scope() to service_role;
