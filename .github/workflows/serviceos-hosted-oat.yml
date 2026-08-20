@@ -1,4 +1,4 @@
-name: ServiceOS Hosted OAT
+name: ServiceOS Full Live OAT
 
 on:
   push:
@@ -10,14 +10,13 @@ permissions:
   contents: read
 
 jobs:
-  hosted-oat:
-    name: Hosted authentication acceptance
+  full-live-oat:
+    name: Full live operational acceptance
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     env:
       BASE_URL: https://haveusclean-k872t00xl-jasons-projects-54483428.vercel.app
-
       SERVICEOS_OAT_PREVIEW_ACCESS_URL: ${{ secrets.SERVICEOS_OAT_PREVIEW_ACCESS_URL }}
 
       SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
@@ -35,24 +34,43 @@ jobs:
       SERVICEOS_OAT_IGNORE_HTTPS_ERRORS: "true"
 
     steps:
-      - name: Checkout exact ServiceOS candidate
+      - name: Checkout isolated OAT helper branch
         uses: actions/checkout@v4
         with:
-          ref: 433d4f64f6d7ba34863a03b7421e92543dd28818
+          ref: serviceos-oat-runner
+          fetch-depth: 0
 
-      - name: Verify exact candidate
+      - name: Verify authoritative candidate and helper isolation
         shell: bash
         run: |
-          ACTUAL_SHA="$(git rev-parse HEAD)"
           EXPECTED_SHA="433d4f64f6d7ba34863a03b7421e92543dd28818"
 
-          echo "Expected SHA: $EXPECTED_SHA"
-          echo "Actual SHA:   $ACTUAL_SHA"
-
-          if [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
-            echo "BLOCKED: incorrect ServiceOS candidate"
+          if ! git cat-file -e "$EXPECTED_SHA^{commit}"; then
+            echo "BLOCKED: authoritative ServiceOS candidate is not present"
             exit 1
           fi
+
+          if ! git merge-base --is-ancestor "$EXPECTED_SHA" HEAD; then
+            echo "BLOCKED: helper branch is not descended from the authoritative candidate"
+            exit 1
+          fi
+
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_SHA"..HEAD)
+          printf 'Helper-only changes:\n'
+          printf '  %s\n' "${changed[@]}"
+
+          for path in "${changed[@]}"; do
+            case "$path" in
+              .github/workflows/serviceos-hosted-oat.yml|scripts/serviceos-full-live-oat.mjs)
+                ;;
+              *)
+                echo "BLOCKED: non-OAT helper change detected: $path"
+                exit 1
+                ;;
+            esac
+          done
+
+          echo "Authoritative application candidate remains: $EXPECTED_SHA"
 
       - name: Verify OAT environment
         shell: bash
@@ -94,5 +112,11 @@ jobs:
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
 
-      - name: Run hosted OAT
+      - name: Run repository regression suite
+        run: npm test
+
+      - name: Reconfirm hosted authentication gate
         run: npm run oat:hosted
+
+      - name: Run full live ServiceOS OAT
+        run: node scripts/serviceos-full-live-oat.mjs
