@@ -156,7 +156,7 @@ jobs:
             echo "BLOCKED: Vercel request-header injection remains in local OAT harness"
             exit 1
           fi
-          echo "PASS: full OAT harness is pinned to localhost and current PR #8 candidate"
+          echo "PASS: full OAT harness is pinned to localhost and the expected candidate SHA"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -307,4 +307,4 @@ jobs:
             echo "BLOCKED: helper provenance changed during OAT"
             exit 1
           fi
-          echo "PASS: PR #8 candidate remained unchanged by local-runner OAT"
+          echo "PASS: expected candidate SHA remained unchanged by local-runner OAT"

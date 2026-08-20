@@ -8,9 +8,16 @@ const workflow = fs.readFileSync(
 );
 
 test("Wave 1-6 local-runner workflow targets the acceptance environment", () => {
-  assert.match(
-    workflow,
-    /full-live-oat:\n(?: {2,}.*\n)* {4}environment: acceptance\n/,
+  const jobStart = workflow.indexOf("  full-live-oat:\n");
+  const stepsStart = workflow.indexOf("\n    steps:\n", jobStart);
+
+  assert.notEqual(jobStart, -1);
+  assert.notEqual(stepsStart, -1);
+
+  const jobHeader = workflow.slice(jobStart, stepsStart);
+
+  assert.ok(
+    jobHeader.includes("    environment: acceptance\n"),
   );
 });
 
