@@ -17,7 +17,8 @@ jobs:
     timeout-minutes: 45
 
     env:
-      BASE_URL: https://haveusclean-k872t00xl-jasons-projects-54483428.vercel.app
+      BASE_URL: https://haveusclean-594f3hubv-jasons-projects-54483428.vercel.app
+      EXPECTED_CANDIDATE_SHA: 03eacdf5917ed399e942764a8e001f2cd61b4f3e
       VERCEL_AUTOMATION_BYPASS_SECRET: ${{ secrets.VERCEL_AUTOMATION_BYPASS_SECRET }}
 
       SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
@@ -45,19 +46,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          EXPECTED_SHA="03eacdf5917ed399e942764a8e001f2cd61b4f3e"
 
-          if ! git cat-file -e "$EXPECTED_SHA^{commit}"; then
+          if ! git cat-file -e "$EXPECTED_CANDIDATE_SHA^{commit}"; then
             echo "BLOCKED: authoritative ServiceOS candidate is not present"
             exit 1
           fi
 
-          if ! git merge-base --is-ancestor "$EXPECTED_SHA" HEAD; then
+          if ! git merge-base --is-ancestor "$EXPECTED_CANDIDATE_SHA" HEAD; then
             echo "BLOCKED: helper branch is not descended from the authoritative candidate"
             exit 1
           fi
 
-          mapfile -t changed < <(git diff --name-only "$EXPECTED_SHA"..HEAD)
+          mapfile -t changed < <(git diff --name-only "$EXPECTED_CANDIDATE_SHA"..HEAD)
           printf 'Helper-only changes:\n'
           printf '  %s\n' "${changed[@]}"
 
@@ -72,7 +72,20 @@ jobs:
             esac
           done
 
-          echo "Authoritative application candidate remains: $EXPECTED_SHA"
+          echo "Authoritative application candidate remains: $EXPECTED_CANDIDATE_SHA"
+
+      - name: Determine OAT mode
+        id: oat_mode
+        shell: bash
+        run: |
+          set -euo pipefail
+          if grep -qiE '^Mode:[[:space:]]*full[[:space:]]*$' .github/serviceos-oat-run.request; then
+            echo "full=true" >> "$GITHUB_OUTPUT"
+            echo "OAT mode: full"
+          else
+            echo "full=false" >> "$GITHUB_OUTPUT"
+            echo "OAT mode: preflight-only"
+          fi
 
       - name: Verify OAT environment
         shell: bash
@@ -82,6 +95,7 @@ jobs:
 
           for name in \
             BASE_URL \
+            EXPECTED_CANDIDATE_SHA \
             VERCEL_AUTOMATION_BYPASS_SECRET \
             SERVICEOS_OAT_OWNER_EMAIL \
             SERVICEOS_OAT_OWNER_PASSWORD \
@@ -136,13 +150,53 @@ jobs:
 
           echo "PASS: automation bypass can reach the exact protected PR #8 Preview"
 
+      - name: Cheap Wave 5 preview-payment readiness preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$RUNNER_TEMP/wave5-preview-payment-preflight.json"
+
+          status="$(curl \
+            --silent \
+            --show-error \
+            --output "$body" \
+            --write-out '%{http_code}' \
+            --max-time 20 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --header "x-vercel-protection-bypass: $VERCEL_AUTOMATION_BYPASS_SECRET" \
+            --data '{}' \
+            "$BASE_URL/api/wave5-preview-payment")"
+
+          echo "Wave 5 preview-payment readiness HTTP status: $status"
+
+          if [ "$status" != "401" ]; then
+            echo "BLOCKED: Wave 5 Preview payment endpoint is not configuration-ready"
+            cat "$body"
+            exit 1
+          fi
+
+          if ! grep -qi 'Authorization' "$body"; then
+            echo "BLOCKED: Wave 5 endpoint returned 401 for an unexpected reason"
+            cat "$body"
+            exit 1
+          fi
+
+          echo "PASS: Wave 5 endpoint cleared environment, feature-flag, Supabase URL/anon, and service-role readiness checks"
+
+      - name: Preflight-only completion
+        if: steps.oat_mode.outputs.full != 'true'
+        run: echo "PASS: cheap ServiceOS preflight completed; full OAT intentionally skipped"
+
       - name: Setup Node
+        if: steps.oat_mode.outputs.full == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
 
       - name: Static verify native automation-bypass harness
+        if: steps.oat_mode.outputs.full == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -182,10 +236,13 @@ jobs:
           echo "PASS: native bypass harness is syntactically valid, share-link free, OIDC free, and exact-host scoped"
 
       - name: Install dependencies
+        if: steps.oat_mode.outputs.full == 'true'
         run: npm ci
 
       - name: Install Chromium
+        if: steps.oat_mode.outputs.full == 'true'
         run: npx playwright install --with-deps chromium
 
       - name: Run full live ServiceOS OAT
+        if: steps.oat_mode.outputs.full == 'true'
         run: node scripts/serviceos-full-live-oat.mjs
