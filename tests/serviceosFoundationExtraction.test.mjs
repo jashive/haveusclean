@@ -1,0 +1,10 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+const sql=fs.readFileSync('supabase/introspection/serviceos_foundation_schema_extract.sql','utf8');
+const manifest=JSON.parse(fs.readFileSync('supabase/introspection/serviceos_foundation_manifest.json','utf8'));
+const required=['organization','jurisdiction','business_unit','app_user','app_role','user_membership','customer','contact','service_location','worker','service_request','opportunity','estimate','pricing_snapshot','quote','quote_version','quote_response','conversion_record','job_handoff'];
+test('foundation boundary contains every required object',()=>required.forEach(x=>assert.ok(manifest.foundation.includes(x),x)));
+test('extractor opens a read-only transaction and rolls back',()=>{assert.match(sql,/BEGIN TRANSACTION READ ONLY/i);assert.match(sql,/ROLLBACK;/i)});
+test('extractor captures complete structural categories',()=>['column','constraint','index','policy','grant','trigger','function','view'].forEach(x=>assert.match(sql,new RegExp(`'${x}' AS section`))));
+test('extractor never queries application rows',()=>{assert.doesNotMatch(sql,/SELECT\s+\*\s+FROM\s+public\./i);assert.doesNotMatch(sql,/\b(COPY|UPDATE|DELETE\s+FROM|ALTER\s+TABLE|DROP\s+TABLE|TRUNCATE)\b/i)});
+test('manifest excludes legacy huc tables from foundation',()=>assert.equal(manifest.foundation.some(x=>x.startsWith('huc_')),false));
+test('extractor contains no project refs or credentials',()=>{assert.doesNotMatch(sql,/opazwghrohmfykzxxsjk|hqeamecwdsrjfjybrsox|eyJhbGci/i)});

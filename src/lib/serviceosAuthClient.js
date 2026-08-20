@@ -40,6 +40,20 @@ function storeSession({ access_token, refresh_token, expires_at, expires_in, use
   return payload;
 }
 
+async function parseAuthResponse(response) {
+  const text = await response.text();
+  if (!text) return {};
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
+
+function authErrorMessage(data, fallback) {
+  return data?.message ?? data?.error_description ?? data?.msg ?? fallback;
+}
+
 // ── Auth API ─────────────────────────────────────────────────────────────────
 
 export async function signInWithPassword(email, password) {
@@ -53,10 +67,10 @@ export async function signInWithPassword(email, password) {
     body: JSON.stringify({ email, password }),
   });
 
-  const data = await response.json();
+  const data = await parseAuthResponse(response);
 
   if (!response.ok) {
-    throw new Error(data?.error_description ?? data?.msg ?? "Sign-in failed");
+    throw new Error(authErrorMessage(data, "Sign-in failed"));
   }
 
   return storeSession(data);
@@ -73,11 +87,11 @@ export async function refreshSession(refreshToken) {
     body: JSON.stringify({ refresh_token: refreshToken }),
   });
 
-  const data = await response.json();
+  const data = await parseAuthResponse(response);
 
   if (!response.ok) {
     clearSession();
-    throw new Error(data?.error_description ?? data?.msg ?? "Session refresh failed");
+    throw new Error(authErrorMessage(data, "Session refresh failed"));
   }
 
   return storeSession(data);
@@ -220,23 +234,25 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: missing credentials");
   }
 
-  // 1. Validate organization HUC
+  // 1. Resolve exactly one organization through RLS. Organization identity is
+  //    data-driven so an isolated acceptance organization does not need to
+  //    impersonate a production organization code.
   const orgRes = await authenticatedRestFetch(
-    "organization?select=id,code,name&code=eq.HUC&limit=1",
+    "organization?select=id,code,name&order=id.asc&limit=2",
     access_token
   );
   if (!orgRes || !orgRes.ok) {
     throw new Error("ServiceOS access denied: organization validation failed");
   }
   const orgs = await orgRes.json();
-  if (!Array.isArray(orgs) || orgs.length === 0) {
-    throw new Error("ServiceOS access denied: organization HUC not found");
+  if (!Array.isArray(orgs) || orgs.length !== 1) {
+    throw new Error(`ServiceOS access denied: expected exactly one visible organization, found ${Array.isArray(orgs) ? orgs.length : "error"}`);
   }
   const orgId = orgs[0].id;
 
-  // 2. Validate both business units HUC-ON and HUC-AZ (include jurisdiction_id for service_location)
+  // 2. Resolve the authenticated identity's visible business-unit scope.
   const buRes = await authenticatedRestFetch(
-    `business_unit?select=id,code,name,jurisdiction_id&code=in.(HUC-ON,HUC-AZ)&order=code.asc`,
+    `business_unit?select=id,organization_id,code,name,jurisdiction_id&organization_id=eq.${encodeURIComponent(orgId)}&order=code.asc`,
     access_token
   );
   if (!buRes || !buRes.ok) {
@@ -247,13 +263,10 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: business unit validation failed");
   }
   const buCodes = bus.map((b) => b.code);
-  if (!buCodes.includes("HUC-ON") || !buCodes.includes("HUC-AZ")) {
-    throw new Error(
-      `ServiceOS access denied: required business units not found (found: ${buCodes.join(", ")})`
-    );
+  if (!buCodes.length || bus.some((businessUnit) => businessUnit.organization_id !== orgId)) {
+    throw new Error("ServiceOS access denied: visible business-unit scope is invalid");
   }
 
-  // Build a lookup map so Wave 2 can resolve HUC-ON / HUC-AZ → canonical UUID + jurisdiction
   const businessUnitByCode = {};
   for (const bu of bus) {
     businessUnitByCode[bu.code] = {
@@ -263,10 +276,9 @@ export async function validateServiceOSContext(session) {
       jurisdictionId: bu.jurisdiction_id ?? null,
     };
   }
-  // Primary business unit defaults to HUC-ON (Ontario pilot)
-  const primaryBusinessUnitId = businessUnitByCode["HUC-ON"]?.id ?? null;
-  // Jurisdiction for HUC-ON pilot service locations — derived from live DB, never invented
-  const primaryJurisdictionId = businessUnitByCode["HUC-ON"]?.jurisdictionId ?? null;
+  const primaryBusinessUnit = businessUnitByCode["HUC-ON"] ?? bus[0];
+  const primaryBusinessUnitId = primaryBusinessUnit?.id ?? null;
+  const primaryJurisdictionId = primaryBusinessUnit?.jurisdictionId ?? primaryBusinessUnit?.jurisdiction_id ?? null;
 
   // 3. Validate exactly one active app_user matching the auth user ID
   const userRes = await authenticatedRestFetch(
@@ -291,35 +303,42 @@ export async function validateServiceOSContext(session) {
   }
   const appUserId = appUser.id;
 
-  // 4. Validate app_role with code = owner_admin
+  // 4. Resolve the user's one active canonical role. Never infer a role from
+  //    the client, and reject mixed-role memberships.
   const roleRes = await authenticatedRestFetch(
-    "app_role?select=id,code,name&code=eq.owner_admin&limit=1",
+    "app_role?select=id,code,name&code=in.(owner_admin,office_ops,worker,qa)",
     access_token
   );
   if (!roleRes || !roleRes.ok) {
     throw new Error("ServiceOS access denied: role validation failed");
   }
   const roles = await roleRes.json();
-  if (!Array.isArray(roles) || roles.length === 0) {
-    throw new Error("ServiceOS access denied: owner_admin role not found");
+  if (!Array.isArray(roles) || roles.length !== 4) {
+    throw new Error("ServiceOS access denied: canonical roles are incomplete");
   }
-  const roleId = roles[0].id;
 
-  // 5. Validate active user_membership: matching app_user, org, and owner_admin role
-  //    Enterprise-wide memberships have business_unit_id null — that is valid.
+  // 5. Validate active user_membership: matching app_user and organization.
   const memberRes = await authenticatedRestFetch(
-    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&role_id=eq.${encodeURIComponent(roleId)}`,
+    `user_membership?select=id,app_user_id,organization_id,business_unit_id,role_id,status&app_user_id=eq.${encodeURIComponent(appUserId)}&organization_id=eq.${encodeURIComponent(orgId)}&status=eq.active`,
     access_token
   );
   if (!memberRes || !memberRes.ok) {
     throw new Error("ServiceOS access denied: membership validation failed");
   }
   const memberships = await memberRes.json();
-  const activeMembership = Array.isArray(memberships)
-    ? memberships.find((m) => m.status === "active")
-    : null;
-  if (!activeMembership) {
-    throw new Error("ServiceOS access denied: active owner_admin membership not found");
+  const activeMemberships = Array.isArray(memberships) ? memberships.filter((m) => m.status === "active") : [];
+  if (!activeMemberships.length) {
+    throw new Error("ServiceOS access denied: active canonical membership not found");
+  }
+  const roleById = new Map(roles.map((role) => [role.id, role.code]));
+  const roleCodes = new Set(activeMemberships.map((membership) => roleById.get(membership.role_id)));
+  if (roleCodes.size !== 1 || roleCodes.has(undefined)) throw new Error("ServiceOS access denied: mixed or unsupported canonical role");
+  const roleCode = [...roleCodes][0];
+  const roleId = roles.find((role) => role.code === roleCode).id;
+
+  const visibleBusinessUnitIds = new Set(bus.map((businessUnit) => businessUnit.id));
+  if (activeMemberships.some((membership) => membership.business_unit_id && !visibleBusinessUnitIds.has(membership.business_unit_id))) {
+    throw new Error("ServiceOS access denied: membership business unit is outside visible scope");
   }
 
   // 6. Authenticated customer SELECT (zero rows is acceptable; auth failure is not)
@@ -331,25 +350,20 @@ export async function validateServiceOSContext(session) {
     throw new Error("ServiceOS access denied: customer access validation failed");
   }
 
-  // All checks passed
   return {
     orgId,
     appUserId,
     roleId,
-    // Backward-compat: array of codes for any code still checking businessUnits
+    roleCode,
     businessUnits: buCodes,
-    // Structured records keyed by code for UUID resolution (HUC-ON, HUC-AZ → id + jurisdictionId)
     businessUnitByCode,
-    // Full array of { id, code, name, jurisdictionId } records
     businessUnitRecords: bus.map((b) => ({
       id: b.id,
       code: b.code,
       name: b.name,
       jurisdictionId: b.jurisdiction_id ?? null,
     })),
-    // Primary canonical business_unit.id (HUC-ON pilot default)
     primaryBusinessUnitId,
-    // HUC-ON jurisdiction_id for service_location — from live DB, never invented
     primaryJurisdictionId,
   };
 }
