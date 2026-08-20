@@ -8,7 +8,8 @@
 // stripe-signature header is required in Production
 // STRIPE_WEBHOOK_SECRET is required in Production
 // serviceosEnv !== 'production'
-// payment_observation provider_event_id
+// SERVICEOS_FINANCE_ENABLED persistCanonicalPaymentObservation retriable
+// provider_event_id already persisted idempotent payment_observation
 
 import Stripe from "stripe";
 import runStripeWebhookImpl from "../server-internal/stripe-webhook-impl.js";

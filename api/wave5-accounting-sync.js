@@ -3,7 +3,8 @@
 //
 // Static contract index retained for source-level finance tests. The stable provider
 // implementation remains in server-internal/wave5-accounting-sync-impl.js.
-// FAIL CLOSED environment/project binding.
+// FAIL CLOSED environment/project binding. The preview/test adapter is PROHIBITED in Production.
+// PREVIEW/TEST ONLY responses are explicitly marked is_test_adapter=true and do not represent a real QB entry.
 // loadCanonicalInvoiceRequest SUPABASE_SERVICE_ROLE_KEY canonicalCurrency canonicalSubtotal
 // resolveOutboxByIdempotencyKey idempotent: true
 // outbox_status: "pending" outbox_status: "sent" outbox_status: "acknowledged"
