@@ -1,7 +1,7 @@
-ServiceOS 1.0 full live OAT request
+ServiceOS 1.0 controlled acceptance request
 Authoritative candidate: 03eacdf5917ed399e942764a8e001f2cd61b4f3e
-Audited helper baseline: a8e68734378b4495b046dfa218dee702527584de
+Current PR Preview: https://haveusclean-594f3hubv-jasons-projects-54483428.vercel.app
 Execution channel: Vercel Protection Bypass for Automation
-Requested: 2026-08-20T11:42:00-07:00
-Attempt: 6 after corrective-action worker-scope validator hardening
-Purpose: confirm the Acceptance-only wave3_validate_ca_scope fix and continue the full controlled live OAT through QA, finance, idempotency, KPI, and post-run integrity.
+Requested: 2026-08-20T11:50:00-07:00
+Mode: preflight
+Purpose: verify candidate provenance, exact current Preview reachability, and Wave 5 server configuration readiness before any additional full OAT lifecycle run.
