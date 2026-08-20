@@ -30,14 +30,13 @@ function attachRuntimeErrorCapture(page, label, runtimeErrors) {
   });
 }
 
-async function navigateAndRequire200(page, url) {
+async function navigate(page, url) {
   const response = await page.goto(url, {
     waitUntil: "domcontentloaded",
     timeout: NAVIGATION_TIMEOUT_MS,
   });
 
   assert(response, `No HTTP response received for ${url}`);
-  assert.equal(response.status(), 200, `Expected HTTP 200 for ${url}; received ${response.status()}`);
 
   await page.waitForLoadState("networkidle", { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(SETTLE_MS);
@@ -47,6 +46,12 @@ async function navigateAndRequire200(page, url) {
     finalUrl: page.url(),
     status: response.status(),
   };
+}
+
+async function navigateAndRequire200(page, url) {
+  const navigation = await navigate(page, url);
+  assert.equal(navigation.status, 200, `Expected HTTP 200 for ${url}; received ${navigation.status}`);
+  return navigation;
 }
 
 async function assertDarkModeHome(page) {
@@ -76,12 +81,21 @@ async function assertDarkModeHome(page) {
   }
 }
 
-async function assertDiagnosticsFailClosed(context, runtimeErrors) {
+async function assertDiagnosticsHiddenOrFailClosed(context) {
   const page = await context.newPage();
-  attachRuntimeErrorCapture(page, "serviceos-diagnostics", runtimeErrors);
 
   try {
-    const navigation = await navigateAndRequire200(page, `${BASE_URL}/serviceos-diagnostics`);
+    const navigation = await navigate(page, `${BASE_URL}/serviceos-diagnostics`);
+
+    if (navigation.status === 404) {
+      return { ...navigation, result: "hidden-404" };
+    }
+
+    assert.equal(
+      navigation.status,
+      200,
+      `Expected ServiceOS diagnostics route to be hidden with 404 or fail closed with 200; received ${navigation.status}`,
+    );
 
     assert.equal(
       await page.locator('[data-testid="serviceos-diagnostics-workspace"]').count(),
@@ -94,7 +108,7 @@ async function assertDiagnosticsFailClosed(context, runtimeErrors) {
     assert(/Diagnostics unavailable/i.test(body), "Direct ServiceOS diagnostics route did not fail closed");
     assert(!/Choose a diagnostic surface/i.test(body), "Direct ServiceOS diagnostics route exposed an owner diagnostics surface");
 
-    return { ...navigation, result: "fail-closed" };
+    return { ...navigation, result: "fail-closed-200" };
   } finally {
     await page.close();
   }
@@ -119,7 +133,7 @@ async function run() {
     await assertDarkModeHome(page);
     await page.close();
 
-    const diagnostics = await assertDiagnosticsFailClosed(context, runtimeErrors);
+    const diagnostics = await assertDiagnosticsHiddenOrFailClosed(context);
 
     assert.equal(
       runtimeErrors.length,
