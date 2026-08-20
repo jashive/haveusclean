@@ -1,4 +1,5 @@
 ServiceOS 1.0 full live OAT request
-Requested after GitHub Actions Trusted Source was scoped to jashive/haveusclean, serviceos-oat-runner, Preview only.
 Authoritative candidate: 433d4f64f6d7ba34863a03b7421e92543dd28818
-Purpose: one controlled OIDC preflight and, only if it passes, full live OAT.
+Execution channel: Vercel Protection Bypass for Automation
+Requested: 2026-08-19T20:40:00-07:00
+Purpose: one controlled bypass preflight and, only if it passes, full live OAT.
