@@ -172,6 +172,10 @@ jobs:
           if (!source.includes(staleRoleWait)) throw new Error('Waves 3-5 stale role-text wait not found');
           source = source.replace(staleRoleWait, stableRoleWait);
 
+          const generatedProfitField = ', gross_contribution: 200, gross_margin_percent: 66.6667, source_lineage:';
+          if (!source.includes(generatedProfitField)) throw new Error('Generated gross_contribution OAT payload marker not found');
+          source = source.replace(generatedProfitField, ', gross_margin_percent: 66.6667, source_lineage:');
+
           const routeStart = source.indexOf('  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;');
           const routeEnd = source.indexOf('  const page = await context.newPage();', routeStart);
           if (routeStart < 0 || routeEnd < 0) throw new Error('expected Vercel route-injection block not found');
@@ -191,7 +195,8 @@ jobs:
           grep -q 'candidateSha: "2350d6d884fdf3bde48316dbb4ccff234a3adefe"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
-          echo "PASS: exact PR17 Wave 2-5 harness prepared; stable canonical login and Wave 2 signals enabled; Wave 6 excluded"
+          ! grep -q 'gross_contribution: 200' scripts/serviceos-wave2-5-live-oat.mjs
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; generated profitability column omitted; Wave 6 excluded"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
