@@ -59,6 +59,80 @@ jobs:
           done
           exit "$missing"
 
+      - name: Diagnose office_ops canonical auth context before browser work
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          OFFICE_EMAIL: ${{ env.SERVICEOS_OAT_OFFICE_EMAIL }}
+          OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+          const anon = String(process.env.SUPABASE_ANON_KEY || '');
+          const email = String(process.env.OFFICE_EMAIL || '');
+          const password = String(process.env.OFFICE_PASSWORD || '');
+          const expected = 'https://hqeamecwdsrjfjybrsox.supabase.co';
+          if (url !== expected || url.includes('opazwghrohmfykzxxsjk')) throw new Error('Acceptance auth diagnostic target is not the approved isolated project');
+          if (!anon || !email || !password) throw new Error('Acceptance auth diagnostic inputs are missing');
+
+          async function jsonSafe(response) {
+            const text = await response.text();
+            if (!text) return null;
+            try { return JSON.parse(text); } catch { return null; }
+          }
+          function message(body, fallback) {
+            return body?.message || body?.error_description || body?.msg || fallback;
+          }
+          const auth = await fetch(`${url}/auth/v1/token?grant_type=password`, {
+            method: 'POST',
+            headers: { apikey: anon, 'content-type': 'application/json' },
+            body: JSON.stringify({ email, password }),
+          });
+          const authBody = await jsonSafe(auth);
+          if (!auth.ok) throw new Error(`office_ops password exchange failed HTTP ${auth.status}: ${message(authBody, 'authentication rejected')}`);
+          const token = authBody?.access_token;
+          const authUserId = authBody?.user?.id;
+          if (!token || !authUserId) throw new Error('office_ops password exchange returned no usable session');
+
+          const headers = { apikey: anon, authorization: `Bearer ${token}`, 'content-type': 'application/json' };
+          async function read(path, label) {
+            const response = await fetch(`${url}/rest/v1/${path}`, { headers });
+            const body = await jsonSafe(response);
+            if (!response.ok) throw new Error(`${label} failed HTTP ${response.status}: ${message(body, 'REST validation rejected')}`);
+            return body;
+          }
+
+          const orgs = await read('organization?select=id,code,name&order=id.asc&limit=2', 'organization validation');
+          if (!Array.isArray(orgs) || orgs.length !== 1) throw new Error(`organization validation expected 1 row, found ${Array.isArray(orgs) ? orgs.length : 'invalid response'}`);
+          const orgId = orgs[0].id;
+          const bus = await read(`business_unit?select=id,organization_id,code,name,jurisdiction_id&organization_id=eq.${encodeURIComponent(orgId)}&order=code.asc`, 'business unit validation');
+          if (!Array.isArray(bus) || bus.length < 1) throw new Error('business unit validation returned no visible rows');
+          const appUsers = await read(`app_user?select=id,auth_user_id,status&auth_user_id=eq.${encodeURIComponent(authUserId)}`, 'app_user validation');
+          if (!Array.isArray(appUsers) || appUsers.length !== 1 || appUsers[0]?.status !== 'active') throw new Error('app_user validation did not resolve exactly one active identity');
+          const roles = await read('app_role?select=id,code&code=in.(owner_admin,office_ops,worker,qa)', 'canonical role validation');
+          if (!Array.isArray(roles) || roles.length !== 4) throw new Error(`canonical role validation expected 4 roles, found ${Array.isArray(roles) ? roles.length : 'invalid response'}`);
+          const memberships = await read(`user_membership?select=role_id,status&app_user_id=eq.${encodeURIComponent(appUsers[0].id)}&organization_id=eq.${encodeURIComponent(orgId)}&status=eq.active`, 'membership validation');
+          if (!Array.isArray(memberships) || memberships.length < 1) throw new Error('membership validation returned no active rows');
+          const roleById = new Map(roles.map((role) => [role.id, role.code]));
+          const roleCodes = [...new Set(memberships.map((membership) => roleById.get(membership.role_id)))];
+          if (roleCodes.length !== 1 || roleCodes[0] !== 'office_ops') throw new Error(`membership role mismatch: expected office_ops, found ${roleCodes.filter(Boolean).join(',') || 'unresolved'}`);
+          await read('customer?select=id&limit=1', 'customer access validation');
+
+          console.log(JSON.stringify({
+            status: 'PASS',
+            check: 'office_ops-direct-auth-and-canonical-context',
+            organizationCount: orgs.length,
+            businessUnitCount: bus.length,
+            appUserCount: appUsers.length,
+            canonicalRoleCount: roles.length,
+            activeMembershipCount: memberships.length,
+            resolvedRole: roleCodes[0],
+            customerAccess: 'PASS',
+          }));
+          NODE
+
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
@@ -100,6 +174,11 @@ jobs:
           const protocolGuard = 'assert.equal(target.protocol, "https:", "Wave 2 smoke target must use HTTPS");';
           if (!wave2.includes(protocolGuard)) throw new Error('Wave 2 HTTPS guard not found');
           wave2 = wave2.replace(protocolGuard, 'assert(target.protocol === "https:" || (target.protocol === "http:" && target.hostname === "localhost"), "Wave 2 smoke target must use HTTPS or isolated localhost HTTP");');
+
+          const loginMarker = '  await page.locator(`[data-revenue-authorized]`).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });';
+          const loginReplacement = `  try {\n    await page.locator('[data-canonical-workspace="true"]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n  } catch (error) {\n    const bodyText = redact(await page.locator("body").innerText().catch(() => ""));\n    throw new Error("Canonical workspace did not render after " + expectedRole + " sign-in. Sanitized UI state: " + bodyText.slice(0, 800) + "\\n" + redact(error));\n  }\n  await page.locator('[data-revenue-authorized]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });`;
+          if (!wave2.includes(loginMarker)) throw new Error('Wave 2 login marker wait not found');
+          wave2 = wave2.replace(loginMarker, loginReplacement);
           fs.writeFileSync(wave2Path, wave2);
 
           const path = 'scripts/serviceos-wave2-5-live-oat.mjs';
@@ -135,7 +214,8 @@ jobs:
           grep -q 'candidateSha: "2350d6d884fdf3bde48316dbb4ccff234a3adefe"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
-          echo "PASS: exact PR17 Wave 2-5 harness prepared; Wave 6 excluded"
+          grep -q 'data-canonical-workspace' scripts/wave2-revenue-smoke-test.mjs
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; Wave 6 excluded; login diagnostics enabled"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
