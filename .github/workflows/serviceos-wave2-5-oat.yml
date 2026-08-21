@@ -229,6 +229,11 @@ jobs:
           const ownerSuccessReplacement = `    try {\n      await page.locator('[data-testid="wave2-created-summary"]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n    } catch (error) {\n      const panelText = redact(await panel.innerText().catch(() => ""));\n      throw new Error("Wave 2 owner lifecycle did not expose the created-record summary. Sanitized pilot state: " + panelText.slice(0, 1600) + "\\n" + redact(error));\n    }`;
           if (!wave2.includes(ownerSuccessMarker)) throw new Error('Wave 2 owner success wait marker not found');
           wave2 = wave2.replace(ownerSuccessMarker, ownerSuccessReplacement);
+
+          const cleanupMarker = '    await page.getByText("Pilot records cleaned up", { exact: true }).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n    assert.equal(await page.locator(\'[data-testid="wave2-created-summary"]\').count(), 0, "Synthetic records remained in UI after cleanup");';
+          const cleanupReplacement = '    await page.locator(\'[data-testid="wave2-created-summary"]\').waitFor({ state: "detached", timeout: DEFAULT_TIMEOUT_MS });\n    assert.equal(await page.locator(\'[data-testid="wave2-created-summary"]\').count(), 0, "Synthetic record summary remained in UI after cleanup");';
+          if (!wave2.includes(cleanupMarker)) throw new Error('Wave 2 cleanup assertion marker not found');
+          wave2 = wave2.replace(cleanupMarker, cleanupReplacement);
           fs.writeFileSync(wave2Path, wave2);
 
           const path = 'scripts/serviceos-wave2-5-live-oat.mjs';
@@ -266,7 +271,7 @@ jobs:
           grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'data-canonical-workspace' scripts/wave2-revenue-smoke-test.mjs
           grep -q 'wave2-created-summary' scripts/wave2-revenue-smoke-test.mjs
-          echo "PASS: exact PR17 Wave 2-5 harness prepared; stable Wave 2 completion signal enabled; Wave 6 excluded"
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; stable Wave 2 completion and cleanup signals enabled; Wave 6 excluded"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
@@ -288,6 +293,36 @@ jobs:
           set -euo pipefail
           server="$RUNNER_TEMP/serviceos-wave2-5-server.mjs"
           log="$RUNNER_TEMP/serviceos-wave2-5-server.log"
+          admin_cleanup="$RUNNER_TEMP/serviceos-wave2-admin-cleanup.mjs"
+          cat > "$admin_cleanup" <<'NODE'
+          const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+          const serviceKey = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+          const expected = 'https://hqeamecwdsrjfjybrsox.supabase.co';
+          if (url !== expected || url.includes('opazwghrohmfykzxxsjk')) throw new Error('Admin cleanup target is not approved isolated Acceptance');
+          if (!serviceKey) throw new Error('Acceptance service-role key missing');
+          const headers = { apikey: serviceKey, authorization: `Bearer ${serviceKey}`, 'content-type': 'application/json' };
+          async function json(path, options = {}) {
+            const response = await fetch(`${url}/rest/v1/${path}`, { headers: { ...headers, ...(options.headers || {}) }, ...options });
+            const text = await response.text();
+            let body = null;
+            if (text) { try { body = JSON.parse(text); } catch {} }
+            if (!response.ok) throw new Error(`Acceptance admin cleanup failed HTTP ${response.status}: ${body?.message || body?.error || text || 'request rejected'}`);
+            return body;
+          }
+          const customers = await json(`customer?select=id,display_name,metadata&display_name=eq.${encodeURIComponent('[PILOT] Synthetic Customer')}`);
+          const pilotCustomers = (Array.isArray(customers) ? customers : []).filter((row) => row?.metadata?.synthetic === true && row?.metadata?.source === 'pilot_ui');
+          for (const customer of pilotCustomers) {
+            const id = encodeURIComponent(customer.id);
+            await json(`service_location?customer_id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+            await json(`contact?customer_id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+            await json(`customer?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+          }
+          const remaining = await json(`customer?select=id,metadata&display_name=eq.${encodeURIComponent('[PILOT] Synthetic Customer')}`);
+          const residual = (Array.isArray(remaining) ? remaining : []).filter((row) => row?.metadata?.synthetic === true && row?.metadata?.source === 'pilot_ui');
+          if (residual.length !== 0) throw new Error(`Synthetic pilot CRM teardown incomplete: ${residual.length} customer row(s) remain`);
+          console.log(JSON.stringify({ status: 'PASS', cleanup: 'service-role synthetic CRM teardown', removedCustomers: pilotCustomers.length, target: 'Acceptance-only' }));
+          NODE
+
           cat > "$server" <<'NODE'
           import http from 'node:http';
           import fs from 'node:fs';
@@ -320,8 +355,12 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then echo "BLOCKED: local ServiceOS server did not become healthy"; cat "$log" || true; exit 1; fi
           cat "$RUNNER_TEMP/serviceos-wave2-5-health.json"
+          echo "=== WAVE 2 PRE-RUN SERVICE-ROLE CRM TEARDOWN ==="
+          node "$admin_cleanup"
           echo "=== WAVE 2 UI PLAYWRIGHT + CLEANUP ==="
           npm run smoke:wave2
+          echo "=== WAVE 2 POST-RUN SERVICE-ROLE CRM TEARDOWN ==="
+          node "$admin_cleanup"
           echo "=== WAVES 3-5 ACCEPTANCE TRAIN ==="
           node scripts/serviceos-wave2-5-live-oat.mjs
 
