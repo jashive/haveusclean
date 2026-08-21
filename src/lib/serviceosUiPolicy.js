@@ -1,6 +1,7 @@
 import { CANONICAL_ROLES, workspaceForRole } from "./serviceosRolePolicy.js";
 
 export const SERVICEOS_DIAGNOSTICS_PATH = "/serviceos-diagnostics";
+export const REVENUE_MANAGEMENT_ROLES = Object.freeze(["owner_admin", "office_ops"]);
 
 export function isServiceOSAcceptance(env = {}) {
   return String(env.VITE_SERVICEOS_ENVIRONMENT || "").toLowerCase() === "acceptance";
@@ -12,6 +13,10 @@ export function isCanonicalServiceOSMode(env = {}) {
 
 export function canOpenServiceOSDiagnostics(role) {
   return role === "owner_admin";
+}
+
+export function canManageServiceOSRevenue(role) {
+  return REVENUE_MANAGEMENT_ROLES.includes(role);
 }
 
 export function serviceOSNavigationForRole(role) {
