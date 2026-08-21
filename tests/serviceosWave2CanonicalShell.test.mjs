@@ -8,10 +8,12 @@ const policy = fs.readFileSync("src/lib/serviceosUiPolicy.js", "utf8");
 const revenueClient = fs.readFileSync("src/lib/serviceosRevenueClient.js", "utf8");
 
 test("Wave 2 Revenue is limited to owner_admin and office_ops", () => {
-  assert.match(policy, /REVENUE_MANAGEMENT_ROLES[\s\S]*owner_admin[\s\S]*office_ops/);
+  const allowlist = policy.match(/REVENUE_MANAGEMENT_ROLES\s*=\s*Object\.freeze\((\[[^\]]+\])\)/)?.[1] ?? "";
+  assert.match(allowlist, /owner_admin/);
+  assert.match(allowlist, /office_ops/);
+  assert.doesNotMatch(allowlist, /worker/);
+  assert.doesNotMatch(allowlist, /qa/);
   assert.match(policy, /canManageServiceOSRevenue\(role\)/);
-  assert.doesNotMatch(policy, /REVENUE_MANAGEMENT_ROLES[\s\S]*worker/);
-  assert.doesNotMatch(policy, /REVENUE_MANAGEMENT_ROLES[\s\S]*qa/);
 });
 
 test("canonical shell mounts Revenue lazily only behind both flags and role authorization", () => {
