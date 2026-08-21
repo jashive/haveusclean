@@ -176,6 +176,11 @@ jobs:
           if (!source.includes(generatedProfitField)) throw new Error('Generated gross_contribution OAT payload marker not found');
           source = source.replace(generatedProfitField, ', gross_margin_percent: 66.6667, source_lineage:');
 
+          const profitabilityLineage = 'source_lineage: { invoice_request_id: invoice.id, contractor_payable_id: payable.id, payment_observation_id: payment.id, runId }';
+          const canonicalProfitabilityLineage = 'source_lineage: { invoice_request_id: invoice.id, pricing_snapshot_id: pricing.id, quote_version_id: qv.id, contractor_payable_id: payable.id, payment_observation_id: payment.id, runId }';
+          if (!source.includes(profitabilityLineage)) throw new Error('Profitability source_lineage OAT payload marker not found');
+          source = source.replace(profitabilityLineage, canonicalProfitabilityLineage);
+
           const routeStart = source.indexOf('  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;');
           const routeEnd = source.indexOf('  const page = await context.newPage();', routeStart);
           if (routeStart < 0 || routeEnd < 0) throw new Error('expected Vercel route-injection block not found');
@@ -195,8 +200,9 @@ jobs:
           grep -q 'candidateSha: "2350d6d884fdf3bde48316dbb4ccff234a3adefe"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'pricing_snapshot_id: pricing.id, quote_version_id: qv.id' scripts/serviceos-wave2-5-live-oat.mjs
           ! grep -q 'gross_contribution: 200' scripts/serviceos-wave2-5-live-oat.mjs
-          echo "PASS: exact PR17 Wave 2-5 harness prepared; generated profitability column omitted; Wave 6 excluded"
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; profitability lineage aligned; Wave 6 excluded"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
