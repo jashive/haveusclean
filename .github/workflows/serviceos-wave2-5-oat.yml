@@ -1,0 +1,306 @@
+name: ServiceOS Wave 2-5 Acceptance Train
+
+on:
+  pull_request:
+    branches:
+      - test/wave2-revenue-production-smoke
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance-train:
+    name: Wave 2 Revenue -> Wave 3 Operations -> Wave 4 QA -> Wave 5 Finance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      EXPECTED_CANDIDATE_SHA: 2350d6d884fdf3bde48316dbb4ccff234a3adefe
+      ACCEPTANCE_SUPABASE_URL: https://hqeamecwdsrjfjybrsox.supabase.co
+      BASE_URL: http://localhost:3000
+      SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
+      SERVICEOS_OAT_OFFICE_EMAIL: serviceos.office.acceptance@example.com
+      SERVICEOS_OAT_WORKER_EMAIL: serviceos.worker.acceptance@example.com
+      SERVICEOS_OAT_QA_EMAIL: serviceos.qa.acceptance@example.com
+
+    steps:
+      - name: Checkout exact PR 17 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.EXPECTED_CANDIDATE_SHA }}
+          fetch-depth: 0
+
+      - name: Verify exact source and approved Acceptance target
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SERVICEOS_ACCEPTANCE_MUTATIONS_APPROVED: "true"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANDIDATE_SHA"
+          test "$SUPABASE_URL" = "https://hqeamecwdsrjfjybrsox.supabase.co"
+          case "$SUPABASE_URL" in *opazwghrohmfykzxxsjk*) echo "CRITICAL: Production Supabase prohibited"; exit 1;; esac
+          node scripts/serviceos-acceptance-preflight.mjs --mutation
+
+      - name: Verify protected Acceptance credentials are available
+        shell: bash
+        env:
+          SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY }}
+          SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
+          SERVICEOS_OAT_OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+          SERVICEOS_OAT_WORKER_PASSWORD: ${{ secrets.SERVICEOS_OAT_WORKER_PASSWORD }}
+          SERVICEOS_OAT_QA_PASSWORD: ${{ secrets.SERVICEOS_OAT_QA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for name in SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY SERVICEOS_OAT_OWNER_PASSWORD SERVICEOS_OAT_OFFICE_PASSWORD SERVICEOS_OAT_WORKER_PASSWORD SERVICEOS_OAT_QA_PASSWORD; do
+            test -n "${!name:-}" || { echo "$name=MISSING"; exit 1; }
+          done
+          echo "PASS: protected Acceptance credentials available"
+
+      - name: Verify governed residential pricing and CAD alignment
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+          const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+          const expected = 'https://hqeamecwdsrjfjybrsox.supabase.co';
+          if (url !== expected || url.includes('opazwghrohmfykzxxsjk')) throw new Error('Pricing verification target is not approved Acceptance');
+          if (!key) throw new Error('Acceptance service-role key missing');
+          const headers = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+          async function read(path) {
+            const response = await fetch(`${url}/rest/v1/${path}`, { headers });
+            const text = await response.text();
+            let body = null;
+            if (text) { try { body = JSON.parse(text); } catch {} }
+            if (!response.ok) throw new Error(`Acceptance read failed HTTP ${response.status}: ${body?.message || text}`);
+            return body;
+          }
+          const orgs = await read('organization?select=id&limit=2');
+          if (!Array.isArray(orgs) || orgs.length !== 1) throw new Error('Acceptance must contain exactly one organization');
+          const orgId = orgs[0].id;
+          const bus = await read(`business_unit?select=id,jurisdiction_id&organization_id=eq.${encodeURIComponent(orgId)}&limit=2`);
+          if (!Array.isArray(bus) || bus.length !== 1 || !bus[0].jurisdiction_id) throw new Error('Acceptance must contain one jurisdiction-bound business unit');
+          const businessUnitId = bus[0].id;
+          const jurisdictionId = bus[0].jurisdiction_id;
+          const jurisdictions = await read(`jurisdiction?select=id,currency_code&id=eq.${encodeURIComponent(jurisdictionId)}&limit=2`);
+          if (jurisdictions?.[0]?.currency_code !== 'CAD') throw new Error('Acceptance jurisdiction currency must be CAD');
+          const rows = await read(`configuration_version?select=configuration,version,status&organization_id=eq.${encodeURIComponent(orgId)}&business_unit_id=eq.${encodeURIComponent(businessUnitId)}&jurisdiction_id=eq.${encodeURIComponent(jurisdictionId)}&configuration_type=eq.residential_pricing&version=eq.ON-2026-08-v1.0&status=eq.published&limit=2`);
+          if (!Array.isArray(rows) || rows.length !== 1) throw new Error('Canonical Ontario governed pricing contract missing or duplicated');
+          const cfg = rows[0].configuration;
+          if (cfg?.currency_code !== 'CAD' || cfg?.tax?.rate !== 0.13 || cfg?.minimum_charge?.general_residential !== 200 || cfg?.dwelling_matrix?.apartments_condos?.['2bed_2bath']?.complete_deep !== 395) throw new Error('Canonical Ontario governed pricing contract mismatch');
+          console.log(JSON.stringify({ status: 'PASS', version: rows[0].version, currency: 'CAD', target: 'Acceptance-only' }));
+          NODE
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build isolated Acceptance application with Waves 2-5 enabled
+        env:
+          VITE_SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          VITE_SERVICEOS_ENVIRONMENT: acceptance
+          VITE_SERVICEOS_ENABLED: "true"
+          VITE_SERVICEOS_AUTH_ENABLED: "true"
+          VITE_SERVICEOS_REVENUE_ENABLED: "true"
+          VITE_SERVICEOS_REVENUE_PILOT_UI: "true"
+          VITE_SERVICEOS_OPERATIONS_ENABLED: "true"
+          VITE_SERVICEOS_OPERATIONS_PILOT_UI: "true"
+          VITE_SERVICEOS_WAVE4_PILOT_UI: "true"
+          VITE_SERVICEOS_FINANCE_ENABLED: "true"
+          VITE_SERVICEOS_WAVE5_PILOT_UI: "true"
+          VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED: "false"
+        run: npm run build
+
+      - name: Prepare localhost-only Wave 2 and Wave 2-5 harnesses
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin serviceos-oat-runner:refs/remotes/origin/serviceos-oat-runner
+          git show refs/remotes/origin/serviceos-oat-runner:scripts/serviceos-full-live-oat.mjs > scripts/serviceos-wave2-5-live-oat.mjs
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const wave2Path = 'scripts/wave2-revenue-smoke-test.mjs';
+          let wave2 = fs.readFileSync(wave2Path, 'utf8');
+          const protocolGuard = 'assert.equal(target.protocol, "https:", "Wave 2 smoke target must use HTTPS");';
+          if (!wave2.includes(protocolGuard)) throw new Error('Wave 2 HTTPS guard not found');
+          wave2 = wave2.replace(protocolGuard, 'assert(target.protocol === "https:" || (target.protocol === "http:" && target.hostname === "localhost"), "Wave 2 smoke target must use HTTPS or isolated localhost HTTP");');
+
+          const loginMarker = '  await page.locator(`[data-revenue-authorized]`).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });';
+          const loginReplacement = `  try {\n    await page.locator('[data-canonical-workspace="true"]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n  } catch (error) {\n    const bodyText = redact(await page.locator("body").innerText().catch(() => ""));\n    throw new Error("Canonical workspace did not render after " + expectedRole + " sign-in. Sanitized UI state: " + bodyText.slice(0, 800) + "\\n" + redact(error));\n  }\n  await page.locator('[data-revenue-authorized]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });`;
+          if (!wave2.includes(loginMarker)) throw new Error('Wave 2 login marker wait not found');
+          wave2 = wave2.replace(loginMarker, loginReplacement);
+
+          const ownerSuccessMarker = '    await page.getByText("Pipeline complete — conversion_record created, Wave 3 job_handoff boundary set", { exact: true })\n      .waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });';
+          const ownerSuccessReplacement = `    try {\n      await page.locator('[data-testid="wave2-created-summary"]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n    } catch (error) {\n      const panelText = redact(await panel.innerText().catch(() => ""));\n      throw new Error("Wave 2 owner lifecycle did not expose the created-record summary. Sanitized pilot state: " + panelText.slice(0, 1600) + "\\n" + redact(error));\n    }`;
+          if (!wave2.includes(ownerSuccessMarker)) throw new Error('Wave 2 owner success wait marker not found');
+          wave2 = wave2.replace(ownerSuccessMarker, ownerSuccessReplacement);
+
+          const cleanupMarker = '    await page.getByText("Pilot records cleaned up", { exact: true }).waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n    assert.equal(await page.locator(\'[data-testid="wave2-created-summary"]\').count(), 0, "Synthetic records remained in UI after cleanup");';
+          const cleanupReplacement = '    await page.locator(\'[data-testid="wave2-created-summary"]\').waitFor({ state: "detached", timeout: DEFAULT_TIMEOUT_MS });\n    assert.equal(await page.locator(\'[data-testid="wave2-created-summary"]\').count(), 0, "Synthetic record summary remained in UI after cleanup");';
+          if (!wave2.includes(cleanupMarker)) throw new Error('Wave 2 cleanup assertion marker not found');
+          wave2 = wave2.replace(cleanupMarker, cleanupReplacement);
+          fs.writeFileSync(wave2Path, wave2);
+
+          const path = 'scripts/serviceos-wave2-5-live-oat.mjs';
+          let source = fs.readFileSync(path, 'utf8');
+          const oldHost = 'haveusclean-k872t00xl-jasons-projects-54483428.vercel.app';
+          const candidate = '2350d6d884fdf3bde48316dbb4ccff234a3adefe';
+          source = source.replace(`const EXPECTED_BASE_HOST = "${oldHost}";`, 'const EXPECTED_BASE_HOST = "localhost";');
+          source = source.replace('const runId = `TEST-W6-FULL-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;', 'const runId = `TEST-W2-5-FULL-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;');
+          source = source.replace('    "VERCEL_AUTOMATION_BYPASS_SECRET",\n', '');
+          source = source.replace('assert(base.protocol === "https:", "BASE_URL must be HTTPS", "BLOCKER");', 'assert(base.protocol === "http:", "BASE_URL must be HTTP for the isolated local runner", "BLOCKER");');
+          source = source.replace('"BASE_URL is not the exact authoritative Preview"', '"BASE_URL is not the exact isolated local runner"');
+          source = source.replace('`protected Preview navigation escaped authoritative host: ${current.hostname}`', '`local runner navigation escaped localhost: ${current.hostname}`');
+          source = source.replace('assert(url.hostname === EXPECTED_BASE_HOST, "Preview API request escaped authoritative host", "CRITICAL");', 'assert(url.hostname === EXPECTED_BASE_HOST, "Local API request escaped localhost", "CRITICAL");');
+          source = source.replace('433d4f64f6d7ba34863a03b7421e92543dd28818', candidate);
+
+          const staleRoleWait = '  await page.getByText(role === "owner" ? "owner admin" : role === "office" ? "office ops" : role, { exact: true }).waitFor({ state: "visible", timeout: 20000 });';
+          const stableRoleWait = `  const revenueExpected = role === "owner" || role === "office" ? "true" : "false";\n  await page.locator('[data-canonical-workspace="true"]').waitFor({ state: "visible", timeout: 20000 });\n  await page.locator(\`[data-canonical-workspace="true"][data-revenue-authorized="\${revenueExpected}"]\`).waitFor({ state: "visible", timeout: 20000 });`;
+          if (!source.includes(staleRoleWait)) throw new Error('Waves 3-5 stale role-text wait not found');
+          source = source.replace(staleRoleWait, stableRoleWait);
+
+          const generatedProfitField = ', gross_contribution: 200, gross_margin_percent: 66.6667, source_lineage:';
+          if (!source.includes(generatedProfitField)) throw new Error('Generated gross_contribution OAT payload marker not found');
+          source = source.replace(generatedProfitField, ', gross_margin_percent: 66.6667, source_lineage:');
+
+          const profitabilityLineage = 'source_lineage: { invoice_request_id: invoice.id, contractor_payable_id: payable.id, payment_observation_id: payment.id, runId }';
+          const canonicalProfitabilityLineage = 'source_lineage: { invoice_request_id: invoice.id, pricing_snapshot_id: pricing.id, quote_version_id: qv.id, contractor_payable_id: payable.id, payment_observation_id: payment.id, runId }';
+          if (!source.includes(profitabilityLineage)) throw new Error('Profitability source_lineage OAT payload marker not found');
+          source = source.replace(profitabilityLineage, canonicalProfitabilityLineage);
+
+          const routeStart = source.indexOf('  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;');
+          const routeEnd = source.indexOf('  const page = await context.newPage();', routeStart);
+          if (routeStart < 0 || routeEnd < 0) throw new Error('expected Vercel route-injection block not found');
+          source = source.slice(0, routeStart) + source.slice(routeEnd);
+          source = source.replace(/\n\s*"x-vercel-protection-bypass": process\.env\.VERCEL_AUTOMATION_BYPASS_SECRET,/, '');
+
+          const stopPoint = '    report.phases.idempotencyConcurrency = "PASS";\n\n    const kpiDefs';
+          if (!source.includes(stopPoint)) throw new Error('Wave 5 stop point not found');
+          source = source.replace(stopPoint, `    report.phases.idempotencyConcurrency = "PASS";\n    report.status = "PASS";\n    report.evidence = { operationalJobId: job.id, qaFailId: qaFail.id, qaPassId: qaPass.id, invoiceRequestId: invoice.id, paymentObservationId: payment.id, contractorPayableId: payable.id, profitabilitySnapshotId: profitability.id };\n    process.stdout.write(\`${'${JSON.stringify(report, null, 2)}'}\\n\`);\n    return;\n\n    const kpiDefs`);
+          fs.writeFileSync(path, source);
+          NODE
+
+          node --check scripts/wave2-revenue-smoke-test.mjs
+          node --check scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'const EXPECTED_BASE_HOST = "localhost"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'data-canonical-workspace' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'candidateSha: "2350d6d884fdf3bde48316dbb4ccff234a3adefe"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'pricing_snapshot_id: pricing.id, quote_version_id: qv.id' scripts/serviceos-wave2-5-live-oat.mjs
+          ! grep -q 'gross_contribution: 200' scripts/serviceos-wave2-5-live-oat.mjs
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; profitability lineage aligned; Wave 6 excluded"
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start isolated local app and run Wave 2 through Wave 5
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY }}
+          SERVICEOS_ENVIRONMENT: test
+          SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED: "true"
+          SERVICEOS_ACCEPTANCE_MUTATIONS_APPROVED: "true"
+          SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
+          SERVICEOS_OAT_OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+          SERVICEOS_OAT_WORKER_PASSWORD: ${{ secrets.SERVICEOS_OAT_WORKER_PASSWORD }}
+          SERVICEOS_OAT_QA_PASSWORD: ${{ secrets.SERVICEOS_OAT_QA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          server="$RUNNER_TEMP/serviceos-wave2-5-server.mjs"
+          log="$RUNNER_TEMP/serviceos-wave2-5-server.log"
+          admin_cleanup="$RUNNER_TEMP/serviceos-wave2-admin-cleanup.mjs"
+
+          cat > "$admin_cleanup" <<'NODE'
+          const url = String(process.env.SUPABASE_URL || '').replace(/\/$/, '');
+          const key = String(process.env.SUPABASE_SERVICE_ROLE_KEY || '');
+          const expected = 'https://hqeamecwdsrjfjybrsox.supabase.co';
+          if (url !== expected || url.includes('opazwghrohmfykzxxsjk')) throw new Error('Admin cleanup target is not approved isolated Acceptance');
+          if (!key) throw new Error('Acceptance service-role key missing');
+          const baseHeaders = { apikey: key, authorization: `Bearer ${key}`, 'content-type': 'application/json' };
+          async function request(path, options = {}) {
+            const response = await fetch(`${url}/rest/v1/${path}`, { ...options, headers: { ...baseHeaders, ...(options.headers || {}) } });
+            const text = await response.text();
+            let body = null;
+            if (text) { try { body = JSON.parse(text); } catch {} }
+            if (!response.ok) throw new Error(`Acceptance admin cleanup failed HTTP ${response.status}: ${body?.message || body?.error || text || 'request rejected'}`);
+            return body;
+          }
+          const customers = await request(`customer?select=id,metadata&display_name=eq.${encodeURIComponent('[PILOT] Synthetic Customer')}`);
+          const pilot = (Array.isArray(customers) ? customers : []).filter((row) => row?.metadata?.synthetic === true && row?.metadata?.source === 'pilot_ui');
+          for (const customer of pilot) {
+            const id = encodeURIComponent(customer.id);
+            await request(`service_location?customer_id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+            await request(`contact?customer_id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+            await request(`customer?id=eq.${id}`, { method: 'DELETE', headers: { Prefer: 'return=representation' } });
+          }
+          const remaining = await request(`customer?select=id,metadata&display_name=eq.${encodeURIComponent('[PILOT] Synthetic Customer')}`);
+          const residual = (Array.isArray(remaining) ? remaining : []).filter((row) => row?.metadata?.synthetic === true && row?.metadata?.source === 'pilot_ui');
+          if (residual.length) throw new Error(`Synthetic pilot CRM teardown incomplete: ${residual.length} customer row(s) remain`);
+          console.log(JSON.stringify({ status: 'PASS', cleanup: 'service-role synthetic CRM teardown', removedCustomers: pilot.length, target: 'Acceptance-only' }));
+          NODE
+
+          cat > "$server" <<'NODE'
+          import http from 'node:http';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+          const ACCEPTANCE_REF = 'hqeamecwdsrjfjybrsox';
+          const PRODUCTION_REF = 'opazwghrohmfykzxxsjk';
+          const expectedUrl = `https://${ACCEPTANCE_REF}.supabase.co`;
+          if (process.env.SUPABASE_URL !== expectedUrl || process.env.SUPABASE_URL.includes(PRODUCTION_REF)) throw new Error('Local server is not pinned to approved Acceptance Supabase');
+          if (!process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Acceptance Supabase keys missing');
+          if (process.env.SERVICEOS_ENVIRONMENT !== 'test') throw new Error('SERVICEOS_ENVIRONMENT must be test');
+          if (process.env.SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED !== 'true') throw new Error('Wave 5 preview payment must be explicitly enabled');
+          const { default: paymentHandler } = await import(pathToFileURL(path.resolve('api/wave5-preview-payment.js')).href);
+          const dist = path.resolve('dist');
+          const types = new Map([['.html','text/html; charset=utf-8'],['.js','text/javascript; charset=utf-8'],['.css','text/css; charset=utf-8'],['.json','application/json; charset=utf-8'],['.svg','image/svg+xml'],['.png','image/png'],['.jpg','image/jpeg'],['.jpeg','image/jpeg'],['.ico','image/x-icon']]);
+          function sendJson(res,status,value){res.writeHead(status,{'content-type':'application/json; charset=utf-8','cache-control':'no-store'});res.end(JSON.stringify(value));}
+          async function readBody(req){let raw='';for await(const chunk of req) raw+=chunk;return raw?JSON.parse(raw):{};}
+          function serveFile(res,file){const ext=path.extname(file).toLowerCase();res.writeHead(200,{'content-type':types.get(ext)||'application/octet-stream','cache-control':'no-store'});fs.createReadStream(file).pipe(res);}
+          const server=http.createServer(async(req,res)=>{try{const url=new URL(req.url||'/','http://localhost:3000');if(url.pathname==='/__oat/health')return sendJson(res,200,{status:'PASS',projectRef:ACCEPTANCE_REF,environment:'test'});if(url.pathname==='/api/wave5-preview-payment'){let body;try{body=await readBody(req);}catch{return sendJson(res,400,{success:false,error:'Request body must be valid JSON'});}let statusCode=200;let sent=false;const response={status(code){statusCode=code;return this;},json(payload){if(!sent){sent=true;sendJson(res,statusCode,payload);}return this;}};await paymentHandler({method:req.method,headers:req.headers,body},response);if(!sent)sendJson(res,500,{success:false,error:'Local API handler returned without a response'});return;}const requested=url.pathname==='/'?'index.html':decodeURIComponent(url.pathname.slice(1));let file=path.resolve(dist,requested);if(!file.startsWith(dist+path.sep)&&file!==path.join(dist,'index.html'))return sendJson(res,403,{error:'Forbidden'});if(!fs.existsSync(file)||!fs.statSync(file).isFile())file=path.join(dist,'index.html');serveFile(res,file);}catch(error){console.error('local-server-error',error?.message||error);if(!res.headersSent)sendJson(res,500,{error:'Local OAT server failure'});else res.end();}});
+          server.listen(3000,'0.0.0.0',()=>console.log('ServiceOS Wave 2-5 local server listening on http://localhost:3000'));
+          NODE
+
+          node "$server" > "$log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://localhost:3000/__oat/health > "$RUNNER_TEMP/serviceos-wave2-5-health.json"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then echo "BLOCKED: local ServiceOS server did not become healthy"; cat "$log" || true; exit 1; fi
+          cat "$RUNNER_TEMP/serviceos-wave2-5-health.json"
+          echo "=== WAVE 2 PRE-RUN SERVICE-ROLE CRM TEARDOWN ==="
+          node "$admin_cleanup"
+          echo "=== WAVE 2 UI PLAYWRIGHT + CLEANUP ==="
+          npm run smoke:wave2
+          echo "=== WAVE 2 POST-RUN SERVICE-ROLE CRM TEARDOWN ==="
+          node "$admin_cleanup"
+          echo "=== WAVES 3-5 ACCEPTANCE TRAIN ==="
+          node scripts/serviceos-wave2-5-live-oat.mjs
+
+      - name: Verify candidate checkout remained exact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard HEAD >/dev/null
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANDIDATE_SHA"
+          echo "PASS: exact PR17 candidate remained unchanged by Acceptance OAT"

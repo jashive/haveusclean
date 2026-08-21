@@ -27,14 +27,11 @@ import {
   computeGovernedResidentialQuote,
   buildGovernedResidentialConfigurationSnapshot,
 } from "../../lib/governedResidentialPricing.js";
-
-// ── Feature flag ──────────────────────────────────────────────────────────────
+import { canManageServiceOSRevenue } from "../../lib/serviceosUiPolicy.js";
 
 const PILOT_UI_ENABLED =
   typeof import.meta !== "undefined" &&
   import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === "true";
-
-// ── Synthetic pilot data ──────────────────────────────────────────────────────
 
 function buildPilotQuoteInput() {
   return {
@@ -48,22 +45,18 @@ function buildPilotQuoteInput() {
   };
 }
 
-// ── Inline styles ─────────────────────────────────────────────────────────────
-
 const styles = {
   panel: {
-    position: "fixed",
-    bottom: 16,
-    right: 16,
-    width: 360,
+    position: "relative",
+    marginTop: 14,
+    width: "100%",
     background: "#1A2235",
     border: "1px solid #2d3f5a",
     borderRadius: 8,
     padding: "1.25rem",
     fontFamily: "system-ui, sans-serif",
     color: "#f0f6ff",
-    zIndex: 9998,
-    boxShadow: "0 4px 24px rgba(0,0,0,0.4)",
+    boxSizing: "border-box",
   },
   heading: {
     margin: "0 0 0.75rem",
@@ -103,12 +96,9 @@ const styles = {
   summaryValue: { color: "#f0f6ff" },
 };
 
-// ── Pipeline runner ───────────────────────────────────────────────────────────
-
 async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, accessToken, setLog }) {
   const log = (msg, kind = "step") => setLog((prev) => [...prev, { msg, kind }]);
 
-  // Validate required canonical context before any network calls
   if (!orgId) throw new Error("Pilot requires revenueContext.orgId");
   if (!businessUnitId) throw new Error("Pilot requires revenueContext.primaryBusinessUnitId");
   if (!jurisdictionId) throw new Error("Pilot requires revenueContext.primaryJurisdictionId (HUC-ON jurisdiction_id)");
@@ -138,11 +128,8 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
   if (rawQuote?.requiresOfficeReview) {
     throw new Error(rawQuote.reason ?? "Governed residential quote requires office review");
   }
-  const quote = withQuotePresentation(rawQuote, {
-    type: "residential",
-    data: quoteInput,
-  });
-  log(`GOVERNED CONFIG PRICING`, "done");
+  const quote = withQuotePresentation(rawQuote, { type: "residential", data: quoteInput });
+  log("GOVERNED CONFIG PRICING", "done");
   log(`Quote: CA$${quote.total.toFixed(2)} total`, "done");
 
   log("Capturing pricing snapshot…");
@@ -157,7 +144,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     governedResidential: true,
   });
   log("Snapshot built (not yet persisted)", "done");
-
   log("Building pipeline payloads…");
 
   const serviceRequestPayload = buildServiceRequestPayload({
@@ -171,7 +157,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true, source: "pilot_ui" },
     appUserId,
   });
-
   const opportunityPayload = buildOpportunityPayload({
     organizationId: orgId,
     businessUnitId,
@@ -181,7 +166,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const estimatePayload = buildEstimatePayload({
     organizationId: orgId,
     businessUnitId,
@@ -192,7 +176,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const quotePayload = buildQuotePayload({
     organizationId: orgId,
     businessUnitId,
@@ -201,7 +184,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const quoteVersionPayload = buildQuoteVersionPayload({
     organizationId: orgId,
     businessUnitId,
@@ -212,7 +194,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const quoteResponsePayload = buildQuoteResponsePayload({
     organizationId: orgId,
     businessUnitId,
@@ -224,7 +205,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const customerPayload = buildCustomerPayload({
     organizationId: orgId,
     businessUnitId,
@@ -232,7 +212,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     displayName: "[PILOT] Synthetic Customer",
     metadata: { synthetic: true, source: "pilot_ui" },
   });
-
   const contactPayload = buildContactPayload({
     customerId: "__pipeline_resolved__",
     contactType: "primary",
@@ -242,7 +221,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     phone: null,
     metadata: { synthetic: true },
   });
-
   const serviceLocationPayload = buildServiceLocationPayload({
     customerId: "__pipeline_resolved__",
     jurisdictionId,
@@ -254,7 +232,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     countryCode: "CA",
     metadata: { synthetic: true },
   });
-
   const conversionRecordPayload = buildConversionRecordPayload({
     organizationId: orgId,
     businessUnitId,
@@ -270,7 +247,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
     metadata: { synthetic: true },
     appUserId,
   });
-
   const jobHandoffPayload = buildJobHandoffPayload({
     organizationId: orgId,
     businessUnitId,
@@ -283,7 +259,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
   });
 
   log("Running revenue pipeline…");
-
   const created = await runRevenuePipeline({
     serviceRequestPayload,
     opportunityPayload,
@@ -304,8 +279,6 @@ async function runPilot({ orgId, businessUnitId, jurisdictionId, appUserId, acce
   return created;
 }
 
-// ── Component ─────────────────────────────────────────────────────────────────
-
 export default function ServiceOSPilotPanel({ session, revenueContext }) {
   const [log, setLog] = useState([]);
   const [running, setRunning] = useState(false);
@@ -313,14 +286,14 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
   const [createdIds, setCreatedIds] = useState(null);
   const [error, setError] = useState(null);
 
+  const role = revenueContext?.roleCode ?? null;
   const accessToken = session?.access_token;
   const orgId = revenueContext?.orgId ?? null;
   const businessUnitId = revenueContext?.primaryBusinessUnitId ?? null;
   const jurisdictionId = revenueContext?.primaryJurisdictionId ?? null;
   const appUserId = revenueContext?.appUserId ?? null;
-
-  // Refuse to run if any required canonical context is missing
-  const canRun = !!(accessToken && orgId && businessUnitId && jurisdictionId);
+  const roleAuthorized = canManageServiceOSRevenue(role);
+  const canRun = roleAuthorized && !!(accessToken && orgId && businessUnitId && jurisdictionId);
 
   const handleRun = useCallback(async () => {
     if (running || !canRun) return;
@@ -340,9 +313,7 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
       setCreatedIds(created);
     } catch (err) {
       const partialCreated = getPipelineCreatedRecords(err);
-      if (partialCreated && Object.keys(partialCreated).length > 0) {
-        setCreatedIds(partialCreated);
-      }
+      if (partialCreated && Object.keys(partialCreated).length > 0) setCreatedIds(partialCreated);
       setError(err?.message ?? "Pipeline failed");
       setLog((prev) => [...prev, { msg: err?.message ?? "Pipeline failed", kind: "error" }]);
     } finally {
@@ -366,29 +337,29 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
     }
   }, [cleaning, createdIds, accessToken]);
 
-  if (!PILOT_UI_ENABLED) return null;
+  if (!PILOT_UI_ENABLED || !roleAuthorized) return null;
 
   return (
-    <div style={styles.panel}>
+    <div style={styles.panel} data-testid="wave2-revenue-pilot" data-revenue-role={role}>
       <h3 style={styles.heading}>
         Wave 2 Revenue Pilot <span style={styles.badge}>PILOT</span>
       </h3>
 
       {log.length > 0 && (
         <>
-          {log.map((entry, i) => {
-            const s = entry.kind === "done" ? styles.stepDone : entry.kind === "error" ? styles.stepError : styles.step;
-            const prefix = entry.kind === "done" ? "✓ " : entry.kind === "error" ? "✗ " : "· ";
-            return (
-              <div key={i} style={s}>{prefix}{entry.msg}</div>
-            );
-          })}
+          <div data-testid="wave2-revenue-log">
+            {log.map((entry, i) => {
+              const s = entry.kind === "done" ? styles.stepDone : entry.kind === "error" ? styles.stepError : styles.step;
+              const prefix = entry.kind === "done" ? "✓ " : entry.kind === "error" ? "✗ " : "· ";
+              return <div key={i} style={s}>{prefix}{entry.msg}</div>;
+            })}
+          </div>
           <hr style={styles.divider} />
         </>
       )}
 
       {createdIds && (
-        <div style={styles.summary}>
+        <div style={styles.summary} data-testid="wave2-created-summary">
           Created:{" "}
           {[
             "serviceRequest", "opportunity", "estimate", "pricingSnapshot",
@@ -409,6 +380,7 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
 
       <div style={styles.actions}>
         <button
+          data-testid="wave2-run-pilot"
           style={{ ...styles.btn, ...styles.btnRun, ...(!canRun || running ? styles.btnDisabled : {}) }}
           onClick={handleRun}
           disabled={!canRun || running}
@@ -417,6 +389,7 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
           {running ? "Running…" : "Run Pilot"}
         </button>
         <button
+          data-testid="wave2-cleanup-pilot"
           style={{ ...styles.btn, ...styles.btnClean, ...(!createdIds || cleaning ? styles.btnDisabled : {}) }}
           onClick={handleCleanup}
           disabled={!createdIds || cleaning}
@@ -427,8 +400,7 @@ export default function ServiceOSPilotPanel({ session, revenueContext }) {
 
       {!canRun && (
         <div style={{ ...styles.step, marginTop: 6 }}>
-          Requires VITE_SERVICEOS_REVENUE_ENABLED + authenticated session with
-          orgId, primaryBusinessUnitId, and primaryJurisdictionId in context.
+          Requires an authorized Revenue role, VITE_SERVICEOS_REVENUE_ENABLED, and authenticated canonical context.
         </div>
       )}
     </div>

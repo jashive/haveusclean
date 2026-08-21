@@ -1,7 +1,18 @@
-import React, { useState } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { useServiceOSContext } from "../../auth/ServiceOSAuthGate";
 import { getStoredSession, signOut } from "../../lib/serviceosAuthClient";
-import { canOpenServiceOSDiagnostics, SERVICEOS_DIAGNOSTICS_PATH } from "../../lib/serviceosUiPolicy";
+import {
+  canManageServiceOSRevenue,
+  canOpenServiceOSDiagnostics,
+  SERVICEOS_DIAGNOSTICS_PATH,
+} from "../../lib/serviceosUiPolicy";
+
+const ServiceOSPilotPanel = lazy(() => import("../pilot/ServiceOSPilotPanel"));
+
+const REVENUE_PILOT_ENABLED =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true" &&
+  import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === "true";
 
 const ROLE_LABELS = {
   owner_admin: "Owner / Admin",
@@ -50,6 +61,7 @@ const styles = {
   actions: { display: "flex", gap: 10, flexWrap: "wrap", marginTop: 16 },
   link: { display: "inline-block", textDecoration: "none", borderRadius: 8, padding: "9px 13px", background: "#00D4AA", color: "#07110F", fontWeight: 850, fontSize: 13 },
   disabled: { display: "inline-block", borderRadius: 8, padding: "9px 13px", border: "1px solid #344359", color: "#6F7F94", fontWeight: 750, fontSize: 13 },
+  enabled: { display: "inline-block", borderRadius: 8, padding: "9px 13px", border: "1px solid #2B7A68", color: "#54E5C2", fontWeight: 800, fontSize: 13 },
 };
 
 export default function ServiceOSWave1Workspace() {
@@ -61,6 +73,7 @@ export default function ServiceOSWave1Workspace() {
   const organizationId = revenueContext?.orgId ?? "Unavailable";
   const businessUnits = Array.isArray(revenueContext?.businessUnits) ? revenueContext.businessUnits : [];
   const email = session?.user?.email ?? "Unavailable";
+  const revenueAuthorized = REVENUE_PILOT_ENABLED && canManageServiceOSRevenue(role);
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -74,13 +87,20 @@ export default function ServiceOSWave1Workspace() {
   }
 
   return (
-    <main style={styles.page} data-serviceos-wave="wave1" data-canonical-workspace="true">
+    <main
+      style={styles.page}
+      data-serviceos-wave={revenueAuthorized ? "wave2" : "wave1"}
+      data-canonical-workspace="true"
+      data-revenue-authorized={revenueAuthorized ? "true" : "false"}
+    >
       <div style={styles.shell}>
         <header style={styles.header}>
           <div>
             <div style={styles.eyebrow}>Have Us Clean · ServiceOS 1.0</div>
-            <h1 style={styles.title}>Wave 1 Access Workspace</h1>
-            <p style={styles.subtitle}>Canonical authentication and role isolation pilot</p>
+            <h1 style={styles.title}>{revenueAuthorized ? "Wave 2 Revenue Workspace" : "Wave 1 Access Workspace"}</h1>
+            <p style={styles.subtitle}>
+              {revenueAuthorized ? "Canonical Revenue pilot with Wave 1 role isolation preserved" : "Canonical authentication and role isolation pilot"}
+            </p>
           </div>
           <button type="button" style={{ ...styles.logout, opacity: loggingOut ? 0.6 : 1 }} onClick={handleLogout} disabled={loggingOut} aria-label="Log out of ServiceOS">
             {loggingOut ? "Logging out…" : "Logout"}
@@ -109,28 +129,36 @@ export default function ServiceOSWave1Workspace() {
         </section>
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
-          <h2 style={styles.sectionTitle}>Wave 1 status</h2>
+          <h2 style={styles.sectionTitle}>Canonical access status</h2>
           <p style={styles.notice}>
-            Authentication is active and this workspace is intentionally isolated from the legacy HUC application data layer. No demo jobs, customers, invoices, partners, or other fixture data are loaded in canonical Production mode.
+            Authentication remains isolated from the legacy HUC application data layer. No demo jobs, customers, invoices, partners, or other fixture data are loaded in canonical mode.
           </p>
           <div style={styles.status}>Canonical shell active</div>
         </section>
 
-        <section style={styles.card}>
-          <h2 style={styles.sectionTitle}>Later ServiceOS waves</h2>
+        <section style={{ ...styles.card, marginBottom: revenueAuthorized ? 14 : 0 }}>
+          <h2 style={styles.sectionTitle}>ServiceOS rollout gates</h2>
           <p style={styles.notice}>
-            Revenue, Operations, QA, and Finance workflows remain unavailable from this Wave 1 shell until their rollout gates are explicitly enabled and accepted.
+            Revenue is available only to authorized office roles when both Wave 2 Revenue flags are enabled. Operations, QA, and Finance remain dark until their separate rollout gates are enabled and accepted.
           </p>
           <div style={styles.actions}>
             {canOpenServiceOSDiagnostics(role) ? (
               <a href={SERVICEOS_DIAGNOSTICS_PATH} style={styles.link}>Open read-only diagnostics</a>
             ) : null}
-            <span style={styles.disabled}>Revenue · disabled</span>
+            <span style={revenueAuthorized ? styles.enabled : styles.disabled}>
+              {revenueAuthorized ? "Revenue · pilot active" : "Revenue · disabled"}
+            </span>
             <span style={styles.disabled}>Operations · disabled</span>
             <span style={styles.disabled}>QA · disabled</span>
             <span style={styles.disabled}>Finance · disabled</span>
           </div>
         </section>
+
+        {revenueAuthorized ? (
+          <Suspense fallback={<div role="status">Loading Revenue pilot…</div>}>
+            <ServiceOSPilotPanel session={session} revenueContext={revenueContext} />
+          </Suspense>
+        ) : null}
       </div>
     </main>
   );
