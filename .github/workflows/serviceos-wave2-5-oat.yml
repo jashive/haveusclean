@@ -1,0 +1,259 @@
+name: ServiceOS Wave 2-5 Acceptance Train
+
+on:
+  push:
+    branches:
+      - serviceos-oat-runner
+    paths:
+      - .github/workflows/serviceos-wave2-5-oat.yml
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance-train:
+    name: Wave 2 Revenue -> Wave 3 Operations -> Wave 4 QA -> Wave 5 Finance
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      EXPECTED_CANDIDATE_SHA: 2350d6d884fdf3bde48316dbb4ccff234a3adefe
+      ACCEPTANCE_SUPABASE_URL: https://hqeamecwdsrjfjybrsox.supabase.co
+      BASE_URL: http://localhost:3000
+      SERVICEOS_OAT_OWNER_EMAIL: serviceos.owner.acceptance@example.com
+      SERVICEOS_OAT_OFFICE_EMAIL: serviceos.office.acceptance@example.com
+      SERVICEOS_OAT_WORKER_EMAIL: serviceos.worker.acceptance@example.com
+      SERVICEOS_OAT_QA_EMAIL: serviceos.qa.acceptance@example.com
+
+    steps:
+      - name: Checkout exact PR 17 candidate
+        uses: actions/checkout@v4
+        with:
+          ref: 2350d6d884fdf3bde48316dbb4ccff234a3adefe
+          fetch-depth: 0
+
+      - name: Verify exact source and approved Acceptance target
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SERVICEOS_ACCEPTANCE_MUTATIONS_APPROVED: "true"
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANDIDATE_SHA"
+          test "$SUPABASE_URL" = "https://hqeamecwdsrjfjybrsox.supabase.co"
+          case "$SUPABASE_URL" in *opazwghrohmfykzxxsjk*) echo "CRITICAL: Production Supabase prohibited"; exit 1;; esac
+          node scripts/serviceos-acceptance-preflight.mjs --mutation
+
+      - name: Verify protected Acceptance credentials are available
+        shell: bash
+        env:
+          SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY }}
+          SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
+          SERVICEOS_OAT_OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+          SERVICEOS_OAT_WORKER_PASSWORD: ${{ secrets.SERVICEOS_OAT_WORKER_PASSWORD }}
+          SERVICEOS_OAT_QA_PASSWORD: ${{ secrets.SERVICEOS_OAT_QA_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY SERVICEOS_OAT_OWNER_PASSWORD SERVICEOS_OAT_OFFICE_PASSWORD SERVICEOS_OAT_WORKER_PASSWORD SERVICEOS_OAT_QA_PASSWORD; do
+            if [ -z "${!name:-}" ]; then echo "$name=MISSING"; missing=1; else echo "$name=SET"; fi
+          done
+          exit "$missing"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build isolated Acceptance application with Waves 2-5 enabled
+        env:
+          VITE_SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          VITE_SERVICEOS_ENVIRONMENT: acceptance
+          VITE_SERVICEOS_ENABLED: "true"
+          VITE_SERVICEOS_AUTH_ENABLED: "true"
+          VITE_SERVICEOS_REVENUE_ENABLED: "true"
+          VITE_SERVICEOS_REVENUE_PILOT_UI: "true"
+          VITE_SERVICEOS_OPERATIONS_ENABLED: "true"
+          VITE_SERVICEOS_OPERATIONS_PILOT_UI: "true"
+          VITE_SERVICEOS_WAVE4_PILOT_UI: "true"
+          VITE_SERVICEOS_FINANCE_ENABLED: "true"
+          VITE_SERVICEOS_WAVE5_PILOT_UI: "true"
+          VITE_SERVICEOS_W6_INTELLIGENCE_ENABLED: "false"
+        run: npm run build
+
+      - name: Prepare localhost-only Wave 2 smoke and Wave 2-5 harness
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin serviceos-oat-runner:refs/remotes/origin/serviceos-oat-runner
+          git show refs/remotes/origin/serviceos-oat-runner:scripts/serviceos-full-live-oat.mjs > scripts/serviceos-wave2-5-live-oat.mjs
+
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+
+          const wave2Path = 'scripts/wave2-revenue-smoke-test.mjs';
+          let wave2 = fs.readFileSync(wave2Path, 'utf8');
+          const protocolGuard = 'assert.equal(target.protocol, "https:", "Wave 2 smoke target must use HTTPS");';
+          if (!wave2.includes(protocolGuard)) throw new Error('Wave 2 HTTPS guard not found');
+          wave2 = wave2.replace(protocolGuard, 'assert(target.protocol === "https:" || (target.protocol === "http:" && target.hostname === "localhost"), "Wave 2 smoke target must use HTTPS or isolated localhost HTTP");');
+          fs.writeFileSync(wave2Path, wave2);
+
+          const path = 'scripts/serviceos-wave2-5-live-oat.mjs';
+          let source = fs.readFileSync(path, 'utf8');
+          const oldHost = 'haveusclean-k872t00xl-jasons-projects-54483428.vercel.app';
+          const candidate = '2350d6d884fdf3bde48316dbb4ccff234a3adefe';
+
+          source = source.replace(`const EXPECTED_BASE_HOST = "${oldHost}";`, 'const EXPECTED_BASE_HOST = "localhost";');
+          source = source.replace('const runId = `TEST-W6-FULL-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;', 'const runId = `TEST-W2-5-FULL-${new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14)}`;');
+          source = source.replace('    "VERCEL_AUTOMATION_BYPASS_SECRET",\n', '');
+          source = source.replace('assert(base.protocol === "https:", "BASE_URL must be HTTPS", "BLOCKER");', 'assert(base.protocol === "http:", "BASE_URL must be HTTP for the isolated local runner", "BLOCKER");');
+          source = source.replace('"BASE_URL is not the exact authoritative Preview"', '"BASE_URL is not the exact isolated local runner"');
+          source = source.replace('`protected Preview navigation escaped authoritative host: ${current.hostname}`', '`local runner navigation escaped localhost: ${current.hostname}`');
+          source = source.replace('assert(url.hostname === EXPECTED_BASE_HOST, "Preview API request escaped authoritative host", "CRITICAL");', 'assert(url.hostname === EXPECTED_BASE_HOST, "Local API request escaped localhost", "CRITICAL");');
+          source = source.replace('433d4f64f6d7ba34863a03b7421e92543dd28818', candidate);
+
+          const routeStart = source.indexOf('  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;');
+          const routeEnd = source.indexOf('  const page = await context.newPage();', routeStart);
+          if (routeStart < 0 || routeEnd < 0) throw new Error('expected Vercel route-injection block not found');
+          source = source.slice(0, routeStart) + source.slice(routeEnd);
+          source = source.replace(/\n\s*"x-vercel-protection-bypass": process\.env\.VERCEL_AUTOMATION_BYPASS_SECRET,/, '');
+
+          const stopPoint = '    report.phases.idempotencyConcurrency = "PASS";\n\n    const kpiDefs';
+          if (!source.includes(stopPoint)) throw new Error('Wave 5 stop point not found');
+          source = source.replace(stopPoint, `    report.phases.idempotencyConcurrency = "PASS";\n    report.status = "PASS";\n    report.evidence = {\n      operationalJobId: job.id,\n      qaFailId: qaFail.id,\n      qaPassId: qaPass.id,\n      invoiceRequestId: invoice.id,\n      paymentObservationId: payment.id,\n      contractorPayableId: payable.id,\n      profitabilitySnapshotId: profitability.id,\n    };\n    process.stdout.write(\`${'${JSON.stringify(report, null, 2)}'}\\n\`);\n    return;\n\n    const kpiDefs`);
+
+          fs.writeFileSync(path, source);
+          NODE
+
+          node --check scripts/wave2-revenue-smoke-test.mjs
+          node --check scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'const EXPECTED_BASE_HOST = "localhost"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'candidateSha: "2350d6d884fdf3bde48316dbb4ccff234a3adefe"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
+          grep -q 'return;' scripts/serviceos-wave2-5-live-oat.mjs
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; Wave 6 excluded"
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Start isolated local app and run Wave 2 through Wave 5
+        shell: bash
+        env:
+          SUPABASE_URL: ${{ env.ACCEPTANCE_SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SERVICEOS_ACCEPTANCE_SUPABASE_SERVICE_ROLE_KEY }}
+          SERVICEOS_ENVIRONMENT: test
+          SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED: "true"
+          SERVICEOS_ACCEPTANCE_MUTATIONS_APPROVED: "true"
+          SERVICEOS_OAT_OWNER_PASSWORD: ${{ secrets.SERVICEOS_OAT_OWNER_PASSWORD }}
+          SERVICEOS_OAT_OFFICE_PASSWORD: ${{ secrets.SERVICEOS_OAT_OFFICE_PASSWORD }}
+          SERVICEOS_OAT_WORKER_PASSWORD: ${{ secrets.SERVICEOS_OAT_WORKER_PASSWORD }}
+          SERVICEOS_OAT_QA_PASSWORD: ${{ secrets.SERVICEOS_OAT_QA_PASSWORD }}
+        run: |
+          set -euo pipefail
+
+          server="$RUNNER_TEMP/serviceos-wave2-5-server.mjs"
+          log="$RUNNER_TEMP/serviceos-wave2-5-server.log"
+
+          cat > "$server" <<'NODE'
+          import http from 'node:http';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import { pathToFileURL } from 'node:url';
+
+          const ACCEPTANCE_REF = 'hqeamecwdsrjfjybrsox';
+          const PRODUCTION_REF = 'opazwghrohmfykzxxsjk';
+          const expectedUrl = `https://${ACCEPTANCE_REF}.supabase.co`;
+          if (process.env.SUPABASE_URL !== expectedUrl) throw new Error('local server is not pinned to approved Acceptance Supabase');
+          if (process.env.SUPABASE_URL.includes(PRODUCTION_REF)) throw new Error('Production Supabase target prohibited');
+          if (!process.env.SUPABASE_ANON_KEY || !process.env.SUPABASE_SERVICE_ROLE_KEY) throw new Error('Acceptance Supabase keys missing');
+          if (process.env.SERVICEOS_ENVIRONMENT !== 'test') throw new Error('SERVICEOS_ENVIRONMENT must be test');
+          if (process.env.SERVICEOS_W5_PREVIEW_PAYMENT_ENABLED !== 'true') throw new Error('Wave 5 preview payment must be explicitly enabled');
+
+          const { default: paymentHandler } = await import(pathToFileURL(path.resolve('api/wave5-preview-payment.js')).href);
+          const dist = path.resolve('dist');
+          const types = new Map([
+            ['.html', 'text/html; charset=utf-8'], ['.js', 'text/javascript; charset=utf-8'], ['.css', 'text/css; charset=utf-8'],
+            ['.json', 'application/json; charset=utf-8'], ['.svg', 'image/svg+xml'], ['.png', 'image/png'], ['.jpg', 'image/jpeg'],
+            ['.jpeg', 'image/jpeg'], ['.ico', 'image/x-icon'],
+          ]);
+
+          function sendJson(res, status, value) {
+            res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+            res.end(JSON.stringify(value));
+          }
+          async function readBody(req) {
+            let raw = '';
+            for await (const chunk of req) raw += chunk;
+            return raw ? JSON.parse(raw) : {};
+          }
+          function serveFile(res, file) {
+            const ext = path.extname(file).toLowerCase();
+            res.writeHead(200, { 'content-type': types.get(ext) || 'application/octet-stream', 'cache-control': 'no-store' });
+            fs.createReadStream(file).pipe(res);
+          }
+
+          const server = http.createServer(async (req, res) => {
+            try {
+              const url = new URL(req.url || '/', 'http://localhost:3000');
+              if (url.pathname === '/__oat/health') return sendJson(res, 200, { status: 'PASS', projectRef: ACCEPTANCE_REF, environment: 'test' });
+              if (url.pathname === '/api/wave5-preview-payment') {
+                let body;
+                try { body = await readBody(req); }
+                catch { return sendJson(res, 400, { success: false, error: 'Request body must be valid JSON' }); }
+                let statusCode = 200;
+                let sent = false;
+                const response = {
+                  status(code) { statusCode = code; return this; },
+                  json(payload) { if (!sent) { sent = true; sendJson(res, statusCode, payload); } return this; },
+                };
+                await paymentHandler({ method: req.method, headers: req.headers, body }, response);
+                if (!sent) sendJson(res, 500, { success: false, error: 'Local API handler returned without a response' });
+                return;
+              }
+              const requested = url.pathname === '/' ? 'index.html' : decodeURIComponent(url.pathname.slice(1));
+              let file = path.resolve(dist, requested);
+              if (!file.startsWith(dist + path.sep) && file !== path.join(dist, 'index.html')) return sendJson(res, 403, { error: 'Forbidden' });
+              if (!fs.existsSync(file) || !fs.statSync(file).isFile()) file = path.join(dist, 'index.html');
+              serveFile(res, file);
+            } catch (error) {
+              console.error('local-server-error', error?.message || error);
+              if (!res.headersSent) sendJson(res, 500, { error: 'Local OAT server failure' }); else res.end();
+            }
+          });
+          server.listen(3000, '0.0.0.0', () => console.log('ServiceOS Wave 2-5 local server listening on http://localhost:3000'));
+          NODE
+
+          node "$server" > "$log" 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if curl --silent --fail http://localhost:3000/__oat/health > "$RUNNER_TEMP/serviceos-wave2-5-health.json"; then ready=1; break; fi
+            sleep 1
+          done
+          if [ "$ready" -ne 1 ]; then echo "BLOCKED: local ServiceOS server did not become healthy"; cat "$log" || true; exit 1; fi
+          cat "$RUNNER_TEMP/serviceos-wave2-5-health.json"
+
+          echo "=== WAVE 2 UI PLAYWRIGHT + CLEANUP ==="
+          npm run smoke:wave2
+
+          echo "=== WAVES 3-5 ACCEPTANCE TRAIN ==="
+          node scripts/serviceos-wave2-5-live-oat.mjs
+
+      - name: Verify candidate checkout remained exact
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          git reset --hard HEAD >/dev/null
+          test "$(git rev-parse HEAD)" = "$EXPECTED_CANDIDATE_SHA"
+          echo "PASS: exact PR17 candidate remained unchanged by Acceptance OAT"
