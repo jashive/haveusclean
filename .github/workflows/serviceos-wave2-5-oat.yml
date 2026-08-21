@@ -179,6 +179,11 @@ jobs:
           const loginReplacement = `  try {\n    await page.locator('[data-canonical-workspace="true"]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n  } catch (error) {\n    const bodyText = redact(await page.locator("body").innerText().catch(() => ""));\n    throw new Error("Canonical workspace did not render after " + expectedRole + " sign-in. Sanitized UI state: " + bodyText.slice(0, 800) + "\\n" + redact(error));\n  }\n  await page.locator('[data-revenue-authorized]').waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });`;
           if (!wave2.includes(loginMarker)) throw new Error('Wave 2 login marker wait not found');
           wave2 = wave2.replace(loginMarker, loginReplacement);
+
+          const ownerSuccessMarker = '    await page.getByText("Pipeline complete — conversion_record created, Wave 3 job_handoff boundary set", { exact: true })\n      .waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });';
+          const ownerSuccessReplacement = `    try {\n      await page.getByText("Pipeline complete — conversion_record created, Wave 3 job_handoff boundary set", { exact: true })\n        .waitFor({ state: "visible", timeout: DEFAULT_TIMEOUT_MS });\n    } catch (error) {\n      const panelText = redact(await panel.innerText().catch(() => ""));\n      throw new Error("Wave 2 owner pipeline did not reach completion. Sanitized pilot state: " + panelText.slice(0, 1600) + "\\n" + redact(error));\n    }`;
+          if (!wave2.includes(ownerSuccessMarker)) throw new Error('Wave 2 owner success wait marker not found');
+          wave2 = wave2.replace(ownerSuccessMarker, ownerSuccessReplacement);
           fs.writeFileSync(wave2Path, wave2);
 
           const path = 'scripts/serviceos-wave2-5-live-oat.mjs';
@@ -215,7 +220,8 @@ jobs:
           grep -q 'report.phases.finance = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'report.phases.idempotencyConcurrency = "PASS"' scripts/serviceos-wave2-5-live-oat.mjs
           grep -q 'data-canonical-workspace' scripts/wave2-revenue-smoke-test.mjs
-          echo "PASS: exact PR17 Wave 2-5 harness prepared; Wave 6 excluded; login diagnostics enabled"
+          grep -q 'Wave 2 owner pipeline did not reach completion' scripts/wave2-revenue-smoke-test.mjs
+          echo "PASS: exact PR17 Wave 2-5 harness prepared; Wave 6 excluded; login and owner-pipeline diagnostics enabled"
 
       - name: Install Chromium
         run: npx playwright install --with-deps chromium
