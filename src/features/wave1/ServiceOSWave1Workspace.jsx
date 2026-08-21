@@ -1,5 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
 import { useServiceOSContext } from "../../auth/ServiceOSAuthGate";
+import { getStoredSession, signOut } from "../../lib/serviceosAuthClient";
 import { canOpenServiceOSDiagnostics, SERVICEOS_DIAGNOSTICS_PATH } from "../../lib/serviceosUiPolicy";
 
 const ROLE_LABELS = {
@@ -55,11 +56,22 @@ export default function ServiceOSWave1Workspace() {
   const context = useServiceOSContext();
   const session = context?.session ?? null;
   const revenueContext = context?.revenueContext ?? null;
-  const logout = context?.logout;
+  const [loggingOut, setLoggingOut] = useState(false);
   const role = revenueContext?.roleCode ?? "unknown";
   const organizationId = revenueContext?.orgId ?? "Unavailable";
   const businessUnits = Array.isArray(revenueContext?.businessUnits) ? revenueContext.businessUnits : [];
   const email = session?.user?.email ?? "Unavailable";
+
+  async function handleLogout() {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      const stored = getStoredSession();
+      await signOut(stored?.access_token);
+    } finally {
+      window.location.assign("/");
+    }
+  }
 
   return (
     <main style={styles.page} data-serviceos-wave="wave1" data-canonical-workspace="true">
@@ -70,8 +82,8 @@ export default function ServiceOSWave1Workspace() {
             <h1 style={styles.title}>Wave 1 Access Workspace</h1>
             <p style={styles.subtitle}>Canonical authentication and role isolation pilot</p>
           </div>
-          <button type="button" style={styles.logout} onClick={() => logout?.()} aria-label="Log out of ServiceOS">
-            Logout
+          <button type="button" style={{ ...styles.logout, opacity: loggingOut ? 0.6 : 1 }} onClick={handleLogout} disabled={loggingOut} aria-label="Log out of ServiceOS">
+            {loggingOut ? "Logging out…" : "Logout"}
           </button>
         </header>
 
