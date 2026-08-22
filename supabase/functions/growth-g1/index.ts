@@ -121,7 +121,12 @@ Deno.serve(async (req: Request) => {
       if (!organizationId || !businessUnitId) fail(400, "organization_id and business_unit_id are required.", "GROWTH_SCOPE_REQUIRED");
       await authorize(token, organizationId, businessUnitId);
       const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 100) || 100, 500));
-      if ((url.searchParams.get("view") || "").toLowerCase() === "review") {
+      const view = (url.searchParams.get("view") || "").toLowerCase();
+      if (view === "readiness") {
+        const readiness = await rpc("growth_g1_scope_readiness", { p_organization_id: organizationId });
+        return json(200, { success: true, readiness });
+      }
+      if (view === "review") {
         const review_queue = await rpc("growth_g1_list_review_queue", {
           p_organization_id: organizationId,
           p_business_unit_id: businessUnitId,
