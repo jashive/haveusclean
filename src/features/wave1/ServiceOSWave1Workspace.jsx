@@ -11,6 +11,7 @@ const ServiceOSPilotPanel = lazy(() => import("../pilot/ServiceOSPilotPanel"));
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
 const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"));
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
+const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
 
 const REVENUE_PILOT_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -28,6 +29,10 @@ const QA_ENABLED =
 const FINANCE_ENABLED =
   typeof import.meta !== "undefined" &&
   import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === "true";
+
+const STAFF_ADMIN_ENABLED =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.VITE_SERVICEOS_STAFF_ADMIN_ENABLED === "true";
 
 const ROLE_LABELS = {
   owner_admin: "Owner / Admin",
@@ -78,6 +83,7 @@ export default function ServiceOSWave1Workspace() {
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
   const qaAuthorized = QA_ENABLED && role === "qa";
   const financeAuthorized = FINANCE_ENABLED && role === "finance";
+  const staffAdminAuthorized = STAFF_ADMIN_ENABLED && role === "owner_admin";
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
   const workspaceTitle = financeAuthorized
     ? "Wave 5 Finance Workspace"
@@ -118,6 +124,7 @@ export default function ServiceOSWave1Workspace() {
       data-operations-authorized={operationsAuthorized ? "true" : "false"}
       data-qa-authorized={qaAuthorized ? "true" : "false"}
       data-finance-authorized={financeAuthorized ? "true" : "false"}
+      data-staff-admin-authorized={staffAdminAuthorized ? "true" : "false"}
     >
       <div style={styles.shell}>
         <header style={styles.header}>
@@ -144,19 +151,25 @@ export default function ServiceOSWave1Workspace() {
           <div style={styles.status}>Canonical shell active</div>
         </section>
 
-        <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized) ? 14 : 0 }}>
+        <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized || staffAdminAuthorized) ? 14 : 0 }}>
           <h2 style={styles.sectionTitle}>ServiceOS rollout gates</h2>
-          <p style={styles.notice}>Revenue, Operations, QA, and Finance use independent role-aware gates. Intelligence remains dark until its own rollout gate is accepted.</p>
+          <p style={styles.notice}>Revenue, Operations, QA, Finance, and Staff Administration use independent role-aware gates. Intelligence remains dark until its own rollout gate is accepted.</p>
           <div style={styles.actions}>
             {canOpenServiceOSDiagnostics(role) ? <a href={SERVICEOS_DIAGNOSTICS_PATH} style={styles.link}>Open read-only diagnostics</a> : null}
             <span style={revenueAuthorized ? styles.enabled : styles.disabled}>{revenueAuthorized ? "Revenue · active" : "Revenue · disabled"}</span>
             <span style={operationsAuthorized ? styles.enabled : styles.disabled}>{operationsAuthorized ? "Operations · active" : "Operations · disabled"}</span>
             <span style={qaAuthorized ? styles.enabled : styles.disabled}>{qaAuthorized ? "QA · active" : "QA · disabled"}</span>
             <span style={financeAuthorized ? styles.enabled : styles.disabled}>{financeAuthorized ? "Finance · active" : "Finance · disabled"}</span>
+            <span style={staffAdminAuthorized ? styles.enabled : styles.disabled}>{staffAdminAuthorized ? "Staff Admin · active" : "Staff Admin · disabled"}</span>
             <span style={styles.disabled}>Intelligence · disabled</span>
           </div>
         </section>
 
+        {staffAdminAuthorized ? (
+          <Suspense fallback={<div role="status">Loading Staff Management…</div>}>
+            <ServiceOSStaffAdminWorkspace />
+          </Suspense>
+        ) : null}
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
             <ServiceOSPilotPanel session={session} revenueContext={revenueContext} />
