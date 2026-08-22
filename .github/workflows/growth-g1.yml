@@ -1,0 +1,25 @@
+name: Growth Layer G1
+
+on:
+  push:
+    branches:
+      - growth/growth-layer-1.0
+  pull_request:
+    paths:
+      - 'src/growth/**'
+      - 'tests/growth*.test.mjs'
+      - 'supabase/functions/growth-g1/**'
+      - 'supabase/migrations/*growth_layer*'
+      - 'docs/growth/**'
+      - '.github/workflows/growth-g1.yml'
+
+jobs:
+  growth-g1-contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: Run Growth G1 tests
+        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs
