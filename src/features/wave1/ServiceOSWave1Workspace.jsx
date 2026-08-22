@@ -130,8 +130,16 @@ export default function ServiceOSWave1Workspace() {
           </div>
         </section>
 
-        {revenueAuthorized ? <Suspense fallback={<div role="status">Loading Revenue…</div>}><ServiceOSPilotPanel session={session} revenueContext={revenueContext} /></Suspense> : null}
-        {operationsAuthorized ? <Suspense fallback={<div role="status">Loading Operations…</div>}><ServiceOSOperationsWorkspace session={session} revenueContext={revenueContext} /></Suspense> : null}
+        {revenueAuthorized ? (
+          <Suspense fallback={<div role="status">Loading Revenue…</div>}>
+            <ServiceOSPilotPanel session={session} revenueContext={revenueContext} />
+          </Suspense>
+        ) : null}
+        {operationsAuthorized ? (
+          <Suspense fallback={<div role="status">Loading Operations…</div>}>
+            <ServiceOSOperationsWorkspace session={session} revenueContext={revenueContext} />
+          </Suspense>
+        ) : null}
       </div>
     </main>
   );
