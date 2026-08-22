@@ -23,4 +23,4 @@ jobs:
         with:
           node-version: 24
       - name: Run Growth G1 tests
-        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs tests/growthReviewReadiness.test.mjs tests/growthContactNormalization.test.mjs tests/growthEnrichmentProvenance.test.mjs tests/growthPilotFixture.test.mjs tests/growthScopeReadiness.test.mjs
+        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs tests/growthReviewReadiness.test.mjs tests/growthContactNormalization.test.mjs tests/growthEnrichmentProvenance.test.mjs tests/growthPilotFixture.test.mjs tests/growthScopeReadiness.test.mjs tests/growthPilotLoadPlan.test.mjs
