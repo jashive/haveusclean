@@ -2,7 +2,16 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const ACCEPTANCE_PROJECT_REF = "hqeamecwdsrjfjybrsox";
 const ALLOWED_ROLES = new Set(["owner_admin", "office_ops"]);
-const ALLOWED_ACTIONS = new Set(["create_prospect", "add_enrichment", "score_prospect", "add_contact_candidate"]);
+const ALLOWED_ACTIONS = new Set([
+  "create_prospect",
+  "add_enrichment",
+  "score_prospect",
+  "add_contact_candidate",
+  "resolve_field",
+  "review_duplicate",
+  "review_contact",
+  "complete_review",
+]);
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -146,7 +155,9 @@ Deno.serve(async (req: Request) => {
     }
 
     const prospectId = String(body.prospect_id || body.contact?.prospect_id || "");
-    if (!prospectId) fail(400, "prospect_id is required.", "GROWTH_PROSPECT_REQUIRED");
+    if (!prospectId && !["review_duplicate", "review_contact"].includes(action)) {
+      fail(400, "prospect_id is required.", "GROWTH_PROSPECT_REQUIRED");
+    }
 
     if (action === "add_enrichment") {
       const evidenceId = await rpc("growth_g1_add_enrichment", { p_prospect_id: prospectId, p_organization_id: organizationId, p_evidence: body.evidence || {} });
@@ -163,6 +174,51 @@ Deno.serve(async (req: Request) => {
       };
       const contactCandidateId = await rpc("growth_g1_add_contact_candidate", { p_payload: contact });
       return json(201, { success: true, contact_candidate_id: contactCandidateId });
+    }
+
+    if (action === "resolve_field") {
+      const fieldResolutionId = await rpc("growth_g1_resolve_field", {
+        p_prospect_id: prospectId,
+        p_organization_id: organizationId,
+        p_field_name: String(body.field_name || ""),
+        p_evidence_id: String(body.evidence_id || ""),
+        p_decision: String(body.decision || ""),
+        p_reviewer_app_user_id: authz.appUser.id,
+        p_notes: body.notes || null,
+      });
+      return json(200, { success: true, field_resolution_id: fieldResolutionId });
+    }
+
+    if (action === "review_duplicate") {
+      const result = await rpc("growth_g1_review_duplicate", {
+        p_duplicate_review_id: String(body.duplicate_review_id || ""),
+        p_organization_id: organizationId,
+        p_decision: String(body.decision || ""),
+        p_reviewer_app_user_id: authz.appUser.id,
+        p_notes: body.notes || null,
+      });
+      return json(200, { success: true, decision: result });
+    }
+
+    if (action === "review_contact") {
+      const result = await rpc("growth_g1_review_contact", {
+        p_contact_candidate_id: String(body.contact_candidate_id || ""),
+        p_organization_id: organizationId,
+        p_decision: String(body.decision || ""),
+        p_reviewer_app_user_id: authz.appUser.id,
+        p_notes: body.notes || null,
+      });
+      return json(200, { success: true, decision: result });
+    }
+
+    if (action === "complete_review") {
+      const lifecycleStatus = await rpc("growth_g1_complete_review", {
+        p_prospect_id: prospectId,
+        p_organization_id: organizationId,
+        p_reviewer_app_user_id: authz.appUser.id,
+        p_notes: body.notes || null,
+      });
+      return json(200, { success: true, lifecycle_status: lifecycleStatus, outreach_eligible: false });
     }
 
     const score = { ...(body.score || {}), scored_by: body.score?.scored_by || `app_user:${authz.appUser.id}` };
