@@ -1,5 +1,6 @@
 // Growth Layer 1.0 governed scope-readiness detector.
 // Pure logic only: it never creates or repairs ServiceOS canonical scope records.
+// Canonical currency is jurisdiction-owned; business-unit status controls active routing.
 
 function text(value) {
   return String(value ?? '').trim();
@@ -11,7 +12,6 @@ function normalize(row = {}) {
     business_unit_id: text(row.business_unit_id || row.id),
     jurisdiction_id: text(row.jurisdiction_id),
     business_unit_status: text(row.business_unit_status || row.status).toLowerCase(),
-    jurisdiction_status: text(row.jurisdiction_status || row.jurisdiction_status_code || 'active').toLowerCase(),
     country_code: text(row.country_code).toUpperCase(),
     subdivision_code: text(row.subdivision_code).toUpperCase(),
     currency_code: text(row.currency_code).toUpperCase(),
@@ -21,7 +21,6 @@ function normalize(row = {}) {
 
 function matches(row, expected) {
   return row.business_unit_status === 'active' &&
-    row.jurisdiction_status === 'active' &&
     row.country_code === expected.country_code &&
     row.subdivision_code === expected.subdivision_code &&
     row.currency_code === expected.currency_code &&
