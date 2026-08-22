@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { normalizeSupabaseSecretKeyHeaders } from "../server-internal/supabase-secret-key-fetch-compat.js";
+import {
+  normalizeSupabaseSecretKeyHeaders,
+  preferModernSupabaseSecret,
+} from "../server-internal/supabase-secret-key-fetch-compat.js";
 
 test("modern Supabase sb_secret key is not sent as bearer JWT", () => {
   const init = normalizeSupabaseSecretKeyHeaders({
@@ -41,4 +44,21 @@ test("authenticated user bearer session is preserved", () => {
 
   assert.equal(init.headers.Authorization, "Bearer user-session-jwt");
   assert.equal(init.headers.apikey, "public-anon-key");
+});
+
+test("modern Supabase secret key overrides stale legacy service-role env value", () => {
+  const env = {
+    SUPABASE_SECRET_KEY: "sb_secret_current",
+    SUPABASE_SERVICE_ROLE_KEY: "legacy-stale-jwt",
+  };
+
+  assert.equal(preferModernSupabaseSecret(env), true);
+  assert.equal(env.SUPABASE_SERVICE_ROLE_KEY, "sb_secret_current");
+});
+
+test("legacy service-role env value remains available when no modern secret is configured", () => {
+  const env = { SUPABASE_SERVICE_ROLE_KEY: "legacy-valid-jwt" };
+
+  assert.equal(preferModernSupabaseSecret(env), false);
+  assert.equal(env.SUPABASE_SERVICE_ROLE_KEY, "legacy-valid-jwt");
 });
