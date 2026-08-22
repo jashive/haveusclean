@@ -2,7 +2,7 @@ import "jsr:@supabase/functions-js/edge-runtime.d.ts";
 
 const ACCEPTANCE_PROJECT_REF = "hqeamecwdsrjfjybrsox";
 const ALLOWED_ROLES = new Set(["owner_admin", "office_ops"]);
-const ALLOWED_ACTIONS = new Set(["create_prospect", "add_enrichment", "score_prospect"]);
+const ALLOWED_ACTIONS = new Set(["create_prospect", "add_enrichment", "score_prospect", "add_contact_candidate"]);
 const cors = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
@@ -110,11 +110,20 @@ Deno.serve(async (req: Request) => {
       const businessUnitId = url.searchParams.get("business_unit_id") || "";
       if (!organizationId || !businessUnitId) fail(400, "organization_id and business_unit_id are required.", "GROWTH_SCOPE_REQUIRED");
       await authorize(token, organizationId, businessUnitId);
+      const limit = Math.max(1, Math.min(Number(url.searchParams.get("limit") || 100) || 100, 500));
+      if ((url.searchParams.get("view") || "").toLowerCase() === "review") {
+        const review_queue = await rpc("growth_g1_list_review_queue", {
+          p_organization_id: organizationId,
+          p_business_unit_id: businessUnitId,
+          p_limit: limit,
+        });
+        return json(200, { success: true, review_queue });
+      }
       const prospects = await rpc("growth_g1_list_prospects", {
         p_organization_id: organizationId,
         p_business_unit_id: businessUnitId,
         p_status: url.searchParams.get("status") || null,
-        p_limit: Math.max(1, Math.min(Number(url.searchParams.get("limit") || 100) || 100, 500)),
+        p_limit: limit,
       });
       return json(200, { success: true, prospects });
     }
@@ -123,8 +132,8 @@ Deno.serve(async (req: Request) => {
     const body = await req.json().catch(() => ({})) as Record<string, any>;
     const action = String(body.action || "");
     if (!ALLOWED_ACTIONS.has(action)) fail(400, "Unknown Growth G1 action.", "GROWTH_ACTION_INVALID");
-    const organizationId = String(body.organization_id || body.prospect?.organization_id || "");
-    const businessUnitId = String(body.business_unit_id || body.prospect?.business_unit_id || "");
+    const organizationId = String(body.organization_id || body.prospect?.organization_id || body.contact?.organization_id || "");
+    const businessUnitId = String(body.business_unit_id || body.prospect?.business_unit_id || body.contact?.business_unit_id || "");
     if (!organizationId || !businessUnitId) fail(400, "organization_id and business_unit_id are required.", "GROWTH_SCOPE_REQUIRED");
     const authz = await authorize(token, organizationId, businessUnitId);
 
@@ -136,11 +145,24 @@ Deno.serve(async (req: Request) => {
       return json(201, { success: true, prospect_id: prospectId });
     }
 
-    const prospectId = String(body.prospect_id || "");
+    const prospectId = String(body.prospect_id || body.contact?.prospect_id || "");
     if (!prospectId) fail(400, "prospect_id is required.", "GROWTH_PROSPECT_REQUIRED");
+
     if (action === "add_enrichment") {
       const evidenceId = await rpc("growth_g1_add_enrichment", { p_prospect_id: prospectId, p_organization_id: organizationId, p_evidence: body.evidence || {} });
       return json(201, { success: true, evidence_id: evidenceId });
+    }
+
+    if (action === "add_contact_candidate") {
+      const contact = {
+        ...(body.contact || {}),
+        prospect_id: prospectId,
+        organization_id: organizationId,
+        business_unit_id: businessUnitId,
+        jurisdiction_id: body.contact?.jurisdiction_id || authz.businessUnit.jurisdiction_id,
+      };
+      const contactCandidateId = await rpc("growth_g1_add_contact_candidate", { p_payload: contact });
+      return json(201, { success: true, contact_candidate_id: contactCandidateId });
     }
 
     const score = { ...(body.score || {}), scored_by: body.score?.scored_by || `app_user:${authz.appUser.id}` };
