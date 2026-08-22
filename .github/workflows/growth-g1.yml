@@ -22,4 +22,4 @@ jobs:
         with:
           node-version: 24
       - name: Run Growth G1 tests
-        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs
+        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs
