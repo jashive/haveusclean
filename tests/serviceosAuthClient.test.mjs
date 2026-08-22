@@ -30,3 +30,9 @@ test("refresh path uses the same safe auth parser and canonical fallback", () =>
   assert.match(refreshSource, /parseAuthResponse\(response\)/);
   assert.match(refreshSource, /authErrorMessage\(data, "Session refresh failed"\)/);
 });
+
+test("canonical role validation includes finance without weakening mixed-role rejection", () => {
+  assert.match(source, /code=in\.\(owner_admin,office_ops,worker,qa,finance\)/);
+  assert.match(source, /roles\.length !== 5/);
+  assert.match(source, /mixed or unsupported canonical role/);
+});
