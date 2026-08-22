@@ -10,6 +10,7 @@ import {
 const ServiceOSPilotPanel = lazy(() => import("../pilot/ServiceOSPilotPanel"));
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
 const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"));
+const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
 
 const REVENUE_PILOT_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -24,11 +25,16 @@ const QA_ENABLED =
   typeof import.meta !== "undefined" &&
   import.meta.env?.VITE_SERVICEOS_QA_ENABLED === "true";
 
+const FINANCE_ENABLED =
+  typeof import.meta !== "undefined" &&
+  import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === "true";
+
 const ROLE_LABELS = {
   owner_admin: "Owner / Admin",
   office_ops: "Office Operations",
   worker: "Worker",
   qa: "Quality Assurance",
+  finance: "Finance",
 };
 
 const styles = {
@@ -71,15 +77,26 @@ export default function ServiceOSWave1Workspace() {
   const revenueAuthorized = REVENUE_PILOT_ENABLED && canManageServiceOSRevenue(role);
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
   const qaAuthorized = QA_ENABLED && role === "qa";
-  const activeWave = qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
-  const workspaceTitle = qaAuthorized ? "Wave 4 Quality Assurance Workspace" : operationsAuthorized ? "Wave 3 Operations Workspace" : revenueAuthorized ? "Wave 2 Revenue Workspace" : "Wave 1 Access Workspace";
-  const workspaceSubtitle = qaAuthorized
-    ? "Controlled QA rollout with Finance and Intelligence gates preserved"
-    : operationsAuthorized
-      ? "Controlled Operations rollout with QA, Finance, and Intelligence gates preserved"
-      : revenueAuthorized
-        ? "Canonical Revenue pilot with Wave 1 role isolation preserved"
-        : "Canonical authentication and role isolation pilot";
+  const financeAuthorized = FINANCE_ENABLED && role === "finance";
+  const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
+  const workspaceTitle = financeAuthorized
+    ? "Wave 5 Finance Workspace"
+    : qaAuthorized
+      ? "Wave 4 Quality Assurance Workspace"
+      : operationsAuthorized
+        ? "Wave 3 Operations Workspace"
+        : revenueAuthorized
+          ? "Wave 2 Revenue Workspace"
+          : "Wave 1 Access Workspace";
+  const workspaceSubtitle = financeAuthorized
+    ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
+    : qaAuthorized
+      ? "Controlled QA rollout with Finance and Intelligence gates preserved"
+      : operationsAuthorized
+        ? "Controlled Operations rollout with QA, Finance, and Intelligence gates preserved"
+        : revenueAuthorized
+          ? "Canonical Revenue pilot with Wave 1 role isolation preserved"
+          : "Canonical authentication and role isolation pilot";
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -100,6 +117,7 @@ export default function ServiceOSWave1Workspace() {
       data-revenue-authorized={revenueAuthorized ? "true" : "false"}
       data-operations-authorized={operationsAuthorized ? "true" : "false"}
       data-qa-authorized={qaAuthorized ? "true" : "false"}
+      data-finance-authorized={financeAuthorized ? "true" : "false"}
     >
       <div style={styles.shell}>
         <header style={styles.header}>
@@ -126,15 +144,15 @@ export default function ServiceOSWave1Workspace() {
           <div style={styles.status}>Canonical shell active</div>
         </section>
 
-        <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized) ? 14 : 0 }}>
+        <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized) ? 14 : 0 }}>
           <h2 style={styles.sectionTitle}>ServiceOS rollout gates</h2>
-          <p style={styles.notice}>Revenue, Operations, and QA each use independent role-aware gates. Finance and Intelligence remain dark until their own rollout gates are accepted.</p>
+          <p style={styles.notice}>Revenue, Operations, QA, and Finance use independent role-aware gates. Intelligence remains dark until its own rollout gate is accepted.</p>
           <div style={styles.actions}>
             {canOpenServiceOSDiagnostics(role) ? <a href={SERVICEOS_DIAGNOSTICS_PATH} style={styles.link}>Open read-only diagnostics</a> : null}
             <span style={revenueAuthorized ? styles.enabled : styles.disabled}>{revenueAuthorized ? "Revenue · active" : "Revenue · disabled"}</span>
             <span style={operationsAuthorized ? styles.enabled : styles.disabled}>{operationsAuthorized ? "Operations · active" : "Operations · disabled"}</span>
             <span style={qaAuthorized ? styles.enabled : styles.disabled}>{qaAuthorized ? "QA · active" : "QA · disabled"}</span>
-            <span style={styles.disabled}>Finance · disabled</span>
+            <span style={financeAuthorized ? styles.enabled : styles.disabled}>{financeAuthorized ? "Finance · active" : "Finance · disabled"}</span>
             <span style={styles.disabled}>Intelligence · disabled</span>
           </div>
         </section>
@@ -152,6 +170,11 @@ export default function ServiceOSWave1Workspace() {
         {qaAuthorized ? (
           <Suspense fallback={<div role="status">Loading QA…</div>}>
             <ServiceOSQaWorkspace session={session} revenueContext={revenueContext} />
+          </Suspense>
+        ) : null}
+        {financeAuthorized ? (
+          <Suspense fallback={<div role="status">Loading Finance…</div>}>
+            <ServiceOSFinanceWorkspace session={session} revenueContext={revenueContext} />
           </Suspense>
         ) : null}
       </div>
