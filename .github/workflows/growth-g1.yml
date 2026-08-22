@@ -8,6 +8,7 @@ on:
     paths:
       - 'src/growth/**'
       - 'tests/growth*.test.mjs'
+      - 'tests/fixtures/growthG1PilotFixture.js'
       - 'supabase/functions/growth-g1/**'
       - 'supabase/migrations/*growth_layer*'
       - 'docs/growth/**'
@@ -22,4 +23,4 @@ jobs:
         with:
           node-version: 24
       - name: Run Growth G1 tests
-        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs tests/growthReviewReadiness.test.mjs tests/growthContactNormalization.test.mjs tests/growthEnrichmentProvenance.test.mjs
+        run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs tests/growthReviewReadiness.test.mjs tests/growthContactNormalization.test.mjs tests/growthEnrichmentProvenance.test.mjs tests/growthPilotFixture.test.mjs
