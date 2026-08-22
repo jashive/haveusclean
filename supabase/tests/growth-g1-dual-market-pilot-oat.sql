@@ -11,6 +11,7 @@
 -- Required governed scope invariants:
 -- Ontario = CA / ON / CAD
 -- Arizona = US / AZ / USD
+-- Currency is canonical on public.jurisdiction.
 --
 -- Safety gates must remain OFF throughout:
 -- growth_outreach_enabled
@@ -27,13 +28,13 @@ begin
   if public.growth_gate_enabled('growth_serviceos_handoff_enabled') then raise exception 'OAT STOP: ServiceOS handoff enabled'; end if;
 end $$;
 
--- Verify governed jurisdiction identity.
+-- Verify governed jurisdiction identity and active business-unit routing.
 do $$
 declare
   on_country text; on_subdivision text; on_currency text;
   az_country text; az_subdivision text; az_currency text;
 begin
-  select j.country_code,j.subdivision_code,b.currency_code
+  select j.country_code,j.subdivision_code,j.currency_code
     into on_country,on_subdivision,on_currency
   from public.business_unit b join public.jurisdiction j on j.id=b.jurisdiction_id
   where b.id=:'on_business_unit_id'::uuid
@@ -41,7 +42,7 @@ begin
     and j.id=:'on_jurisdiction_id'::uuid
     and b.status='active';
 
-  select j.country_code,j.subdivision_code,b.currency_code
+  select j.country_code,j.subdivision_code,j.currency_code
     into az_country,az_subdivision,az_currency
   from public.business_unit b join public.jurisdiction j on j.id=b.jurisdiction_id
   where b.id=:'az_business_unit_id'::uuid
