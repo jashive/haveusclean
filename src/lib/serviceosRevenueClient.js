@@ -71,14 +71,34 @@ async function updateById(table, id, patch, accessToken) {
   return Array.isArray(rows) ? rows[0] : rows;
 }
 
+/**
+ * Delete exactly one row and prove that PostgREST actually deleted it.
+ *
+ * RLS can legally turn DELETE into a successful 200/204 response that affects
+ * zero rows. Pilot cleanup must never treat that as success. Requesting the
+ * deleted representation lets us distinguish a real delete from an RLS-hidden
+ * zero-row delete without granting broader permissions or exposing service-role
+ * credentials in the browser.
+ */
 async function deleteById(table, id, accessToken) {
   const res = await authenticatedRestFetch(`${table}?id=eq.${encodeURIComponent(id)}`, accessToken, {
     method: "DELETE",
+    headers: { Prefer: "return=representation" },
   });
   if (!res || !res.ok) {
     const text = await res?.text().catch(() => "");
     throw new Error(`Revenue delete failed on ${table} id=${id}: ${res?.status ?? "network error"} ${text}`);
   }
+
+  const rows = await res.json().catch(() => []);
+  const deleted = Array.isArray(rows) ? rows : rows ? [rows] : [];
+  const exactMatch = deleted.some((row) => row?.id === id);
+  if (!exactMatch) {
+    throw new Error(
+      `Revenue delete verification failed on ${table} id=${id}: request succeeded but the exact row was not returned as deleted (possible RLS block)`
+    );
+  }
+
   return true;
 }
 
@@ -396,6 +416,8 @@ export async function runRevenuePipeline({
 // Deletion order respects foreign-key dependencies (children first).
 // pricing_snapshot is immutable but orphan snapshots may be deleted after
 // quote_version is deleted.
+// Every delete is fail-closed: a 2xx response is insufficient unless PostgREST
+// returns the exact deleted row representation.
 
 /**
  * @param {object} createdIds  Map of entity → { id } as returned by runRevenuePipeline
