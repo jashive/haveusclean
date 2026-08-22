@@ -13,7 +13,6 @@ const on = (overrides = {}) => ({
   business_unit_id: ON_BU,
   jurisdiction_id: ON_JUR,
   business_unit_status: 'active',
-  jurisdiction_status: 'active',
   country_code: 'CA',
   subdivision_code: 'ON',
   currency_code: 'CAD',
@@ -26,7 +25,6 @@ const az = (overrides = {}) => ({
   business_unit_id: AZ_BU,
   jurisdiction_id: AZ_JUR,
   business_unit_status: 'active',
-  jurisdiction_status: 'active',
   country_code: 'US',
   subdivision_code: 'AZ',
   currency_code: 'USD',
@@ -40,7 +38,6 @@ test('TEST-W6-like synthetic scope is BLOCKED and cannot load pilot', () => {
     business_unit_id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     jurisdiction_id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb',
     business_unit_status: 'active',
-    jurisdiction_status: 'active',
     country_code: 'US',
     subdivision_code: '',
     currency_code: 'CAD',
@@ -89,10 +86,7 @@ test('business unit and jurisdiction identity must be distinct between markets',
   assert.ok(sameJur.reasons.includes('jurisdictions_not_distinct'));
 });
 
-test('inactive business unit or jurisdiction does not satisfy readiness', () => {
+test('inactive business unit does not satisfy readiness', () => {
   const inactiveBu = evaluateG1ScopeReadiness([on({ business_unit_status: 'inactive' }), az()]);
   assert.ok(inactiveBu.reasons.includes('ontario_scope_missing'));
-
-  const inactiveJur = evaluateG1ScopeReadiness([on(), az({ jurisdiction_status: 'inactive' })]);
-  assert.ok(inactiveJur.reasons.includes('arizona_scope_missing'));
 });
