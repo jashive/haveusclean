@@ -24,6 +24,11 @@ test('Wave 5 Finance workspace is deliberately limited to readiness and frozen i
   assert.doesNotMatch(workspace, /createContractorPayable/);
 });
 
+test('Wave 5 Finance conversion lineage is read from the canonical operational job', () => {
+  assert.match(workspace, /job\.conversion_record_id/);
+  assert.doesNotMatch(workspace, /handoff\?\.conversion_record_id/);
+});
+
 test('Finance can read corrective actions but receives no corrective-action write policy', () => {
   assert.match(caMigration, /pol_ca_finance_select/);
   assert.match(caMigration, /FOR SELECT TO authenticated/);

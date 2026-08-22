@@ -91,10 +91,9 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
       const quoteVersion = job.quote_version_id
         ? await fetchOne(`quote_version?id=eq.${encodeURIComponent(job.quote_version_id)}&limit=1`)
         : null;
-      let conversionRecord = null;
-      if (handoff?.conversion_record_id) {
-        conversionRecord = await fetchOne(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&limit=1`);
-      }
+      const conversionRecord = job.conversion_record_id
+        ? await fetchOne(`conversion_record?id=eq.${encodeURIComponent(job.conversion_record_id)}&limit=1`)
+        : null;
       setCaseData({ job, workOrder, handoff, correctiveActions, pricingSnapshot, quoteVersion, conversionRecord });
     } catch (e) {
       setCaseData(null);
