@@ -54,6 +54,20 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
     return [...rows].reverse().find((row) => ["pending", "in_progress"].includes(row.inspection_status)) ?? null;
   }, [caseData]);
 
+  const passedInspection = useMemo(() => {
+    const rows = caseData?.qaInspections ?? [];
+    return [...rows].reverse().find((row) => row.inspection_status === "passed") ?? null;
+  }, [caseData]);
+
+  const recoverablePassedInspection = useMemo(() => {
+    if (!passedInspection || !caseData?.job || !caseData?.workOrder) return null;
+    if (caseData.job.operational_status !== "qa_pending") return null;
+    if (caseData.workOrder.work_order_status !== "service_complete") return null;
+    return passedInspection;
+  }, [passedInspection, caseData]);
+
+  const passInspection = currentInspection ?? recoverablePassedInspection;
+
   const refresh = useCallback(async () => {
     setError("");
     if (!jobId.trim() || !workOrderId.trim()) {
@@ -115,13 +129,18 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   }, [caseData, accessToken, appUserId, refresh]);
 
   const passQa = useCallback(async () => {
-    if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
+    if (!passInspection || !caseData?.job || !caseData?.workOrder) return;
     setBusy(true);
     setError("");
     try {
-      const numericScore = Number(score);
+      const numericScore = passInspection.inspection_status === "passed"
+        ? Number(passInspection.score ?? score)
+        : Number(score);
       if (!Number.isFinite(numericScore) || numericScore < 0 || numericScore > 100) throw new Error("QA score must be between 0 and 100.");
-      await updateQaInspectionStatus(currentInspection.id, "passed", accessToken, appUserId, { score: numericScore });
+
+      if (passInspection.inspection_status !== "passed") {
+        await updateQaInspectionStatus(passInspection.id, "passed", accessToken, appUserId, { score: numericScore });
+      }
       await updateWorkOrderStatus(caseData.workOrder.id, "qa_complete", accessToken, appUserId);
       await updateOperationalJobStatus(caseData.job.id, "qa_passed", accessToken, appUserId);
       await createWorkOrderEvent({
@@ -132,7 +151,11 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
         event_type: "qa_passed",
         event_at: new Date().toISOString(),
         actor_app_user_id: appUserId,
-        event_payload: { score: numericScore, findings: findings.trim() },
+        event_payload: {
+          score: numericScore,
+          findings: findings.trim(),
+          resumed_after_partial_failure: passInspection.inspection_status === "passed",
+        },
         metadata: { source: "wave4_production_workspace", synthetic: false },
       }, accessToken);
       await refresh();
@@ -141,7 +164,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
     } finally {
       setBusy(false);
     }
-  }, [currentInspection, caseData, score, findings, accessToken, appUserId, refresh]);
+  }, [passInspection, caseData, score, findings, accessToken, appUserId, refresh]);
 
   const failQa = useCallback(async () => {
     if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
@@ -202,10 +225,11 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
       </div>
       <div style={styles.actions}>
         <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={refresh} disabled={busy}>{busy ? "Working…" : "Load / Refresh QA Case"}</button>
-        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={startQa} disabled={busy || !caseData || caseData.job.operational_status !== "qa_pending" || !!currentInspection}>Start QA</button>
-        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={passQa} disabled={busy || !currentInspection}>Pass QA</button>
+        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={startQa} disabled={busy || !caseData || caseData.job.operational_status !== "qa_pending" || !!currentInspection || !!passedInspection}>Start QA</button>
+        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={passQa} disabled={busy || !passInspection}>{recoverablePassedInspection ? "Finalize Passed QA" : "Pass QA"}</button>
         <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !currentInspection}>Fail QA + Open Rework</button>
       </div>
+      {recoverablePassedInspection ? <div style={styles.status}>Recovery detected: QA inspection already passed. Finalize the governed work-order/job transition and audit event.</div> : null}
       {caseData ? <div style={styles.status}>Job: {caseData.job.operational_status}{"\n"}Work order: {caseData.workOrder.work_order_status}{"\n"}QA inspections: {(caseData.qaInspections ?? []).length}{"\n"}Corrective actions: {(caseData.correctiveActions ?? []).length}</div> : null}
       {error ? <div role="alert" style={styles.error}>{error}</div> : null}
     </section>
