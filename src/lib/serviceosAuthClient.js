@@ -159,6 +159,8 @@ export async function authenticatedRestFetchWithRefresh(path, options = {}) {
   return response;
 }
 
+// ── Canonical ServiceOS context validation ────────────────────────────────────
+
 export async function validateServiceOSContext(session) {
   const { access_token, user } = session;
   const authUserId = user?.id;
