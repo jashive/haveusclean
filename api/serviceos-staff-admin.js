@@ -3,6 +3,7 @@
 
 import "../server-internal/supabase-secret-key-fetch-compat.js";
 import runStaffAdmin from "../server-internal/serviceos-staff-admin-impl.js";
+import { runWithStaffAdminDiagnostics } from "../server-internal/serviceos-staff-admin-diagnostics.js";
 import { requireServiceosServerTarget } from "../src/server/serviceosServerEnvironment.js";
 
 export default async function handler(req, res) {
@@ -20,5 +21,5 @@ export default async function handler(req, res) {
     });
   }
 
-  return runStaffAdmin(req, res);
+  return runWithStaffAdminDiagnostics(req, res, () => runStaffAdmin(req, res));
 }
