@@ -39,6 +39,17 @@ function withoutAuthorization(headers) {
   return next;
 }
 
+export function preferModernSupabaseSecret(env = process.env) {
+  const modern = String(env.SUPABASE_SECRET_KEY || "").trim();
+  if (!modern) return false;
+
+  // Staff Admin's older env reader checks SUPABASE_SERVICE_ROLE_KEY first.
+  // Promote the modern secret into that compatibility slot so a stale legacy
+  // service-role JWT can never override an explicitly configured secret key.
+  env.SUPABASE_SERVICE_ROLE_KEY = modern;
+  return true;
+}
+
 export function normalizeSupabaseSecretKeyHeaders(init = {}) {
   const apikey = headerValue(init.headers, "apikey").trim();
   const authorization = headerValue(init.headers, "authorization").trim();
@@ -50,6 +61,7 @@ export function normalizeSupabaseSecretKeyHeaders(init = {}) {
 }
 
 export function installSupabaseSecretKeyFetchCompat() {
+  preferModernSupabaseSecret();
   if (globalThis[FETCH_COMPAT_MARK]) return;
   const originalFetch = globalThis.fetch;
   if (typeof originalFetch !== "function") return;
