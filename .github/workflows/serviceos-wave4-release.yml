@@ -1,0 +1,29 @@
+name: ServiceOS Wave 4 Production Release
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/features/wave1/ServiceOSWave1Workspace.jsx'
+      - 'src/features/wave4/**'
+      - 'tests/serviceosWave4ProductionBoundary.test.mjs'
+      - '.env.production'
+      - 'package.json'
+      - '.github/workflows/serviceos-wave4-release.yml'
+  push:
+    branches:
+      - 'release/wave4-qa-production'
+
+jobs:
+  verify-wave4-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - run: npm run build
