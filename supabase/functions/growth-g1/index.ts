@@ -7,6 +7,7 @@ const ALLOWED_ACTIONS = new Set([
   "add_enrichment",
   "score_prospect",
   "add_contact_candidate",
+  "record_duplicate_review",
   "resolve_field",
   "review_duplicate",
   "review_contact",
@@ -174,6 +175,15 @@ Deno.serve(async (req: Request) => {
       };
       const contactCandidateId = await rpc("growth_g1_add_contact_candidate", { p_payload: contact });
       return json(201, { success: true, contact_candidate_id: contactCandidateId });
+    }
+
+    if (action === "record_duplicate_review") {
+      const duplicateReviewId = await rpc("growth_g1_record_duplicate_review", {
+        p_prospect_id: prospectId,
+        p_organization_id: organizationId,
+        p_payload: body.duplicate || {},
+      });
+      return json(201, { success: true, duplicate_review_id: duplicateReviewId });
     }
 
     if (action === "resolve_field") {
