@@ -43,7 +43,11 @@ function isPasswordSetupRequest() {
   if (window.location.pathname === "/set-password") return true;
   const callback = new URLSearchParams(window.location.hash.replace(/^#/, ""));
   const type = callback.get("type");
-  return Boolean(callback.get("access_token")) && (type === "invite" || type === "recovery");
+  const hasPasswordSession = Boolean(callback.get("access_token")) && (type === "invite" || type === "recovery");
+  const hasAuthCallbackError = Boolean(
+    callback.get("error") || callback.get("error_code") || callback.get("error_description")
+  );
+  return hasPasswordSession || hasAuthCallbackError;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
