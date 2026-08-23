@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import ServiceOSAuthGate, { useServiceOSContext } from "./auth/ServiceOSAuthGate";
+import ServiceOSPasswordSetup from "./auth/ServiceOSPasswordSetup";
 import { isCanonicalServiceOSMode, SERVICEOS_DIAGNOSTICS_PATH } from "./lib/serviceosUiPolicy";
 import "./styles.css";
 
@@ -37,8 +38,14 @@ function ServiceOSRoot() {
   );
 }
 
+const passwordSetupRequested = typeof window !== "undefined" && window.location.pathname === "/set-password";
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>
+    {passwordSetupRequested ? (
+      <ServiceOSPasswordSetup />
+    ) : (
+      <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>
+    )}
   </React.StrictMode>
 );
