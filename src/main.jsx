@@ -38,11 +38,17 @@ function ServiceOSRoot() {
   );
 }
 
-const passwordSetupRequested = typeof window !== "undefined" && window.location.pathname === "/set-password";
+function isPasswordSetupRequest() {
+  if (typeof window === "undefined") return false;
+  if (window.location.pathname === "/set-password") return true;
+  const callback = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const type = callback.get("type");
+  return Boolean(callback.get("access_token")) && (type === "invite" || type === "recovery");
+}
 
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    {passwordSetupRequested ? (
+    {isPasswordSetupRequest() ? (
       <ServiceOSPasswordSetup />
     ) : (
       <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>
