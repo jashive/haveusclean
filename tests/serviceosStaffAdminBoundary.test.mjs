@@ -6,6 +6,7 @@ const shell = fs.readFileSync(new URL('../src/features/wave1/ServiceOSWave1Works
 const client = fs.readFileSync(new URL('../src/lib/serviceosStaffAdminClient.js', import.meta.url), 'utf8');
 const api = fs.readFileSync(new URL('../api/serviceos-staff-admin.js', import.meta.url), 'utf8');
 const impl = fs.readFileSync(new URL('../server-internal/serviceos-staff-admin-impl.js', import.meta.url), 'utf8');
+const diagnostics = fs.readFileSync(new URL('../server-internal/serviceos-staff-admin-diagnostics.js', import.meta.url), 'utf8');
 const envExample = fs.readFileSync(new URL('../.env.example', import.meta.url), 'utf8');
 
 test('staff administration is dark-gated and Owner/Admin only in the canonical shell', () => {
@@ -44,6 +45,15 @@ test('privileged Supabase operations stay server-side and invitation writes cano
   assert.match(impl, /staff\.deactivated/);
   assert.match(impl, /STAFF_ADMIN_DUPLICATE_USER/);
   assert.match(impl, /provisioning_failed/);
+});
+
+test('staff admin Supabase diagnostics remain server-side and do not enrich client error responses', () => {
+  assert.match(diagnostics, /SERVICEOS_STAFF_ADMIN_SUPABASE_DIAGNOSTIC/);
+  assert.match(diagnostics, /console\.error/);
+  assert.doesNotMatch(diagnostics, /supabaseStatus:/);
+  assert.doesNotMatch(diagnostics, /supabaseStatusText:/);
+  assert.doesNotMatch(diagnostics, /supabaseError:/);
+  assert.doesNotMatch(diagnostics, /return originalJson\(\{\s*\.\.\.payload/);
 });
 
 test('staff admin role vocabulary remains the ServiceOS canonical five-role set', () => {
