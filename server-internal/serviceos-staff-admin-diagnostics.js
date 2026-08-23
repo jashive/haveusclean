@@ -84,19 +84,6 @@ export async function runWithStaffAdminDiagnostics(req, res, operation) {
         hint: failure.error?.hint ?? null,
         code: failure.error?.code ?? null,
       });
-
-      return originalJson({
-        ...payload,
-        table: failure.table,
-        supabaseStatus: failure.status,
-        supabaseStatusText: failure.statusText,
-        supabaseError: {
-          message: failure.error?.message ?? null,
-          details: failure.error?.details ?? null,
-          hint: failure.error?.hint ?? null,
-          code: failure.error?.code ?? null,
-        },
-      });
     }
 
     return originalJson(payload);
