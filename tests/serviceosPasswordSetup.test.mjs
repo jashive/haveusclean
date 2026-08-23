@@ -12,6 +12,13 @@ test("invite and recovery callbacks bypass the normal sign-in gate", () => {
   assert.match(mainSource, /<ServiceOSPasswordSetup \/>/);
 });
 
+test("failed or consumed auth callbacks route to password recovery", () => {
+  assert.match(mainSource, /callback\.get\("error"\)/);
+  assert.match(mainSource, /callback\.get\("error_code"\)/);
+  assert.match(mainSource, /callback\.get\("error_description"\)/);
+  assert.match(mainSource, /return hasPasswordSession \|\| hasAuthCallbackError/);
+});
+
 test("password setup updates the authenticated Supabase user", () => {
   assert.match(setupSource, /fetch\(`\$\{url\}\/auth\/v1\/user`/);
   assert.match(setupSource, /method: "PUT"/);
