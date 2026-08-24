@@ -17,13 +17,15 @@ test("Wave 2 Revenue is limited to owner_admin and office_ops", () => {
   assert.match(policy, /canManageServiceOSRevenue\(role\)/);
 });
 
-test("canonical shell mounts native Revenue lazily behind Revenue flag and role authorization", () => {
+test("canonical shell mounts native Revenue lazily behind Revenue flag, role authorization, and active market context", () => {
   assert.match(shell, /lazy\(\(\) => import\(["']\.\/ServiceOSRevenueWorkspace["']\)\)/);
   assert.match(shell, /VITE_SERVICEOS_REVENUE_ENABLED/);
   assert.doesNotMatch(shell, /VITE_SERVICEOS_REVENUE_PILOT_UI/);
   assert.match(shell, /canManageServiceOSRevenue\(role\)/);
   assert.match(shell, /revenueAuthorized \? \(/);
-  assert.match(shell, /<ServiceOSRevenueWorkspace session=\{session\} revenueContext=\{revenueContext\} \/>/);
+  assert.match(shell, /<ServiceOSRevenueWorkspace session=\{session\} revenueContext=\{activeRevenueContext\} \/>/);
+  assert.match(shell, /primaryBusinessUnitId: activeBusinessUnit\.id/);
+  assert.match(shell, /primaryJurisdictionId: activeBusinessUnit\.jurisdictionId/);
 });
 
 test("native Revenue workspace retains a second role boundary and stable selectors", () => {

@@ -2,7 +2,19 @@ import { authenticatedRestFetch } from "./serviceosAuthClient.js";
 
 export const GOVERNED_RESIDENTIAL_CONFIG_TYPE = "residential_pricing";
 export const GOVERNED_RESIDENTIAL_REQUIRED_VERSION = "ON-2026-08-v1.0";
+export const GOVERNED_RESIDENTIAL_VERSION_BY_BUSINESS_UNIT = Object.freeze({
+  "HUC-ON": "ON-2026-08-v1.0",
+  "HUC-AZ": "AZ-2026-08-v1.0",
+});
 export const GOVERNED_RESIDENTIAL_REQUIRED_STATUS = "published";
+
+export function getGovernedResidentialRequiredVersion(businessUnitCode) {
+  const version = GOVERNED_RESIDENTIAL_VERSION_BY_BUSINESS_UNIT[businessUnitCode];
+  if (!version) {
+    throw new Error(`Governed residential config lookup failed: unsupported business unit ${businessUnitCode || "unknown"}`);
+  }
+  return version;
+}
 
 function encode(value) {
   return encodeURIComponent(String(value ?? ""));
@@ -47,6 +59,7 @@ export async function fetchPublishedGovernedResidentialConfig({
   if (!organizationId) throw new Error("Governed residential config lookup failed: organizationId required");
   if (!businessUnitId) throw new Error("Governed residential config lookup failed: businessUnitId required");
   if (!jurisdictionId) throw new Error("Governed residential config lookup failed: jurisdictionId required");
+  if (!requiredVersion) throw new Error("Governed residential config lookup failed: requiredVersion required");
 
   const select = [
     "id",

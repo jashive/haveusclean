@@ -1,23 +1,8 @@
 const HAZARD_PATTERNS = [
-  /hoard/i,
-  /biohazard/i,
-  /blood/i,
-  /needle/i,
-  /human waste/i,
-  /animal waste/i,
-  /feces/i,
-  /faeces/i,
-  /mold/i,
-  /mould/i,
-  /infestation/i,
-  /hazmat/i,
-  /chemical contamination/i,
-  /drug contamination/i,
-  /fire damage/i,
-  /smoke damage/i,
-  /water damage/i,
-  /construction debris/i,
-  /unsafe access/i,
+  /hoard/i, /biohazard/i, /blood/i, /needle/i, /human waste/i, /animal waste/i,
+  /feces/i, /faeces/i, /mold/i, /mould/i, /infestation/i, /hazmat/i,
+  /chemical contamination/i, /drug contamination/i, /fire damage/i, /smoke damage/i,
+  /water damage/i, /construction debris/i, /unsafe access/i,
 ];
 
 export const OFFICE_ADDON_OPTIONS = [
@@ -31,11 +16,9 @@ export const OFFICE_ADDON_OPTIONS = [
   { id: "garage_sweep_out", label: "Garage sweep-out", configKey: "garage_sweep_out_starting" },
 ];
 
-const COMPLETE_DEEP_INCLUDED_ADDONS = new Set([
-  "inside_refrigerator",
-  "inside_oven",
-  "inside_kitchen_cabinets",
-]);
+function normalizeToken(value) {
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
+}
 
 function money(value) {
   const numeric = Number(value);
@@ -43,20 +26,29 @@ function money(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
-export function getManagementReviewReason({ condition, notes, packageKey, addons = [] }) {
-  if (String(condition || "").toLowerCase() === "extreme") {
-    return "Extreme condition requires management review.";
-  }
+function completeDeepIncludedAddonIds(configurationVersion) {
+  const config = configurationVersion?.configuration || {};
+  const packageRule = config.packages?.complete_deep_clean ?? config.packages?.complete_deep ?? {};
+  const text = [
+    ...(Array.isArray(packageRule.includes) ? packageRule.includes : []),
+    ...(Array.isArray(packageRule.do_not_double_charge) ? packageRule.do_not_double_charge : []),
+  ].map(normalizeToken);
+  const included = new Set();
+  if (text.some((item) => item.includes("refrigerator") || item === "fridge")) included.add("inside_refrigerator");
+  if (text.some((item) => item.includes("oven"))) included.add("inside_oven");
+  if (text.some((item) => item.includes("kitchen_cabinet") || item === "cabinets")) included.add("inside_kitchen_cabinets");
+  return included;
+}
+
+export function getManagementReviewReason({ condition, notes, packageKey, addons = [], configurationVersion = null }) {
+  if (String(condition || "").toLowerCase() === "extreme") return "Extreme condition requires management review.";
   const text = String(notes || "");
   const hazard = HAZARD_PATTERNS.find((pattern) => pattern.test(text));
-  if (hazard) {
-    return "Potential hazardous or specialty scope requires management review.";
-  }
-  if (packageKey === "complete_deep") {
-    const duplicate = addons.find((id) => COMPLETE_DEEP_INCLUDED_ADDONS.has(id));
-    if (duplicate) {
-      return "Complete Deep already includes refrigerator, oven, and empty kitchen-cabinet interiors. Remove duplicate add-ons.";
-    }
+  if (hazard) return "Potential hazardous or specialty scope requires management review.";
+  if (packageKey === "complete_deep" && configurationVersion) {
+    const included = completeDeepIncludedAddonIds(configurationVersion);
+    const duplicate = addons.find((id) => included.has(id));
+    if (duplicate) return "Complete Deep already includes that selected service under this market's published package. Remove the duplicate add-on.";
   }
   return null;
 }
@@ -67,29 +59,20 @@ export function getDefaultApprovedSelections(configurationVersion, { condition, 
   const normalizedFrequency = String(frequency || "one_time").toLowerCase();
   const approved = {};
 
-  if (normalizedCondition === "moderate") {
-    approved.conditionMarkupPct = Number(config.condition_adjustments?.moderate?.minimum_markup ?? 0.1);
-  } else if (normalizedCondition === "heavy") {
-    approved.conditionMarkupPct = Number(config.condition_adjustments?.heavy?.minimum_markup ?? 0.2);
-  }
+  if (normalizedCondition === "moderate") approved.conditionMarkupPct = Number(config.condition_adjustments?.moderate?.minimum_markup ?? Number.NaN);
+  else if (normalizedCondition === "heavy") approved.conditionMarkupPct = Number(config.condition_adjustments?.heavy?.minimum_markup ?? Number.NaN);
 
-  if (normalizedFrequency === "weekly") {
-    approved.recurringDiscountPct = Number(config.recurring_service?.weekly_discount?.min ?? 0.1);
-  } else if (normalizedFrequency === "biweekly") {
-    approved.recurringDiscountPct = Number(config.recurring_service?.biweekly_discount?.min ?? 0.05);
-  } else if (normalizedFrequency === "monthly") {
-    approved.recurringDiscountPct = Number(config.recurring_service?.monthly_discount?.min ?? 0);
-  }
+  if (normalizedFrequency === "weekly") approved.recurringDiscountPct = Number(config.recurring_service?.weekly_discount?.min ?? Number.NaN);
+  else if (normalizedFrequency === "biweekly") approved.recurringDiscountPct = Number(config.recurring_service?.biweekly_discount?.min ?? Number.NaN);
+  else if (normalizedFrequency === "monthly") approved.recurringDiscountPct = Number(config.recurring_service?.monthly_discount?.min ?? Number.NaN);
 
   if (sqftBand === "additional_250_500_sqft") {
     approved.sqftBand = sqftBand;
-    approved.sqftAdjustmentAmount = Number(config.square_footage_adjustments?.additional_250_500_sqft?.minimum ?? 25);
+    approved.sqftAdjustmentAmount = Number(config.square_footage_adjustments?.additional_250_500_sqft?.minimum ?? Number.NaN);
   } else if (sqftBand === "additional_500_1000_sqft") {
     approved.sqftBand = sqftBand;
-    approved.sqftAdjustmentAmount = Number(config.square_footage_adjustments?.additional_500_1000_sqft?.minimum ?? 50);
-  } else if (sqftBand === "more_than_1000_sqft_above_typical") {
-    approved.sqftBand = sqftBand;
-  }
+    approved.sqftAdjustmentAmount = Number(config.square_footage_adjustments?.additional_500_1000_sqft?.minimum ?? Number.NaN);
+  } else if (sqftBand === "more_than_1000_sqft_above_typical") approved.sqftBand = sqftBand;
 
   return approved;
 }
@@ -98,44 +81,33 @@ export function applyGovernedResidentialAddons(quote, configurationVersion, addo
   const config = configurationVersion?.configuration || {};
   const rateCard = config.premium_addons || {};
   const selected = OFFICE_ADDON_OPTIONS.filter((option) => addonIds.includes(option.id));
-  const addonLines = selected.map((option) => ({
-    id: option.id,
-    label: option.label,
-    amount: money(rateCard[option.configKey]),
-  }));
+  const addonLines = selected.map((option) => ({ id: option.id, label: option.label, amount: money(rateCard[option.configKey]) }));
   const addonTotal = money(addonLines.reduce((sum, line) => sum + line.amount, 0));
-  if (!addonTotal) {
-    return {
-      ...quote,
-      addonLines,
-      addonTotal: 0,
-      input: { ...(quote?.input || {}), addons: addonIds },
-    };
-  }
+  if (!addonTotal) return { ...quote, addonLines, addonTotal: 0, input: { ...(quote?.input || {}), addons: addonIds } };
 
   const taxRate = Number(quote?.taxRate ?? config.tax?.rate ?? 0);
   const preTaxTotal = money(Number(quote?.preTaxTotal ?? 0) + addonTotal);
   const taxAmount = money(preTaxTotal * taxRate);
   const total = money(preTaxTotal + taxAmount);
+  return { ...quote, preTaxTotal, taxAmount, total, baseClientPrice: preTaxTotal, addonLines, addonTotal, input: { ...(quote?.input || {}), addons: addonIds } };
+}
 
-  return {
-    ...quote,
-    preTaxTotal,
-    taxAmount,
-    total,
-    baseClientPrice: preTaxTotal,
-    addonLines,
-    addonTotal,
-    input: { ...(quote?.input || {}), addons: addonIds },
-  };
+export function formatQuoteMoney(amount, currencyCode) {
+  const code = String(currencyCode || "CAD").toUpperCase();
+  const symbol = code === "CAD" ? "CA$" : code === "USD" ? "$" : `${code} `;
+  return `${symbol}${Number(amount || 0).toFixed(2)}`;
 }
 
 export function buildCustomerFacingQuoteText({ customerName, serviceLabel, quote, frequencyLabel }) {
   const firstName = String(customerName || "").trim().split(/\s+/)[0];
   const greeting = firstName ? `Hi ${firstName},` : "Hello,";
   const frequency = frequencyLabel && frequencyLabel !== "One-Time" ? ` (${frequencyLabel})` : "";
-  const addonText = quote?.addonLines?.length
-    ? ` Add-ons included: ${quote.addonLines.map((line) => line.label).join(", ")}.`
-    : "";
-  return `${greeting}\n\nThank you for contacting Have Us Clean. Your ${serviceLabel}${frequency} is $${Number(quote?.preTaxTotal || 0).toFixed(2)} + HST, for a total of $${Number(quote?.total || 0).toFixed(2)}.${addonText}\n\nWould you like me to check availability and get that scheduled for you?`;
+  const addonText = quote?.addonLines?.length ? ` Add-ons included: ${quote.addonLines.map((line) => line.label).join(", ")}.` : "";
+  const currencyCode = quote?.currencyCode ?? quote?.currency ?? "CAD";
+  const preTax = formatQuoteMoney(quote?.preTaxTotal, currencyCode);
+  const total = formatQuoteMoney(quote?.total, currencyCode);
+  const taxName = quote?.taxName || "Tax";
+  const taxRate = Number(quote?.taxRate || 0);
+  const priceText = taxRate > 0 ? `${preTax} + ${taxName}, for a total of ${total}` : `${total} total (no service tax applied)`;
+  return `${greeting}\n\nThank you for contacting Have Us Clean. Your ${serviceLabel}${frequency} is ${priceText}.${addonText}\n\nWould you like me to check availability and get that scheduled for you?`;
 }

@@ -1,5 +1,3 @@
-import { GOVERNED_RESIDENTIAL_REQUIRED_VERSION } from "./governedResidentialConfig.js";
-
 const SUPPORTED_PACKAGE_KEYS = new Set([
   "essential_refresh",
   "signature_initial_reset",
@@ -7,24 +5,22 @@ const SUPPORTED_PACKAGE_KEYS = new Set([
   "move_in_move_out",
 ]);
 
-const INCLUDED_COMPLETE_DEEP_ADDONS = new Set(["fridge", "oven", "cabinets", "kitchen_cabinets", "kitchen-cabinets"]);
+const ADDON_ALIASES = {
+  fridge: "inside_refrigerator",
+  refrigerator: "inside_refrigerator",
+  inside_refrigerator: "inside_refrigerator",
+  oven: "inside_oven",
+  inside_oven: "inside_oven",
+  cabinets: "inside_kitchen_cabinets",
+  kitchen_cabinets: "inside_kitchen_cabinets",
+  inside_kitchen_cabinets: "inside_kitchen_cabinets",
+};
 const DWELLING_TYPE_ALIASES = {
-  apartments_condos: [
-    "apartments_condos",
-    "apartment_condo",
-    "apartment",
-    "condo",
-  ],
+  apartments_condos: ["apartments_condos", "apartment_condo", "apartment", "condo"],
   townhouses: ["townhouses", "townhouse", "townhome"],
   semi_detached_detached: [
-    "semi_detached_detached",
-    "detached_house_semi_detached",
-    "detached_semi_detached",
-    "detached_house",
-    "detached",
-    "semi_detached",
-    "semi_detached_house",
-    "semi_detached_detached_house",
+    "semi_detached_detached", "detached_house_semi_detached", "detached_semi_detached",
+    "detached_house", "detached", "semi_detached", "semi_detached_house", "semi_detached_detached_house",
   ],
 };
 
@@ -38,11 +34,7 @@ function toMoney(value) {
 }
 
 function normalizeToken(value) {
-  return String(value ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
+  return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
 
 function normalizeCondition(value) {
@@ -62,16 +54,12 @@ function asRange(range, minKey = "min", maxKey = "max") {
 
 function valueInRange(selection, range) {
   const value = toNumber(selection, Number.NaN);
-  if (!Number.isFinite(value)) return false;
-  return value >= range.min && value <= range.max;
+  return Number.isFinite(value) && value >= range.min && value <= range.max;
 }
 
 function resolveRangeSelection(range, approvedValue, label) {
   if (!range || !valueInRange(approvedValue, range)) {
-    return {
-      requiresOfficeReview: true,
-      reason: `${label} requires approved selection within published range`,
-    };
+    return { requiresOfficeReview: true, reason: `${label} requires approved selection within published range` };
   }
   return { value: toNumber(approvedValue, 0) };
 }
@@ -91,10 +79,7 @@ function buildBedBathKeyCandidates(beds, baths) {
   if (!Number.isFinite(bed) || !Number.isFinite(bath)) return [];
   const bedPart = Number.isInteger(bed) ? String(bed) : String(bed).replace(".", "_");
   const bathPart = Number.isInteger(bath) ? String(bath) : String(bath).replace(".", "_");
-  return [
-    `${bedPart}bed_${bathPart}bath`,
-    `${bedPart}_bed_${bathPart}_bath`,
-  ];
+  return [`${bedPart}bed_${bathPart}bath`, `${bedPart}_bed_${bathPart}_bath`];
 }
 
 function resolveDwellingMatrixTypeKey(matrix, dwellingType) {
@@ -102,12 +87,10 @@ function resolveDwellingMatrixTypeKey(matrix, dwellingType) {
   const aliasEntry = Object.entries(DWELLING_TYPE_ALIASES).find(([, aliases]) => aliases.includes(normalizedType));
   const preferredKey = aliasEntry?.[0];
   if (preferredKey && Object.prototype.hasOwnProperty.call(matrix, preferredKey)) return preferredKey;
-
   const matchingEntry = Object.entries(matrix).find(([key]) => {
     const normalizedKey = normalizeToken(key);
     if (normalizedKey === normalizedType) return true;
-    if (!preferredKey) return false;
-    return normalizeToken(preferredKey) === normalizedKey;
+    return preferredKey ? normalizeToken(preferredKey) === normalizedKey : false;
   });
   return matchingEntry?.[0] ?? null;
 }
@@ -121,37 +104,22 @@ function mapFrequencyRule(recurringService, normalizedFrequency) {
 
 function mapUrgencyRule(urgency, urgencyLevel) {
   const urgencyKey = normalizeToken(urgencyLevel);
-  if (urgencyKey === "small_job" || urgencyKey === "small_job_premium") {
-    return { type: "range", range: asRange(urgency?.small_job_premium, "minimum", "maximum") };
-  }
-  if (urgencyKey === "large_job" || urgencyKey === "larger_job" || urgencyKey === "larger_job_premium") {
-    return { type: "range", range: asRange(urgency?.larger_job_premium, "minimum", "maximum") };
-  }
-  if (urgencyKey === "evening_holiday_urgent_dispatch" || urgencyKey === "evening_holiday_urgent") {
-    return { type: "office_review" };
-  }
+  if (urgencyKey === "small_job" || urgencyKey === "small_job_premium") return { type: "range", range: asRange(urgency?.small_job_premium, "minimum", "maximum") };
+  if (urgencyKey === "large_job" || urgencyKey === "larger_job" || urgencyKey === "larger_job_premium") return { type: "range", range: asRange(urgency?.larger_job_premium, "minimum", "maximum") };
+  if (urgencyKey === "evening_holiday_urgent_dispatch" || urgencyKey === "evening_holiday_urgent") return { type: "office_review" };
   return { type: "unknown" };
 }
 
 function mapSqftRule(squareFootageAdjustments, sqftBand) {
   const sqftKey = normalizeToken(sqftBand);
-  if (sqftKey === "additional_250_500_sqft") {
-    return { type: "range", range: asRange(squareFootageAdjustments?.additional_250_500_sqft, "minimum", "maximum") };
-  }
-  if (sqftKey === "additional_500_1000_sqft") {
-    return { type: "range", range: asRange(squareFootageAdjustments?.additional_500_1000_sqft, "minimum", "maximum") };
-  }
-  if (sqftKey === "more_than_1000_sqft_above_typical") {
-    return { type: "office_review" };
-  }
+  if (sqftKey === "additional_250_500_sqft") return { type: "range", range: asRange(squareFootageAdjustments?.additional_250_500_sqft, "minimum", "maximum") };
+  if (sqftKey === "additional_500_1000_sqft") return { type: "range", range: asRange(squareFootageAdjustments?.additional_500_1000_sqft, "minimum", "maximum") };
+  if (sqftKey === "more_than_1000_sqft_above_typical") return { type: "office_review" };
   return { type: "unknown" };
 }
 
 function requiresOfficeReview(reason) {
-  return {
-    requiresOfficeReview: true,
-    reason,
-  };
+  return { requiresOfficeReview: true, reason };
 }
 
 function findMatrixPrice(matrix, { dwellingType, beds, baths, packageKey }) {
@@ -166,21 +134,12 @@ function findMatrixPrice(matrix, { dwellingType, beds, baths, packageKey }) {
     const canonicalType = normalizeToken(dwellingType);
     const aliasEntry = Object.values(DWELLING_TYPE_ALIASES).find((aliases) => aliases.includes(canonicalType));
     const typeAliases = aliasEntry ?? [canonicalType];
-    const row = matrix.find((entry) => {
-      if (!entry || typeof entry !== "object") return false;
-      const typeToken = normalizeToken(entry.dwelling_type);
-      const typeMatch = typeAliases.includes(typeToken);
-      const bedMatch = toNumber(entry.beds, Number.NaN) === bed;
-      const bathMatch = toNumber(entry.baths, Number.NaN) === bath;
-      return typeMatch && bedMatch && bathMatch;
-    });
+    const row = matrix.find((entry) => entry && typeof entry === "object" && typeAliases.includes(normalizeToken(entry.dwelling_type)) && toNumber(entry.beds, Number.NaN) === bed && toNumber(entry.baths, Number.NaN) === bath);
     if (!row) return null;
     if (row.package_prices && typeof row.package_prices === "object") {
       const direct = row.package_prices[packageKey];
       if (typeof direct === "number") return direct;
-      for (const [key, val] of Object.entries(row.package_prices)) {
-        if (normalizeToken(key) === normalizedPackageKey && typeof val === "number") return val;
-      }
+      for (const [key, val] of Object.entries(row.package_prices)) if (normalizeToken(key) === normalizedPackageKey && typeof val === "number") return val;
     }
     return null;
   }
@@ -189,57 +148,39 @@ function findMatrixPrice(matrix, { dwellingType, beds, baths, packageKey }) {
   if (!resolvedMatrixTypeKey) return null;
   const byBedsBaths = matrix[resolvedMatrixTypeKey];
   if (!byBedsBaths || typeof byBedsBaths !== "object") return null;
-
-  const bedBathEntry = Object.entries(byBedsBaths).find(([key, value]) => {
-    if (!value || typeof value !== "object") return false;
-    const keyMatches = normalizedCandidates.has(normalizeToken(key));
-    if (keyMatches) return true;
-    return toNumber(value.beds, Number.NaN) === bed && toNumber(value.baths, Number.NaN) === bath;
-  });
+  const bedBathEntry = Object.entries(byBedsBaths).find(([key, value]) => value && typeof value === "object" && (normalizedCandidates.has(normalizeToken(key)) || (toNumber(value.beds, Number.NaN) === bed && toNumber(value.baths, Number.NaN) === bath)));
   if (!bedBathEntry) return null;
-
   const packagePrices = bedBathEntry[1]?.package_prices ?? bedBathEntry[1];
   if (!packagePrices || typeof packagePrices !== "object") return null;
   if (typeof packagePrices[packageKey] === "number") return packagePrices[packageKey];
-  for (const [key, val] of Object.entries(packagePrices)) {
-    if (normalizeToken(key) === normalizedPackageKey && typeof val === "number") return val;
-  }
+  for (const [key, val] of Object.entries(packagePrices)) if (normalizeToken(key) === normalizedPackageKey && typeof val === "number") return val;
   return null;
 }
 
+function getCompleteDeepIncludedAddonSet(config) {
+  const packageRule = config?.packages?.complete_deep_clean ?? config?.packages?.complete_deep;
+  const values = [
+    ...(Array.isArray(packageRule?.includes) ? packageRule.includes : []),
+    ...(Array.isArray(packageRule?.do_not_double_charge) ? packageRule.do_not_double_charge : []),
+  ];
+  return new Set(values.map((value) => ADDON_ALIASES[normalizeToken(value)]).filter(Boolean));
+}
+
 export function computeGovernedResidentialQuote({
-  configurationVersion,
-  dwellingType,
-  beds,
-  baths,
-  packageKey,
-  condition = "light",
-  frequency = "one_time",
-  addons = [],
-  approvedSelections = {},
+  configurationVersion, dwellingType, beds, baths, packageKey, condition = "light",
+  frequency = "one_time", addons = [], approvedSelections = {},
 }) {
-  if (!configurationVersion || typeof configurationVersion !== "object") {
-    throw new Error("Governed residential pricing requires configurationVersion");
-  }
-  if (!configurationVersion.configuration || typeof configurationVersion.configuration !== "object") {
-    throw new Error("Governed residential pricing requires configuration payload");
-  }
+  if (!configurationVersion || typeof configurationVersion !== "object") throw new Error("Governed residential pricing requires configurationVersion");
+  if (!configurationVersion.configuration || typeof configurationVersion.configuration !== "object") throw new Error("Governed residential pricing requires configuration payload");
 
   const normalizedPackage = normalizeToken(packageKey);
-  if (!SUPPORTED_PACKAGE_KEYS.has(normalizedPackage)) {
-    throw new Error(`Governed residential pricing unsupported packageKey: ${packageKey}`);
-  }
+  if (!SUPPORTED_PACKAGE_KEYS.has(normalizedPackage)) throw new Error(`Governed residential pricing unsupported packageKey: ${packageKey}`);
 
   const config = configurationVersion.configuration;
-  const startingPrice = findMatrixPrice(config.dwelling_matrix, {
-    dwellingType,
-    beds,
-    baths,
-    packageKey: normalizedPackage,
-  });
-  if (!Number.isFinite(startingPrice)) {
-    throw new Error("Governed residential pricing matrix row not found");
-  }
+  const currencyCode = String(config.currency_code ?? "").trim().toUpperCase();
+  if (!/^[A-Z]{3}$/.test(currencyCode)) throw new Error("Governed residential pricing requires valid currency_code");
+  const startingPrice = findMatrixPrice(config.dwelling_matrix, { dwellingType, beds, baths, packageKey: normalizedPackage });
+  if (!Number.isFinite(startingPrice)) throw new Error("Governed residential pricing matrix row not found");
 
   const normalizedCondition = normalizeCondition(condition);
   let conditionMarkupPct = 0;
@@ -256,11 +197,7 @@ export function computeGovernedResidentialQuote({
   if (normalizedFrequency !== "one_time") {
     const recurringRule = mapFrequencyRule(config.recurring_service, normalizedFrequency);
     const recurringRange = asRange(recurringRule, "min", "max");
-    const resolved = resolveRangeSelection(
-      recurringRange,
-      approvedSelections.recurringDiscountPct,
-      "recurring discount"
-    );
+    const resolved = resolveRangeSelection(recurringRange, approvedSelections.recurringDiscountPct, "recurring discount");
     if (resolved.requiresOfficeReview) return resolved;
     recurringDiscountPct = resolved.value;
   }
@@ -268,49 +205,32 @@ export function computeGovernedResidentialQuote({
   let urgencyPremiumAmount = 0;
   if (approvedSelections.urgencyLevel) {
     const urgencyRule = mapUrgencyRule(config.urgency, approvedSelections.urgencyLevel);
-    if (urgencyRule.type === "office_review") {
-      return requiresOfficeReview("urgency premium requires office review");
-    }
+    if (urgencyRule.type === "office_review") return requiresOfficeReview("urgency premium requires office review");
     if (urgencyRule.type === "range") {
-      const resolved = resolveRangeSelection(
-        urgencyRule.range,
-        approvedSelections.urgencyPremiumAmount,
-        "urgency premium"
-      );
+      const resolved = resolveRangeSelection(urgencyRule.range, approvedSelections.urgencyPremiumAmount, "urgency premium");
       if (resolved.requiresOfficeReview) return resolved;
       urgencyPremiumAmount = resolved.value;
     }
-    if (urgencyRule.type === "unknown") {
-      return requiresOfficeReview("urgency premium requires office review");
-    }
+    if (urgencyRule.type === "unknown") return requiresOfficeReview("urgency premium requires office review");
   }
 
   let sqftAdjustmentAmount = 0;
   if (approvedSelections.sqftBand) {
     const sqftRule = mapSqftRule(config.square_footage_adjustments, approvedSelections.sqftBand);
-    if (sqftRule.type === "office_review") {
-      return requiresOfficeReview("sqft adjustment requires office review");
-    }
+    if (sqftRule.type === "office_review") return requiresOfficeReview("sqft adjustment requires office review");
     if (sqftRule.type === "range") {
-      const resolved = resolveRangeSelection(
-        sqftRule.range,
-        approvedSelections.sqftAdjustmentAmount,
-        "sqft adjustment"
-      );
+      const resolved = resolveRangeSelection(sqftRule.range, approvedSelections.sqftAdjustmentAmount, "sqft adjustment");
       if (resolved.requiresOfficeReview) return resolved;
       sqftAdjustmentAmount = resolved.value;
     }
-    if (sqftRule.type === "unknown") {
-      return requiresOfficeReview("sqft adjustment requires office review");
-    }
+    if (sqftRule.type === "unknown") return requiresOfficeReview("sqft adjustment requires office review");
   }
 
-  const addonIds = Array.isArray(addons) ? addons.map(normalizeToken) : [];
+  const addonIds = Array.isArray(addons) ? addons.map((id) => ADDON_ALIASES[normalizeToken(id)] ?? normalizeToken(id)) : [];
   if (normalizedPackage === "complete_deep") {
-    const duplicateIncluded = addonIds.find((id) => INCLUDED_COMPLETE_DEEP_ADDONS.has(id));
-    if (duplicateIncluded) {
-      throw new Error("complete_deep includes fridge/oven/kitchen-cabinet services; do not double-charge addons");
-    }
+    const includedAddons = getCompleteDeepIncludedAddonSet(config);
+    const duplicateIncluded = addonIds.find((id) => includedAddons.has(id));
+    if (duplicateIncluded) throw new Error("complete_deep includes selected service; do not double-charge addon");
   }
 
   const taxRate = toNumber(config.tax?.rate, 0);
@@ -328,7 +248,7 @@ export function computeGovernedResidentialQuote({
     preTaxTotal: subtotal,
     taxAmount,
     taxRate,
-    taxName: config.tax?.label ?? config.tax?.name ?? "HST",
+    taxName: config.tax?.label ?? config.tax?.name ?? "Tax",
     discountAmt: toMoney(markedUpSubtotal - discountedSubtotal),
     discPct: recurringDiscountPct,
     partnerPay: 0,
@@ -336,26 +256,22 @@ export function computeGovernedResidentialQuote({
     teamSize: null,
     jobHours: null,
     breakdown: [],
-    currency: "CA$",
+    currency: currencyCode,
+    currencyCode,
     baseClientPrice: subtotal,
-    quoteContractVersion: "2.0",
+    quoteContractVersion: "2.1",
     governance: {
       authority: "configuration_version",
       configurationType: configurationVersion.configuration_type,
-      version: configurationVersion.version ?? GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
+      version: configurationVersion.version,
       configurationVersionId: configurationVersion.id ?? null,
     },
   };
 }
 
 export function buildGovernedResidentialConfigurationSnapshot(configurationVersion) {
-  if (!configurationVersion || typeof configurationVersion !== "object") {
-    throw new Error("Governed residential snapshot requires configurationVersion");
-  }
-  if (!configurationVersion.configuration || typeof configurationVersion.configuration !== "object") {
-    throw new Error("Governed residential snapshot requires configuration payload");
-  }
-
+  if (!configurationVersion || typeof configurationVersion !== "object") throw new Error("Governed residential snapshot requires configurationVersion");
+  if (!configurationVersion.configuration || typeof configurationVersion.configuration !== "object") throw new Error("Governed residential snapshot requires configuration payload");
   const configuration = configurationVersion.configuration;
   const snapshot = {
     source_authority: "published_configuration_version",
@@ -366,28 +282,12 @@ export function buildGovernedResidentialConfigurationSnapshot(configurationVersi
     business_unit_id: configurationVersion.business_unit_id,
     jurisdiction_id: configurationVersion.jurisdiction_id,
   };
-
   const publishedKeys = [
-    "authority",
-    "tax",
-    "minimum_charge",
-    "packages",
-    "dwelling_matrix",
-    "kitchen_bath_packages",
-    "bathroom_only",
-    "partial_cleaning",
-    "move_in_move_out_addons",
-    "premium_addons",
-    "recurring_service",
-    "condition_adjustments",
-    "urgency",
-    "square_footage_adjustments",
-    "quote_controls",
+    "authority", "tax", "minimum_charge", "packages", "dwelling_matrix", "kitchen_bath_packages",
+    "bathroom_only", "partial_cleaning", "move_in_move_out_addons", "premium_addons", "recurring_service",
+    "condition_adjustments", "urgency", "square_footage_adjustments", "quote_controls", "currency_code",
+    "jurisdiction_code", "business_unit_code",
   ];
-  for (const key of publishedKeys) {
-    if (Object.prototype.hasOwnProperty.call(configuration, key)) {
-      snapshot[key] = configuration[key];
-    }
-  }
+  for (const key of publishedKeys) if (Object.prototype.hasOwnProperty.call(configuration, key)) snapshot[key] = configuration[key];
   return snapshot;
 }
