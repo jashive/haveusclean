@@ -68,6 +68,12 @@ const styles = {
     fontWeight: 500,
   },
   buttonDisabled: { opacity: 0.6, cursor: "not-allowed" },
+  recoveryLink: {
+    display: "inline-block",
+    marginTop: "0.875rem",
+    color: "#2563eb",
+    fontSize: "0.88rem",
+  },
   error: { color: "#dc2626", fontSize: "0.85rem", margin: "0.5rem 0 0" },
   badge: {
     position: "fixed",
@@ -175,6 +181,7 @@ function LoginForm({ onSuccess }) {
           >
             {loading ? "Signing in…" : "Sign In"}
           </button>
+          <a href="/set-password" style={styles.recoveryLink}>Forgot password?</a>
           {error && <p style={styles.error}>{error}</p>}
         </form>
       </div>
