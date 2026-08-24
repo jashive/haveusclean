@@ -7,6 +7,7 @@ import {
   SERVICEOS_DIAGNOSTICS_PATH,
 } from "../../lib/serviceosUiPolicy";
 
+const ServiceOSLeadIntakePanel = lazy(() => import("./ServiceOSLeadIntakePanel"));
 const ServiceOSRevenueWorkspace = lazy(() => import("./ServiceOSRevenueWorkspace"));
 const ServiceOSCustomerResponsePanel = lazy(() => import("./ServiceOSCustomerResponsePanel"));
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
@@ -101,7 +102,7 @@ export default function ServiceOSWave1Workspace() {
       : operationsAuthorized
         ? "Controlled Operations with canonical Revenue, QA, Finance, and Intelligence boundaries preserved"
         : revenueAuthorized
-          ? "Guided intake, governed quoting, and explicit customer response capture for real Have Us Clean leads"
+          ? "Immediate lead capture, guided qualification, governed quoting, and explicit customer response for real Have Us Clean leads"
           : "Canonical authentication and role isolation";
 
   async function handleLogout() {
@@ -147,7 +148,7 @@ export default function ServiceOSWave1Workspace() {
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
-          <p style={styles.notice}>ServiceOS is the operational system of record. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
+          <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
           <div style={styles.status}>Canonical shell active</div>
         </section>
 
@@ -172,6 +173,7 @@ export default function ServiceOSWave1Workspace() {
         ) : null}
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
+            <ServiceOSLeadIntakePanel session={session} revenueContext={revenueContext} />
             <ServiceOSRevenueWorkspace session={session} revenueContext={revenueContext} />
             <ServiceOSCustomerResponsePanel session={session} revenueContext={revenueContext} />
           </Suspense>
