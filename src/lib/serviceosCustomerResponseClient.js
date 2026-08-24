@@ -30,6 +30,14 @@ export function responseCreatesConversion(responseType) {
   return responseType === "accepted";
 }
 
+export function serviceRequestHasCanonicalIdentity(serviceRequest) {
+  return Boolean(
+    serviceRequest?.customer_id &&
+    serviceRequest?.contact_id &&
+    serviceRequest?.service_location_id
+  );
+}
+
 export async function listSentQuoteVersions({ accessToken, organizationId, businessUnitId }) {
   assertRevenueEnabled();
   if (!organizationId || !businessUnitId) throw new Error("Organization and business unit are required");
@@ -40,7 +48,7 @@ export async function listSentQuoteVersions({ accessToken, organizationId, busin
     "sent_at",
     "quote_id",
     "pricing_snapshot_id",
-    "quote:quote_id(id,opportunity_id,opportunity:opportunity_id(id,service_request_id,service_request:service_request_id(id,title,requirements)))",
+    "quote:quote_id(id,opportunity_id,opportunity:opportunity_id(id,service_request_id,service_request:service_request_id(id,title,requirements,customer_id,contact_id,service_location_id)))",
   ].join(",");
   const query = [
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
