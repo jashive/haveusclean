@@ -7,16 +7,15 @@ import {
   SERVICEOS_DIAGNOSTICS_PATH,
 } from "../../lib/serviceosUiPolicy";
 
-const ServiceOSPilotPanel = lazy(() => import("../pilot/ServiceOSPilotPanel"));
+const ServiceOSRevenueWorkspace = lazy(() => import("./ServiceOSRevenueWorkspace"));
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
 const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"));
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
 const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
 
-const REVENUE_PILOT_ENABLED =
+const REVENUE_ENABLED =
   typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true" &&
-  import.meta.env?.VITE_SERVICEOS_REVENUE_PILOT_UI === "true";
+  import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
 
 const OPERATIONS_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -79,7 +78,7 @@ export default function ServiceOSWave1Workspace() {
   const organizationId = revenueContext?.orgId ?? "Unavailable";
   const businessUnits = Array.isArray(revenueContext?.businessUnits) ? revenueContext.businessUnits : [];
   const email = session?.user?.email ?? "Unavailable";
-  const revenueAuthorized = REVENUE_PILOT_ENABLED && canManageServiceOSRevenue(role);
+  const revenueAuthorized = REVENUE_ENABLED && canManageServiceOSRevenue(role);
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
   const qaAuthorized = QA_ENABLED && role === "qa";
   const financeAuthorized = FINANCE_ENABLED && role === "finance";
@@ -90,19 +89,19 @@ export default function ServiceOSWave1Workspace() {
     : qaAuthorized
       ? "Wave 4 Quality Assurance Workspace"
       : operationsAuthorized
-        ? "Wave 3 Operations Workspace"
+        ? "ServiceOS Operations Workspace"
         : revenueAuthorized
-          ? "Wave 2 Revenue Workspace"
+          ? "ServiceOS Revenue Workspace"
           : "Wave 1 Access Workspace";
   const workspaceSubtitle = financeAuthorized
     ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
     : qaAuthorized
       ? "Controlled QA rollout with Finance and Intelligence gates preserved"
       : operationsAuthorized
-        ? "Controlled Operations rollout with QA, Finance, and Intelligence gates preserved"
+        ? "Controlled Operations with canonical Revenue, QA, Finance, and Intelligence boundaries preserved"
         : revenueAuthorized
-          ? "Canonical Revenue pilot with Wave 1 role isolation preserved"
-          : "Canonical authentication and role isolation pilot";
+          ? "Guided intake and governed quoting for real Have Us Clean leads"
+          : "Canonical authentication and role isolation";
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -147,7 +146,7 @@ export default function ServiceOSWave1Workspace() {
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
-          <p style={styles.notice}>Authentication remains isolated from the legacy HUC application data layer. No demo jobs, customers, invoices, partners, or other fixture data are loaded in canonical mode.</p>
+          <p style={styles.notice}>ServiceOS is the operational system of record. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events.</p>
           <div style={styles.status}>Canonical shell active</div>
         </section>
 
@@ -172,7 +171,7 @@ export default function ServiceOSWave1Workspace() {
         ) : null}
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
-            <ServiceOSPilotPanel session={session} revenueContext={revenueContext} />
+            <ServiceOSRevenueWorkspace session={session} revenueContext={revenueContext} />
           </Suspense>
         ) : null}
         {operationsAuthorized ? (
