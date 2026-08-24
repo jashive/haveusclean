@@ -32,10 +32,12 @@ test("only Accepted is classified as a converting customer response", () => {
   }
 });
 
-test("customer response UI is mounted only inside the authorized Revenue surface", () => {
+test("customer response UI is mounted only inside the authorized Revenue surface and follows active market context", () => {
   assert.match(shell, /lazy\(\(\) => import\(["']\.\/ServiceOSCustomerResponsePanel["']\)\)/);
   assert.match(shell, /revenueAuthorized \? \(/);
-  assert.match(shell, /<ServiceOSCustomerResponsePanel session=\{session\} revenueContext=\{revenueContext\} \/>/);
+  assert.match(shell, /<ServiceOSCustomerResponsePanel session=\{session\} revenueContext=\{activeRevenueContext\} \/>/);
+  assert.match(shell, /primaryBusinessUnitId: activeBusinessUnit\.id/);
+  assert.match(shell, /primaryJurisdictionId: activeBusinessUnit\.jurisdictionId/);
   assert.match(panel, /data-testid="serviceos-customer-response-panel"/);
   assert.match(panel, /Only <strong>Accepted<\/strong> can create the canonical conversion and ready Operations handoff/);
 });
