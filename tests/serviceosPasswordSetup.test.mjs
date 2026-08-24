@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const mainSource = fs.readFileSync("src/main.jsx", "utf8");
+const authGateSource = fs.readFileSync("src/auth/ServiceOSAuthGate.jsx", "utf8");
 const setupSource = fs.readFileSync("src/auth/ServiceOSPasswordSetup.jsx", "utf8");
 
 test("invite and recovery callbacks bypass the normal sign-in gate", () => {
@@ -17,6 +18,11 @@ test("failed or consumed auth callbacks route to password recovery", () => {
   assert.match(mainSource, /callback\.get\("error_code"\)/);
   assert.match(mainSource, /callback\.get\("error_description"\)/);
   assert.match(mainSource, /return hasPasswordSession \|\| hasAuthCallbackError/);
+});
+
+test("normal ServiceOS sign in exposes the existing password recovery route", () => {
+  assert.match(authGateSource, /href="\/set-password"/);
+  assert.match(authGateSource, />Forgot password\?<\/a>/);
 });
 
 test("password setup updates the authenticated Supabase user", () => {
