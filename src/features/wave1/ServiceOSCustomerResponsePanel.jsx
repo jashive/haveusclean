@@ -4,6 +4,7 @@ import {
   listSentQuoteVersions,
   recordCustomerResponse,
   responseCreatesConversion,
+  serviceRequestHasCanonicalIdentity,
 } from "../../lib/serviceosCustomerResponseClient.js";
 
 const styles = {
@@ -56,6 +57,8 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
   const businessUnitId = revenueContext?.primaryBusinessUnitId ?? null;
   const jurisdictionId = revenueContext?.primaryJurisdictionId ?? null;
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) || null, [rows, selectedId]);
+  const selectedServiceRequest = getServiceRequest(selected);
+  const hasCanonicalIdentity = serviceRequestHasCanonicalIdentity(selectedServiceRequest);
   const converts = responseCreatesConversion(responseType);
 
   async function refresh() {
@@ -95,10 +98,10 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
     setError(null);
     setResult(null);
     try {
-      if (converts) {
-        if (!fields.customerName.trim()) throw new Error("Accepted response requires the customer name.");
-        if (!fields.customerEmail.trim() && !fields.customerPhone.trim()) throw new Error("Accepted response requires customer email or phone.");
-        if (!fields.addressLine1.trim() || !fields.city.trim()) throw new Error("Accepted response requires service address and city.");
+      if (converts && !hasCanonicalIdentity) {
+        if (!fields.customerName.trim()) throw new Error("A new customer acceptance requires the customer name.");
+        if (!fields.customerEmail.trim() && !fields.customerPhone.trim()) throw new Error("A new customer acceptance requires customer email or phone.");
+        if (!fields.addressLine1.trim() || !fields.city.trim()) throw new Error("A new customer acceptance requires service address and city.");
       }
 
       const recorded = await recordCustomerResponse({
@@ -154,7 +157,11 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
         <label style={{ ...styles.field, ...styles.span2 }}><span style={styles.label}>Response notes</span><textarea style={{ ...styles.input, minHeight: 74, resize: "vertical" }} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional: customer's exact request, reason, or follow-up note" /></label>
       </div>
 
-      {converts ? <div style={styles.warning}><strong>Acceptance boundary:</strong> recording Accepted will atomically create one accepted quote response, one conversion record, and one ready job handoff. Repeating the action returns the existing conversion/handoff instead of creating duplicates.</div> : <div style={styles.note}>This disposition records the customer state only. It cannot create a conversion record or job handoff.</div>}
+      {converts ? (
+        <div style={styles.warning}>
+          <strong>Acceptance boundary:</strong> recording Accepted will atomically create one accepted quote response, one conversion record, and one ready job handoff. {hasCanonicalIdentity ? "This service request already has a complete canonical customer/contact/location identity; ServiceOS will reuse it and will stop for review if supplied details conflict." : "ServiceOS will search for an exact scoped identity before creating a new customer."} Repeating the action returns the existing conversion/handoff instead of creating duplicates.
+        </div>
+      ) : <div style={styles.note}>This disposition records the customer state only. It cannot create a conversion record or job handoff.</div>}
 
       <div style={styles.actions}>
         <button type="button" style={{ ...styles.primary, ...((busy || !selectedId) ? styles.disabled : {}) }} disabled={busy || !selectedId} onClick={submitResponse}>{busy ? "Recording…" : `Record ${CUSTOMER_RESPONSE_OPTIONS.find((item) => item.value === responseType)?.label || "Response"}`}</button>
@@ -166,6 +173,7 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
         <div style={styles.success}>
           <strong>{responseType === "accepted" ? "Accepted and handed off." : "Response recorded."}</strong>
           {result?.idempotent_replay ? " Existing accepted conversion returned; no duplicate was created." : ""}
+          {result?.identity_resolution ? <><br />Identity: {result.identity_resolution}</> : null}
           {result?.conversion_record?.id ? <><br />Conversion: {result.conversion_record.id}</> : null}
           {result?.job_handoff?.id ? <><br />Ready job handoff: {result.job_handoff.id}</> : null}
         </div>
