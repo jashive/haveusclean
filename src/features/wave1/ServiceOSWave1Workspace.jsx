@@ -15,25 +15,11 @@ const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"))
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
 const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
 
-const REVENUE_ENABLED =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
-
-const OPERATIONS_ENABLED =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === "true";
-
-const QA_ENABLED =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_QA_ENABLED === "true";
-
-const FINANCE_ENABLED =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === "true";
-
-const STAFF_ADMIN_ENABLED =
-  typeof import.meta !== "undefined" &&
-  import.meta.env?.VITE_SERVICEOS_STAFF_ADMIN_ENABLED === "true";
+const REVENUE_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
+const OPERATIONS_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === "true";
+const QA_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_QA_ENABLED === "true";
+const FINANCE_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_FINANCE_ENABLED === "true";
+const STAFF_ADMIN_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_STAFF_ADMIN_ENABLED === "true";
 
 const ROLE_LABELS = {
   owner_admin: "Owner / Admin",
@@ -43,15 +29,13 @@ const ROLE_LABELS = {
   finance: "Finance",
 };
 
+const MARKET_LABELS = {
+  "HUC-ON": "Ontario — HUC-ON",
+  "HUC-AZ": "Arizona — HUC-AZ",
+};
+
 const styles = {
-  page: {
-    minHeight: "100vh",
-    background: "#0A0F1E",
-    color: "#F5F8FC",
-    fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-    padding: "32px 20px 48px",
-    boxSizing: "border-box",
-  },
+  page: { minHeight: "100vh", background: "#0A0F1E", color: "#F5F8FC", fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", padding: "32px 20px 48px", boxSizing: "border-box" },
   shell: { maxWidth: 1040, margin: "0 auto" },
   header: { display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", flexWrap: "wrap", marginBottom: 28 },
   eyebrow: { color: "#00D4AA", fontSize: 12, fontWeight: 800, letterSpacing: ".12em", textTransform: "uppercase" },
@@ -69,6 +53,7 @@ const styles = {
   link: { display: "inline-block", textDecoration: "none", borderRadius: 8, padding: "9px 13px", background: "#00D4AA", color: "#07110F", fontWeight: 850, fontSize: 13 },
   disabled: { display: "inline-block", borderRadius: 8, padding: "9px 13px", border: "1px solid #344359", color: "#6F7F94", fontWeight: 750, fontSize: 13 },
   enabled: { display: "inline-block", borderRadius: 8, padding: "9px 13px", border: "1px solid #2B7A68", color: "#54E5C2", fontWeight: 800, fontSize: 13 },
+  marketSelect: { width: "100%", marginTop: 8, border: "1px solid #3A4B62", borderRadius: 8, background: "#0E1524", color: "#F5F8FC", padding: "10px 11px", fontSize: 14, fontWeight: 750 },
 };
 
 export default function ServiceOSWave1Workspace() {
@@ -76,9 +61,24 @@ export default function ServiceOSWave1Workspace() {
   const session = context?.session ?? null;
   const revenueContext = context?.revenueContext ?? null;
   const [loggingOut, setLoggingOut] = useState(false);
+  const [selectedBusinessUnitCode, setSelectedBusinessUnitCode] = useState("HUC-ON");
+
   const role = revenueContext?.roleCode ?? "unknown";
   const organizationId = revenueContext?.orgId ?? "Unavailable";
   const businessUnits = Array.isArray(revenueContext?.businessUnits) ? revenueContext.businessUnits : [];
+  const businessUnitRecords = Array.isArray(revenueContext?.businessUnitRecords) ? revenueContext.businessUnitRecords : [];
+  const activeBusinessUnit = businessUnitRecords.find((item) => item.code === selectedBusinessUnitCode)
+    ?? businessUnitRecords.find((item) => item.code === "HUC-ON")
+    ?? businessUnitRecords[0]
+    ?? null;
+  const activeRevenueContext = activeBusinessUnit ? {
+    ...revenueContext,
+    primaryBusinessUnitId: activeBusinessUnit.id,
+    primaryJurisdictionId: activeBusinessUnit.jurisdictionId,
+    activeBusinessUnitCode: activeBusinessUnit.code,
+    activeBusinessUnitName: activeBusinessUnit.name,
+  } : revenueContext;
+  const canSelectMarket = role === "owner_admin" && businessUnitRecords.length > 1;
   const email = session?.user?.email ?? "Unavailable";
   const revenueAuthorized = REVENUE_ENABLED && canManageServiceOSRevenue(role);
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
@@ -86,15 +86,7 @@ export default function ServiceOSWave1Workspace() {
   const financeAuthorized = FINANCE_ENABLED && role === "finance";
   const staffAdminAuthorized = STAFF_ADMIN_ENABLED && role === "owner_admin";
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
-  const workspaceTitle = financeAuthorized
-    ? "Wave 5 Finance Workspace"
-    : qaAuthorized
-      ? "Wave 4 Quality Assurance Workspace"
-      : operationsAuthorized
-        ? "ServiceOS Operations Workspace"
-        : revenueAuthorized
-          ? "ServiceOS Revenue Workspace"
-          : "Wave 1 Access Workspace";
+  const workspaceTitle = financeAuthorized ? "Wave 5 Finance Workspace" : qaAuthorized ? "Wave 4 Quality Assurance Workspace" : operationsAuthorized ? "ServiceOS Operations Workspace" : revenueAuthorized ? "ServiceOS Revenue Workspace" : "Wave 1 Access Workspace";
   const workspaceSubtitle = financeAuthorized
     ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
     : qaAuthorized
@@ -126,6 +118,7 @@ export default function ServiceOSWave1Workspace() {
       data-qa-authorized={qaAuthorized ? "true" : "false"}
       data-finance-authorized={financeAuthorized ? "true" : "false"}
       data-staff-admin-authorized={staffAdminAuthorized ? "true" : "false"}
+      data-active-business-unit={activeBusinessUnit?.code ?? "unavailable"}
     >
       <div style={styles.shell}>
         <header style={styles.header}>
@@ -143,13 +136,26 @@ export default function ServiceOSWave1Workspace() {
           <div style={styles.card}><div style={styles.label}>Authenticated user</div><div style={styles.value}>{email}</div></div>
           <div style={styles.card}><div style={styles.label}>Canonical role</div><div style={styles.value}>{ROLE_LABELS[role] ?? role}</div><div style={styles.status}>{role}</div></div>
           <div style={styles.card}><div style={styles.label}>Organization</div><div style={styles.value}>Have Us Clean</div><div style={{ ...styles.notice, marginTop: 6 }}>ID: {organizationId}</div></div>
-          <div style={styles.card}><div style={styles.label}>Business-unit scope</div><div style={styles.value}>{businessUnits.length ? businessUnits.join(", ") : "No visible business unit"}</div></div>
+          <div style={styles.card}>
+            <div style={styles.label}>{canSelectMarket ? "Active market / business unit" : "Business-unit scope"}</div>
+            {canSelectMarket ? (
+              <select
+                style={styles.marketSelect}
+                value={activeBusinessUnit?.code ?? ""}
+                onChange={(event) => setSelectedBusinessUnitCode(event.target.value)}
+                aria-label="Active Have Us Clean market"
+              >
+                {businessUnitRecords.map((item) => <option key={item.id} value={item.code}>{MARKET_LABELS[item.code] ?? `${item.name} — ${item.code}`}</option>)}
+              </select>
+            ) : <div style={styles.value}>{businessUnits.length ? businessUnits.join(", ") : "No visible business unit"}</div>}
+            {activeBusinessUnit ? <div style={{ ...styles.notice, marginTop: 6 }}>Active: {MARKET_LABELS[activeBusinessUnit.code] ?? activeBusinessUnit.name}</div> : null}
+          </div>
         </section>
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
           <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
-          <div style={styles.status}>Canonical shell active</div>
+          <div style={styles.status}>Canonical shell active · {activeBusinessUnit?.code ?? "No BU"}</div>
         </section>
 
         <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized || staffAdminAuthorized) ? 14 : 0 }}>
@@ -166,33 +172,17 @@ export default function ServiceOSWave1Workspace() {
           </div>
         </section>
 
-        {staffAdminAuthorized ? (
-          <Suspense fallback={<div role="status">Loading Staff Management…</div>}>
-            <ServiceOSStaffAdminWorkspace />
-          </Suspense>
-        ) : null}
+        {staffAdminAuthorized ? <Suspense fallback={<div role="status">Loading Staff Management…</div>}><ServiceOSStaffAdminWorkspace /></Suspense> : null}
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
-            <ServiceOSLeadIntakePanel session={session} revenueContext={revenueContext} />
-            <ServiceOSRevenueWorkspace session={session} revenueContext={revenueContext} />
-            <ServiceOSCustomerResponsePanel session={session} revenueContext={revenueContext} />
+            <ServiceOSLeadIntakePanel session={session} revenueContext={activeRevenueContext} />
+            <ServiceOSRevenueWorkspace session={session} revenueContext={activeRevenueContext} />
+            <ServiceOSCustomerResponsePanel session={session} revenueContext={activeRevenueContext} />
           </Suspense>
         ) : null}
-        {operationsAuthorized ? (
-          <Suspense fallback={<div role="status">Loading Operations…</div>}>
-            <ServiceOSOperationsWorkspace session={session} revenueContext={revenueContext} />
-          </Suspense>
-        ) : null}
-        {qaAuthorized ? (
-          <Suspense fallback={<div role="status">Loading QA…</div>}>
-            <ServiceOSQaWorkspace session={session} revenueContext={revenueContext} />
-          </Suspense>
-        ) : null}
-        {financeAuthorized ? (
-          <Suspense fallback={<div role="status">Loading Finance…</div>}>
-            <ServiceOSFinanceWorkspace session={session} revenueContext={revenueContext} />
-          </Suspense>
-        ) : null}
+        {operationsAuthorized ? <Suspense fallback={<div role="status">Loading Operations…</div>}><ServiceOSOperationsWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
+        {qaAuthorized ? <Suspense fallback={<div role="status">Loading QA…</div>}><ServiceOSQaWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
+        {financeAuthorized ? <Suspense fallback={<div role="status">Loading Finance…</div>}><ServiceOSFinanceWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
       </div>
     </main>
   );
