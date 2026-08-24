@@ -16,7 +16,8 @@ test("Wave 1 canonical shell contains no legacy HUC storage endpoints or demo fi
   assert.doesNotMatch(shell, /huc_[a-z_]+/i);
   assert.doesNotMatch(shell, /partner_progress/i);
   assert.doesNotMatch(shell, /Sarah M\.|Thompson House|Priya S\.|King St Lofts/);
-  assert.match(shell, /No demo jobs, customers, invoices, partners, or other fixture data are loaded/);
+  assert.match(shell, /ServiceOS is the operational system of record/);
+  assert.match(shell, /Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events/);
 });
 
 test("Wave 1 shell exposes authenticated identity, role, organization and visible logout", () => {
