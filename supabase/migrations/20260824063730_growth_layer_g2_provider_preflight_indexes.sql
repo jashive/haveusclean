@@ -1,0 +1,2 @@
+create index if not exists provider_adapter_contract_reviewer_idx on growth.provider_adapter_contract(approved_by_app_user_id);
+create index if not exists outreach_submission_reservation_provider_contract_idx on growth.outreach_submission_reservation(provider_adapter_contract_id);
