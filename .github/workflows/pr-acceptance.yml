@@ -25,5 +25,8 @@ jobs:
       - name: Run tests
         run: npm test
 
+      - name: Run Growth G2 controlled-outreach tests
+        run: node --test tests/growthG2OutreachEligibility.test.mjs tests/growthG2ProviderDryRun.test.mjs
+
       - name: Build
         run: npm run build
