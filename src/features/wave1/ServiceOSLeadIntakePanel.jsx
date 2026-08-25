@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
+import ServiceOSPartialLeadQuoteContinuation from "./ServiceOSPartialLeadQuoteContinuation.jsx";
 
 const initialForm = {
   customerName: "", phone: "", email: "", address: "", city: "", postalCode: "",
@@ -30,11 +31,13 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [form, setForm] = useState(initialForm);
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState(null);
+  const [continuationLead, setContinuationLead] = useState(null);
   const [error, setError] = useState(null);
 
   function setField(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
     setResult(null);
+    setContinuationLead(null);
     setError(null);
   }
 
@@ -43,6 +46,7 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
     setBusy(true);
     setError(null);
     setResult(null);
+    setContinuationLead(null);
     try {
       const saved = await savePartialInboundLead({
         accessToken: session?.access_token,
@@ -78,10 +82,12 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
     }
   }
 
+  const canContinue = !!result?.service_request?.id && !!result?.opportunity?.id && !result?.duplicate_review_required;
+
   return (
     <section style={styles.panel} data-testid="serviceos-partial-lead-intake">
       <h2 style={styles.heading}>Save Lead / Qualify Later</h2>
-      <p style={styles.sub}>Capture an inbound lead immediately even when quote details are incomplete. This creates only the canonical intake request and open opportunity; it does not create a quote, acceptance, handoff, job, or accounting event.</p>
+      <p style={styles.sub}>Capture an inbound lead immediately even when quote details are incomplete. This creates only the canonical intake request and open opportunity. Once saved, ordinary residential leads can continue into governed quoting without creating a second service request.</p>
       <div style={styles.grid}>
         <label style={styles.field}><span style={styles.label}>Customer name</span><input style={styles.input} value={form.customerName} onChange={(e) => setField("customerName", e.target.value)} /></label>
         <label style={styles.field}><span style={styles.label}>Phone</span><input style={styles.input} value={form.phone} onChange={(e) => setField("phone", e.target.value)} /></label>
@@ -104,12 +110,13 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
       </div>
       <div style={styles.actions}>
         <button type="button" style={{ ...styles.primary, opacity: busy ? 0.55 : 1 }} disabled={busy} onClick={saveLead}>{busy ? "Saving…" : "Save Lead / Qualify Later"}</button>
-        <button type="button" style={styles.secondary} disabled={busy} onClick={() => { setForm(initialForm); setResult(null); setError(null); }}>Clear</button>
+        <button type="button" style={styles.secondary} disabled={busy} onClick={() => { setForm(initialForm); setResult(null); setContinuationLead(null); setError(null); }}>Clear</button>
       </div>
       <div style={styles.note}>Duplicate order: external source ID first; then active phone/email; then exact active name/address. Phone/email or address matches are surfaced for staff review rather than silently creating another active lead.</div>
       {error ? <div style={styles.error}><strong>Unable to save:</strong> {error}</div> : null}
-      {result?.duplicate_review_required ? <div style={styles.warning}><strong>Possible duplicate — review existing lead.</strong><br />Reason: {result.dedup_reason}<br />Service request: {result.service_request?.id}</div> : null}
-      {result && !result.duplicate_review_required ? <div style={styles.success}><strong>{result.created ? "Lead captured." : "Existing source record returned; no duplicate created."}</strong><br />Service request: {result.service_request?.id}<br />Opportunity: {result.opportunity?.id || "Not available"}</div> : null}
+      {result?.duplicate_review_required ? <div style={styles.warning}><strong>Possible duplicate — review existing lead before quoting.</strong><br />Reason: {result.dedup_reason}<br />Service request: {result.service_request?.id}</div> : null}
+      {result && !result.duplicate_review_required ? <div style={styles.success}><strong>{result.created ? "Lead captured." : "Existing source record returned; no duplicate created."}</strong><br />Service request: {result.service_request?.id}<br />Opportunity: {result.opportunity?.id || "Not available"}{canContinue ? <div style={styles.actions}><button type="button" style={styles.primary} onClick={() => setContinuationLead(result)}>Continue This Lead to Quote</button></div> : null}</div> : null}
+      {continuationLead ? <ServiceOSPartialLeadQuoteContinuation leadResult={continuationLead} session={session} revenueContext={revenueContext} onClose={() => setContinuationLead(null)} /> : null}
     </section>
   );
 }
