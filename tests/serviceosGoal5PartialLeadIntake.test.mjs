@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const migration = fs.readFileSync("supabase/migrations/20260825001500_goal5_partial_lead_intake.sql", "utf8");
+const auditHotfix = fs.readFileSync("supabase/migrations/20260825043000_goal5_partial_lead_audit_event_rls_hotfix.sql", "utf8");
 const client = fs.readFileSync("src/lib/serviceosLeadIntakeClient.js", "utf8");
 const panel = fs.readFileSync("src/features/wave1/ServiceOSLeadIntakePanel.jsx", "utf8");
 const shell = fs.readFileSync("src/features/wave1/ServiceOSWave1Workspace.jsx", "utf8");
@@ -47,6 +48,18 @@ test("saved lead is explicitly marked real partial intake and not quote ready", 
   assert.match(migration, /'partial_intake', true/);
   assert.match(migration, /'quote_ready', false/);
   assert.match(migration, /lead_intake_captured/);
+});
+
+test("lead intake audit insert is RLS-authorized without bypassing RLS", () => {
+  assert.match(auditHotfix, /create policy audit_lead_intake_insert/i);
+  assert.match(auditHotfix, /for insert/i);
+  assert.match(auditHotfix, /to authenticated/i);
+  assert.match(auditHotfix, /actor_user_id = public\.current_app_user_id\(\)/i);
+  assert.match(auditHotfix, /event_type = 'lead_intake_captured'/i);
+  assert.match(auditHotfix, /entity_type = 'service_request'/i);
+  assert.match(auditHotfix, /source_system = 'serviceos_revenue'/i);
+  assert.match(auditHotfix, /has_bu_role[\s\S]*owner_admin[\s\S]*office_ops/i);
+  assert.doesNotMatch(auditHotfix, /security definer/i);
 });
 
 test("browser client uses one authenticated transactional RPC", () => {
