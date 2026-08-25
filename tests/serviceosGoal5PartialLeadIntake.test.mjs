@@ -68,9 +68,10 @@ test("browser client uses one authenticated transactional RPC", () => {
   assert.doesNotMatch(client, /service_role/i);
 });
 
-test("office panel allows sparse lead capture and states the no-downstream boundary", () => {
+test("office panel allows sparse lead capture and keeps Save Lead as intake-only boundary", () => {
   assert.match(panel, /Save Lead \/ Qualify Later/);
-  assert.match(panel, /does not create a quote, acceptance, handoff, job, or accounting event/);
+  assert.match(panel, /creates only the canonical intake request and open opportunity/i);
+  assert.match(panel, /Continue This Lead to Quote/);
   assert.match(panel, /Possible duplicate — review existing lead/);
 });
 
