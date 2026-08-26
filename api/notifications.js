@@ -61,6 +61,53 @@ function bodyObject(req) {
   return Object.fromEntries(new URLSearchParams(String(req.body || '')).entries());
 }
 
+function microsoft365Config() {
+  const tenantId = String(process.env.M365_TENANT_ID || '').trim();
+  const clientId = String(process.env.M365_CLIENT_ID || '').trim();
+  const clientSecret = String(process.env.M365_CLIENT_SECRET || '').trim();
+  const senderEmail = String(process.env.M365_SENDER_EMAIL || '').trim().toLowerCase();
+  if (!tenantId || !clientId || !clientSecret || !senderEmail) {
+    throw new Error('Have Us Clean Microsoft 365 quote delivery is not configured');
+  }
+  return { tenantId, clientId, clientSecret, senderEmail };
+}
+
+async function microsoftGraphToken() {
+  const { tenantId, clientId, clientSecret } = microsoft365Config();
+  const body = new URLSearchParams({
+    client_id: clientId,
+    client_secret: clientSecret,
+    scope: 'https://graph.microsoft.com/.default',
+    grant_type: 'client_credentials',
+  });
+  const response = await fetch(`https://login.microsoftonline.com/${encodeURIComponent(tenantId)}/oauth2/v2.0/token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const data = await parse(response, 'Microsoft 365 authentication failed');
+  const token = String(data?.access_token || '').trim();
+  if (!token) throw new Error('Microsoft 365 authentication failed: no access token returned');
+  return token;
+}
+
+async function graphRequest(path, token, options = {}, fallback = 'Microsoft 365 request failed') {
+  const response = await fetch(`https://graph.microsoft.com/v1.0${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+  });
+  if (response.status === 204 || response.status === 202) return { response, data: null };
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!response.ok) throw new Error(data?.error?.message || data?.message || fallback);
+  return { response, data };
+}
+
 async function handleQuoteDecision(req, res) {
   if (req.method === 'GET') {
     const token = String(req.query?.token || '').trim();
@@ -110,25 +157,49 @@ async function handleQuoteEmail(req, res) {
   const customerText = String(qv.commercial_snapshot?.customerFacingText || '').trim();
   if (!recipientEmail) return res.status(422).json({ error: 'This saved lead does not have a customer email address' });
   if (!customerText) return res.status(409).json({ error: 'The canonical saved quote does not contain customer-facing quote text' });
-  if (!process.env.GOOGLE_EMAIL || !process.env.GOOGLE_APP_PASSWORD) return res.status(503).json({ error: 'Have Us Clean email delivery is not configured' });
 
+  const { senderEmail } = microsoft365Config();
   const token = crypto.randomBytes(32).toString('base64url');
   const tokenHash = crypto.createHash('sha256').update(token).digest('hex');
   const expiresAt = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString();
   const decisionUrl = `${origin(req)}/api/notifications?action=quote-decision&token=${encodeURIComponent(token)}`;
-  const nodemailer = (await import('nodemailer')).default;
-  const transporter = nodemailer.createTransport({ host: 'smtp.gmail.com', port: 587, secure: false, auth: { user: process.env.GOOGLE_EMAIL, pass: process.env.GOOGLE_APP_PASSWORD } });
-  const info = await transporter.sendMail({
-    from: `Have Us Clean <${process.env.GOOGLE_EMAIL}>`, to: recipientEmail,
-    subject: `Your Have Us Clean Quote${qv.title ? ` — ${qv.title}` : ''}`,
-    text: `${customerText}\n\nReview your quote and respond here: ${decisionUrl}\n\nThank you,\nHave Us Clean`,
-    html: `<!doctype html><html><body style="margin:0;background:#f4f7f8;font-family:Arial,sans-serif;color:#17202a"><div style="max-width:640px;margin:0 auto;padding:28px"><div style="background:#102a26;color:#fff;padding:20px 24px;border-radius:12px 12px 0 0"><h1 style="margin:0;font-size:24px">Have Us Clean</h1><p style="margin:6px 0 0;color:#bfe9df">Your cleaning quote</p></div><div style="background:#fff;padding:24px;border:1px solid #dce5e7;border-top:0;border-radius:0 0 12px 12px"><div style="white-space:pre-wrap;line-height:1.6;font-size:15px">${escapeHtml(customerText)}</div><p style="margin:26px 0 10px"><a href="${escapeHtml(decisionUrl)}" style="display:inline-block;background:#00a985;color:#fff;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:8px">Review & Respond to Quote</a></p><p style="font-size:12px;color:#68777d;line-height:1.5">This secure response link expires in 14 days. If you need a different service scope or price point, choose Request Changes and tell us what you would like adjusted.</p></div></div></body></html>`,
-  });
-  const accepted = Array.isArray(info.accepted) ? info.accepted.map((v) => String(v).toLowerCase()) : [];
-  if (!accepted.includes(recipientEmail)) throw new Error('Email provider did not accept the customer address');
-  const providerMessageId = String(info.messageId || '').trim();
-  if (!providerMessageId) throw new Error('Email provider did not return a message ID');
-  const delivery = await parse(await rest('rpc/record_quote_email_delivery', accessToken, { method: 'POST', body: JSON.stringify({ p_quote_version_id: qv.id, p_recipient_email: recipientEmail, p_provider: 'gmail_smtp', p_provider_message_id: providerMessageId, p_decision_token_hash: tokenHash, p_decision_expires_at: expiresAt, p_metadata: { source: 'serviceos_native_quote_email', smtp_response: info.response || null } }) }), 'Email was accepted by the provider but ServiceOS could not record delivery evidence');
+  const subject = `Your Have Us Clean Quote${qv.title ? ` — ${qv.title}` : ''}`;
+  const html = `<!doctype html><html><body style="margin:0;background:#f4f7f8;font-family:Arial,sans-serif;color:#17202a"><div style="max-width:640px;margin:0 auto;padding:28px"><div style="background:#102a26;color:#fff;padding:20px 24px;border-radius:12px 12px 0 0"><h1 style="margin:0;font-size:24px">Have Us Clean</h1><p style="margin:6px 0 0;color:#bfe9df">Your cleaning quote</p></div><div style="background:#fff;padding:24px;border:1px solid #dce5e7;border-top:0;border-radius:0 0 12px 12px"><div style="white-space:pre-wrap;line-height:1.6;font-size:15px">${escapeHtml(customerText)}</div><p style="margin:26px 0 10px"><a href="${escapeHtml(decisionUrl)}" style="display:inline-block;background:#00a985;color:#fff;text-decoration:none;font-weight:700;padding:13px 20px;border-radius:8px">Review & Respond to Quote</a></p><p style="font-size:12px;color:#68777d;line-height:1.5">This secure response link expires in 14 days. If you need a different service scope or price point, choose Request Changes and tell us what you would like adjusted.</p></div></div></body></html>`;
+
+  const graphToken = await microsoftGraphToken();
+  const mailboxPath = `/users/${encodeURIComponent(senderEmail)}`;
+  const draftPayload = {
+    subject,
+    body: { contentType: 'HTML', content: html },
+    toRecipients: [{ emailAddress: { address: recipientEmail } }],
+    internetMessageHeaders: [
+      { name: 'X-HUC-Quote-Version', value: qv.id },
+      { name: 'X-HUC-Delivery-Channel', value: 'serviceos-native-quote' },
+    ],
+  };
+  const { data: draft } = await graphRequest(`${mailboxPath}/messages`, graphToken, { method: 'POST', body: JSON.stringify(draftPayload) }, 'Microsoft 365 could not create the quote email');
+  const providerMessageId = String(draft?.id || '').trim();
+  if (!providerMessageId) throw new Error('Microsoft 365 did not return a provider message ID');
+
+  const { response: sendResponse } = await graphRequest(`${mailboxPath}/messages/${encodeURIComponent(providerMessageId)}/send`, graphToken, { method: 'POST' }, 'Microsoft 365 did not accept the quote email for sending');
+  if (sendResponse.status !== 202) throw new Error(`Microsoft 365 did not accept the quote email for sending (HTTP ${sendResponse.status})`);
+
+  const delivery = await parse(await rest('rpc/record_quote_email_delivery', accessToken, { method: 'POST', body: JSON.stringify({
+    p_quote_version_id: qv.id,
+    p_recipient_email: recipientEmail,
+    p_provider: 'microsoft_graph',
+    p_provider_message_id: providerMessageId,
+    p_decision_token_hash: tokenHash,
+    p_decision_expires_at: expiresAt,
+    p_metadata: {
+      source: 'serviceos_native_quote_email',
+      sender_email: senderEmail,
+      graph_message_id: providerMessageId,
+      internet_message_id: draft?.internetMessageId || null,
+      graph_send_status: sendResponse.status,
+    },
+  }) }), 'Email was accepted by Microsoft 365 but ServiceOS could not record delivery evidence');
+
   return res.status(200).json({ success: true, alreadySent: false, quoteVersionId: qv.id, delivery });
 }
 
