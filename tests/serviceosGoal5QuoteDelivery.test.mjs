@@ -27,11 +27,13 @@ test("email action reads canonical saved quote and recipient through authenticat
   assert.doesNotMatch(notificationsApi, /SERVICE_ROLE|service_role|SUPABASE_SERVICE_ROLE/);
 });
 
-test("quote is recorded Sent only after SMTP accepts the exact customer recipient", () => {
-  const sendIndex = notificationsApi.indexOf("transporter.sendMail", notificationsApi.indexOf("handleQuoteEmail"));
-  const acceptedIndex = notificationsApi.indexOf("accepted.includes(recipientEmail)");
-  const rpcIndex = notificationsApi.indexOf("rpc/record_quote_email_delivery");
-  assert.ok(sendIndex >= 0 && acceptedIndex > sendIndex && rpcIndex > acceptedIndex);
+test("quote is recorded Sent only after Microsoft 365 accepts the exact quote message for sending", () => {
+  const quoteEmail = notificationsApi.slice(notificationsApi.indexOf("async function handleQuoteEmail"), notificationsApi.indexOf("async function handleReminder"));
+  const createIndex = quoteEmail.indexOf("/messages`");
+  const sendIndex = quoteEmail.indexOf("/send`");
+  const acceptedIndex = quoteEmail.indexOf("sendResponse.status !== 202");
+  const rpcIndex = quoteEmail.indexOf("rpc/record_quote_email_delivery");
+  assert.ok(createIndex >= 0 && sendIndex > createIndex && acceptedIndex > sendIndex && rpcIndex > acceptedIndex);
   assert.match(migration, /if v_qv\.lifecycle_status = 'draft' then[\s\S]*lifecycle_status = 'sent'/i);
   assert.match(migration, /provider_message_id text not null/);
   assert.match(migration, /provider_accepted_at timestamptz not null/);
