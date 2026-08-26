@@ -10,6 +10,7 @@ import {
 const ServiceOSLeadIntakePanel = lazy(() => import("./ServiceOSLeadIntakePanel"));
 const ServiceOSRevenueWorkspace = lazy(() => import("./ServiceOSRevenueWorkspace"));
 const ServiceOSQuoteDeliveryPanel = lazy(() => import("./ServiceOSQuoteDeliveryPanel"));
+const ServiceOSQuoteRevisionPanel = lazy(() => import("./ServiceOSQuoteRevisionPanel"));
 const ServiceOSCustomerResponsePanel = lazy(() => import("./ServiceOSCustomerResponsePanel"));
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
 const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"));
@@ -95,7 +96,7 @@ export default function ServiceOSWave1Workspace() {
       : operationsAuthorized
         ? "Controlled Operations with canonical Revenue, QA, Finance, and Intelligence boundaries preserved"
         : revenueAuthorized
-          ? "Immediate lead capture, guided qualification, governed quoting, native quote delivery, and explicit customer response for real Have Us Clean leads"
+          ? "Immediate lead capture, guided qualification, governed quoting, quote revision, native delivery, and explicit customer response for real Have Us Clean leads"
           : "Canonical authentication and role isolation";
 
   async function handleLogout() {
@@ -155,7 +156,7 @@ export default function ServiceOSWave1Workspace() {
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
-          <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Native quote delivery marks a quote Sent only after email-provider acceptance. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
+          <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Quote revision also does not fabricate customer acceptance, conversion, job handoff, or accounting events. Revised quotes create a new canonical version and preserve the prior version as Superseded. Native quote delivery marks a quote Sent only after email-provider acceptance. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
           <div style={styles.status}>Canonical shell active · {activeBusinessUnit?.code ?? "No BU"}</div>
         </section>
 
@@ -179,6 +180,7 @@ export default function ServiceOSWave1Workspace() {
             <ServiceOSLeadIntakePanel session={session} revenueContext={activeRevenueContext} />
             <ServiceOSRevenueWorkspace session={session} revenueContext={activeRevenueContext} />
             <ServiceOSQuoteDeliveryPanel session={session} revenueContext={activeRevenueContext} />
+            <ServiceOSQuoteRevisionPanel session={session} revenueContext={activeRevenueContext} />
             <ServiceOSCustomerResponsePanel session={session} revenueContext={activeRevenueContext} />
           </Suspense>
         ) : null}
