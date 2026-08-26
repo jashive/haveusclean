@@ -10,17 +10,65 @@ function assertRevenueEnabled() {
   if (!enabled) throw new Error("ServiceOS revenue feature is disabled");
 }
 
-async function parseResponse(res) {
+async function parseResponse(res, label = "Unable to save lead") {
   if (!res || !res.ok) {
     const text = await res?.text().catch(() => "");
-    throw new Error(`Unable to save lead: ${res?.status ?? "network error"} ${text}`);
+    throw new Error(`${label}: ${res?.status ?? "network error"} ${text}`);
   }
   return res.json();
+}
+
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
 }
 
 export function normalizeExternalSourceSystem(value) {
   const source = String(value || "").trim().toLowerCase();
   return source || null;
+}
+
+export async function listRecentInboundLeads({ accessToken, organizationId, businessUnitId, limit = 25 }) {
+  assertRevenueEnabled();
+  if (!organizationId || !businessUnitId) throw new Error("Organization and business unit are required");
+  const safeLimit = Math.min(Math.max(Number(limit) || 25, 1), 50);
+  const requestQuery = [
+    `organization_id=eq.${encodeURIComponent(organizationId)}`,
+    `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
+    `lifecycle_status=${encodeURIComponent("in.(intake,qualified)")}`,
+    `select=${encodeURIComponent("id,title,lifecycle_status,requirements,metadata,customer_id,contact_id,service_location_id,created_at,updated_at")}`,
+    "order=created_at.desc",
+    `limit=${safeLimit}`,
+  ].join("&");
+  const requestRes = await authenticatedRestFetch(`service_request?${requestQuery}`, accessToken);
+  const serviceRequests = await parseResponse(requestRes, "Unable to load recent leads");
+  if (!Array.isArray(serviceRequests) || serviceRequests.length === 0) return [];
+
+  const requestIds = unique(serviceRequests.map((row) => row.id));
+  const opportunityQuery = [
+    `organization_id=eq.${encodeURIComponent(organizationId)}`,
+    `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
+    `service_request_id=${encodeURIComponent(`in.(${requestIds.join(",")})`)}`,
+    `select=${encodeURIComponent("id,service_request_id,stage,title,summary,metadata,created_at,updated_at")}`,
+    "order=created_at.desc",
+  ].join("&");
+  const opportunityRes = await authenticatedRestFetch(`opportunity?${opportunityQuery}`, accessToken);
+  const opportunities = await parseResponse(opportunityRes, "Unable to load recent lead opportunities");
+  const opportunityByServiceRequest = new Map();
+  for (const opportunity of Array.isArray(opportunities) ? opportunities : []) {
+    if (!opportunityByServiceRequest.has(opportunity.service_request_id)) {
+      opportunityByServiceRequest.set(opportunity.service_request_id, opportunity);
+    }
+  }
+
+  return serviceRequests
+    .map((serviceRequest) => ({
+      created: false,
+      restored_from_canonical_store: true,
+      service_request: serviceRequest,
+      opportunity: opportunityByServiceRequest.get(serviceRequest.id) || null,
+      duplicate_review_required: false,
+    }))
+    .filter((row) => row.opportunity?.id);
 }
 
 export async function savePartialInboundLead({
