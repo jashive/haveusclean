@@ -1,0 +1,2 @@
+create index if not exists serviceos_handoff_reservation_business_unit_idx on growth.serviceos_handoff_reservation(business_unit_id);
+create index if not exists serviceos_handoff_reservation_jurisdiction_idx on growth.serviceos_handoff_reservation(jurisdiction_id);
