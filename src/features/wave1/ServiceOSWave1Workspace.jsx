@@ -156,7 +156,7 @@ export default function ServiceOSWave1Workspace() {
 
         <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
-          <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation or revision does not fabricate customer acceptance, conversion, job handoff, or accounting events. Revised quotes create a new canonical version and preserve the prior version as Superseded. Native quote delivery marks a quote Sent only after email-provider acceptance. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
+          <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Quote revision also does not fabricate customer acceptance, conversion, job handoff, or accounting events. Revised quotes create a new canonical version and preserve the prior version as Superseded. Native quote delivery marks a quote Sent only after email-provider acceptance. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
           <div style={styles.status}>Canonical shell active · {activeBusinessUnit?.code ?? "No BU"}</div>
         </section>
 
