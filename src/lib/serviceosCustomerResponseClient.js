@@ -18,6 +18,28 @@ async function parseResponse(res, label) {
   return res.json();
 }
 
+function unique(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function inFilter(values) {
+  return encodeURIComponent(`in.(${unique(values).join(",")})`);
+}
+
+async function fetchScopedRows({ accessToken, table, organizationId, businessUnitId, ids, select }) {
+  const scopedIds = unique(ids);
+  if (scopedIds.length === 0) return [];
+  const query = [
+    `organization_id=eq.${encodeURIComponent(organizationId)}`,
+    `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
+    `id=${inFilter(scopedIds)}`,
+    `select=${encodeURIComponent(select)}`,
+  ].join("&");
+  const res = await authenticatedRestFetch(`${table}?${query}`, accessToken);
+  const rows = await parseResponse(res, `Unable to load ${table}`);
+  return Array.isArray(rows) ? rows : [];
+}
+
 export const CUSTOMER_RESPONSE_OPTIONS = [
   { value: "accepted", label: "Accepted", converts: true },
   { value: "declined", label: "Declined", converts: false },
@@ -42,26 +64,64 @@ export async function listSentQuoteVersions({ accessToken, organizationId, busin
   assertRevenueEnabled();
   if (!organizationId || !businessUnitId) throw new Error("Organization and business unit are required");
 
-  const select = [
-    "id",
-    "title",
-    "sent_at",
-    "quote_id",
-    "pricing_snapshot_id",
-    "quote:quote_id(id,opportunity_id,opportunity:opportunity_id(id,service_request_id,service_request:service_request_id(id,title,requirements,customer_id,contact_id,service_location_id)))",
-  ].join(",");
-  const query = [
+  const quoteVersionQuery = [
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
     `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
     "lifecycle_status=eq.sent",
-    `select=${encodeURIComponent(select)}`,
+    `select=${encodeURIComponent("id,title,sent_at,quote_id,pricing_snapshot_id")}`,
     "order=sent_at.desc",
     "limit=50",
   ].join("&");
 
-  const res = await authenticatedRestFetch(`quote_version?${query}`, accessToken);
-  const rows = await parseResponse(res, "Unable to load sent quotes");
-  return Array.isArray(rows) ? rows : [];
+  const quoteVersionRes = await authenticatedRestFetch(`quote_version?${quoteVersionQuery}`, accessToken);
+  const quoteVersions = await parseResponse(quoteVersionRes, "Unable to load sent quotes");
+  if (!Array.isArray(quoteVersions) || quoteVersions.length === 0) return [];
+
+  const quotes = await fetchScopedRows({
+    accessToken,
+    table: "quote",
+    organizationId,
+    businessUnitId,
+    ids: quoteVersions.map((row) => row.quote_id),
+    select: "id,opportunity_id",
+  });
+  const quoteById = new Map(quotes.map((row) => [row.id, row]));
+
+  const opportunities = await fetchScopedRows({
+    accessToken,
+    table: "opportunity",
+    organizationId,
+    businessUnitId,
+    ids: quotes.map((row) => row.opportunity_id),
+    select: "id,service_request_id",
+  });
+  const opportunityById = new Map(opportunities.map((row) => [row.id, row]));
+
+  const serviceRequests = await fetchScopedRows({
+    accessToken,
+    table: "service_request",
+    organizationId,
+    businessUnitId,
+    ids: opportunities.map((row) => row.service_request_id),
+    select: "id,title,requirements,customer_id,contact_id,service_location_id",
+  });
+  const serviceRequestById = new Map(serviceRequests.map((row) => [row.id, row]));
+
+  return quoteVersions.map((quoteVersion) => {
+    const quote = quoteById.get(quoteVersion.quote_id) || null;
+    const opportunity = quote ? opportunityById.get(quote.opportunity_id) || null : null;
+    const serviceRequest = opportunity ? serviceRequestById.get(opportunity.service_request_id) || null : null;
+    return {
+      ...quoteVersion,
+      quote: quote ? {
+        ...quote,
+        opportunity: opportunity ? {
+          ...opportunity,
+          service_request: serviceRequest,
+        } : null,
+      } : null,
+    };
+  });
 }
 
 export async function recordCustomerResponse({

@@ -68,6 +68,25 @@ test("browser client uses one authenticated transactional RPC", () => {
   assert.doesNotMatch(client, /service_role/i);
 });
 
+test("recent saved leads are reloaded from canonical ServiceOS storage across devices", () => {
+  assert.match(client, /export async function listRecentInboundLeads/);
+  assert.match(client, /service_request\?/);
+  assert.match(client, /opportunity\?/);
+  assert.match(client, /organization_id=eq/);
+  assert.match(client, /business_unit_id=eq/);
+  assert.match(panel, /Recent Saved Leads/);
+  assert.match(panel, /not device memory/);
+  assert.match(panel, /Refresh Leads/);
+});
+
+test("proposal-stage leads remain visible but cannot create a duplicate quote", () => {
+  assert.match(panel, /canContinueRecentLead/);
+  assert.match(panel, /lifecycle_status === "intake"/);
+  assert.match(panel, /stage === "open"/);
+  assert.match(panel, /Already in quote workflow/);
+  assert.match(panel, /Use Customer Response \/ Acceptance for sent quotes instead of creating another quote/);
+});
+
 test("office panel allows sparse lead capture and keeps Save Lead as intake-only boundary", () => {
   assert.match(panel, /Save Lead \/ Qualify Later/);
   assert.match(panel, /creates only the canonical intake request and open opportunity/i);

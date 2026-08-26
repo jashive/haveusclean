@@ -13,8 +13,11 @@ test("Goal 5.3 recognizes only a complete service-request canonical identity", (
   assert.equal(serviceRequestHasCanonicalIdentity({}), false);
 });
 
-test("sent quote query exposes service-request identity IDs for acceptance decisions", () => {
-  assert.match(client, /service_request:service_request_id\(id,title,requirements,customer_id,contact_id,service_location_id\)/);
+test("sent quote loader exposes service-request identity IDs for acceptance decisions", () => {
+  assert.match(client, /table: "service_request"/);
+  assert.match(client, /select: "id,title,requirements,customer_id,contact_id,service_location_id"/);
+  assert.match(client, /organization_id=eq/);
+  assert.match(client, /business_unit_id=eq/);
 });
 
 test("accepted conversion resolves identity before accepting the quote", () => {

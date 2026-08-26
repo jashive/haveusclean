@@ -42,6 +42,15 @@ test("customer response UI is mounted only inside the authorized Revenue surface
   assert.match(panel, /Only <strong>Accepted<\/strong> can create the canonical conversion and ready Operations handoff/);
 });
 
+test("sent quote loader uses explicit scoped reads instead of fragile PostgREST relationship aliases", () => {
+  assert.doesNotMatch(client, /quote:quote_id\(/);
+  assert.match(client, /table: "quote"/);
+  assert.match(client, /table: "opportunity"/);
+  assert.match(client, /table: "service_request"/);
+  assert.match(client, /organization_id=eq/);
+  assert.match(client, /business_unit_id=eq/);
+});
+
 test("response client uses one authenticated atomic RPC instead of browser-side conversion inserts", () => {
   assert.match(client, /rpc\/record_quote_response_and_convert/);
   assert.doesNotMatch(client, /createConversionRecord\(/);
