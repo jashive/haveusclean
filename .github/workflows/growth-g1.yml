@@ -27,3 +27,7 @@ jobs:
         run: node --test tests/growthLayerG1Foundation.test.mjs tests/growthLeadMining.test.mjs tests/growthDuplicateResolution.test.mjs tests/growthReviewReadiness.test.mjs tests/growthContactNormalization.test.mjs tests/growthEnrichmentProvenance.test.mjs tests/growthPilotFixture.test.mjs tests/growthScopeReadiness.test.mjs tests/growthPilotLoadPlan.test.mjs tests/growthReviewHardening.test.mjs
       - name: Run Growth G2 controlled-outreach tests
         run: node --test tests/growthG2OutreachEligibility.test.mjs tests/growthG2ProviderDryRun.test.mjs
+      - name: Run Growth G3 reply-qualification tests
+        run: node --test tests/growthG3ReplyClassification.test.mjs
+      - name: Run Growth G4 handoff-preflight tests
+        run: node --test tests/growthG4ServiceOSHandoffPreflight.test.mjs
