@@ -68,7 +68,7 @@ export async function listSentQuoteVersions({ accessToken, organizationId, busin
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
     `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
     "lifecycle_status=eq.sent",
-    `select=${encodeURIComponent("id,title,sent_at,quote_id,pricing_snapshot_id")}`,
+    `select=${encodeURIComponent("id,title,sent_at,quote_id,pricing_snapshot_id,commercial_snapshot,line_items_snapshot")}`,
     "order=sent_at.desc",
     "limit=50",
   ].join("&");
@@ -77,34 +77,11 @@ export async function listSentQuoteVersions({ accessToken, organizationId, busin
   const quoteVersions = await parseResponse(quoteVersionRes, "Unable to load sent quotes");
   if (!Array.isArray(quoteVersions) || quoteVersions.length === 0) return [];
 
-  const quotes = await fetchScopedRows({
-    accessToken,
-    table: "quote",
-    organizationId,
-    businessUnitId,
-    ids: quoteVersions.map((row) => row.quote_id),
-    select: "id,opportunity_id",
-  });
+  const quotes = await fetchScopedRows({ accessToken, table: "quote", organizationId, businessUnitId, ids: quoteVersions.map((row) => row.quote_id), select: "id,opportunity_id" });
   const quoteById = new Map(quotes.map((row) => [row.id, row]));
-
-  const opportunities = await fetchScopedRows({
-    accessToken,
-    table: "opportunity",
-    organizationId,
-    businessUnitId,
-    ids: quotes.map((row) => row.opportunity_id),
-    select: "id,service_request_id",
-  });
+  const opportunities = await fetchScopedRows({ accessToken, table: "opportunity", organizationId, businessUnitId, ids: quotes.map((row) => row.opportunity_id), select: "id,service_request_id" });
   const opportunityById = new Map(opportunities.map((row) => [row.id, row]));
-
-  const serviceRequests = await fetchScopedRows({
-    accessToken,
-    table: "service_request",
-    organizationId,
-    businessUnitId,
-    ids: opportunities.map((row) => row.service_request_id),
-    select: "id,title,requirements,customer_id,contact_id,service_location_id",
-  });
+  const serviceRequests = await fetchScopedRows({ accessToken, table: "service_request", organizationId, businessUnitId, ids: opportunities.map((row) => row.service_request_id), select: "id,title,requirements,customer_id,contact_id,service_location_id" });
   const serviceRequestById = new Map(serviceRequests.map((row) => [row.id, row]));
 
   return quoteVersions.map((quoteVersion) => {
@@ -113,40 +90,15 @@ export async function listSentQuoteVersions({ accessToken, organizationId, busin
     const serviceRequest = opportunity ? serviceRequestById.get(opportunity.service_request_id) || null : null;
     return {
       ...quoteVersion,
-      quote: quote ? {
-        ...quote,
-        opportunity: opportunity ? {
-          ...opportunity,
-          service_request: serviceRequest,
-        } : null,
-      } : null,
+      quote: quote ? { ...quote, opportunity: opportunity ? { ...opportunity, service_request: serviceRequest } : null } : null,
     };
   });
 }
 
-export async function recordCustomerResponse({
-  accessToken,
-  quoteVersionId,
-  responseType,
-  responseChannel = "serviceos_office_ui",
-  respondedByName,
-  respondedByEmail,
-  notes,
-  customerName,
-  customerEmail,
-  customerPhone,
-  addressLine1,
-  city,
-  postalCode,
-  jurisdictionId,
-  metadata = {},
-}) {
+export async function recordCustomerResponse({ accessToken, quoteVersionId, responseType, responseChannel = "serviceos_office_ui", respondedByName, respondedByEmail, notes, customerName, customerEmail, customerPhone, addressLine1, city, postalCode, jurisdictionId, metadata = {} }) {
   assertRevenueEnabled();
   if (!quoteVersionId) throw new Error("Quote version is required");
-  if (!CUSTOMER_RESPONSE_OPTIONS.some((item) => item.value === responseType)) {
-    throw new Error("Choose a supported customer response");
-  }
-
+  if (!CUSTOMER_RESPONSE_OPTIONS.some((item) => item.value === responseType)) throw new Error("Choose a supported customer response");
   const payload = {
     p_quote_version_id: quoteVersionId,
     p_response_type: responseType,
@@ -163,11 +115,6 @@ export async function recordCustomerResponse({
     p_jurisdiction_id: jurisdictionId || null,
     p_metadata: metadata || {},
   };
-
-  const res = await authenticatedRestFetch("rpc/record_quote_response_and_convert", accessToken, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
+  const res = await authenticatedRestFetch("rpc/record_quote_response_and_convert", accessToken, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
   return parseResponse(res, "Unable to record customer response");
 }
