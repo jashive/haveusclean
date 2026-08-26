@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const migration = fs.readFileSync('supabase/migrations/20260826033000_goal5_governed_quote_revision.sql','utf8');
 const approverMigration = fs.readFileSync('supabase/migrations/20260826033500_goal5_quote_revision_approvers.sql','utf8');
+const acceptanceLineageHotfix = fs.readFileSync('supabase/migrations/20260826064500_goal5_revised_quote_acceptance_lineage.sql','utf8');
 const panel = fs.readFileSync('src/features/wave1/ServiceOSQuoteRevisionPanel.jsx','utf8');
 const client = fs.readFileSync('src/lib/serviceosQuoteRevisionClient.js','utf8');
 const shell = fs.readFileSync('src/features/wave1/ServiceOSWave1Workspace.jsx','utf8');
@@ -56,4 +57,14 @@ test('client uses authenticated RPCs and adds no Vercel serverless function', ()
   assert.match(client,/rpc\/list_quote_revision_approvers/);
   assert.doesNotMatch(client,/service_role|SUPABASE_SERVICE_ROLE/i);
   assert.equal(fs.existsSync('api/quote-revision.js'), false);
+});
+
+test('revised quote acceptance validates parent quote to opportunity, not stale parent estimate', () => {
+  assert.match(acceptanceLineageHotfix,/Parent quote lineage is quote -> opportunity/);
+  assert.match(acceptanceLineageHotfix,/SELECT opportunity_id[\s\S]*FROM public\.quote/i);
+  assert.doesNotMatch(acceptanceLineageHotfix,/quote_estimate/);
+  assert.match(acceptanceLineageHotfix,/version_estimate IS DISTINCT FROM NEW\.estimate_id/);
+  assert.match(acceptanceLineageHotfix,/version_quote IS DISTINCT FROM NEW\.quote_id/);
+  assert.match(acceptanceLineageHotfix,/response_version IS DISTINCT FROM NEW\.quote_version_id/);
+  assert.match(acceptanceLineageHotfix,/response_type_value <> 'accepted'/);
 });
