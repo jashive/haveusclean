@@ -21,6 +21,7 @@ const styles = {
   secondary: { border: "1px solid #3D516B", borderRadius: 8, padding: "10px 14px", background: "#202B3C", color: "#F5F8FC", fontWeight: 800, cursor: "pointer" },
   disabled: { opacity: 0.48, cursor: "not-allowed" },
   note: { color: "#8FA0B5", fontSize: 12, marginTop: 8, lineHeight: 1.45 },
+  quoteText: { whiteSpace: "pre-wrap", background: "#0E1524", border: "1px solid #33445A", borderRadius: 8, padding: 12, marginTop: 8, fontSize: 13, lineHeight: 1.55, color: "#E8EFF7" },
   error: { marginTop: 12, border: "1px solid #8E3540", background: "#35151A", color: "#FF9EAA", borderRadius: 8, padding: 12, fontSize: 13 },
   success: { marginTop: 12, border: "1px solid #2B7A68", background: "#102A26", color: "#60E7C6", borderRadius: 8, padding: 12, fontSize: 13, lineHeight: 1.5 },
   warning: { marginTop: 12, border: "1px solid #C78A20", background: "#35270F", color: "#FFD78A", borderRadius: 8, padding: 12, fontSize: 13, lineHeight: 1.5 },
@@ -28,6 +29,10 @@ const styles = {
 
 function getServiceRequest(row) {
   return row?.quote?.opportunity?.service_request || null;
+}
+
+function getCustomerMessage(row) {
+  return row?.commercial_snapshot?.customerFacingText || row?.commercial_snapshot?.customer_facing_text || "";
 }
 
 function deriveCustomerFields(row) {
@@ -51,6 +56,7 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [result, setResult] = useState(null);
+  const [copyStatus, setCopyStatus] = useState("");
 
   const accessToken = session?.access_token ?? null;
   const organizationId = revenueContext?.orgId ?? null;
@@ -58,6 +64,7 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
   const jurisdictionId = revenueContext?.primaryJurisdictionId ?? null;
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) || null, [rows, selectedId]);
   const selectedServiceRequest = getServiceRequest(selected);
+  const selectedCustomerMessage = getCustomerMessage(selected);
   const hasCanonicalIdentity = serviceRequestHasCanonicalIdentity(selectedServiceRequest);
   const converts = responseCreatesConversion(responseType);
 
@@ -86,10 +93,21 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
     setNotes("");
     setResult(null);
     setError(null);
+    setCopyStatus("");
   }, [selectedId]);
 
   function setField(name, value) {
     setFields((current) => ({ ...current, [name]: value }));
+  }
+
+  async function copySavedQuote() {
+    if (!selectedCustomerMessage) return;
+    try {
+      await navigator.clipboard.writeText(selectedCustomerMessage);
+      setCopyStatus("Quote message copied. Send it through the customer's real email, text, or lead channel.");
+    } catch {
+      setCopyStatus("Select and copy the saved quote message manually.");
+    }
   }
 
   async function submitResponse() {
@@ -132,7 +150,7 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
   return (
     <section style={styles.panel} data-testid="serviceos-customer-response-panel">
       <h2 style={styles.heading}>Customer Response / Acceptance</h2>
-      <p style={styles.subheading}>Record what the customer actually did after a quote was sent. Only <strong>Accepted</strong> can create the canonical conversion and ready Operations handoff.</p>
+      <p style={styles.subheading}>This screen does <strong>not send a quote</strong>. Use it only after the quote has actually been sent to the customer and the customer has replied. Only <strong>Accepted</strong> can create the canonical conversion and ready Operations handoff.</p>
 
       <div style={styles.grid}>
         <label style={{ ...styles.field, ...styles.span2 }}>
@@ -142,6 +160,23 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
             {rows.map((row) => <option key={row.id} value={row.id}>{getServiceRequest(row)?.title || row.title || row.id} · {row.id.slice(0, 8)}</option>)}
           </select>
         </label>
+      </div>
+
+      {selected ? (
+        <div style={{ marginTop: 14 }} data-testid="serviceos-saved-sent-quote">
+          <span style={styles.label}>Saved customer quote</span>
+          {selectedCustomerMessage ? (
+            <>
+              <div style={styles.quoteText}>{selectedCustomerMessage}</div>
+              <div style={styles.actions}><button type="button" style={styles.secondary} onClick={copySavedQuote}>Copy Saved Quote Message</button></div>
+              {copyStatus ? <div style={styles.note}>{copyStatus}</div> : null}
+            </>
+          ) : <div style={styles.note}>This older quote has no saved customer-facing message. Do not recreate the lead; review the quote record instead.</div>}
+          <div style={styles.note}><strong>Delivery boundary:</strong> ServiceOS currently records quote status; it does not transmit email/SMS itself. Send through the customer's actual channel first. Customer Response below records what the customer did afterward.</div>
+        </div>
+      ) : null}
+
+      <div style={{ ...styles.grid, marginTop: 16 }}>
         <label style={styles.field}>
           <span style={styles.label}>Customer response</span>
           <select style={styles.input} value={responseType} onChange={(e) => { setResponseType(e.target.value); setResult(null); setError(null); }} disabled={!selectedId || busy}>
