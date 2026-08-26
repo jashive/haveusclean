@@ -1,0 +1,6 @@
+create index if not exists serviceos_handoff_authorization_business_unit_idx on growth.serviceos_handoff_authorization(business_unit_id);
+create index if not exists serviceos_handoff_authorization_jurisdiction_idx on growth.serviceos_handoff_authorization(jurisdiction_id);
+create index if not exists serviceos_handoff_authorization_revocation_business_unit_idx on growth.serviceos_handoff_authorization_revocation(business_unit_id);
+create index if not exists serviceos_handoff_authorization_revocation_jurisdiction_idx on growth.serviceos_handoff_authorization_revocation(jurisdiction_id);
+create index if not exists serviceos_handoff_execution_lease_business_unit_idx on growth.serviceos_handoff_execution_lease(business_unit_id);
+create index if not exists serviceos_handoff_execution_lease_jurisdiction_idx on growth.serviceos_handoff_execution_lease(jurisdiction_id);
