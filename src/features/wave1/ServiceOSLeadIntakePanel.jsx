@@ -1,5 +1,5 @@
-import React, { useState } from "react";
-import { savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
+import React, { useEffect, useMemo, useState } from "react";
+import { listRecentInboundLeads, savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
 import ServiceOSPartialLeadQuoteContinuation from "./ServiceOSPartialLeadQuoteContinuation.jsx";
 
 const initialForm = {
@@ -25,7 +25,17 @@ const styles = {
   success: { marginTop: 12, border: "1px solid #2B7A68", background: "#102A26", color: "#60E7C6", borderRadius: 8, padding: 12, fontSize: 13, lineHeight: 1.5 },
   warning: { marginTop: 12, border: "1px solid #C78A20", background: "#35270F", color: "#FFD78A", borderRadius: 8, padding: 12, fontSize: 13, lineHeight: 1.5 },
   error: { marginTop: 12, border: "1px solid #8E3540", background: "#35151A", color: "#FF9EAA", borderRadius: 8, padding: 12, fontSize: 13 },
+  recent: { marginTop: 18, borderTop: "1px solid #28364A", paddingTop: 16 },
+  recentRow: { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", border: "1px solid #28364A", borderRadius: 8, padding: 10, marginTop: 8, background: "#0E1524" },
 };
+
+function leadLabel(row) {
+  const sr = row?.service_request || {};
+  const req = sr.requirements || {};
+  const customer = req.customer || {};
+  const location = req.location || {};
+  return customer.name || sr.title || customer.email || customer.phone || location.address || sr.id || "Saved lead";
+}
 
 export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [form, setForm] = useState(initialForm);
@@ -33,6 +43,32 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [result, setResult] = useState(null);
   const [continuationLead, setContinuationLead] = useState(null);
   const [error, setError] = useState(null);
+  const [recentLeads, setRecentLeads] = useState([]);
+  const [recentBusy, setRecentBusy] = useState(false);
+  const [recentError, setRecentError] = useState(null);
+
+  const accessToken = session?.access_token || null;
+  const organizationId = revenueContext?.orgId || null;
+  const businessUnitId = revenueContext?.primaryBusinessUnitId || null;
+
+  async function refreshRecentLeads() {
+    if (!accessToken || !organizationId || !businessUnitId) return;
+    setRecentBusy(true);
+    setRecentError(null);
+    try {
+      const rows = await listRecentInboundLeads({ accessToken, organizationId, businessUnitId });
+      setRecentLeads(rows);
+    } catch (err) {
+      setRecentError(err?.message || "Unable to load recent leads.");
+    } finally {
+      setRecentBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshRecentLeads();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accessToken, organizationId, businessUnitId]);
 
   function setField(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
@@ -49,9 +85,9 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
     setContinuationLead(null);
     try {
       const saved = await savePartialInboundLead({
-        accessToken: session?.access_token,
-        organizationId: revenueContext?.orgId,
-        businessUnitId: revenueContext?.primaryBusinessUnitId,
+        accessToken,
+        organizationId,
+        businessUnitId,
         intakeChannel: "office_partial_intake",
         leadSource: form.leadSource,
         externalSourceSystem: form.externalSourceSystem,
@@ -75,6 +111,7 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
       });
       setResult(saved);
       if (saved?.created) setForm(initialForm);
+      await refreshRecentLeads();
     } catch (err) {
       setError(err?.message || "Unable to save lead.");
     } finally {
@@ -83,11 +120,12 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   }
 
   const canContinue = !!result?.service_request?.id && !!result?.opportunity?.id && !result?.duplicate_review_required;
+  const visibleRecentLeads = useMemo(() => recentLeads.slice(0, 25), [recentLeads]);
 
   return (
     <section style={styles.panel} data-testid="serviceos-partial-lead-intake">
       <h2 style={styles.heading}>Save Lead / Qualify Later</h2>
-      <p style={styles.sub}>Capture an inbound lead immediately even when quote details are incomplete. This creates only the canonical intake request and open opportunity. Once saved, ordinary residential leads can continue into governed quoting without creating a second service request.</p>
+      <p style={styles.sub}>Capture an inbound lead immediately even when quote details are incomplete. This creates only the canonical intake request and open opportunity. Saved leads are reloaded from ServiceOS so the same record is available after refresh and on another device.</p>
       <div style={styles.grid}>
         <label style={styles.field}><span style={styles.label}>Customer name</span><input style={styles.input} value={form.customerName} onChange={(e) => setField("customerName", e.target.value)} /></label>
         <label style={styles.field}><span style={styles.label}>Phone</span><input style={styles.input} value={form.phone} onChange={(e) => setField("phone", e.target.value)} /></label>
@@ -116,6 +154,25 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
       {error ? <div style={styles.error}><strong>Unable to save:</strong> {error}</div> : null}
       {result?.duplicate_review_required ? <div style={styles.warning}><strong>Possible duplicate — review existing lead before quoting.</strong><br />Reason: {result.dedup_reason}<br />Service request: {result.service_request?.id}</div> : null}
       {result && !result.duplicate_review_required ? <div style={styles.success}><strong>{result.created ? "Lead captured." : "Existing source record returned; no duplicate created."}</strong><br />Service request: {result.service_request?.id}<br />Opportunity: {result.opportunity?.id || "Not available"}{canContinue ? <div style={styles.actions}><button type="button" style={styles.primary} onClick={() => setContinuationLead(result)}>Continue This Lead to Quote</button></div> : null}</div> : null}
+
+      <div style={styles.recent} data-testid="serviceos-recent-saved-leads">
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
+          <div><strong>Recent Saved Leads</strong><div style={styles.note}>Canonical Ontario/active-market leads from ServiceOS, not device memory.</div></div>
+          <button type="button" style={styles.secondary} disabled={recentBusy} onClick={refreshRecentLeads}>{recentBusy ? "Refreshing…" : "Refresh Leads"}</button>
+        </div>
+        {recentError ? <div style={styles.error}><strong>Unable to load recent leads:</strong> {recentError}</div> : null}
+        {!recentBusy && !recentError && visibleRecentLeads.length === 0 ? <div style={styles.note}>No active saved leads found for this market.</div> : null}
+        {visibleRecentLeads.map((row) => (
+          <div style={styles.recentRow} key={row.service_request.id}>
+            <div>
+              <strong>{leadLabel(row)}</strong><br />
+              <span style={styles.note}>Status: {row.service_request.lifecycle_status} · Service request: {row.service_request.id.slice(0, 8)}</span>
+            </div>
+            <button type="button" style={styles.primary} onClick={() => setContinuationLead(row)}>Open / Continue Quote</button>
+          </div>
+        ))}
+      </div>
+
       {continuationLead ? <ServiceOSPartialLeadQuoteContinuation leadResult={continuationLead} session={session} revenueContext={revenueContext} onClose={() => setContinuationLead(null)} /> : null}
     </section>
   );
