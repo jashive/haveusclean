@@ -6,6 +6,7 @@ const panel = fs.readFileSync("src/features/wave1/ServiceOSLeadIntakePanel.jsx",
 const continuation = fs.readFileSync("src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", "utf8");
 const client = fs.readFileSync("src/lib/serviceosLeadQuoteContinuationClient.js", "utf8");
 const intakeClient = fs.readFileSync("src/lib/serviceosLeadIntakeClient.js", "utf8");
+const revenueClient = fs.readFileSync("src/lib/serviceosRevenueClient.js", "utf8");
 
 test("saved partial lead exposes explicit continuation to quote", () => {
   assert.match(panel, /Continue This Lead to Quote/);
@@ -62,9 +63,16 @@ test("changing active market closes stale continuation state", () => {
   assert.match(panel, /\[accessToken, organizationId, businessUnitId\]/);
 });
 
-test("sent action remains explicit and does not fabricate acceptance", () => {
-  assert.match(continuation, /I Sent This Quote — Record Sent/);
-  assert.match(continuation, /does not mark the customer accepted or create a job/);
-  assert.match(continuation, /updateQuoteVersionStatus\(saved\.quoteVersion\.id, "sent"/);
-  assert.doesNotMatch(continuation, /"accepted"/);
+test("saved-lead quote routes through native provider delivery instead of manual sent marker", () => {
+  assert.doesNotMatch(continuation, /I Sent This Quote — Record Sent/);
+  assert.doesNotMatch(continuation, /updateQuoteVersionStatus/);
+  assert.match(continuation, /Quote Delivery \+ Customer Decision/);
+  assert.match(continuation, /Send Quote by Email/);
+  assert.match(continuation, /Microsoft 365 accepts the delivery/);
+});
+
+test("quote sent lifecycle updates do not supply client-generated sent_at", () => {
+  assert.match(revenueClient, /updateQuoteVersionStatus\(quoteVersionId, newStatus, accessToken\)/);
+  assert.doesNotMatch(revenueClient, /sent_at: new Date\(\)\.toISOString\(\)/);
+  assert.match(revenueClient, /\{ lifecycle_status: "sent" \}/);
 });
