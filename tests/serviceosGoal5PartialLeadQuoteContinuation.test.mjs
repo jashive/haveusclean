@@ -5,6 +5,7 @@ import fs from "node:fs";
 const panel = fs.readFileSync("src/features/wave1/ServiceOSLeadIntakePanel.jsx", "utf8");
 const continuation = fs.readFileSync("src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", "utf8");
 const client = fs.readFileSync("src/lib/serviceosLeadQuoteContinuationClient.js", "utf8");
+const intakeClient = fs.readFileSync("src/lib/serviceosLeadIntakeClient.js", "utf8");
 
 test("saved partial lead exposes explicit continuation to quote", () => {
   assert.match(panel, /Continue This Lead to Quote/);
@@ -41,6 +42,11 @@ test("existing lead promotion remains business-unit scoped and fail closed", () 
   assert.match(client, /opportunity\.business_unit_id !== businessUnitId/);
   assert.match(client, /Only intake\/qualified leads can continue to quote/);
   assert.match(client, /Only open\/proposal opportunities can continue to quote/);
+});
+
+test("restored saved leads carry canonical business unit ids needed by the continuation guard", () => {
+  assert.match(intakeClient, /id,organization_id,business_unit_id,title,lifecycle_status/);
+  assert.match(intakeClient, /id,organization_id,business_unit_id,service_request_id,stage/);
 });
 
 test("saved lead continuation anchors to its visible canonical business unit", () => {
