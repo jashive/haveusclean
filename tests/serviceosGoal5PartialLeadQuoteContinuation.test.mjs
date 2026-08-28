@@ -43,6 +43,19 @@ test("existing lead promotion remains business-unit scoped and fail closed", () 
   assert.match(client, /Only open\/proposal opportunities can continue to quote/);
 });
 
+test("saved lead continuation anchors to its visible canonical business unit", () => {
+  assert.match(panel, /serviceRequestBusinessUnitId/);
+  assert.match(panel, /serviceRequestBusinessUnitId !== opportunityBusinessUnitId/);
+  assert.match(panel, /visibleRecords\.find\(\(item\) => item\.id === serviceRequestBusinessUnitId\)/);
+  assert.match(panel, /primaryBusinessUnitId: canonicalLeadBusinessUnit\.id/);
+  assert.match(panel, /activeBusinessUnitCode: canonicalLeadBusinessUnit\.code/);
+});
+
+test("changing active market closes stale continuation state", () => {
+  assert.match(panel, /setContinuationLead\(null\);\s*setResult\(null\);\s*refreshRecentLeads\(\)/);
+  assert.match(panel, /\[accessToken, organizationId, businessUnitId\]/);
+});
+
 test("sent action remains explicit and does not fabricate acceptance", () => {
   assert.match(continuation, /I Sent This Quote — Record Sent/);
   assert.match(continuation, /does not mark the customer accepted or create a job/);
