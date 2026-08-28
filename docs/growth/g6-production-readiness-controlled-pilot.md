@@ -1,246 +1,180 @@
 # Growth Layer G6 — Production Readiness & Controlled Pilot Commissioning
 
-Status: **IN PROGRESS — engineering readiness foundation implemented in Acceptance; commissioning remains BLOCKED; no Growth execution gate activated.**
+Status: **IN PROGRESS — engineering commissioning + staged-activation control plane implemented and proven in Acceptance; real commissioning remains BLOCKED; no persistent execution gate activated.**
 
-Branch: `growth/g6-production-readiness-pilot`
-Base: G5 merge/main `4a343e638d28aa88a64bd790db241a654afb256e`
-Acceptance project: `HEMS_Growth_Dev` (`hqeamecwdsrjfjybrsox`)
-Production ServiceOS is out of scope for this slice and was not modified.
+Branch: `growth/g6-production-readiness-pilot`  
+Base: G5 merge/main `4a343e638d28aa88a64bd790db241a654afb256e`  
+Acceptance: `HEMS_Growth_Dev` (`hqeamecwdsrjfjybrsox`)  
+Production ServiceOS was not modified.
 
-## 1. Purpose
+## 1. Architectural boundary
 
-G6 is the commissioning and controlled-pilot layer for Growth Layer 1.0. It does not create another outreach system or another operational lifecycle. It governs whether the already-built G2 outreach/provider controls and G4 ServiceOS handoff controls have enough approved evidence to request a tightly scoped activation.
+G6 commissions the existing Growth Layer; it does not create another outreach engine or operational lifecycle. HEMS remains governance authority. G2 remains authoritative for outreach/provider/legal/sender controls. G4 remains authoritative for Growth→ServiceOS handoff. G5 remains the read-only analytics/feedback surface.
 
-HEMS remains the governance authority. ServiceOS remains the canonical operational system of record after a governed handoff.
+Persistent control state remains:
 
-## 2. Protected starting state
-
-The following persistent execution gates remain OFF:
-
+- `growth_layer_enabled=true`
 - `growth_outreach_enabled=false`
 - `growth_auto_followup_enabled=false`
 - `growth_provider_execution_enabled=false`
 - `growth_serviceos_handoff_enabled=false`
 
-`growth_layer_enabled=true` remains the non-execution layer gate.
+## 2. G6 slice 1 — commissioning evidence and readiness
 
-At G6 start, Acceptance contained zero sender identities, sender-auth evidence, sender-health snapshots, provider adapter contracts, provider adapter allowlist records, provider runtime bindings, provider activation approvals, and provider execution leases. G6 therefore starts from a deliberately non-commissioned state.
+Implemented private/RLS/append-only tables:
 
-## 3. Reuse of existing controls
+- `growth.commissioning_evidence`
+- `growth.commissioning_evidence_revocation`
+- `growth.pilot_policy`
+- `growth.pilot_policy_revocation`
 
-G6 reuses G2 rather than duplicating it. G2 remains authoritative for:
+Commissioning evidence types are legal/compliance approval, provider security review, sender-domain readiness, monitoring/alerting readiness, rollback/emergency-stop readiness, staff SOP/training readiness, ServiceOS handoff-pilot readiness, and HEMS pilot approval.
 
-- sender identity and approval;
-- SPF/DKIM/DMARC evidence;
-- event-derived sender health;
-- provider adapter contract metadata;
-- adapter allowlisting;
-- runtime binding and external credential state;
-- human provider activation approval;
-- short-lived provider execution leases;
-- suppression, reply stops, cooldown, frequency, bounce and complaint controls;
-- provider emergency suspension/revocation.
+First-stage policy is deliberately narrow:
 
-G6 also reuses G4 rather than duplicating the handoff path. G4 remains authoritative for qualified Growth→ServiceOS handoff authorization, short-lived execution leases, deterministic idempotency, canonical dedupe and atomic ServiceOS mutation.
+- `manual_email_outreach`
+- email only
+- daily cap 1–25
+- total cap 1–100
+- `handoff_cap=0`
+- auto-followup/SMS/phone all false
+- kill on any complaint
+- maximum policy validity 7 days.
 
-## 4. First G6 engineering slice
+Service-role-only RPCs record/revoke evidence and policy and evaluate `growth_g6_commissioning_readiness(...)`. Readiness is pre-activation only: it requires all protected execution gates OFF and returns `BLOCKED` or `READY_FOR_STAGED_ACTIVATION_REQUEST`; it never changes a gate and always reports `execution_authorized=false`.
 
-### 4.1 Immutable commissioning evidence
+### OAT 024 — PASS
 
-Private table: `growth.commissioning_evidence`
+Rollback-only Acceptance proof covers fail-closed empty state, idempotency/collision rejection, append-only controls, evidence revocation, sender/provider blockers, channel/handoff restrictions, no gate mutation and zero synthetic residue.
 
-Allowed evidence types:
+Source: `supabase/tests/growth-g6-commissioning-foundation-oat.sql`.
 
-1. `legal_compliance_approval`
-2. `provider_security_review`
-3. `sender_domain_readiness`
-4. `monitoring_alerting_readiness`
-5. `rollback_emergency_stop_readiness`
-6. `staff_sop_training_ready`
-7. `serviceos_handoff_pilot_ready`
-8. `hems_pilot_approval`
+## 3. G6 slice 2 — staged activation + server-side pilot quota
 
-Evidence is scoped to organization, business unit, jurisdiction and environment. It is time-bounded, idempotent, SHA-256 request-hashed, human-approved and append-only. Revocation is recorded separately in `growth.commissioning_evidence_revocation`.
+Implemented:
 
-The first manual-email stage requires all evidence above except `serviceos_handoff_pilot_ready`; handoff is intentionally disabled in this stage.
+- `growth.staged_activation_authorization`
+- `growth.staged_activation_authorization_revocation`
+- `growth.pilot_send_reservation`
 
-### 4.2 Bounded pilot policy
+All are private/RLS/append-only and service-role operated.
 
-Private table: `growth.pilot_policy`
+### Runtime prerequisite fingerprint
 
-Version: `g6-pilot-policy-v1`
+`growth_g6_runtime_prerequisite_snapshot(...)` derives a server-authoritative snapshot of the exact current pilot policy, required commissioning evidence IDs, sender readiness, provider runtime binding, adapter allowlist, activation approval and canonical jurisdiction timezone. The snapshot is SHA-256 fingerprinted.
 
-The first policy stage is deliberately narrow:
+This snapshot intentionally excludes the two deliberate first-stage execution gates so an authorization can be recorded while gates are OFF and remain valid after an explicitly governed micro-stage activation. It still blocks if auto-followup or ServiceOS handoff is enabled during the manual-email pilot.
 
-- `pilot_stage=manual_email_outreach`
-- email only;
-- daily send cap: 1–25;
-- total send cap: 1–100;
-- `handoff_cap=0`;
-- `auto_followup_allowed=false`;
-- `sms_allowed=false`;
-- `phone_allowed=false`;
-- `kill_on_any_complaint=true`;
-- sender-health policy bound to `g2-sender-health-2026-08-23`;
-- maximum policy validity: 7 days.
+### Staged activation authorization
 
-Policy revocation is separately immutable in `growth.pilot_policy_revocation`.
+`growth_g6_record_staged_activation_authorization(...)` requires:
 
-### 4.3 Service-role write/read boundary
+- pre-activation G6 readiness = `READY_FOR_STAGED_ACTIVATION_REQUEST`;
+- current runtime prerequisites = ready;
+- active human approver;
+- exact org/BU/jurisdiction/environment;
+- exact policy/request hash/evidence/runtime fingerprint;
+- validity no longer than 24 hours and never beyond pilot-policy expiry.
 
-Service-role-only RPCs:
+It is idempotent, immutable and separately revocable. It does **not** mutate a feature gate.
 
-- `public.growth_g6_record_commissioning_evidence(...)`
-- `public.growth_g6_revoke_commissioning_evidence(...)`
-- `public.growth_g6_record_pilot_policy(...)`
-- `public.growth_g6_revoke_pilot_policy(...)`
-- `public.growth_g6_commissioning_readiness(...)`
+`growth_g6_evaluate_staged_activation_authorization(...)` fails closed on expiry, revocation, policy drift, evidence/sender/provider drift, or premature later-stage gate activation.
 
-All G6 evidence/policy tables have RLS enabled and intentionally have no anon/authenticated browser policies. SECURITY DEFINER RPCs use empty `search_path`; SHA-256 hashing is explicitly schema-qualified through `extensions.digest(...)`.
+### Server-side pilot quota
 
-### 4.4 Read-only commissioning readiness
+`growth_g6_reserve_pilot_send_for_provider_lease(...)` locks the authorization row while reserving a send slot, preventing concurrent cap races. It enforces:
 
-Readiness version: `g6-commissioning-readiness-v1`
+- exact submission/provider/sender scope;
+- one reservation per G2 submission reservation;
+- canonical jurisdiction timezone (`America/Toronto` for Ontario, `America/Phoenix` for Arizona);
+- daily and total pilot send caps.
 
-`public.growth_g6_commissioning_readiness(...)` checks:
+Quota is intentionally conservative: reserved slots are not automatically released, preferring under-send over accidental over-send.
 
-- exact active organization/business-unit/jurisdiction scope;
-- environment (`acceptance` or `production`);
-- current unrevoked required commissioning evidence;
-- current unrevoked pilot policy;
-- existing G2 sender readiness;
-- approved matching G2 provider runtime binding;
-- matching G2 adapter allowlist including adapter version;
-- matching G2 provider activation approval;
-- in production, runtime credentials must be externally configured;
-- all protected Growth execution gates are still OFF before a staged activation request.
+## 4. G2 production provider-lease hardening
 
-It returns either `BLOCKED` or `READY_FOR_STAGED_ACTIVATION_REQUEST`.
+Existing G2 provider controls remain mandatory. G6 adds an additional production-only requirement rather than replacing them.
 
-Crucially, this first slice always returns:
+`growth.provider_execution_lease` now links optionally to:
 
-- `execution_authorized=false`
-- `gate_mutation_performed=false`
+- `g6_staged_activation_authorization_id`
+- `g6_pilot_send_reservation_id`
 
-It does not activate or mutate a gate.
+For `environment_name='production'`, `growth_g2_issue_provider_execution_lease(...)` now requires exactly one current matching G6 staged authorization plus an available G6 quota slot. A missing or ambiguous G6 authorization blocks issuance. Lease expiry cannot exceed G6 authorization expiry.
 
-## 5. Current real readiness
+Acceptance/non-production behavior remains compatible with G2.
 
-Representative Ontario and Arizona Acceptance scopes both correctly return `BLOCKED`.
+`growth_g2_consume_provider_execution_lease(...)` now rechecks the linked G6 authorization and quota binding before a production lease can be consumed. Revocation or prerequisite drift after lease issuance therefore blocks consumption.
 
-Current blockers are:
+There is still no generic G6 gate-toggle RPC.
 
-- missing/inactive legal-compliance approval;
-- missing/inactive provider-security review;
-- missing/inactive sender-domain readiness;
-- missing/inactive monitoring/alerting readiness;
-- missing/inactive rollback/emergency-stop readiness;
-- missing/inactive staff SOP/training readiness;
-- missing/inactive HEMS pilot approval;
-- missing/inactive pilot policy.
+## 5. OAT 025 — PASS
 
-No real commissioning evidence or provider/sender approval was fabricated to make the result green.
+Source: `supabase/acceptance/025_growth_g6_staged_activation_quota_provider_lease_oat.sql`.
 
-## 6. OAT 024 — commissioning foundation
+Rollback-only Acceptance test proved the real G2/G6 chain:
 
-Acceptance rollback-only test: `supabase/tests/growth-g6-commissioning-foundation-oat.sql`
+1. Starts with every protected execution gate OFF.
+2. Builds two synthetic, legally approved, sender-ready G2 outreach targets and valid non-sending preflight reservations.
+3. Creates production-shaped provider metadata in Acceptance only; no secret or network send.
+4. Temporarily enables the old G2 outreach/provider gates and proves production lease issuance is still BLOCKED without G6 (`g6_staged_activation_authorization_missing`).
+5. Restores gates OFF, records G6 evidence + one-send production-shaped pilot policy, and proves readiness is `READY_FOR_STAGED_ACTIVATION_REQUEST` without execution authorization or gate mutation.
+6. Records a human staged authorization while all execution gates remain OFF.
+7. Temporarily enables only outreach + provider execution; handoff + auto-followup remain OFF.
+8. First production-mode lease is issued and bound to the exact G6 authorization + pilot-send reservation.
+9. Quota uses `America/Toronto` for the Ontario scope.
+10. With total cap = 1, a second otherwise-valid reservation is blocked by `pilot_total_send_cap_reached` and creates no second lease.
+11. Revoking the G6 authorization invalidates it immediately.
+12. Consumption of the already-issued unconsumed lease is BLOCKED by `authorization_revoked` and does not burn the lease.
+13. Transaction rolls back all synthetic data and temporary gate changes.
 
-Final result: **PASS**.
+OAT discovery: PostgreSQL does not support `min(uuid)`. The initial authorization lookup was corrected to explicit count + deterministic UUID selection before the final PASS.
 
-OAT 024 proves:
+## 6. Acceptance migration ledger
 
-- empty readiness fails closed;
-- commissioning evidence is idempotent;
-- exact replay returns the same ID;
-- changed payload under an existing idempotency key is blocked;
-- evidence and policy tables are append-only;
-- pilot policy is idempotent and collision-protected;
-- even with synthetic commissioning evidence and a synthetic pilot policy, missing G2 sender/provider readiness keeps G6 BLOCKED;
-- expected blockers include sender not ready, runtime binding missing, adapter not allowlisted and provider activation approval missing;
-- first-stage policy enforces handoff cap zero and prohibits auto-followup, SMS and phone;
-- revoking required evidence immediately invalidates readiness;
-- no readiness call authorizes execution or mutates a gate;
-- all protected execution gates remain OFF.
+First slice:
 
-All synthetic OAT rows were rolled back. Post-test residue for G6-OAT evidence, revocations and pilot policy is zero.
+- `20260828174019_growth_layer_g6_commissioning_readiness_foundation.sql`
+- `20260828174128_growth_layer_g6_business_unit_status_hotfix.sql`
+- `20260828174232_growth_layer_g6_active_human_approver_hotfix.sql`
+- `20260828174425_growth_layer_g6_provider_readiness_alignment_hotfix.sql`
 
-## 7. Acceptance integration corrections discovered during OAT
+Second slice:
 
-Acceptance-first validation caught and corrected three schema assumptions before any activation path existed:
+- `20260828181425_growth_layer_g6_staged_activation_quota_provider_lease.sql`
+- `20260828181714_growth_layer_g6_provider_lease_uuid_selection_hotfix.sql`
 
-1. `public.business_unit` uses `status='active'`, not `is_active`.
-2. `public.app_user` does not carry `organization_id`; active-human approval follows the existing ServiceOS/Growth pattern while org/BU/jurisdiction scope is enforced independently.
-3. `growth.provider_runtime_binding` does not store `adapter_version`; adapter version belongs to allowlist/activation records, and provider activation uses `approval_status`.
+Clean-source migrations contain the final corrected state; hotfix-version files are retained as documented no-op ledger reconciliation where the clean consolidated migration already includes the fix.
 
-The clean-source migration contains the corrected final state. Three no-op migration-history reconciliation files retain the exact Acceptance migration ledger so future Supabase migration tooling can reconcile cleanly.
+## 7. Real commissioning state
 
-## 8. What G6 does not yet authorize
+**BLOCKED AT COMMISSIONING.** No real commissioning evidence, sender identity, provider binding, provider credentials, provider activation approval or HEMS live-pilot approval was fabricated.
 
-G6 is not complete and production commissioning is not approved.
+Current real prerequisites still include:
 
-This slice does **not** authorize:
+- Ontario/Canada CASL operating/legal approval for the chosen pilot scope;
+- Arizona/US CAN-SPAM operating/legal approval for any US pilot scope;
+- provider/security selection and review;
+- credentials stored externally, not repo/database plaintext;
+- approved sender identity plus current SPF/DKIM/DMARC evidence;
+- event-derived healthy sender state;
+- monitoring/alerting operational proof;
+- emergency-stop/rollback approval;
+- staff SOP/training approval;
+- exact micro-pilot policy;
+- HEMS live-pilot approval.
 
-- real outbound provider execution;
-- persistent outreach gate activation;
-- automatic follow-up;
-- SMS or phone outreach;
-- Growth→ServiceOS handoff activation;
-- production ServiceOS mutation;
-- bypassing G2 sender-health, legal-basis, suppression or provider controls;
-- bypassing G4 qualification/handoff controls.
+Until these are real, the correct outcome is BLOCKED, not a bypass.
 
-## 9. Next engineering slice — staged activation authorization
+## 8. Next G6 engineering work
 
-The next G6 boundary must bind a human commissioning authorization to an exact, current readiness state and pilot policy. It must not expose a generic all-gates toggle.
+1. Formalize pilot monitoring/go-no-go and emergency-stop evidence around the existing G2 complaint/bounce/sender-health rules.
+2. Add the separately governed **handoff-pilot stage** only after manual-email pilot proof. It must require `serviceos_handoff_pilot_ready`, a tiny explicit handoff cap and the existing G4 authorization/lease/atomic handoff path.
+3. Keep `growth_serviceos_handoff_enabled=false` until that later stage is approved.
+4. Keep `growth_auto_followup_enabled=false` until manual sequence quality is proven; auto-followup remains the last stage.
+5. Use G5 dashboard v2 for pilot evidence; G5 recommendations remain advisory and sample-gated.
+6. Complete CI/PR review and merge the G6 engineering foundation without activating it.
 
-Required design:
+## 9. Commissioning exit criteria
 
-1. Immutable staged-activation authorization bound to exact org/BU/jurisdiction/environment, pilot policy, sender/provider scope and readiness evidence.
-2. Authorization invalidation when policy/evidence/sender/provider readiness changes or is revoked.
-3. Existing G2 provider-execution lease issuance hardened so a production/live-provider lease cannot be issued without current G6 pilot authorization.
-4. Pilot caps enforced server-side, not only documented.
-5. Existing G2 sender-health emergency stop reused so complaint/bounce/health triggers can suspend/revoke execution eligibility immediately.
-6. Provider/outreach micro-pilot first; ServiceOS handoff remains OFF.
-7. Separate later handoff-pilot readiness must require `serviceos_handoff_pilot_ready`, a tiny explicit handoff cap and the existing G4 authorization/lease path.
-8. Auto-followup remains the last activation stage and requires separate approval after manual sequence quality is proven.
-
-## 10. Pilot monitoring and go/no-go
-
-G5 dashboard v2 remains the read-only measurement surface for funnel, latency, finance, campaign outcomes and sample-gated optimization observations. G5 recommendations remain advisory only.
-
-Before expansion, G6 must define and operate a review cadence covering:
-
-- delivery;
-- hard bounce rate;
-- complaints;
-- sender-health state;
-- reply/positive-interest rate;
-- qualification quality;
-- suppression/opt-out handling;
-- duplicate/error rate;
-- handoff quality once separately authorized;
-- quote/acceptance/conversion outcomes when enough sample exists;
-- CAC/ROAS/contribution ROI only where valid evidence and sample size exist.
-
-The existing conservative G2 rule—any complaint is blocking—remains in force for the first pilot.
-
-## 11. Commissioning exit criteria
-
-G6 can only move from engineering-ready to controlled live pilot when all of the following are true:
-
-- applicable CASL/CAN-SPAM/legal-basis operating approval is documented for the pilot scope;
-- provider/security review is documented;
-- live provider selected and credentials provisioned outside repo/database plaintext;
-- sender identity is approved;
-- SPF, DKIM and DMARC evidence is current;
-- event-derived sender health is acceptable;
-- monitoring and alerting are operational;
-- emergency stop/rollback runbook is approved;
-- staff SOP/training is approved;
-- exact micro-pilot policy is approved;
-- HEMS pilot approval is current;
-- staged activation authorization passes server-side readiness;
-- all relevant OAT and CI checks are green;
-- production ServiceOS remains protected until the separately governed handoff stage.
-
-Until then, the correct state is **BLOCKED AT COMMISSIONING**, not bypassed.
+G6 can move from engineering foundation to a real controlled live pilot only when legal/compliance, provider/security, sender authentication/health, monitoring, rollback, training, exact pilot policy and HEMS approvals are current; server-side staged authorization passes; all relevant OAT/CI checks are green; and Production ServiceOS remains protected until the separately authorized G4 handoff stage.
