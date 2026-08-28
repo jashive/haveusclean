@@ -55,6 +55,23 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const organizationId = revenueContext?.orgId || null;
   const businessUnitId = revenueContext?.primaryBusinessUnitId || null;
 
+  const continuationRevenueContext = useMemo(() => {
+    if (!continuationLead) return revenueContext;
+    const serviceRequestBusinessUnitId = continuationLead?.service_request?.business_unit_id || null;
+    const opportunityBusinessUnitId = continuationLead?.opportunity?.business_unit_id || null;
+    if (!serviceRequestBusinessUnitId || serviceRequestBusinessUnitId !== opportunityBusinessUnitId) return revenueContext;
+    const visibleRecords = Array.isArray(revenueContext?.businessUnitRecords) ? revenueContext.businessUnitRecords : [];
+    const canonicalLeadBusinessUnit = visibleRecords.find((item) => item.id === serviceRequestBusinessUnitId) || null;
+    if (!canonicalLeadBusinessUnit) return revenueContext;
+    return {
+      ...revenueContext,
+      primaryBusinessUnitId: canonicalLeadBusinessUnit.id,
+      primaryJurisdictionId: canonicalLeadBusinessUnit.jurisdictionId,
+      activeBusinessUnitCode: canonicalLeadBusinessUnit.code,
+      activeBusinessUnitName: canonicalLeadBusinessUnit.name,
+    };
+  }, [continuationLead, revenueContext]);
+
   async function refreshRecentLeads() {
     if (!accessToken || !organizationId || !businessUnitId) return;
     setRecentBusy(true);
@@ -70,6 +87,8 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   }
 
   useEffect(() => {
+    setContinuationLead(null);
+    setResult(null);
     refreshRecentLeads();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [accessToken, organizationId, businessUnitId]);
@@ -181,7 +200,7 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
         })}
       </div>
 
-      {continuationLead ? <ServiceOSPartialLeadQuoteContinuation leadResult={continuationLead} session={session} revenueContext={revenueContext} onClose={() => setContinuationLead(null)} /> : null}
+      {continuationLead ? <ServiceOSPartialLeadQuoteContinuation key={`${continuationLead.service_request.id}:${continuationRevenueContext?.primaryBusinessUnitId || "no-bu"}`} leadResult={continuationLead} session={session} revenueContext={continuationRevenueContext} onClose={() => setContinuationLead(null)} /> : null}
     </section>
   );
 }
