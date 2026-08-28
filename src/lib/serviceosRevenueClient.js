@@ -158,7 +158,7 @@ export async function createQuoteVersion(payload, accessToken) {
 /**
  * Transition a quote_version through its lifecycle.
  * Valid transitions: draft → sent, sent → accepted
- * Do NOT combine with commercial edits.
+ * Do NOT combine with commercial edits. Database governance stamps sent_at.
  *
  * @param {string} quoteVersionId
  * @param {"sent"|"accepted"} newStatus
@@ -170,11 +170,7 @@ export async function updateQuoteVersionStatus(quoteVersionId, newStatus, access
   if (newStatus !== "sent" && newStatus !== "accepted") {
     throw new Error('updateQuoteVersionStatus: newStatus must be "sent" or "accepted"');
   }
-  const patch = { lifecycle_status: newStatus };
-  if (newStatus === "sent") {
-    patch.sent_at = new Date().toISOString();
-  }
-  return updateById("quote_version", quoteVersionId, patch, accessToken);
+  return updateById("quote_version", quoteVersionId, { lifecycle_status: newStatus }, accessToken);
 }
 
 // ── Quote Response ────────────────────────────────────────────────────────────
@@ -332,11 +328,11 @@ export async function runRevenuePipeline({
     );
     created.quoteVersion = quoteVersion;
 
-    // 7. Transition quote_version: draft → sent
+    // 7. Transition quote_version: draft → sent. Database stamps sent_at.
     await updateById(
       "quote_version",
       quoteVersion.id,
-      { lifecycle_status: "sent", sent_at: new Date().toISOString() },
+      { lifecycle_status: "sent" },
       accessToken
     );
 
