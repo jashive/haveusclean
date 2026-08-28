@@ -49,7 +49,7 @@ function azConfig() {
 
 test("Goal 5.6A resolves governed versions by business unit and fails closed otherwise", () => {
   assert.equal(GOVERNED_RESIDENTIAL_REQUIRED_VERSION, "ON-2026-08-v1.0");
-  assert.equal(getGovernedResidentialRequiredVersion("HUC-ON"), "ON-2026-08-v1.0");
+  assert.equal(getGovernedResidentialRequiredVersion("HUC-ON"), "ON-2026-08-v1.1");
   assert.equal(getGovernedResidentialRequiredVersion("HUC-AZ"), "AZ-2026-08-v1.0");
   assert.throws(() => getGovernedResidentialRequiredVersion("HUC-XX"), /unsupported business unit/);
 });
