@@ -31,6 +31,8 @@ import {
   formatQuoteMoney,
   getDefaultApprovedSelections,
   getManagementReviewReason,
+  isAddonBundledForPackage,
+  removeBundledAddonsForPackage,
 } from "../../lib/serviceosOfficeQuoteUtils.js";
 import { canManageServiceOSRevenue } from "../../lib/serviceosUiPolicy.js";
 
@@ -126,8 +128,18 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
   const customerText = useMemo(() => quote ? buildCustomerFacingQuoteText({ customerName: form.customerName, serviceLabel: packageLabel(form.packageKey), quote, frequencyLabel: frequencyLabel(form.frequency) }) : "", [quote, form.customerName, form.packageKey, form.frequency]);
 
   function resetComputed() { setQuote(null); setSaved(null); setConfigurationVersion(null); setReviewReason(null); setError(null); }
-  function setField(name, value) { setForm((current) => ({ ...current, [name]: value })); resetComputed(); }
+  function setField(name, value) {
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === "packageKey") {
+        next.addons = removeBundledAddonsForPackage({ packageKey: value, addons: current.addons, businessUnitCode, configurationVersion });
+      }
+      return next;
+    });
+    resetComputed();
+  }
   function toggleAddon(id) {
+    if (isAddonBundledForPackage({ packageKey: form.packageKey, addonId: id, businessUnitCode, configurationVersion })) return;
     setForm((current) => ({ ...current, addons: current.addons.includes(id) ? current.addons.filter((item) => item !== id) : [...current.addons, id] }));
     resetComputed();
   }
@@ -142,19 +154,19 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
       if (!form.beds || !form.baths) throw new Error("Bedrooms and bathrooms are required for residential matrix pricing.");
       if (!businessUnitCode) throw new Error("Active business unit is required before quoting.");
 
-      const basicReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons });
+      const basicReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, businessUnitCode });
       if (basicReviewReason) { setReviewReason(basicReviewReason); return; }
 
       const requiredVersion = getGovernedResidentialRequiredVersion(businessUnitCode);
       const config = await fetchPublishedGovernedResidentialConfig({ accessToken, organizationId: orgId, businessUnitId, jurisdictionId, requiredVersion });
-      const packageReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion: config });
+      const packageReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion: config, businessUnitCode });
       if (packageReviewReason) { setReviewReason(packageReviewReason); return; }
       const approvedSelections = getDefaultApprovedSelections(config, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
       const rawQuote = computeGovernedResidentialQuote({
         configurationVersion: config, dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey,
         condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections,
       });
-      if (rawQuote?.requiresOfficeReview) { setReviewReason(rawQuote.reason || "This scope requires management review."); return; }
+      if (rawQuote?.requiresOfficeReview) { setReviewReason(rawQuote.reason || "Requires Management Review / Custom Pricing"); return; }
       const completedQuote = applyGovernedResidentialAddons(rawQuote, config, form.addons);
       completedQuote.input = { dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
       setConfigurationVersion(config); setQuote(completedQuote);
@@ -244,12 +256,15 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
 
       <div style={styles.section}>
         <h3 style={styles.sectionTitle}>Add-ons</h3>
-        <div style={styles.addons}>{OFFICE_ADDON_OPTIONS.map((item) => <label key={item.id} style={styles.check}><input type="checkbox" checked={form.addons.includes(item.id)} onChange={() => toggleAddon(item.id)} />{item.label}</label>)}</div>
-        <div style={styles.note}>Published starting/minimum add-on prices for {selectedMarket} are used only where the active configuration supports them. Specialty work routes to management review.</div>
+        <div style={styles.addons}>{OFFICE_ADDON_OPTIONS.map((item) => {
+          const bundled = isAddonBundledForPackage({ packageKey: form.packageKey, addonId: item.id, businessUnitCode, configurationVersion });
+          return <label key={item.id} style={{ ...styles.check, ...(bundled ? styles.disabled : {}) }} title={bundled ? "Included in Complete Deep Clean — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} />{item.label}{bundled ? " — Included" : ""}</label>;
+        })}</div>
+        <div style={styles.note}>Published starting/minimum add-on prices for {selectedMarket} are used only where the active configuration supports them. Complete Deep bundled items are disabled to prevent double charging. Specialty work routes to management review.</div>
       </div>
 
       <div style={styles.actions}><button type="button" style={{ ...styles.primary, ...(busy ? styles.disabled : {}) }} disabled={busy} onClick={handleGenerateQuote}>{busy ? "Working…" : `Generate ${selectedMarket} Quote`}</button></div>
-      {reviewReason ? <div style={styles.review}><strong>Management review required:</strong> {reviewReason}</div> : null}
+      {reviewReason ? <div style={styles.review}><strong>{reviewReason.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {reviewReason}</div> : null}
       {error ? <div style={styles.error}><strong>Unable to continue:</strong> {error}</div> : null}
 
       {quote ? (
