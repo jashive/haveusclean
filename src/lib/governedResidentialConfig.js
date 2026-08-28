@@ -1,7 +1,9 @@
 import { authenticatedRestFetch } from "./serviceosAuthClient.js";
 
 export const GOVERNED_RESIDENTIAL_CONFIG_TYPE = "residential_pricing";
-export const GOVERNED_RESIDENTIAL_REQUIRED_VERSION = "ON-2026-08-v1.1";
+// Legacy/default contract retained for isolated callers. Live market-aware quoting must
+// resolve through getGovernedResidentialRequiredVersion(businessUnitCode).
+export const GOVERNED_RESIDENTIAL_REQUIRED_VERSION = "ON-2026-08-v1.0";
 export const GOVERNED_RESIDENTIAL_VERSION_BY_BUSINESS_UNIT = Object.freeze({
   "HUC-ON": "ON-2026-08-v1.1",
   "HUC-AZ": "AZ-2026-08-v1.0",
