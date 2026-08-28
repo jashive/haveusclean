@@ -10,7 +10,6 @@ import {
   createPricingSnapshot,
   createQuote,
   createQuoteVersion,
-  updateQuoteVersionStatus,
 } from "../../lib/serviceosRevenueClient.js";
 import { promoteExistingLeadForQuote } from "../../lib/serviceosLeadQuoteContinuationClient.js";
 import {
@@ -194,18 +193,8 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       const pricingSnapshot = await createPricingSnapshot(capturePricingSnapshot({ quote, organizationId: orgId, businessUnitId, opportunityId: promoted.opportunity.id, estimateId: estimate.id, appUserId, configurationVersionId: config.id, configurationSnapshot, governedResidential: true }), accessToken);
       const quoteRecord = await createQuote(buildQuotePayload({ organizationId: orgId, businessUnitId, opportunityId: promoted.opportunity.id, estimateId: estimate.id, lifecycleStatus: "active", metadata, appUserId }), accessToken);
       const quoteVersion = await createQuoteVersion(buildQuoteVersionPayload({ organizationId: orgId, businessUnitId, quoteId: quoteRecord.id, pricingSnapshotId: pricingSnapshot.id, estimateId: estimate.id, versionNo: 1, title: packageLabel(form.packageKey), lineItemsSnapshot: [{ service: packageLabel(form.packageKey), subtotal: quote.preTaxTotal, tax: quote.taxAmount, total: quote.total, currency_code: quote.currencyCode, tax_name: quote.taxName, addons: quote.addonLines || [] }], commercialSnapshot: { customerFacingText: customerText, business_unit_code: businessUnitCode, booking_ready: bookingMissing.length === 0, booking_missing: bookingMissing }, metadata, appUserId }), accessToken);
-      setSaved({ ...promoted, estimate, pricingSnapshot, quote: quoteRecord, quoteVersion, sent: false });
+      setSaved({ ...promoted, estimate, pricingSnapshot, quote: quoteRecord, quoteVersion });
     } catch (err) { setError(err?.message || "Unable to save quote on this lead."); }
-    finally { setBusy(false); }
-  }
-
-  async function recordSent() {
-    if (busy || !saved?.quoteVersion?.id || saved.sent) return;
-    setBusy(true); setError(null);
-    try {
-      const quoteVersion = await updateQuoteVersionStatus(saved.quoteVersion.id, "sent", accessToken);
-      setSaved((current) => ({ ...current, quoteVersion, sent: true }));
-    } catch (err) { setError(err?.message || "Unable to record quote as sent."); }
     finally { setBusy(false); }
   }
 
@@ -247,7 +236,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         <div style={s.label}>Customer total · {currencyCode}</div><div style={s.money}>{formatQuoteMoney(quote.total, currencyCode)}</div>
         <div style={s.note}>{customerText}</div>
         <div style={s.actions}><button type="button" style={s.primary} disabled={busy || !!saved} onClick={saveDraft}>{saved ? "Quote Saved on Existing Lead" : "Save Quote on This Lead"}</button></div>
-        {saved ? <div style={s.note}>Reused Service Request: {saved.serviceRequest?.id}<br />Quote Version: {saved.quoteVersion?.id}<div style={s.actions}><button type="button" style={s.secondary} disabled={busy || saved.sent} onClick={recordSent}>{saved.sent ? "Quote Recorded as Sent" : "I Sent This Quote — Record Sent"}</button></div><strong>Recording sent does not mark the customer accepted or create a job.</strong></div> : null}
+        {saved ? <div style={s.note}>Reused Service Request: {saved.serviceRequest?.id}<br />Quote Version: {saved.quoteVersion?.id}<br /><strong>Next:</strong> use Quote Delivery + Customer Decision below, refresh the quote queue, then choose Send Quote by Email. ServiceOS marks the quote Sent only after Microsoft 365 accepts the delivery.</div> : null}
       </div> : null}
     </div>
   );
