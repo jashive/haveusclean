@@ -16,8 +16,8 @@ insert into public.configuration_version (
   effective_from,
   effective_to,
   configuration,
-  created_by_app_user_id,
-  metadata
+  approved_by,
+  approved_at
 )
 select
   prior.organization_id,
@@ -30,30 +30,35 @@ select
   null,
   jsonb_set(
     jsonb_set(
-      prior.configuration,
-      '{dwelling_matrix,townhouses,3bed_2bath}',
-      jsonb_build_object(
-        'sqft_min', 1200,
-        'sqft_max', 1650,
-        'essential_refresh', 260,
-        'signature_initial_reset', 340,
-        'complete_deep', 460,
-        'move_in_move_out', 315,
-        'pricing_basis', 'owner_approved_midpoint_bridge_from_adjacent_3bed_townhouse_rows'
+      jsonb_set(
+        prior.configuration,
+        '{dwelling_matrix,townhouses,3bed_2bath}',
+        jsonb_build_object(
+          'sqft_min', 1200,
+          'sqft_max', 1650,
+          'essential_refresh', 260,
+          'signature_initial_reset', 340,
+          'complete_deep', 460,
+          'move_in_move_out', 315,
+          'pricing_basis', 'owner_approved_midpoint_bridge_from_adjacent_3bed_townhouse_rows'
+        ),
+        true
       ),
+      '{authority,effective_period}',
+      to_jsonb('August 2026 v1.1 coverage patch'::text),
       true
     ),
-    '{authority,effective_period}',
-    to_jsonb('August 2026 v1.1 coverage patch'::text),
+    '{authority,coverage_patch}',
+    jsonb_build_object(
+      'supersedes_version', prior.version,
+      'change_type', 'pricing_matrix_coverage_patch',
+      'change_reason', 'Add standard townhouse 3 bed / 2 bath coverage and prevent quote dead-end',
+      'derived_row_method', 'midpoint interpolation between 3bed_1_5bath and 3bed_2_5bath rounded to $5'
+    ),
     true
   ),
-  prior.created_by_app_user_id,
-  coalesce(prior.metadata, '{}'::jsonb) || jsonb_build_object(
-    'supersedes_version', prior.version,
-    'change_type', 'pricing_matrix_coverage_patch',
-    'change_reason', 'Add standard townhouse 3 bed / 2 bath coverage and prevent quote dead-end',
-    'derived_row_method', 'midpoint interpolation between 3bed_1_5bath and 3bed_2_5bath rounded to $5'
-  )
+  prior.approved_by,
+  now()
 from public.configuration_version prior
 join public.business_unit bu on bu.id = prior.business_unit_id
 join public.jurisdiction j on j.id = prior.jurisdiction_id
