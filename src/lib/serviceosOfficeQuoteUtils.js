@@ -22,6 +22,11 @@ export const ONTARIO_COMPLETE_DEEP_BUNDLED_ADDON_IDS = Object.freeze([
   "inside_kitchen_cabinets",
 ]);
 
+export const KITCHEN_BATH_DEEP_BUNDLED_ADDON_IDS = Object.freeze([
+  "inside_refrigerator",
+  "inside_oven",
+]);
+
 function normalizeToken(value) {
   return String(value ?? "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "");
 }
@@ -53,14 +58,19 @@ export function getCompleteDeepBundledAddonIds({ businessUnitCode = null, config
   return new Set();
 }
 
+export function getBundledAddonIdsForPackage({ packageKey, businessUnitCode = null, configurationVersion = null } = {}) {
+  if (packageKey === "complete_deep") return getCompleteDeepBundledAddonIds({ businessUnitCode, configurationVersion });
+  if (packageKey === "kitchen_bath_deep") return new Set(KITCHEN_BATH_DEEP_BUNDLED_ADDON_IDS);
+  return new Set();
+}
+
 export function isAddonBundledForPackage({ packageKey, addonId, businessUnitCode = null, configurationVersion = null }) {
-  if (packageKey !== "complete_deep") return false;
-  return getCompleteDeepBundledAddonIds({ businessUnitCode, configurationVersion }).has(addonId);
+  return getBundledAddonIdsForPackage({ packageKey, businessUnitCode, configurationVersion }).has(addonId);
 }
 
 export function removeBundledAddonsForPackage({ packageKey, addons = [], businessUnitCode = null, configurationVersion = null }) {
-  if (packageKey !== "complete_deep") return Array.isArray(addons) ? [...addons] : [];
-  const bundled = getCompleteDeepBundledAddonIds({ businessUnitCode, configurationVersion });
+  const bundled = getBundledAddonIdsForPackage({ packageKey, businessUnitCode, configurationVersion });
+  if (!bundled.size) return Array.isArray(addons) ? [...addons] : [];
   return (Array.isArray(addons) ? addons : []).filter((id) => !bundled.has(id));
 }
 
@@ -69,10 +79,11 @@ export function getManagementReviewReason({ condition, notes, packageKey, addons
   const text = String(notes || "");
   const hazard = HAZARD_PATTERNS.find((pattern) => pattern.test(text));
   if (hazard) return "Potential hazardous or specialty scope requires management review.";
-  if (packageKey === "complete_deep") {
-    const included = getCompleteDeepBundledAddonIds({ businessUnitCode, configurationVersion });
-    const duplicate = addons.find((id) => included.has(id));
-    if (duplicate) return "Complete Deep already includes that selected service under this market's published package. Remove the duplicate add-on.";
+  const included = getBundledAddonIdsForPackage({ packageKey, businessUnitCode, configurationVersion });
+  const duplicate = addons.find((id) => included.has(id));
+  if (duplicate) {
+    if (packageKey === "kitchen_bath_deep") return "Kitchen & Bath Deep already includes refrigerator and oven cleaning. Remove the duplicate add-on.";
+    return "Complete Deep already includes that selected service under this market's published package. Remove the duplicate add-on.";
   }
   return null;
 }
