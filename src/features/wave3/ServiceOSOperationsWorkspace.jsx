@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
+import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";
 import {
   fetchEligibleJobHandoffs,
   fetchActiveWorkers,
@@ -50,6 +50,31 @@ async function getJson(path) {
   const res = await authenticatedRestFetchWithRefresh(path);
   if (!res?.ok) throw new Error(`Operations read failed: HTTP ${res?.status ?? "network"} ${await res?.text().catch(() => "")}`);
   return res.json();
+}
+
+async function postWorkerDispatchNotification(assignmentId, workOrderId) {
+  const accessToken = await getValidAccessToken();
+  const response = await fetch("/api/notifications?action=worker-dispatch", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ assignmentId, workOrderId }),
+  });
+  const text = await response.text();
+  let data = null;
+  try { data = text ? JSON.parse(text) : {}; } catch { data = { error: text || "Worker notification response was unreadable" }; }
+  return { ok: response.ok, status: response.status, ...data };
+}
+
+async function acknowledgeWorkerNotificationDelivery(workerAssignmentId) {
+  const response = await authenticatedRestFetchWithRefresh(
+    `worker_notification_delivery?worker_assignment_id=eq.${encodeURIComponent(workerAssignmentId)}&delivery_status=in.(requested,sent,delivered)`,
+    {
+      method: "PATCH",
+      headers: { Prefer: "return=minimal" },
+      body: JSON.stringify({ delivery_status: "acknowledged", acknowledged_at: new Date().toISOString() }),
+    }
+  );
+  if (!response?.ok) throw new Error(`Notification acknowledgement audit failed: HTTP ${response?.status ?? "network"}`);
 }
 
 function toIso(localValue) {
@@ -356,7 +381,17 @@ function OfficeOperations({ revenueContext }) {
       }));
       await updateWorkOrderStatus(workOrder.id, "published", null, appUserId);
       await updateOperationalJobStatus(job.id, "dispatched", null, appUserId);
-      setMessage(`DISPATCHED · job ${job.id} · assignment ${assignment.id} · work order ${workOrder.id}. Worker must acknowledge and execute next.`);
+      let notificationSummary = "notification audit unavailable";
+      try {
+        const notification = await postWorkerDispatchNotification(assignment.id, workOrder.id);
+        const channelStates = Array.isArray(notification.results)
+          ? notification.results.map((item) => `${item.channel}:${item.delivery?.delivery_status || (item.error ? "failed" : "unknown")}`).join(", ")
+          : (notification.error || `HTTP ${notification.status}`);
+        notificationSummary = `worker notification ${channelStates}`;
+      } catch (notificationError) {
+        notificationSummary = `worker notification request error: ${notificationError?.message || String(notificationError)}`;
+      }
+      setMessage(`DISPATCHED · job ${job.id} · assignment ${assignment.id} · work order ${workOrder.id} · ${notificationSummary}. Worker must acknowledge and execute next.`);
       setHandoffId(""); setStart(""); setEnd(""); setScheduleHint("");
       await load();
     } catch (e) { setError(e?.message ?? String(e)); }
@@ -442,7 +477,16 @@ function WorkerOperations({ revenueContext }) {
 
   const acknowledge = async () => {
     setBusy(true); setError(""); setMessage("");
-    try { await updateWorkerAssignmentStatus(selected.id, "acknowledged", null, appUserId); setMessage("Assignment acknowledged."); await load(); }
+    try {
+      await updateWorkerAssignmentStatus(selected.id, "acknowledged", null, appUserId);
+      try {
+        await acknowledgeWorkerNotificationDelivery(selected.id);
+        setMessage("Assignment acknowledged. Worker notification audit is acknowledged.");
+      } catch (auditError) {
+        setMessage(`Assignment acknowledged. Notification audit sync needs review: ${auditError?.message || String(auditError)}`);
+      }
+      await load();
+    }
     catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
   };
 
