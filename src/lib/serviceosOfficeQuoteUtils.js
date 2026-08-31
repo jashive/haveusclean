@@ -1,3 +1,5 @@
+import { getJobHours, getTeamSize } from "../core/pricing/sharedPricing.js";
+
 const HAZARD_PATTERNS = [
   /hoard/i, /biohazard/i, /blood/i, /needle/i, /human waste/i, /animal waste/i,
   /feces/i, /faeces/i, /mold/i, /mould/i, /infestation/i, /hazmat/i,
@@ -88,11 +90,17 @@ export function getManagementReviewReason({ condition, notes, packageKey, addons
   return null;
 }
 
-export function getDefaultApprovedSelections(configurationVersion, { condition, frequency, sqftBand }) {
+export function getDefaultApprovedSelections(configurationVersion, { condition, frequency, sqftBand, sqft }) {
   const config = configurationVersion?.configuration || {};
   const normalizedCondition = String(condition || "light").toLowerCase();
   const normalizedFrequency = String(frequency || "one_time").toLowerCase();
   const approved = {};
+  const exactSqft = Number(sqft);
+  if (Number.isFinite(exactSqft) && exactSqft > 0) {
+    approved.teamSize = getTeamSize(exactSqft);
+    approved.jobHours = getJobHours(exactSqft);
+    approved.laborSource = "pricing_calculator_exact_sqft";
+  }
 
   if (normalizedCondition === "moderate") approved.conditionMarkupPct = Number(config.condition_adjustments?.moderate?.minimum_markup ?? Number.NaN);
   else if (normalizedCondition === "heavy") approved.conditionMarkupPct = Number(config.condition_adjustments?.heavy?.minimum_markup ?? Number.NaN);

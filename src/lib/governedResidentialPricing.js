@@ -277,6 +277,10 @@ export function computeGovernedResidentialQuote({
   const subtotal = toMoney(Math.max(discountedSubtotal, minimumCharge));
   const taxAmount = toMoney(subtotal * taxRate);
   const total = toMoney(subtotal + taxAmount);
+  const selectedTeamSize = Number(approvedSelections.teamSize);
+  const selectedJobHours = Number(approvedSelections.jobHours);
+  const teamSize = Number.isInteger(selectedTeamSize) && selectedTeamSize > 0 ? selectedTeamSize : null;
+  const jobHours = Number.isFinite(selectedJobHours) && selectedJobHours > 0 ? selectedJobHours : null;
 
   return {
     total,
@@ -288,8 +292,8 @@ export function computeGovernedResidentialQuote({
     discPct: recurringDiscountPct,
     partnerPay: 0,
     partnerPayEach: 0,
-    teamSize: null,
-    jobHours: null,
+    teamSize,
+    jobHours,
     breakdown: [],
     currency: currencyCode,
     currencyCode,
@@ -300,6 +304,7 @@ export function computeGovernedResidentialQuote({
       configurationType: configurationVersion.configuration_type,
       version: configurationVersion.version,
       configurationVersionId: configurationVersion.id ?? null,
+      laborSource: jobHours && teamSize ? (approvedSelections.laborSource || "pricing_calculator") : null,
     },
   };
 }

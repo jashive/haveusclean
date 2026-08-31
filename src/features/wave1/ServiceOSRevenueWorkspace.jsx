@@ -166,7 +166,7 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
       const config = await fetchPublishedGovernedResidentialConfig({ accessToken, organizationId: orgId, businessUnitId, jurisdictionId, requiredVersion });
       const packageReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion: config, businessUnitCode });
       if (packageReviewReason) { setReviewReason(packageReviewReason); return; }
-      const approvedSelections = getDefaultApprovedSelections(config, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
+      const approvedSelections = getDefaultApprovedSelections(config, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand, sqft: form.sqft ? Number(form.sqft) : null });
       const rawQuote = computeGovernedResidentialQuote({
         configurationVersion: config, dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey,
         condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections,
