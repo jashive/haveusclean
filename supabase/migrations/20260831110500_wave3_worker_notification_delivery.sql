@@ -54,6 +54,8 @@ GRANT SELECT, INSERT, UPDATE ON public.worker_notification_delivery TO authentic
 
 CREATE OR REPLACE FUNCTION public.guard_worker_notification_delivery_update()
 RETURNS trigger LANGUAGE plpgsql SET search_path=public AS $$
+DECLARE
+  v_privileged boolean;
 BEGIN
   IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
      OR NEW.business_unit_id IS DISTINCT FROM OLD.business_unit_id
@@ -64,12 +66,59 @@ BEGIN
      OR NEW.channel IS DISTINCT FROM OLD.channel
      OR NEW.recipient IS DISTINCT FROM OLD.recipient
      OR NEW.provider IS DISTINCT FROM OLD.provider
-     OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key THEN
+     OR NEW.idempotency_key IS DISTINCT FROM OLD.idempotency_key
+     OR NEW.requested_at IS DISTINCT FROM OLD.requested_at
+     OR NEW.created_at IS DISTINCT FROM OLD.created_at
+     OR NEW.created_by_app_user_id IS DISTINCT FROM OLD.created_by_app_user_id THEN
     RAISE EXCEPTION 'worker_notification_delivery identity is immutable';
   END IF;
+
+  v_privileged := public.has_bu_role(OLD.organization_id, OLD.business_unit_id, ARRAY['owner_admin'::text,'office_ops'::text]);
+
+  IF NOT v_privileged
+     AND OLD.worker_id = public.current_worker_id(OLD.organization_id) THEN
+    IF NEW.delivery_status <> 'acknowledged'
+       OR NEW.provider_message_id IS DISTINCT FROM OLD.provider_message_id
+       OR NEW.sent_at IS DISTINCT FROM OLD.sent_at
+       OR NEW.delivered_at IS DISTINCT FROM OLD.delivered_at
+       OR NEW.failed_at IS DISTINCT FROM OLD.failed_at
+       OR NEW.failure_reason IS DISTINCT FROM OLD.failure_reason
+       OR NEW.metadata IS DISTINCT FROM OLD.metadata THEN
+      RAISE EXCEPTION 'worker may only acknowledge own notification delivery';
+    END IF;
+    IF NEW.acknowledged_at IS NULL THEN
+      RAISE EXCEPTION 'worker acknowledgement timestamp is required';
+    END IF;
+  END IF;
+
   IF OLD.delivery_status = 'acknowledged' AND NEW.delivery_status <> 'acknowledged' THEN
     RAISE EXCEPTION 'acknowledged worker notification is terminal';
   END IF;
+
+  IF NEW.delivery_status IS DISTINCT FROM OLD.delivery_status THEN
+    IF NOT (
+      (OLD.delivery_status = 'requested' AND NEW.delivery_status IN ('sent','failed','acknowledged')) OR
+      (OLD.delivery_status = 'sent' AND NEW.delivery_status IN ('delivered','failed','acknowledged')) OR
+      (OLD.delivery_status = 'delivered' AND NEW.delivery_status = 'acknowledged') OR
+      (OLD.delivery_status = 'failed' AND NEW.delivery_status = 'sent')
+    ) THEN
+      RAISE EXCEPTION 'invalid worker notification transition: % -> %', OLD.delivery_status, NEW.delivery_status;
+    END IF;
+  END IF;
+
+  IF NEW.delivery_status = 'sent' AND NEW.sent_at IS NULL THEN
+    RAISE EXCEPTION 'sent worker notification requires sent_at';
+  END IF;
+  IF NEW.delivery_status = 'delivered' AND NEW.delivered_at IS NULL THEN
+    RAISE EXCEPTION 'delivered worker notification requires delivered_at';
+  END IF;
+  IF NEW.delivery_status = 'failed' AND NEW.failed_at IS NULL THEN
+    RAISE EXCEPTION 'failed worker notification requires failed_at';
+  END IF;
+  IF NEW.delivery_status = 'acknowledged' AND NEW.acknowledged_at IS NULL THEN
+    RAISE EXCEPTION 'acknowledged worker notification requires acknowledged_at';
+  END IF;
+
   NEW.updated_at := now();
   RETURN NEW;
 END;
