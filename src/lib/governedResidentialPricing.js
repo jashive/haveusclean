@@ -288,7 +288,7 @@ export function computeGovernedResidentialQuote({
     taxAmount,
     taxRate,
     taxName: config.tax?.label ?? config.tax?.name ?? "Tax",
-    discountAmt: toMoney(markedUpSubtotal - discountedSubtotal),
+    discountAmt: toMoney(Math.max(0, withDollarAdjustmentsSubtotal - discountedSubtotal)),
     discPct: recurringDiscountPct,
     partnerPay: 0,
     partnerPayEach: 0,
