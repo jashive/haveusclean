@@ -1,6 +1,10 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import {
+  buildRevisionSourceScope,
+  deriveLegacySqftBand,
+} from '../src/lib/serviceosQuoteRevisionClient.js';
 
 const migration = fs.readFileSync('supabase/migrations/20260826033000_goal5_governed_quote_revision.sql','utf8');
 const approverMigration = fs.readFileSync('supabase/migrations/20260826033500_goal5_quote_revision_approvers.sql','utf8');
@@ -40,6 +44,63 @@ test('scope adjustment recalculates governed package/add-ons and enforces partia
   assert.match(panel,/Partial Home \/ Selected Areas/);
   assert.match(panel,/minimum_charge\?\.partial_cleaning/);
   assert.match(panel,/cannot be quoted below[\s\S]*without an Approved Concession/);
+});
+
+test('legacy Mississauga comparison quote recovers 3,000 sqft scope and governed sqft band', () => {
+  const scope = buildRevisionSourceScope({
+    pricing: {
+      calculation_inputs: {
+        matrix_key: '4bed_3bath',
+        actual_sqft: 3000,
+        matrix_sqft_max: 2500,
+        selection_pending: true,
+        sqft_adjustment_used: 25,
+      },
+      raw_calculation_snapshot: {
+        selectionPending: true,
+        bindingTotal: null,
+      },
+    },
+    serviceRequest: {
+      requirements: {
+        sqft: 3000,
+        bedrooms: 4,
+        bathrooms: 3,
+        dwelling_type: 'detached_house',
+      },
+    },
+  });
+  assert.equal(scope.sqft, 3000);
+  assert.equal(scope.beds, 4);
+  assert.equal(scope.baths, 3);
+  assert.equal(scope.dwellingType, 'detached_house');
+  assert.equal(scope.sqftBand, 'additional_250_500_sqft');
+  assert.equal(deriveLegacySqftBand({ sqft: 3000, matrixSqftMax: 2500 }), 'additional_250_500_sqft');
+});
+
+test('legacy comparison revisions resolve active market configuration instead of frozen incomplete config', () => {
+  assert.match(client,/getGovernedResidentialRequiredVersion/);
+  assert.match(client,/fetchPublishedGovernedResidentialConfig/);
+  assert.match(client,/canonicalBusinessUnitId/);
+  assert.match(client,/businessUnitCode/);
+  assert.match(client,/jurisdictionId/);
+  assert.match(client,/canonicalCurrencyCode/);
+  assert.match(panel,/selected\.activeConfigurationVersion \|\| configurationVersionFromSnapshot/);
+  assert.match(panel,/buildGovernedResidentialConfigurationSnapshot/);
+  assert.match(panel,/configuration_version_id: configurationVersion\?\.id/);
+});
+
+test('fresh governed revision carries canonical crew size and job hours into pricing snapshot', () => {
+  assert.match(panel,/teamSize: quote\.teamSize \?\? null/);
+  assert.match(panel,/jobHours: quote\.jobHours \?\? null/);
+  assert.match(panel,/Crew Size: \{preview\.quote\.teamSize\}/);
+  assert.match(panel,/Planned Hours: \{preview\.quote\.jobHours\}/);
+  assert.match(panel,/getDefaultApprovedSelections\(configVersion,[\s\S]*sqft: sourceScope\.sqft/);
+});
+
+test('zero binding total legacy comparison cannot be treated as concession base', () => {
+  assert.match(panel,/Legacy comparison quote has no binding subtotal/);
+  assert.match(panel,/ServiceOS will re-price it from the active governed/);
 });
 
 test('revision starts draft and does not fabricate acceptance conversion or job', () => {
