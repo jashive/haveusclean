@@ -99,3 +99,17 @@ test("Wave 3 dispatch consumes canonical pricing duration and computes END", () 
   assert.match(source, /setEnd\(duration \? addHoursToLocalDateTime\(requested, duration\) : ""\)/);
   assert.match(source, /function addHoursToLocalDateTime\(localValue, hours\)/);
 });
+
+
+test("operator UI surfaces canonical crew/duration without lifecycle clutter", () => {
+  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+  const revenue = fs.readFileSync(new URL("../src/features/wave1/ServiceOSRevenueWorkspace.jsx", import.meta.url), "utf8");
+  assert.match(operations, /Ready for Dispatch/);
+  assert.match(operations, /return "Dispatched"/);
+  assert.match(operations, /return "Completed"/);
+  assert.match(operations, /crew_size: crewSize/);
+  assert.match(operations, /data-wave3-dispatch-plan="true"/);
+  assert.match(operations, /End auto-calculated/);
+  assert.match(revenue, /data-testid="serviceos-quote-labor-badges"/);
+  assert.match(revenue, /Crew \{quote\.teamSize\}/);
+});

@@ -99,6 +99,8 @@ const styles = {
   metric: { background: "#0C1E1B", borderRadius: 8, padding: 10 }, metricLabel: { color: "#89A8A1", fontSize: 11, textTransform: "uppercase", fontWeight: 850 }, metricValue: { marginTop: 4, fontWeight: 850 },
   text: { whiteSpace: "pre-wrap", background: "#0E1524", border: "1px solid #33445A", borderRadius: 8, padding: 12, marginTop: 12, fontSize: 13, lineHeight: 1.55, color: "#E8EFF7" },
   status: { display: "inline-flex", marginTop: 10, padding: "5px 9px", borderRadius: 999, background: "#173A33", color: "#60E7C6", fontSize: 12, fontWeight: 850 },
+  laborPills: { display: "flex", gap: 7, flexWrap: "wrap", marginTop: 10 },
+  laborPill: { display: "inline-flex", padding: "4px 8px", borderRadius: 999, border: "1px solid #355064", color: "#C6D6E6", fontSize: 11, fontWeight: 800 },
   note: { color: "#8FA0B5", fontSize: 12, marginTop: 8, lineHeight: 1.45 },
 };
 
@@ -277,6 +279,7 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
           <div style={styles.label}>Recommended customer total · {currencyCode}</div>
           <div style={styles.money}>{formatQuoteMoney(quote.total, currencyCode)}</div>
           <div style={styles.status}>READY TO QUOTE · {businessUnitCode}</div>
+          {(quote.teamSize || quote.jobHours) ? <div style={styles.laborPills} data-testid="serviceos-quote-labor-badges">{quote.teamSize ? <span style={styles.laborPill}>Crew {quote.teamSize}</span> : null}{quote.jobHours ? <span style={styles.laborPill}>{quote.jobHours}h planned</span> : null}</div> : null}
           <div style={styles.resultGrid}>
             <div style={styles.metric}><div style={styles.metricLabel}>Pre-tax</div><div style={styles.metricValue}>{formatQuoteMoney(quote.preTaxTotal, currencyCode)}</div></div>
             <div style={styles.metric}><div style={styles.metricLabel}>{taxLabel}</div><div style={styles.metricValue}>{formatQuoteMoney(quote.taxAmount, currencyCode)}</div></div>

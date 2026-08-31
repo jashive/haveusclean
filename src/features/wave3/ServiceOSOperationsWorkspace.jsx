@@ -44,6 +44,13 @@ const styles = {
   pipeline: { marginTop: 14, padding: 14, border: "1px solid #31425A", borderRadius: 10, background: "#101827" },
   pipelineRow: { display: "grid", gridTemplateColumns: "minmax(260px,1.7fr) minmax(110px,.6fr) minmax(180px,1fr)", gap: 10, alignItems: "center", padding: "9px 0", borderTop: "1px solid #253449", fontSize: 13 },
   badge: { display: "inline-flex", width: "fit-content", padding: "4px 8px", borderRadius: 999, background: "#20304A", color: "#BFD4F2", fontSize: 11, fontWeight: 850, textTransform: "uppercase" },
+  badgeReady: { background: "#173A33", color: "#60E7C6" },
+  badgeDispatched: { background: "#1F3358", color: "#AFCBFF" },
+  badgeCompleted: { background: "#3A3120", color: "#FFD78A" },
+  laborMeta: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 },
+  laborBadge: { display: "inline-flex", alignItems: "center", padding: "3px 7px", borderRadius: 999, border: "1px solid #34465F", color: "#B8C7D9", fontSize: 11, fontWeight: 750 },
+  scheduleCard: { marginTop: 12, padding: "10px 12px", borderRadius: 9, border: "1px solid #2D4551", background: "#102329", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" },
+  autoTag: { marginLeft: 6, padding: "2px 6px", borderRadius: 999, background: "#173A33", color: "#60E7C6", fontSize: 9, fontWeight: 900, letterSpacing: ".04em" },
 };
 
 async function getJson(path) {
@@ -159,6 +166,32 @@ function resolveDurationHours(pricingSnapshot, scope) {
   return null;
 }
 
+function resolveCrewSize(pricingSnapshot) {
+  const candidates = [
+    pricingSnapshot?.labor_economics?.teamSize,
+    pricingSnapshot?.raw_calculation_snapshot?.teamSize,
+  ];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isInteger(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function pipelineStatusLabel(status) {
+  if (status === "ready_to_schedule" || status === "scheduled") return "Ready for Dispatch";
+  if (status === "dispatched" || status === "in_progress") return "Dispatched";
+  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return "Completed";
+  return String(status || "Unknown").replaceAll("_", " ");
+}
+
+function pipelineStatusStyle(status) {
+  if (status === "ready_to_schedule" || status === "scheduled") return styles.badgeReady;
+  if (status === "dispatched" || status === "in_progress") return styles.badgeDispatched;
+  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return styles.badgeCompleted;
+  return {};
+}
+
 function timezoneForScope(scope, location) {
   const code = scope?.businessUnitCode || scope?.business_unit_code || "";
   const subdivision = String(location?.subdivision || "").toUpperCase();
@@ -215,6 +248,7 @@ async function enrichHandoffForDispatch(handoff) {
   const locationLabel = location?.address_line1 ? `${city} / ${location.address_line1}` : city;
   const requestedStartLocal = resolveRequestedStart(scope?.preferredDate, scope?.preferredWindow, serviceRequest?.created_at || handoff.created_at);
   const durationHours = resolveDurationHours(pricingSnapshot, scope);
+  const crewSize = resolveCrewSize(pricingSnapshot);
 
   return {
     ...handoff,
@@ -226,6 +260,7 @@ async function enrichHandoffForDispatch(handoff) {
     requested_window: scope?.preferredWindow || null,
     requested_start_local: requestedStartLocal,
     estimated_duration_hours: durationHours,
+    crew_size: crewSize,
     suggested_timezone: timezoneForScope(scope, location),
   };
 }
@@ -264,6 +299,7 @@ function OfficeOperations({ revenueContext }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const appUserId = revenueContext?.appUserId ?? null;
+  const selectedHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === handoffId) ?? null, [handoffs, handoffId]);
 
   const applyScheduleSuggestion = useCallback((handoff) => {
     if (!handoff) { setStart(""); setEnd(""); setScheduleHint(""); return; }
@@ -409,14 +445,14 @@ function OfficeOperations({ revenueContext }) {
       </div>
       <div style={{...styles.label,marginTop:12}}>Approved / Ready for dispatch · {handoffs.length}</div>
       {handoffs.length ? handoffs.map((handoff) => <div key={handoff.id} style={styles.pipelineRow}>
-        <div>{handoff.dispatch_label}</div>
-        <span style={styles.badge}>ready</span>
+        <div><div>{handoff.dispatch_label}</div><div style={styles.laborMeta}>{handoff.crew_size ? <span style={styles.laborBadge}>Crew {handoff.crew_size}</span> : null}{handoff.estimated_duration_hours ? <span style={styles.laborBadge}>{handoff.estimated_duration_hours}h planned</span> : null}</div></div>
+        <span style={{...styles.badge,...styles.badgeReady}}>Ready for Dispatch</span>
         <button style={styles.secondary} onClick={()=>selectHandoff(handoff.id)}>Select for dispatch</button>
       </div>) : <div style={styles.note}>No approved handoffs are waiting for dispatch.</div>}
       <div style={{...styles.label,marginTop:14}}>Active Operations · {pipelineJobs.length}</div>
       {pipelineJobs.length ? pipelineJobs.map((job) => <div key={job.id} style={styles.pipelineRow}>
-        <div>{job.dispatch_label || `Operational job ${handoffIdSnippet(job.id)}`}</div>
-        <span style={styles.badge}>{job.operational_status}</span>
+        <div><div>{job.dispatch_label || `Operational job ${handoffIdSnippet(job.id)}`}</div><div style={styles.laborMeta}>{job.crew_size ? <span style={styles.laborBadge}>Crew {job.crew_size}</span> : null}{job.estimated_duration_hours ? <span style={styles.laborBadge}>{job.estimated_duration_hours}h planned</span> : null}</div></div>
+        <span style={{...styles.badge,...pipelineStatusStyle(job.operational_status)}}>{pipelineStatusLabel(job.operational_status)}</span>
         <div style={styles.mono}>{job.schedule_window?.scheduled_start ? `${job.schedule_window.scheduled_start} → ${job.schedule_window.scheduled_end || "end pending"}` : "Schedule pending"}</div>
       </div>) : <div style={styles.note}>No active operational jobs.</div>}
     </div>
@@ -425,9 +461,10 @@ function OfficeOperations({ revenueContext }) {
       <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>selectHandoff(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
       <label><span style={styles.label}>Worker</span><select style={styles.input} value={workerId} onChange={e=>setWorkerId(e.target.value)}><option value="">Select…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.display_name || w.email || w.id}</option>)}</select></label>
       <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>
-      <label><span style={styles.label}>End</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} /></label>
+      <label><span style={styles.label}>End{selectedHandoff?.estimated_duration_hours ? <span style={styles.autoTag}>AUTO</span> : null}</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} /></label>
       <label><span style={styles.label}>Timezone</span><select style={styles.input} value={timezone} onChange={e=>setTimezone(e.target.value)}><option value="America/Toronto">Ontario · America/Toronto</option><option value="America/Phoenix">Arizona · America/Phoenix</option></select></label>
     </div>
+    {selectedHandoff ? <div style={styles.scheduleCard} data-wave3-dispatch-plan="true"><strong>Dispatch plan</strong><div style={styles.laborMeta}>{selectedHandoff.crew_size ? <span style={styles.laborBadge}>Crew {selectedHandoff.crew_size}</span> : null}{selectedHandoff.estimated_duration_hours ? <span style={styles.laborBadge}>{selectedHandoff.estimated_duration_hours}h duration</span> : null}{selectedHandoff.estimated_duration_hours && end ? <span style={{...styles.laborBadge,...styles.badgeReady}}>End auto-calculated</span> : null}</div></div> : null}
     {scheduleHint ? <div style={{...styles.note,marginTop:10}} data-wave3-schedule-prefill-hint="true">{scheduleHint}</div> : null}
     <div style={styles.row}><button style={styles.button} onClick={schedule} disabled={busy}>Schedule & Dispatch</button></div>
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
