@@ -210,7 +210,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
 
     const review = getManagementReviewReason({ condition: sourceScope.condition, notes: selected.serviceRequest?.requirements?.scope?.notes || '', packageKey, addons, configurationVersion: configVersion });
     if (review) throw new Error(review);
-    const approvedSelections = getDefaultApprovedSelections(configVersion, { condition: sourceScope.condition || 'light', frequency: sourceScope.frequency || 'one_time', sqftBand: sourceScope.sqftBand || '' });
+    const approvedSelections = getDefaultApprovedSelections(configVersion, { condition: sourceScope.condition || 'light', frequency: sourceScope.frequency || 'one_time', sqftBand: sourceScope.sqftBand || '', sqft: sourceScope.sqft ? Number(sourceScope.sqft) : null });
     const raw = computeGovernedResidentialQuote({
       configurationVersion: configVersion,
       dwellingType: sourceScope.dwellingType,

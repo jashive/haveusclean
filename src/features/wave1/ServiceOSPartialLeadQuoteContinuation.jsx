@@ -170,7 +170,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       const configurationVersion = await fetchPublishedGovernedResidentialConfig({ accessToken, organizationId: orgId, businessUnitId, jurisdictionId, requiredVersion });
       const secondReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion, businessUnitCode });
       if (secondReview) { setReview(secondReview); return; }
-      const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
+      const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand, sqft: form.sqft ? Number(form.sqft) : null });
       const raw = computeGovernedResidentialQuote({ configurationVersion, dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections });
       if (raw?.requiresOfficeReview) { setReview(raw.reason || "Requires Management Review / Custom Pricing"); return; }
       const completed = applyGovernedResidentialAddons(raw, configurationVersion, form.addons);
