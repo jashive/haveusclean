@@ -110,6 +110,8 @@ test("operator UI surfaces canonical crew/duration without lifecycle clutter", (
   assert.match(operations, /crew_size: crewSize/);
   assert.match(operations, /data-wave3-dispatch-plan="true"/);
   assert.match(operations, /End auto-calculated/);
+  assert.match(operations, /endAutoCalculated && end/);
+  assert.match(operations, /setEndAutoCalculated\(false\)/);
   assert.match(revenue, /data-testid="serviceos-quote-labor-badges"/);
   assert.match(revenue, /Crew \{quote\.teamSize\}/);
 });

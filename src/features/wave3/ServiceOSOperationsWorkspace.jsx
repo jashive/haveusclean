@@ -293,6 +293,7 @@ function OfficeOperations({ revenueContext }) {
   const [workerId, setWorkerId] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
+  const [endAutoCalculated, setEndAutoCalculated] = useState(false);
   const [timezone, setTimezone] = useState("America/Toronto");
   const [scheduleHint, setScheduleHint] = useState("");
   const [busy, setBusy] = useState(false);
@@ -302,7 +303,7 @@ function OfficeOperations({ revenueContext }) {
   const selectedHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === handoffId) ?? null, [handoffs, handoffId]);
 
   const applyScheduleSuggestion = useCallback((handoff) => {
-    if (!handoff) { setStart(""); setEnd(""); setScheduleHint(""); return; }
+    if (!handoff) { setStart(""); setEnd(""); setEndAutoCalculated(false); setScheduleHint(""); return; }
     const requested = handoff.requested_start_local || "";
     const duration = handoff.estimated_duration_hours;
     const requestedDate = requested ? new Date(requested) : null;
@@ -311,11 +312,12 @@ function OfficeOperations({ revenueContext }) {
     if (requested && !isPast) {
       setStart(requested);
       setEnd(duration ? addHoursToLocalDateTime(requested, duration) : "");
+      setEndAutoCalculated(Boolean(duration));
       setScheduleHint(duration
         ? `Requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}. Estimated duration ${duration}h from accepted quote/intake data.`
         : `Requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}. No canonical service duration was captured; enter End manually.`);
     } else {
-      setStart(""); setEnd("");
+      setStart(""); setEnd(""); setEndAutoCalculated(false);
       setScheduleHint(requested
         ? `Customer requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}, but that target is in the past. Choose a new Start/End.`
         : "No parseable requested date/time was captured on this accepted handoff. Enter Start/End manually.");
@@ -428,7 +430,7 @@ function OfficeOperations({ revenueContext }) {
         notificationSummary = `worker notification request error: ${notificationError?.message || String(notificationError)}`;
       }
       setMessage(`DISPATCHED · job ${job.id} · assignment ${assignment.id} · work order ${workOrder.id} · ${notificationSummary}. Worker must acknowledge and execute next.`);
-      setHandoffId(""); setStart(""); setEnd(""); setScheduleHint("");
+      setHandoffId(""); setStart(""); setEnd(""); setEndAutoCalculated(false); setScheduleHint("");
       await load();
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
@@ -461,10 +463,10 @@ function OfficeOperations({ revenueContext }) {
       <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>selectHandoff(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
       <label><span style={styles.label}>Worker</span><select style={styles.input} value={workerId} onChange={e=>setWorkerId(e.target.value)}><option value="">Select…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.display_name || w.email || w.id}</option>)}</select></label>
       <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>
-      <label><span style={styles.label}>End{selectedHandoff?.estimated_duration_hours ? <span style={styles.autoTag}>AUTO</span> : null}</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} /></label>
+      <label><span style={styles.label}>End{selectedHandoff?.estimated_duration_hours ? <span style={styles.autoTag}>AUTO</span> : null}</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>{setEnd(e.target.value);setEndAutoCalculated(false);}} /></label>
       <label><span style={styles.label}>Timezone</span><select style={styles.input} value={timezone} onChange={e=>setTimezone(e.target.value)}><option value="America/Toronto">Ontario · America/Toronto</option><option value="America/Phoenix">Arizona · America/Phoenix</option></select></label>
     </div>
-    {selectedHandoff ? <div style={styles.scheduleCard} data-wave3-dispatch-plan="true"><strong>Dispatch plan</strong><div style={styles.laborMeta}>{selectedHandoff.crew_size ? <span style={styles.laborBadge}>Crew {selectedHandoff.crew_size}</span> : null}{selectedHandoff.estimated_duration_hours ? <span style={styles.laborBadge}>{selectedHandoff.estimated_duration_hours}h duration</span> : null}{selectedHandoff.estimated_duration_hours && end ? <span style={{...styles.laborBadge,...styles.badgeReady}}>End auto-calculated</span> : null}</div></div> : null}
+    {selectedHandoff ? <div style={styles.scheduleCard} data-wave3-dispatch-plan="true"><strong>Dispatch plan</strong><div style={styles.laborMeta}>{selectedHandoff.crew_size ? <span style={styles.laborBadge}>Crew {selectedHandoff.crew_size}</span> : null}{selectedHandoff.estimated_duration_hours ? <span style={styles.laborBadge}>{selectedHandoff.estimated_duration_hours}h duration</span> : null}{endAutoCalculated && end ? <span style={{...styles.laborBadge,...styles.badgeReady}}>End auto-calculated</span> : null}</div></div> : null}
     {scheduleHint ? <div style={{...styles.note,marginTop:10}} data-wave3-schedule-prefill-hint="true">{scheduleHint}</div> : null}
     <div style={styles.row}><button style={styles.button} onClick={schedule} disabled={busy}>Schedule & Dispatch</button></div>
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
