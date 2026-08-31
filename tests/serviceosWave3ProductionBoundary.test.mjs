@@ -32,3 +32,19 @@ test("Production workspace uses real Revenue handoffs and marks records non-synt
   assert.match(workspace, /source: "wave3_production_workspace", synthetic: false/);
   assert.doesNotMatch(workspace, /operations_pilot_ui/);
 });
+
+test("Wave 3 Revenue handoff dropdown renders human-readable customer, service, location, and ID context", () => {
+  assert.match(workspace, /dispatch_label/);
+  assert.match(workspace, /customer\?id=eq\./);
+  assert.match(workspace, /quote_version\?id=eq\./);
+  assert.match(workspace, /service_location\?id=eq\./);
+  assert.match(workspace, /\$\{customerName\} — \$\{serviceTier\} — \$\{locationLabel\} \(\$\{handoffIdSnippet\(handoff\.id\)\}\)/);
+  assert.match(workspace, /<option key=\{h\.id\} value=\{h\.id\}>\{h\.dispatch_label/);
+});
+
+test("Wave 3 dropdown label enrichment is presentation-only and preserves dispatch by canonical handoff UUID", () => {
+  assert.match(workspace, /fetchJobHandoffById\(handoffId\)/);
+  assert.match(workspace, /jobHandoffId: handoff\.id/);
+  assert.match(workspace, /value=\{handoffId\}/);
+  assert.doesNotMatch(workspace, /jobHandoffId: handoff\.dispatch_label/);
+});

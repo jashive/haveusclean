@@ -56,6 +56,51 @@ function toIso(localValue) {
   return d.toISOString();
 }
 
+function handoffIdSnippet(id) {
+  return id ? `${String(id).slice(0, 8)}...` : "unknown";
+}
+
+function firstRow(rows) {
+  return Array.isArray(rows) ? rows[0] ?? null : rows ?? null;
+}
+
+async function enrichHandoffForDispatch(handoff) {
+  if (!handoff?.id) return handoff;
+
+  const [conversionRows, quoteVersionRows] = await Promise.all([
+    getJson(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&select=id,customer_id,contact_id,service_location_id&limit=1`),
+    getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title&limit=1`),
+  ]);
+  const conversion = firstRow(conversionRows);
+  const quoteVersion = firstRow(quoteVersionRows);
+
+  const [customerRows, contactRows, locationRows] = await Promise.all([
+    conversion?.customer_id
+      ? getJson(`customer?id=eq.${encodeURIComponent(conversion.customer_id)}&select=id,display_name&limit=1`)
+      : Promise.resolve([]),
+    conversion?.contact_id
+      ? getJson(`contact?id=eq.${encodeURIComponent(conversion.contact_id)}&select=id,first_name,last_name&limit=1`)
+      : Promise.resolve([]),
+    conversion?.service_location_id
+      ? getJson(`service_location?id=eq.${encodeURIComponent(conversion.service_location_id)}&select=id,address_line1,city,subdivision&limit=1`)
+      : Promise.resolve([]),
+  ]);
+
+  const customer = firstRow(customerRows);
+  const contact = firstRow(contactRows);
+  const location = firstRow(locationRows);
+  const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ").trim();
+  const customerName = customer?.display_name || contactName || "Customer";
+  const serviceTier = quoteVersion?.title || "Service details unavailable";
+  const city = location?.city || location?.subdivision || "Location unavailable";
+  const locationLabel = location?.address_line1 ? `${city} / ${location.address_line1}` : city;
+
+  return {
+    ...handoff,
+    dispatch_label: `${customerName} — ${serviceTier} — ${locationLabel} (${handoffIdSnippet(handoff.id)})`,
+  };
+}
+
 function OfficeOperations({ revenueContext }) {
   const [handoffs, setHandoffs] = useState([]);
   const [workers, setWorkers] = useState([]);
@@ -72,8 +117,21 @@ function OfficeOperations({ revenueContext }) {
   const load = useCallback(async () => {
     setBusy(true); setError(""); setMessage("");
     try {
-      const [nextHandoffs, nextWorkers] = await Promise.all([fetchEligibleJobHandoffs(), fetchActiveWorkers()]);
-      setHandoffs(Array.isArray(nextHandoffs) ? nextHandoffs : []);
+      const [rawHandoffs, nextWorkers] = await Promise.all([fetchEligibleJobHandoffs(), fetchActiveWorkers()]);
+      const eligibleHandoffs = Array.isArray(rawHandoffs) ? rawHandoffs : [];
+      const nextHandoffs = await Promise.all(
+        eligibleHandoffs.map(async (handoff) => {
+          try {
+            return await enrichHandoffForDispatch(handoff);
+          } catch {
+            return {
+              ...handoff,
+              dispatch_label: `Customer details unavailable — Service details unavailable — Location unavailable (${handoffIdSnippet(handoff?.id)})`,
+            };
+          }
+        })
+      );
+      setHandoffs(nextHandoffs);
       setWorkers(Array.isArray(nextWorkers) ? nextWorkers : []);
       if (!handoffId && nextHandoffs?.[0]?.id) setHandoffId(nextHandoffs[0].id);
       if (!workerId && nextWorkers?.[0]?.id) setWorkerId(nextWorkers[0].id);
@@ -159,7 +217,7 @@ function OfficeOperations({ revenueContext }) {
     <p style={styles.note}>Uses real accepted Revenue handoffs. This Production workspace does not create synthetic data and stops before worker execution and QA.</p>
     <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Working…" : "Load eligible work"}</button></div>
     <div style={{...styles.grid, marginTop: 12}}>
-      <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>setHandoffId(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.id}</option>)}</select></label>
+      <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>setHandoffId(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
       <label><span style={styles.label}>Worker</span><select style={styles.input} value={workerId} onChange={e=>setWorkerId(e.target.value)}><option value="">Select…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.display_name || w.email || w.id}</option>)}</select></label>
       <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>
       <label><span style={styles.label}>End</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} /></label>
