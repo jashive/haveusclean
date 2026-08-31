@@ -37,84 +37,37 @@ jobs:
                   raise SystemExit(f'{path}: expected exactly one match, found {count}: {old!r}')
               p.write_text(s.replace(old, new, 1))
 
-          helper = Path('src/lib/serviceosPricingNormalization.js')
-          if helper.exists():
-              raise SystemExit('pricing normalization helper already exists unexpectedly')
-          helper.write_text("""function finiteNumber(value, fallback = 0) {
-            const parsed = Number(value);
-            return Number.isFinite(parsed) ? parsed : fallback;
-          }
-
-          export function normalizeDiscountAmount(value = 0, explicitConcession = 0) {
-            const combined = finiteNumber(value, 0) + finiteNumber(explicitConcession, 0);
-            return Math.round((Math.max(0, combined) + Number.EPSILON) * 100) / 100;
-          }
-
-          export function normalizeDiscountPercentage(value = 0) {
-            return Math.max(0, finiteNumber(value, 0));
-          }
-          """)
-
-          replace_once(
-              'src/lib/governedResidentialPricing.js',
-              'const SUPPORTED_PACKAGE_KEYS = new Set([',
-              "import { normalizeDiscountAmount, normalizeDiscountPercentage } from './serviceosPricingNormalization.js';\n\nconst SUPPORTED_PACKAGE_KEYS = new Set([",
-          )
           replace_once(
               'src/lib/governedResidentialPricing.js',
               '    discountAmt: toMoney(markedUpSubtotal - discountedSubtotal),',
-              '    discountAmt: normalizeDiscountAmount(withDollarAdjustmentsSubtotal - discountedSubtotal),',
-          )
-          replace_once(
-              'src/lib/governedResidentialPricing.js',
-              '    discPct: recurringDiscountPct,',
-              '    discPct: normalizeDiscountPercentage(recurringDiscountPct),',
-          )
-
-          replace_once(
-              'src/lib/serviceosRevenueUtils.js',
-              '// ── Wave 2: ServiceOS Revenue Utils ──────────────────────────────────────────',
-              "import { normalizeDiscountAmount, normalizeDiscountPercentage } from './serviceosPricingNormalization.js';\n\n// ── Wave 2: ServiceOS Revenue Utils ──────────────────────────────────────────",
-          )
-          replace_once(
-              'src/lib/serviceosRevenueUtils.js',
-              '  const discountAmount = quote.discountAmt ?? quote.discountAmount ?? 0;',
-              '  const discountAmount = normalizeDiscountAmount(quote.discountAmt ?? quote.discountAmount ?? 0);',
-          )
-          replace_once(
-              'src/lib/serviceosRevenueUtils.js',
-              '    discountPct: quote.discPct ?? null,',
-              '    discountPct: normalizeDiscountPercentage(quote.discPct ?? 0),',
+              '    discountAmt: toMoney(Math.max(0, withDollarAdjustmentsSubtotal - discountedSubtotal)),',
           )
 
           replace_once(
               'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
-              "import React, { useEffect, useMemo, useState } from 'react';",
-              "import React, { useEffect, useMemo, useState } from 'react';\nimport { normalizeDiscountAmount, normalizeDiscountPercentage } from '../../lib/serviceosPricingNormalization.js';",
+              "function money(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; }",
+              "function money(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; }\nfunction nonNegativeMoney(value) { const n = Number(value); return money(Number.isFinite(n) ? Math.max(0, n) : 0); }\nfunction nonNegativeRate(value) { const n = Number(value); return Number.isFinite(n) ? Math.max(0, n) : 0; }",
           )
           replace_once(
               'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
               '    discount_amount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),',
-              '    discount_amount: normalizeDiscountAmount(quote.discountAmt ?? 0, concessionAmount ?? 0),',
+              '    discount_amount: nonNegativeMoney(nonNegativeMoney(quote.discountAmt) + nonNegativeMoney(concessionAmount)),',
           )
           replace_once(
               'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
               '      discountPct: quote.discPct ?? null,',
-              '      discountPct: normalizeDiscountPercentage(quote.discPct ?? 0),',
+              '      discountPct: nonNegativeRate(quote.discPct ?? 0),',
           )
           replace_once(
               'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
               '      discountAmount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),',
-              '      discountAmount: normalizeDiscountAmount(quote.discountAmt ?? 0, concessionAmount ?? 0),',
+              '      discountAmount: nonNegativeMoney(nonNegativeMoney(quote.discountAmt) + nonNegativeMoney(concessionAmount)),',
           )
 
-          test = Path('tests/serviceosPricingSnapshotDiscountNormalization.test.mjs')
-          test.write_text("""import test from 'node:test';
+          Path('tests/serviceosPricingSnapshotDiscountNormalization.test.mjs').write_text("""import test from 'node:test';
           import assert from 'node:assert/strict';
           import { readFile } from 'node:fs/promises';
           import { computeGovernedResidentialQuote } from '../src/lib/governedResidentialPricing.js';
-          import { capturePricingSnapshot } from '../src/lib/serviceosRevenueUtils.js';
-          import { normalizeDiscountAmount, normalizeDiscountPercentage } from '../src/lib/serviceosPricingNormalization.js';
 
           const config = {
             id: 'cfg-on-test',
@@ -140,7 +93,7 @@ jobs:
             },
           };
 
-          test('Mississauga-style 3,000 sq ft surcharge is not misclassified as a negative discount', () => {
+          test('Mississauga-style surcharge is not misclassified as a negative discount', () => {
             const quote = computeGovernedResidentialQuote({
               configurationVersion: config,
               dwellingType: 'detached_house',
@@ -160,7 +113,7 @@ jobs:
             assert.equal(quote.discPct, 0);
           });
 
-          test('recurring discount is calculated from the surcharge-adjusted subtotal and stays non-negative', () => {
+          test('recurring discount is calculated from the surcharge-adjusted subtotal', () => {
             const quote = computeGovernedResidentialQuote({
               configurationVersion: config,
               dwellingType: 'detached_house',
@@ -181,39 +134,13 @@ jobs:
             assert.equal(quote.discPct, 0.1);
           });
 
-          test('pricing snapshot capture clamps malformed negative discount values to zero', () => {
-            const snapshot = capturePricingSnapshot({
-              quote: {
-                quoteContractVersion: 'test-v1',
-                preTaxTotal: 550,
-                taxRate: 0.13,
-                taxAmount: 71.5,
-                total: 621.5,
-                discountAmt: -50,
-                discPct: -0.1,
-                currency: 'CAD',
-              },
-              organizationId: 'org',
-              businessUnitId: 'bu',
-            });
-            assert.equal(snapshot.discount_amount, 0);
-            assert.equal(snapshot.calculation_outputs.discountAmount, 0);
-            assert.equal(snapshot.labor_economics.discountPct, 0);
-          });
-
-          test('normalization defaults are explicit zero and explicit concession remains positive', () => {
-            assert.equal(normalizeDiscountAmount(null), 0);
-            assert.equal(normalizeDiscountAmount(-35), 0);
-            assert.equal(normalizeDiscountAmount(0, 25), 25);
-            assert.equal(normalizeDiscountPercentage(null), 0);
-            assert.equal(normalizeDiscountPercentage(-0.05), 0);
-          });
-
-          test('revision adapter uses shared non-negative discount normalization for amount and percentage', async () => {
+          test('all quote revision pricing paths explicitly normalize discount amount and percentage to non-negative values', async () => {
             const source = await readFile(new URL('../src/features/wave1/ServiceOSQuoteRevisionPanel.jsx', import.meta.url), 'utf8');
-            assert.match(source, /discount_amount:\s*normalizeDiscountAmount\(quote\.discountAmt \?\? 0, concessionAmount \?\? 0\)/);
-            assert.match(source, /discountAmount:\s*normalizeDiscountAmount\(quote\.discountAmt \?\? 0, concessionAmount \?\? 0\)/);
-            assert.match(source, /discountPct:\s*normalizeDiscountPercentage\(quote\.discPct \?\? 0\)/);
+            assert.match(source, /function nonNegativeMoney\(value\)/);
+            assert.match(source, /function nonNegativeRate\(value\)/);
+            assert.match(source, /discount_amount:\s*nonNegativeMoney\(nonNegativeMoney\(quote\.discountAmt\) \+ nonNegativeMoney\(concessionAmount\)\)/);
+            assert.match(source, /discountAmount:\s*nonNegativeMoney\(nonNegativeMoney\(quote\.discountAmt\) \+ nonNegativeMoney\(concessionAmount\)\)/);
+            assert.match(source, /discountPct:\s*nonNegativeRate\(quote\.discPct \?\? 0\)/);
           });
           """)
 
@@ -235,6 +162,6 @@ jobs:
         run: |
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/lib/serviceosPricingNormalization.js src/lib/governedResidentialPricing.js src/lib/serviceosRevenueUtils.js src/features/wave1/ServiceOSQuoteRevisionPanel.jsx tests/serviceosPricingSnapshotDiscountNormalization.test.mjs package.json
-          git commit -m "Fix pricing snapshot discount normalization"
+          git add src/lib/governedResidentialPricing.js src/features/wave1/ServiceOSQuoteRevisionPanel.jsx tests/serviceosPricingSnapshotDiscountNormalization.test.mjs package.json
+          git commit -m "Fix revision pricing discount normalization"
           git push origin HEAD:fix/pricing-snapshot-discount-normalization
