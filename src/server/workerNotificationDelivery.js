@@ -136,11 +136,11 @@ async function sendEmail({ worker, context, audit, accessToken }) {
   return patchAudit(accessToken, audit.id, { delivery_status: 'sent', provider_message_id: providerMessageId, sent_at: new Date().toISOString(), metadata: { ...(audit.metadata || {}), provider_acceptance_status: 202, sender_email: senderEmail } });
 }
 
-async function sendSms({ worker, context, audit, accessToken, req }) {
+async function sendSms({ worker, context, audit, accessToken }) {
   const cfg = twilioConfig();
   if (!cfg) throw new Error('SMS provider is not configured');
   const body = `Have Us Clean work order: ${context.serviceTitle}. ${context.start} at ${context.location}. Open ServiceOS to review and acknowledge: ${context.workerUrl}`;
-  const form = new URLSearchParams({ To: worker.phone, From: cfg.from, Body: body, StatusCallback: `${publicOrigin(req)}/api/notifications?action=worker-notification-status` });
+  const form = new URLSearchParams({ To: worker.phone, From: cfg.from, Body: body });
   const response = await fetch(`https://api.twilio.com/2010-04-01/Accounts/${encodeURIComponent(cfg.accountSid)}/Messages.json`, {
     method: 'POST',
     headers: { Authorization: `Basic ${Buffer.from(`${cfg.accountSid}:${cfg.authToken}`).toString('base64')}`, 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -212,7 +212,7 @@ export async function handleWorkerDispatchNotification(req, res, accessToken) {
     try {
       const delivery = channel.channel === 'email'
         ? await sendEmail({ worker, context, audit, accessToken })
-        : await sendSms({ worker, context, audit, accessToken, req });
+        : await sendSms({ worker, context, audit, accessToken });
       results.push({ channel: channel.channel, alreadyRequested: false, delivery });
     } catch (error) {
       const failed = await patchAudit(accessToken, audit.id, { delivery_status: 'failed', failed_at: new Date().toISOString(), failure_reason: String(error.message || error).slice(0, 1000) });
