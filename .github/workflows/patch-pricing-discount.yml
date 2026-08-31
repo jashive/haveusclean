@@ -1,0 +1,240 @@
+name: One-shot pricing discount normalization patch
+
+on:
+  push:
+    branches:
+      - fix/pricing-snapshot-discount-normalization
+    paths:
+      - .github/workflows/patch-pricing-discount.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/pricing-snapshot-discount-normalization
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Apply guarded source patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}: {old!r}')
+              p.write_text(s.replace(old, new, 1))
+
+          helper = Path('src/lib/serviceosPricingNormalization.js')
+          if helper.exists():
+              raise SystemExit('pricing normalization helper already exists unexpectedly')
+          helper.write_text("""function finiteNumber(value, fallback = 0) {
+            const parsed = Number(value);
+            return Number.isFinite(parsed) ? parsed : fallback;
+          }
+
+          export function normalizeDiscountAmount(value = 0, explicitConcession = 0) {
+            const combined = finiteNumber(value, 0) + finiteNumber(explicitConcession, 0);
+            return Math.round((Math.max(0, combined) + Number.EPSILON) * 100) / 100;
+          }
+
+          export function normalizeDiscountPercentage(value = 0) {
+            return Math.max(0, finiteNumber(value, 0));
+          }
+          """)
+
+          replace_once(
+              'src/lib/governedResidentialPricing.js',
+              'const SUPPORTED_PACKAGE_KEYS = new Set([',
+              "import { normalizeDiscountAmount, normalizeDiscountPercentage } from './serviceosPricingNormalization.js';\n\nconst SUPPORTED_PACKAGE_KEYS = new Set([",
+          )
+          replace_once(
+              'src/lib/governedResidentialPricing.js',
+              '    discountAmt: toMoney(markedUpSubtotal - discountedSubtotal),',
+              '    discountAmt: normalizeDiscountAmount(withDollarAdjustmentsSubtotal - discountedSubtotal),',
+          )
+          replace_once(
+              'src/lib/governedResidentialPricing.js',
+              '    discPct: recurringDiscountPct,',
+              '    discPct: normalizeDiscountPercentage(recurringDiscountPct),',
+          )
+
+          replace_once(
+              'src/lib/serviceosRevenueUtils.js',
+              '// ── Wave 2: ServiceOS Revenue Utils ──────────────────────────────────────────',
+              "import { normalizeDiscountAmount, normalizeDiscountPercentage } from './serviceosPricingNormalization.js';\n\n// ── Wave 2: ServiceOS Revenue Utils ──────────────────────────────────────────",
+          )
+          replace_once(
+              'src/lib/serviceosRevenueUtils.js',
+              '  const discountAmount = quote.discountAmt ?? quote.discountAmount ?? 0;',
+              '  const discountAmount = normalizeDiscountAmount(quote.discountAmt ?? quote.discountAmount ?? 0);',
+          )
+          replace_once(
+              'src/lib/serviceosRevenueUtils.js',
+              '    discountPct: quote.discPct ?? null,',
+              '    discountPct: normalizeDiscountPercentage(quote.discPct ?? 0),',
+          )
+
+          replace_once(
+              'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
+              "import React, { useEffect, useMemo, useState } from 'react';",
+              "import React, { useEffect, useMemo, useState } from 'react';\nimport { normalizeDiscountAmount, normalizeDiscountPercentage } from '../../lib/serviceosPricingNormalization.js';",
+          )
+          replace_once(
+              'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
+              '    discount_amount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),',
+              '    discount_amount: normalizeDiscountAmount(quote.discountAmt ?? 0, concessionAmount ?? 0),',
+          )
+          replace_once(
+              'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
+              '      discountPct: quote.discPct ?? null,',
+              '      discountPct: normalizeDiscountPercentage(quote.discPct ?? 0),',
+          )
+          replace_once(
+              'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx',
+              '      discountAmount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),',
+              '      discountAmount: normalizeDiscountAmount(quote.discountAmt ?? 0, concessionAmount ?? 0),',
+          )
+
+          test = Path('tests/serviceosPricingSnapshotDiscountNormalization.test.mjs')
+          test.write_text("""import test from 'node:test';
+          import assert from 'node:assert/strict';
+          import { readFile } from 'node:fs/promises';
+          import { computeGovernedResidentialQuote } from '../src/lib/governedResidentialPricing.js';
+          import { capturePricingSnapshot } from '../src/lib/serviceosRevenueUtils.js';
+          import { normalizeDiscountAmount, normalizeDiscountPercentage } from '../src/lib/serviceosPricingNormalization.js';
+
+          const config = {
+            id: 'cfg-on-test',
+            business_unit_id: 'bu-on',
+            jurisdiction_id: 'jur-on',
+            configuration_type: 'residential_pricing',
+            version: 'ON-TEST',
+            configuration: {
+              currency_code: 'CAD',
+              tax: { rate: 0.13, label: 'HST' },
+              minimum_charge: { general_residential: 200 },
+              dwelling_matrix: {
+                semi_detached_detached: {
+                  '4bed_3bath': { package_prices: { complete_deep: 500 } },
+                },
+              },
+              square_footage_adjustments: {
+                additional_250_500_sqft: { minimum: 50, maximum: 50 },
+              },
+              recurring_service: {
+                weekly_discount: { min: 0.1, max: 0.1 },
+              },
+            },
+          };
+
+          test('Mississauga-style 3,000 sq ft surcharge is not misclassified as a negative discount', () => {
+            const quote = computeGovernedResidentialQuote({
+              configurationVersion: config,
+              dwellingType: 'detached_house',
+              beds: 4,
+              baths: 3,
+              packageKey: 'complete_deep',
+              condition: 'light',
+              frequency: 'one_time',
+              addons: [],
+              approvedSelections: {
+                sqftBand: 'additional_250_500_sqft',
+                sqftAdjustmentAmount: 50,
+              },
+            });
+            assert.equal(quote.preTaxTotal, 550);
+            assert.equal(quote.discountAmt, 0);
+            assert.equal(quote.discPct, 0);
+          });
+
+          test('recurring discount is calculated from the surcharge-adjusted subtotal and stays non-negative', () => {
+            const quote = computeGovernedResidentialQuote({
+              configurationVersion: config,
+              dwellingType: 'detached_house',
+              beds: 4,
+              baths: 3,
+              packageKey: 'complete_deep',
+              condition: 'light',
+              frequency: 'weekly',
+              addons: [],
+              approvedSelections: {
+                sqftBand: 'additional_250_500_sqft',
+                sqftAdjustmentAmount: 50,
+                recurringDiscountPct: 0.1,
+              },
+            });
+            assert.equal(quote.preTaxTotal, 495);
+            assert.equal(quote.discountAmt, 55);
+            assert.equal(quote.discPct, 0.1);
+          });
+
+          test('pricing snapshot capture clamps malformed negative discount values to zero', () => {
+            const snapshot = capturePricingSnapshot({
+              quote: {
+                quoteContractVersion: 'test-v1',
+                preTaxTotal: 550,
+                taxRate: 0.13,
+                taxAmount: 71.5,
+                total: 621.5,
+                discountAmt: -50,
+                discPct: -0.1,
+                currency: 'CAD',
+              },
+              organizationId: 'org',
+              businessUnitId: 'bu',
+            });
+            assert.equal(snapshot.discount_amount, 0);
+            assert.equal(snapshot.calculation_outputs.discountAmount, 0);
+            assert.equal(snapshot.labor_economics.discountPct, 0);
+          });
+
+          test('normalization defaults are explicit zero and explicit concession remains positive', () => {
+            assert.equal(normalizeDiscountAmount(null), 0);
+            assert.equal(normalizeDiscountAmount(-35), 0);
+            assert.equal(normalizeDiscountAmount(0, 25), 25);
+            assert.equal(normalizeDiscountPercentage(null), 0);
+            assert.equal(normalizeDiscountPercentage(-0.05), 0);
+          });
+
+          test('revision adapter uses shared non-negative discount normalization for amount and percentage', async () => {
+            const source = await readFile(new URL('../src/features/wave1/ServiceOSQuoteRevisionPanel.jsx', import.meta.url), 'utf8');
+            assert.match(source, /discount_amount:\s*normalizeDiscountAmount\(quote\.discountAmt \?\? 0, concessionAmount \?\? 0\)/);
+            assert.match(source, /discountAmount:\s*normalizeDiscountAmount\(quote\.discountAmt \?\? 0, concessionAmount \?\? 0\)/);
+            assert.match(source, /discountPct:\s*normalizeDiscountPercentage\(quote\.discPct \?\? 0\)/);
+          });
+          """)
+
+          replace_once(
+              'package.json',
+              'tests/serviceosCanonicalJobDuration.test.mjs tests/serviceosWave4ProductionBoundary.test.mjs',
+              'tests/serviceosCanonicalJobDuration.test.mjs tests/serviceosPricingSnapshotDiscountNormalization.test.mjs tests/serviceosWave4ProductionBoundary.test.mjs',
+          )
+          PY
+      - run: npm ci
+      - name: Targeted regression
+        run: node --test tests/serviceosPricingSnapshotDiscountNormalization.test.mjs tests/serviceosGoal5QuoteRevision.test.mjs tests/serviceosCanonicalJobDuration.test.mjs
+      - name: Full regression
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Commit tested patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/serviceosPricingNormalization.js src/lib/governedResidentialPricing.js src/lib/serviceosRevenueUtils.js src/features/wave1/ServiceOSQuoteRevisionPanel.jsx tests/serviceosPricingSnapshotDiscountNormalization.test.mjs package.json
+          git commit -m "Fix pricing snapshot discount normalization"
+          git push origin HEAD:fix/pricing-snapshot-discount-normalization
