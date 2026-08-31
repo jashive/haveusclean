@@ -1,0 +1,62 @@
+name: Address PR74 operator status review
+
+on:
+  push:
+    branches:
+      - feature/dispatch-revenue-ui-polish
+    paths:
+      - .github/workflows/pr74-review-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/dispatch-revenue-ui-polish
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Address review findings
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('src/features/wave3/ServiceOSOperationsWorkspace.jsx')
+          s=p.read_text()
+          def rep(old,new):
+              global s
+              if old not in s: raise SystemExit(f'anchor missing: {old[:100]!r}')
+              s=s.replace(old,new,1)
+          rep('  badgeCompleted: { background: "#3A3120", color: "#FFD78A" },\n  laborMeta:', '  badgeCompleted: { background: "#3A3120", color: "#FFD78A" },\n  badgeCorrection: { background: "#461C25", color: "#FF9EAA" },\n  laborMeta:')
+          rep('  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return "Completed";', '  if (status === "service_complete" || status === "qa_pending") return "Completed";\n  if (status === "corrective_action_required") return "Correction Required";')
+          rep('  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return styles.badgeCompleted;', '  if (status === "service_complete" || status === "qa_pending") return styles.badgeCompleted;\n  if (status === "corrective_action_required") return styles.badgeCorrection;')
+          rep('<label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>', '<label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>{const next=e.target.value;setStart(next);const duration=selectedHandoff?.estimated_duration_hours;if(duration&&next){setEnd(addHoursToLocalDateTime(next,duration));setEndAutoCalculated(true);}else{setEndAutoCalculated(false);}}} /></label>')
+          p.write_text(s)
+
+          t=Path('tests/serviceosCanonicalJobDuration.test.mjs')
+          x=t.read_text()
+          marker='  assert.match(operations, /return "Completed"/);'
+          new=marker+'\n  assert.match(operations, /return "Correction Required"/);\n  assert.match(operations, /setEnd\\(addHoursToLocalDateTime\\(next,duration\\)\\)/);'
+          if marker not in x: raise SystemExit('test marker missing')
+          t.write_text(x.replace(marker,new,1))
+          PY
+      - name: Targeted tests
+        run: node --test tests/serviceosCanonicalJobDuration.test.mjs tests/serviceosWave3ProductionBoundary.test.mjs
+      - name: Full suite
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit review fixes
+        run: |
+          rm .github/workflows/pr74-review-fix.yml
+          git config user.name "jashive"
+          git config user.email "68502405+jashive@users.noreply.github.com"
+          git add src/features/wave3/ServiceOSOperationsWorkspace.jsx tests/serviceosCanonicalJobDuration.test.mjs .github/workflows/pr74-review-fix.yml
+          git commit -m "Address PR74 dispatch status review findings"
+          git push origin HEAD:feature/dispatch-revenue-ui-polish
