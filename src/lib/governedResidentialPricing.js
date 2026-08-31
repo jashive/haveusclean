@@ -3,7 +3,12 @@ const SUPPORTED_PACKAGE_KEYS = new Set([
   "signature_initial_reset",
   "complete_deep",
   "move_in_move_out",
+  "kitchen_bath_refresh",
+  "kitchen_bath_deep",
 ]);
+
+const KITCHEN_BATH_PACKAGE_KEYS = new Set(["kitchen_bath_refresh", "kitchen_bath_deep"]);
+const KITCHEN_BATH_DEEP_INCLUDED_ADDONS = new Set(["inside_refrigerator", "inside_oven"]);
 
 const ADDON_ALIASES = {
   fridge: "inside_refrigerator",
@@ -80,6 +85,24 @@ function buildBedBathKeyCandidates(beds, baths) {
   const bedPart = Number.isInteger(bed) ? String(bed) : String(bed).replace(".", "_");
   const bathPart = Number.isInteger(bath) ? String(bath) : String(bath).replace(".", "_");
   return [`${bedPart}bed_${bathPart}bath`, `${bedPart}_bed_${bathPart}_bath`];
+}
+
+function buildKitchenBathKey(baths) {
+  const bath = toNumber(baths, Number.NaN);
+  if (!Number.isFinite(bath) || bath <= 0) return null;
+  const bathPart = Number.isInteger(bath) ? String(bath) : String(bath).replace(".", "_");
+  return `kitchen_${bathPart}bath`;
+}
+
+function findKitchenBathPrice(kitchenBathPackages, { baths, packageKey }) {
+  if (!kitchenBathPackages || typeof kitchenBathPackages !== "object") return null;
+  const rowKey = buildKitchenBathKey(baths);
+  if (!rowKey) return null;
+  const row = kitchenBathPackages[rowKey];
+  if (!row || typeof row !== "object") return null;
+  const priceKey = packageKey === "kitchen_bath_deep" ? "complete_deep" : "essential_refresh";
+  const value = toNumber(row[priceKey], Number.NaN);
+  return Number.isFinite(value) ? value : null;
 }
 
 function resolveDwellingMatrixTypeKey(matrix, dwellingType) {
@@ -179,9 +202,15 @@ export function computeGovernedResidentialQuote({
   const config = configurationVersion.configuration;
   const currencyCode = String(config.currency_code ?? "").trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currencyCode)) throw new Error("Governed residential pricing requires valid currency_code");
-  const startingPrice = findMatrixPrice(config.dwelling_matrix, { dwellingType, beds, baths, packageKey: normalizedPackage });
+
+  const kitchenBathPackage = KITCHEN_BATH_PACKAGE_KEYS.has(normalizedPackage);
+  const startingPrice = kitchenBathPackage
+    ? findKitchenBathPrice(config.kitchen_bath_packages, { baths, packageKey: normalizedPackage })
+    : findMatrixPrice(config.dwelling_matrix, { dwellingType, beds, baths, packageKey: normalizedPackage });
   if (!Number.isFinite(startingPrice)) {
-    return requiresOfficeReview("Requires Management Review / Custom Pricing: this property, bed/bath, and service combination is not mapped in the published residential pricing matrix.");
+    return kitchenBathPackage
+      ? requiresOfficeReview("Requires Management Review / Custom Pricing: this bathroom count and Kitchen & Bath service are not mapped in the published regional pricing configuration.")
+      : requiresOfficeReview("Requires Management Review / Custom Pricing: this property, bed/bath, and service combination is not mapped in the published residential pricing matrix.");
   }
 
   const normalizedCondition = normalizeCondition(condition);
@@ -234,9 +263,13 @@ export function computeGovernedResidentialQuote({
     const duplicateIncluded = addonIds.find((id) => includedAddons.has(id));
     if (duplicateIncluded) throw new Error("complete_deep includes selected service; do not double-charge addon");
   }
+  if (normalizedPackage === "kitchen_bath_deep") {
+    const duplicateIncluded = addonIds.find((id) => KITCHEN_BATH_DEEP_INCLUDED_ADDONS.has(id));
+    if (duplicateIncluded) throw new Error("kitchen_bath_deep includes refrigerator and oven; do not double-charge addon");
+  }
 
   const taxRate = toNumber(config.tax?.rate, 0);
-  const minimumCharge = toNumber(config.minimum_charge?.general_residential, 0);
+  const minimumCharge = kitchenBathPackage ? 0 : toNumber(config.minimum_charge?.general_residential, 0);
   const baseSubtotal = toNumber(startingPrice, 0);
   const markedUpSubtotal = baseSubtotal * (1 + conditionMarkupPct);
   const withDollarAdjustmentsSubtotal = markedUpSubtotal + urgencyPremiumAmount + sqftAdjustmentAmount;

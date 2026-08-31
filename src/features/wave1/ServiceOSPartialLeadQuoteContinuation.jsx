@@ -34,8 +34,10 @@ import {
 const DWELLINGS = ["Apartment / Condo", "Townhouse", "Detached House"];
 const PACKAGES = [
   ["essential_refresh", "Essential Refresh Clean"],
+  ["kitchen_bath_refresh", "Kitchen & Bath Refresh Clean"],
   ["signature_initial_reset", "Signature Initial Reset Clean"],
   ["complete_deep", "Complete Deep Clean"],
+  ["kitchen_bath_deep", "Kitchen & Bath Deep Clean"],
   ["move_in_move_out", "Move-In / Move-Out Clean"],
 ];
 const FREQUENCIES = [["one_time", "One-Time"], ["weekly", "Weekly"], ["biweekly", "Biweekly"], ["monthly", "Monthly"]];
@@ -69,6 +71,7 @@ function text(v) { return typeof v === "string" ? v : ""; }
 function numberText(v) { return v === null || v === undefined ? "" : String(v); }
 function packageLabel(key) { return PACKAGES.find(([value]) => value === key)?.[1] || key; }
 function frequencyLabel(key) { return FREQUENCIES.find(([value]) => value === key)?.[1] || key; }
+function isKitchenBathPackage(key) { return key === "kitchen_bath_refresh" || key === "kitchen_bath_deep"; }
 function normalizeDwelling(value) {
   const raw = text(value).toLowerCase();
   if (raw.includes("condo") || raw.includes("apartment")) return "Apartment / Condo";
@@ -77,6 +80,7 @@ function normalizeDwelling(value) {
 }
 function normalizePackage(value) {
   const raw = text(value).toLowerCase();
+  if (raw.includes("kitchen") && raw.includes("bath")) return raw.includes("deep") ? "kitchen_bath_deep" : "kitchen_bath_refresh";
   if (raw.includes("move")) return "move_in_move_out";
   if (raw.includes("deep")) return "complete_deep";
   if (raw.includes("reset") || raw.includes("initial")) return "signature_initial_reset";
@@ -117,6 +121,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
   const orgId = revenueContext?.orgId || null;
   const appUserId = revenueContext?.appUserId || null;
   const currencyCode = quote?.currencyCode || (businessUnitCode === "HUC-AZ" ? "USD" : "CAD");
+  const kitchenBathPackage = isKitchenBathPackage(form.packageKey);
 
   const bookingMissing = useMemo(() => {
     const items = [];
@@ -156,7 +161,8 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
     setBusy(true); setError(null); setReview(null); setQuote(null); setSaved(null);
     try {
       if (!sr?.id || !opp?.id) throw new Error("This saved lead is missing its canonical service request or opportunity.");
-      if (!form.beds || !form.baths) throw new Error("Bedrooms and bathrooms are required to price this residential lead.");
+      if (!form.baths) throw new Error("Bathrooms are required to price this residential lead.");
+      if (!kitchenBathPackage && !form.beds) throw new Error("Bedrooms are required for full-home residential matrix pricing.");
       if (!businessUnitCode) throw new Error("Active business unit is required before quoting.");
       const firstReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, businessUnitCode });
       if (firstReview) { setReview(firstReview); return; }
@@ -165,10 +171,10 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       const secondReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion, businessUnitCode });
       if (secondReview) { setReview(secondReview); return; }
       const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
-      const raw = computeGovernedResidentialQuote({ configurationVersion, dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections });
+      const raw = computeGovernedResidentialQuote({ configurationVersion, dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections });
       if (raw?.requiresOfficeReview) { setReview(raw.reason || "Requires Management Review / Custom Pricing"); return; }
       const completed = applyGovernedResidentialAddons(raw, configurationVersion, form.addons);
-      completed.input = { dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
+      completed.input = { dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
       setConfig(configurationVersion); setQuote(completed);
     } catch (err) {
       const message = err?.message || "Unable to generate quote.";
@@ -183,7 +189,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       const requirements = {
         customer: { name: form.customerName.trim() || null, phone: form.phone.trim() || null, email: form.email.trim() || null },
         location: { address: form.address.trim() || null, city: form.city.trim() || null, postalCode: form.postalCode.trim() || null, jurisdictionId },
-        scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
+        scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
       };
       const metadata = { ...(sr.metadata || {}), source: "serviceos_partial_lead_quote_continuation", business_unit_code: businessUnitCode, booking_ready: bookingMissing.length === 0, booking_missing: bookingMissing };
       const title = `${form.customerName.trim() || "Saved lead"} — ${packageLabel(form.packageKey)}`;
@@ -210,7 +216,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         <label style={s.field}><span style={s.label}>City</span><input style={s.input} value={form.city} onChange={(e) => setField("city", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>{businessUnitCode === "HUC-AZ" ? "ZIP code" : "Postal code"}</span><input style={s.input} value={form.postalCode} onChange={(e) => setField("postalCode", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Property type *</span><select style={s.input} value={form.dwellingType} onChange={(e) => setField("dwellingType", e.target.value)}>{DWELLINGS.map((x) => <option key={x}>{x}</option>)}</select></label>
-        <label style={s.field}><span style={s.label}>Bedrooms *</span><input style={s.input} type="number" min="0" value={form.beds} onChange={(e) => setField("beds", e.target.value)} /></label>
+        <label style={s.field}><span style={s.label}>{kitchenBathPackage ? "Bedrooms (not used for Kitchen & Bath)" : "Bedrooms *"}</span><input style={{ ...s.input, ...(kitchenBathPackage ? s.disabled : {}) }} type="number" min="0" value={form.beds} disabled={kitchenBathPackage} onChange={(e) => setField("beds", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Bathrooms *</span><input style={s.input} type="number" min="0" step="0.5" value={form.baths} onChange={(e) => setField("baths", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Approx. sq ft</span><input style={s.input} type="number" min="0" value={form.sqft} onChange={(e) => setField("sqft", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Service *</span><select style={s.input} value={form.packageKey} onChange={(e) => setField("packageKey", e.target.value)}>{PACKAGES.map(([v,l]) => <option key={v} value={v}>{l}</option>)}</select></label>
@@ -222,9 +228,9 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       </div>
       <div style={{ marginTop: 12 }}><span style={s.label}>Add-ons</span><div style={{ ...s.grid, marginTop: 6 }}>{OFFICE_ADDON_OPTIONS.map((item) => {
         const bundled = isAddonBundledForPackage({ packageKey: form.packageKey, addonId: item.id, businessUnitCode, configurationVersion: config });
-        return <label key={item.id} style={{ color: "#D9E2EE", fontSize: 13, ...(bundled ? s.disabled : {}) }} title={bundled ? "Included in Complete Deep Clean — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> {item.label}{bundled ? " — Included" : ""}</label>;
+        return <label key={item.id} style={{ color: "#D9E2EE", fontSize: 13, ...(bundled ? s.disabled : {}) }} title={bundled ? "Included in selected package — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> {item.label}{bundled ? " — Included" : ""}</label>;
       })}</div></div>
-      <div style={s.note}>Complete Deep bundled items are disabled automatically to prevent double charging.</div>
+      <div style={s.note}>Complete Deep bundled items are disabled automatically. Kitchen & Bath Deep includes refrigerator and oven; cabinets remain selectable at the published rate.</div>
       <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Scope / access / pets / safety notes</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.notes} onChange={(e) => setField("notes", e.target.value)} /></label>
 
       {bookingMissing.length ? <div style={s.warning}><strong>Quote allowed — booking information still incomplete.</strong><ul style={s.checklist}>{bookingMissing.map((item) => <li key={item}>{item}</li>)}</ul></div> : <div style={{ ...s.note, color: "#60E7C6" }}>Booking information checklist is complete.</div>}

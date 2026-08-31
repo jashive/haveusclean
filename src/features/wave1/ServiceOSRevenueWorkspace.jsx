@@ -38,8 +38,10 @@ import { canManageServiceOSRevenue } from "../../lib/serviceosUiPolicy.js";
 
 const PACKAGE_OPTIONS = [
   { value: "essential_refresh", label: "Essential Refresh Clean" },
+  { value: "kitchen_bath_refresh", label: "Kitchen & Bath Refresh Clean" },
   { value: "signature_initial_reset", label: "Signature Initial Reset Clean" },
   { value: "complete_deep", label: "Complete Deep Clean" },
+  { value: "kitchen_bath_deep", label: "Kitchen & Bath Deep Clean" },
   { value: "move_in_move_out", label: "Move-In / Move-Out Clean" },
 ];
 const DWELLING_OPTIONS = [
@@ -103,6 +105,7 @@ const styles = {
 function packageLabel(key) { return PACKAGE_OPTIONS.find((item) => item.value === key)?.label || key; }
 function frequencyLabel(key) { return FREQUENCY_OPTIONS.find((item) => item.value === key)?.label || key; }
 function marketLabel(code) { return code === "HUC-AZ" ? "Arizona" : code === "HUC-ON" ? "Ontario" : code || "selected market"; }
+function isKitchenBathPackage(key) { return key === "kitchen_bath_refresh" || key === "kitchen_bath_deep"; }
 
 export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
   const [form, setForm] = useState(initialForm);
@@ -124,6 +127,7 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
     ?? revenueContext?.businessUnitRecords?.find((item) => item.id === businessUnitId)?.code
     ?? (revenueContext?.businessUnits?.length === 1 ? revenueContext.businessUnits[0] : null);
   const appUserId = revenueContext?.appUserId ?? null;
+  const kitchenBathPackage = isKitchenBathPackage(form.packageKey);
 
   const customerText = useMemo(() => quote ? buildCustomerFacingQuoteText({ customerName: form.customerName, serviceLabel: packageLabel(form.packageKey), quote, frequencyLabel: frequencyLabel(form.frequency) }) : "", [quote, form.customerName, form.packageKey, form.frequency]);
 
@@ -151,7 +155,8 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
       if (!form.customerName.trim()) throw new Error("Customer name is required.");
       if (!form.phone.trim() && !form.email.trim()) throw new Error("Enter at least a phone number or email address.");
       if (!form.address.trim() || !form.city.trim()) throw new Error("Service address and city are required.");
-      if (!form.beds || !form.baths) throw new Error("Bedrooms and bathrooms are required for residential matrix pricing.");
+      if (!form.baths) throw new Error("Bathrooms are required for residential pricing.");
+      if (!kitchenBathPackage && !form.beds) throw new Error("Bedrooms are required for full-home residential matrix pricing.");
       if (!businessUnitCode) throw new Error("Active business unit is required before quoting.");
 
       const basicReviewReason = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, businessUnitCode });
@@ -163,12 +168,12 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
       if (packageReviewReason) { setReviewReason(packageReviewReason); return; }
       const approvedSelections = getDefaultApprovedSelections(config, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
       const rawQuote = computeGovernedResidentialQuote({
-        configurationVersion: config, dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey,
+        configurationVersion: config, dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey,
         condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections,
       });
       if (rawQuote?.requiresOfficeReview) { setReviewReason(rawQuote.reason || "Requires Management Review / Custom Pricing"); return; }
       const completedQuote = applyGovernedResidentialAddons(rawQuote, config, form.addons);
-      completedQuote.input = { dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
+      completedQuote.input = { dwellingType: form.dwellingType, beds: Number(form.beds || 0), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
       setConfigurationVersion(config); setQuote(completedQuote);
     } catch (err) {
       const message = err?.message || "Unable to generate quote.";
@@ -183,7 +188,7 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
       const requirements = {
         customer: { name: form.customerName.trim(), phone: form.phone.trim() || null, email: form.email.trim() || null },
         location: { address: form.address.trim(), city: form.city.trim(), postalCode: form.postalCode.trim() || null, jurisdictionId },
-        scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
+        scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
       };
       const metadata = { source: "serviceos_native_quote", lead_source: form.leadSource || null, business_unit_code: businessUnitCode };
       const title = `${form.customerName.trim()} — ${packageLabel(form.packageKey)}`;
@@ -241,7 +246,7 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
         <h3 style={styles.sectionTitle}>Residential qualification · {selectedMarket}</h3>
         <div style={styles.grid}>
           <label style={styles.field}><span style={styles.label}>Property type *</span><select style={styles.input} value={form.dwellingType} onChange={(e) => setField("dwellingType", e.target.value)}>{DWELLING_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
-          <label style={styles.field}><span style={styles.label}>Bedrooms *</span><input style={styles.input} type="number" min="0" step="1" value={form.beds} onChange={(e) => setField("beds", e.target.value)} /></label>
+          <label style={styles.field}><span style={styles.label}>{kitchenBathPackage ? "Bedrooms (not used for Kitchen & Bath)" : "Bedrooms *"}</span><input style={{ ...styles.input, ...(kitchenBathPackage ? styles.disabled : {}) }} type="number" min="0" step="1" value={form.beds} disabled={kitchenBathPackage} onChange={(e) => setField("beds", e.target.value)} /></label>
           <label style={styles.field}><span style={styles.label}>Bathrooms *</span><input style={styles.input} type="number" min="0" step="0.5" value={form.baths} onChange={(e) => setField("baths", e.target.value)} /></label>
           <label style={styles.field}><span style={styles.label}>Approx. sq ft</span><input style={styles.input} type="number" min="0" value={form.sqft} onChange={(e) => setField("sqft", e.target.value)} /></label>
           <label style={styles.field}><span style={styles.label}>Service *</span><select style={styles.input} value={form.packageKey} onChange={(e) => setField("packageKey", e.target.value)}>{PACKAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label>
@@ -258,9 +263,9 @@ export default function ServiceOSRevenueWorkspace({ session, revenueContext }) {
         <h3 style={styles.sectionTitle}>Add-ons</h3>
         <div style={styles.addons}>{OFFICE_ADDON_OPTIONS.map((item) => {
           const bundled = isAddonBundledForPackage({ packageKey: form.packageKey, addonId: item.id, businessUnitCode, configurationVersion });
-          return <label key={item.id} style={{ ...styles.check, ...(bundled ? styles.disabled : {}) }} title={bundled ? "Included in Complete Deep Clean — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} />{item.label}{bundled ? " — Included" : ""}</label>;
+          return <label key={item.id} style={{ ...styles.check, ...(bundled ? styles.disabled : {}) }} title={bundled ? "Included in selected package — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} />{item.label}{bundled ? " — Included" : ""}</label>;
         })}</div>
-        <div style={styles.note}>Published starting/minimum add-on prices for {selectedMarket} are used only where the active configuration supports them. Complete Deep bundled items are disabled to prevent double charging. Specialty work routes to management review.</div>
+        <div style={styles.note}>Published starting/minimum add-on prices for {selectedMarket} are used only where the active configuration supports them. Complete Deep bundled items are disabled; Kitchen & Bath Deep includes refrigerator and oven while cabinets remain selectable. Specialty work routes to management review.</div>
       </div>
 
       <div style={styles.actions}><button type="button" style={{ ...styles.primary, ...(busy ? styles.disabled : {}) }} disabled={busy} onClick={handleGenerateQuote}>{busy ? "Working…" : `Generate ${selectedMarket} Quote`}</button></div>

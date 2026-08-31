@@ -14,12 +14,16 @@ import {
   formatQuoteMoney,
   getDefaultApprovedSelections,
   getManagementReviewReason,
+  isAddonBundledForPackage,
+  removeBundledAddonsForPackage,
 } from '../../lib/serviceosOfficeQuoteUtils.js';
 
 const PACKAGE_OPTIONS = [
   { value: 'essential_refresh', label: 'Essential Refresh Clean' },
+  { value: 'kitchen_bath_refresh', label: 'Kitchen & Bath Refresh Clean' },
   { value: 'signature_initial_reset', label: 'Signature Initial Reset Clean' },
   { value: 'complete_deep', label: 'Complete Deep Clean' },
+  { value: 'kitchen_bath_deep', label: 'Kitchen & Bath Deep Clean' },
   { value: 'move_in_move_out', label: 'Move-In / Move-Out Clean' },
 ];
 
@@ -111,6 +115,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
   const [busy, setBusy] = useState(false);
 
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) || null, [rows, selectedId]);
+  const selectedConfigVersion = selected?.pricing ? configurationVersionFromSnapshot(selected.pricing) : null;
 
   async function refresh() {
     if (!token || !organizationId || !businessUnitId) return;
@@ -135,7 +140,17 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
     setPartialAreas(''); setPartialSubtotal(''); setReason(''); setApprovedBy(''); setConcessionAmount(''); setPreview(null);
   }, [selectedId]);
 
-  function toggleAddon(id) { setAddons((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]); setPreview(null); }
+  function selectPackage(nextPackageKey) {
+    setPackageKey(nextPackageKey);
+    setAddons((current) => removeBundledAddonsForPackage({ packageKey: nextPackageKey, addons: current, configurationVersion: selectedConfigVersion }));
+    setPreview(null);
+  }
+
+  function toggleAddon(id) {
+    if (isAddonBundledForPackage({ packageKey, addonId: id, configurationVersion: selectedConfigVersion })) return;
+    setAddons((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+    setPreview(null);
+  }
 
   function buildPreview() {
     if (!selected?.pricing) throw new Error('Select an active quote version to revise.');
@@ -199,7 +214,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
     const raw = computeGovernedResidentialQuote({
       configurationVersion: configVersion,
       dwellingType: sourceScope.dwellingType,
-      beds: Number(sourceScope.beds),
+      beds: Number(sourceScope.beds || 0),
       baths: Number(sourceScope.baths),
       packageKey,
       condition: sourceScope.condition || 'light',
@@ -270,9 +285,12 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
         {revisionType === 'scope_adjustment' ? <>
           <div style={styles.grid}>
             <label style={styles.field}><span style={styles.label}>Scope path</span><select style={styles.input} value={scopeMode} onChange={(e) => { setScopeMode(e.target.value); setPreview(null); }}><option value="full_home">Package / Add-on Revision</option><option value="partial_home">Partial Home / Selected Areas</option></select></label>
-            {scopeMode === 'full_home' ? <label style={styles.field}><span style={styles.label}>Service tier</span><select style={styles.input} value={packageKey} onChange={(e) => { setPackageKey(e.target.value); setPreview(null); }}>{PACKAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label> : null}
+            {scopeMode === 'full_home' ? <label style={styles.field}><span style={styles.label}>Service tier</span><select style={styles.input} value={packageKey} onChange={(e) => selectPackage(e.target.value)}>{PACKAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label> : null}
           </div>
-          {scopeMode === 'full_home' ? <div style={styles.grid}>{OFFICE_ADDON_OPTIONS.map((item) => <label key={item.id} style={{ ...styles.field, flexDirection: 'row', alignItems: 'center' }}><input type="checkbox" checked={addons.includes(item.id)} onChange={() => toggleAddon(item.id)} /> <span>{item.label}</span></label>)}</div> : <div style={styles.grid}>
+          {scopeMode === 'full_home' ? <div style={styles.grid}>{OFFICE_ADDON_OPTIONS.map((item) => {
+            const bundled = isAddonBundledForPackage({ packageKey, addonId: item.id, configurationVersion: selectedConfigVersion });
+            return <label key={item.id} style={{ ...styles.field, flexDirection: 'row', alignItems: 'center', ...(bundled ? { opacity: 0.48 } : {}) }} title={bundled ? 'Included in selected package — no additional charge' : undefined}><input type="checkbox" checked={addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> <span>{item.label}{bundled ? ' — Included' : ''}</span></label>;
+          })}</div> : <div style={styles.grid}>
             <label style={styles.field}><span style={styles.label}>Areas included</span><textarea style={styles.input} rows={3} value={partialAreas} onChange={(e) => { setPartialAreas(e.target.value); setPreview(null); }} placeholder="Kitchen, bathrooms, floors, main level..." /></label>
             <label style={styles.field}><span style={styles.label}>Governed partial pre-tax price</span><input style={styles.input} type="number" min="0" step="5" value={partialSubtotal} onChange={(e) => { setPartialSubtotal(e.target.value); setPreview(null); }} /><span style={styles.sub}>HEMS partial-clean minimum is enforced from the frozen configuration. Below-minimum pricing requires Approved Concession.</span></label>
           </div>}
