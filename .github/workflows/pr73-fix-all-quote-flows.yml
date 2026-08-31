@@ -1,0 +1,70 @@
+name: Fix PR73 canonical duration quote flows
+
+on:
+  push:
+    branches:
+      - feature/canonical-job-duration
+    paths:
+      - .github/workflows/pr73-fix-all-quote-flows.yml
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: feature/canonical-job-duration
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - name: Propagate sqft through remaining governed quote flows
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          replacements = {
+            'src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx': (
+              'const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });',
+              'const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand, sqft: form.sqft ? Number(form.sqft) : null });'
+            ),
+            'src/features/wave1/ServiceOSQuoteRevisionPanel.jsx': (
+              "const approvedSelections = getDefaultApprovedSelections(configVersion, { condition: sourceScope.condition || 'light', frequency: sourceScope.frequency || 'one_time', sqftBand: sourceScope.sqftBand || '' });",
+              "const approvedSelections = getDefaultApprovedSelections(configVersion, { condition: sourceScope.condition || 'light', frequency: sourceScope.frequency || 'one_time', sqftBand: sourceScope.sqftBand || '', sqft: sourceScope.sqft ? Number(sourceScope.sqft) : null });"
+            ),
+          }
+          for path, (old, new) in replacements.items():
+              p = Path(path)
+              text = p.read_text()
+              if old not in text:
+                  raise SystemExit(f'Expected anchor not found in {path}')
+              p.write_text(text.replace(old, new, 1))
+
+          test = Path('tests/serviceosCanonicalJobDuration.test.mjs')
+          text = test.read_text()
+          marker = 'test("Wave 3 dispatch consumes canonical pricing duration and computes END", () => {'
+          insert = '''test("all governed quote flows pass exact sqft into canonical labor calculation", () => {\n  const partial = fs.readFileSync(new URL("../src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", import.meta.url), "utf8");\n  const revision = fs.readFileSync(new URL("../src/features/wave1/ServiceOSQuoteRevisionPanel.jsx", import.meta.url), "utf8");\n  assert.match(partial, /getDefaultApprovedSelections\\(configurationVersion, \\{[^}]*sqft: form\\.sqft \\? Number\\(form\\.sqft\\) : null/);\n  assert.match(revision, /getDefaultApprovedSelections\\(configVersion, \\{[^}]*sqft: sourceScope\\.sqft \\? Number\\(sourceScope\\.sqft\\) : null/);\n});\n\n'''
+          if insert not in text:
+              if marker not in text:
+                  raise SystemExit('Test insertion marker not found')
+              test.write_text(text.replace(marker, insert + marker, 1))
+          PY
+      - name: Targeted tests
+        run: node --test tests/serviceosCanonicalJobDuration.test.mjs tests/serviceosGoal5PartialLeadQuoteContinuation.test.mjs tests/serviceosGoal5QuoteRevision.test.mjs tests/serviceosOfficeQuoteUtils.test.mjs tests/serviceosRevenue.test.mjs tests/serviceosWave3ProductionBoundary.test.mjs
+      - name: Full test suite
+        run: npm test
+      - name: Build
+        run: npm run build
+      - name: Commit fix only
+        run: |
+          rm .github/workflows/pr73-fix-all-quote-flows.yml
+          git config user.name "jashive"
+          git config user.email "68502405+jashive@users.noreply.github.com"
+          git add src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx src/features/wave1/ServiceOSQuoteRevisionPanel.jsx tests/serviceosCanonicalJobDuration.test.mjs
+          git commit -m "fix: propagate canonical duration through governed quote flows"
+          git push origin HEAD:feature/canonical-job-duration
