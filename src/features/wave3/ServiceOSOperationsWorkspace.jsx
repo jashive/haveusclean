@@ -41,6 +41,9 @@ const styles = {
   ok: { color: "#54E5C2", marginTop: 10, fontSize: 13 },
   error: { color: "#FF7D8A", marginTop: 10, fontSize: 13, whiteSpace: "pre-wrap" },
   mono: { fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", fontSize: 12, color: "#9FB2C9", overflowWrap: "anywhere" },
+  pipeline: { marginTop: 14, padding: 14, border: "1px solid #31425A", borderRadius: 10, background: "#101827" },
+  pipelineRow: { display: "grid", gridTemplateColumns: "minmax(260px,1.7fr) minmax(110px,.6fr) minmax(180px,1fr)", gap: 10, alignItems: "center", padding: "9px 0", borderTop: "1px solid #253449", fontSize: 13 },
+  badge: { display: "inline-flex", width: "fit-content", padding: "4px 8px", borderRadius: 999, background: "#20304A", color: "#BFD4F2", fontSize: 11, fontWeight: 850, textTransform: "uppercase" },
 };
 
 async function getJson(path) {
@@ -64,15 +67,105 @@ function firstRow(rows) {
   return Array.isArray(rows) ? rows[0] ?? null : rows ?? null;
 }
 
+function pad2(value) {
+  return String(value).padStart(2, "0");
+}
+
+function formatLocalDateTime(date) {
+  if (!(date instanceof Date) || Number.isNaN(date.getTime())) return "";
+  return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+}
+
+function parsePreferredDate(value, referenceDate) {
+  const text = String(value || "").trim();
+  if (!text) return null;
+  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const reference = referenceDate ? new Date(referenceDate) : new Date();
+  const year = Number.isNaN(reference.getTime()) ? new Date().getFullYear() : reference.getFullYear();
+  const parsed = new Date(`${text} ${year}`);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
+}
+
+function parsePreferredTime(value) {
+  const text = String(value || "").trim().toLowerCase();
+  if (!text) return null;
+  if (text.includes("morning")) return "09:00";
+  if (text.includes("afternoon")) return "13:00";
+  if (text.includes("evening")) return "17:00";
+  const match = text.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
+  if (!match) return null;
+  let hour = Number(match[1]);
+  const minute = Number(match[2] || 0);
+  const meridiem = match[3]?.toLowerCase();
+  if (meridiem === "pm" && hour < 12) hour += 12;
+  if (meridiem === "am" && hour === 12) hour = 0;
+  if (hour > 23 || minute > 59) return null;
+  return `${pad2(hour)}:${pad2(minute)}`;
+}
+
+function resolveRequestedStart(preferredDate, preferredWindow, referenceDate) {
+  const date = parsePreferredDate(preferredDate, referenceDate);
+  const time = parsePreferredTime(preferredWindow);
+  return date && time ? `${date}T${time}` : null;
+}
+
+function addHoursToLocalDateTime(localValue, hours) {
+  if (!localValue || !Number.isFinite(Number(hours)) || Number(hours) <= 0) return "";
+  const parsed = new Date(localValue);
+  if (Number.isNaN(parsed.getTime())) return "";
+  parsed.setMinutes(parsed.getMinutes() + Math.round(Number(hours) * 60));
+  return formatLocalDateTime(parsed);
+}
+
+function resolveDurationHours(pricingSnapshot, scope) {
+  const candidates = [
+    pricingSnapshot?.labor_economics?.jobHours,
+    pricingSnapshot?.calculation_outputs?.jobHours,
+    pricingSnapshot?.raw_calculation_snapshot?.jobHours,
+    scope?.estimatedDurationHours,
+    scope?.estimated_duration_hours,
+  ];
+  for (const candidate of candidates) {
+    const value = Number(candidate);
+    if (Number.isFinite(value) && value > 0) return value;
+  }
+  return null;
+}
+
+function timezoneForScope(scope, location) {
+  const code = scope?.businessUnitCode || scope?.business_unit_code || "";
+  const subdivision = String(location?.subdivision || "").toUpperCase();
+  return code === "HUC-AZ" || subdivision === "AZ" ? "America/Phoenix" : "America/Toronto";
+}
+
 async function enrichHandoffForDispatch(handoff) {
   if (!handoff?.id) return handoff;
 
-  const [conversionRows, quoteVersionRows] = await Promise.all([
+  const [conversionRows, quoteVersionRows, pricingRows] = await Promise.all([
     getJson(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&select=id,customer_id,contact_id,service_location_id&limit=1`),
-    getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title&limit=1`),
+    getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title,estimate_id&limit=1`),
+    handoff.pricing_snapshot_id
+      ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`)
+      : Promise.resolve([]),
   ]);
   const conversion = firstRow(conversionRows);
   const quoteVersion = firstRow(quoteVersionRows);
+  const pricingSnapshot = firstRow(pricingRows);
+
+  const estimateRows = quoteVersion?.estimate_id
+    ? await getJson(`estimate?id=eq.${encodeURIComponent(quoteVersion.estimate_id)}&select=id,opportunity_id,scope_snapshot&limit=1`)
+    : [];
+  const estimate = firstRow(estimateRows);
+  const opportunityRows = estimate?.opportunity_id
+    ? await getJson(`opportunity?id=eq.${encodeURIComponent(estimate.opportunity_id)}&select=id,service_request_id&limit=1`)
+    : [];
+  const opportunity = firstRow(opportunityRows);
+  const serviceRequestRows = opportunity?.service_request_id
+    ? await getJson(`service_request?id=eq.${encodeURIComponent(opportunity.service_request_id)}&select=id,requirements,created_at&limit=1`)
+    : [];
+  const serviceRequest = firstRow(serviceRequestRows);
 
   const [customerRows, contactRows, locationRows] = await Promise.all([
     conversion?.customer_id
@@ -89,56 +182,113 @@ async function enrichHandoffForDispatch(handoff) {
   const customer = firstRow(customerRows);
   const contact = firstRow(contactRows);
   const location = firstRow(locationRows);
+  const scope = serviceRequest?.requirements?.scope || estimate?.scope_snapshot || {};
   const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ").trim();
-  const customerName = customer?.display_name || contactName || "Customer";
+  const customerName = customer?.display_name || contactName || serviceRequest?.requirements?.customer?.name || "Customer";
   const serviceTier = quoteVersion?.title || "Service details unavailable";
   const city = location?.city || location?.subdivision || "Location unavailable";
   const locationLabel = location?.address_line1 ? `${city} / ${location.address_line1}` : city;
+  const requestedStartLocal = resolveRequestedStart(scope?.preferredDate, scope?.preferredWindow, serviceRequest?.created_at || handoff.created_at);
+  const durationHours = resolveDurationHours(pricingSnapshot, scope);
 
   return {
     ...handoff,
     dispatch_label: `${customerName} — ${serviceTier} — ${locationLabel} (${handoffIdSnippet(handoff.id)})`,
+    customer_name: customerName,
+    service_tier: serviceTier,
+    location_label: locationLabel,
+    requested_date: scope?.preferredDate || null,
+    requested_window: scope?.preferredWindow || null,
+    requested_start_local: requestedStartLocal,
+    estimated_duration_hours: durationHours,
+    suggested_timezone: timezoneForScope(scope, location),
   };
+}
+
+async function fetchActiveDispatchPipeline() {
+  const jobs = await getJson([
+    "operational_job?select=id,job_handoff_id,operational_status,created_at",
+    "operational_status=in.(ready_to_schedule,scheduled,dispatched,in_progress,service_complete,qa_pending,corrective_action_required)",
+    "order=created_at.desc",
+    "limit=50",
+  ].join("&"));
+  if (!Array.isArray(jobs) || jobs.length === 0) return [];
+  return Promise.all(jobs.map(async (job) => {
+    try {
+      const handoff = firstRow(await getJson(`job_handoff?id=eq.${encodeURIComponent(job.job_handoff_id)}&select=id,organization_id,business_unit_id,conversion_record_id,quote_version_id,pricing_snapshot_id,handoff_status,created_at&limit=1`));
+      const enriched = handoff ? await enrichHandoffForDispatch(handoff) : null;
+      const scheduleWindow = firstRow(await getJson(`schedule_window?operational_job_id=eq.${encodeURIComponent(job.id)}&select=scheduled_start,scheduled_end,timezone,status&order=created_at.desc&limit=1`));
+      return { ...job, ...enriched, schedule_window: scheduleWindow };
+    } catch {
+      return { ...job, dispatch_label: `Operational job ${handoffIdSnippet(job.id)}` };
+    }
+  }));
 }
 
 function OfficeOperations({ revenueContext }) {
   const [handoffs, setHandoffs] = useState([]);
+  const [pipelineJobs, setPipelineJobs] = useState([]);
   const [workers, setWorkers] = useState([]);
   const [handoffId, setHandoffId] = useState("");
   const [workerId, setWorkerId] = useState("");
   const [start, setStart] = useState("");
   const [end, setEnd] = useState("");
   const [timezone, setTimezone] = useState("America/Toronto");
+  const [scheduleHint, setScheduleHint] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const appUserId = revenueContext?.appUserId ?? null;
 
+  const applyScheduleSuggestion = useCallback((handoff) => {
+    if (!handoff) { setStart(""); setEnd(""); setScheduleHint(""); return; }
+    const requested = handoff.requested_start_local || "";
+    const duration = handoff.estimated_duration_hours;
+    const requestedDate = requested ? new Date(requested) : null;
+    const isPast = requestedDate && !Number.isNaN(requestedDate.getTime()) && requestedDate.getTime() < Date.now();
+    setTimezone(handoff.suggested_timezone || "America/Toronto");
+    if (requested && !isPast) {
+      setStart(requested);
+      setEnd(duration ? addHoursToLocalDateTime(requested, duration) : "");
+      setScheduleHint(duration
+        ? `Requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}. Estimated duration ${duration}h from accepted quote/intake data.`
+        : `Requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}. No canonical service duration was captured; enter End manually.`);
+    } else {
+      setStart(""); setEnd("");
+      setScheduleHint(requested
+        ? `Customer requested ${handoff.requested_date || "date"} · ${handoff.requested_window || "time"}, but that target is in the past. Choose a new Start/End.`
+        : "No parseable requested date/time was captured on this accepted handoff. Enter Start/End manually.");
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setBusy(true); setError(""); setMessage("");
     try {
-      const [rawHandoffs, nextWorkers] = await Promise.all([fetchEligibleJobHandoffs(), fetchActiveWorkers()]);
+      const [rawHandoffs, nextWorkers, activePipeline] = await Promise.all([fetchEligibleJobHandoffs(), fetchActiveWorkers(), fetchActiveDispatchPipeline()]);
       const eligibleHandoffs = Array.isArray(rawHandoffs) ? rawHandoffs : [];
-      const nextHandoffs = await Promise.all(
-        eligibleHandoffs.map(async (handoff) => {
-          try {
-            return await enrichHandoffForDispatch(handoff);
-          } catch {
-            return {
-              ...handoff,
-              dispatch_label: `Customer details unavailable — Service details unavailable — Location unavailable (${handoffIdSnippet(handoff?.id)})`,
-            };
-          }
-        })
-      );
+      const nextHandoffs = await Promise.all(eligibleHandoffs.map(async (handoff) => {
+        try { return await enrichHandoffForDispatch(handoff); }
+        catch { return { ...handoff, dispatch_label: `Customer details unavailable — Service details unavailable — Location unavailable (${handoffIdSnippet(handoff?.id)})` }; }
+      }));
       setHandoffs(nextHandoffs);
+      setPipelineJobs(Array.isArray(activePipeline) ? activePipeline : []);
       setWorkers(Array.isArray(nextWorkers) ? nextWorkers : []);
-      if (!handoffId && nextHandoffs?.[0]?.id) setHandoffId(nextHandoffs[0].id);
+      if (!handoffId && nextHandoffs?.[0]?.id) {
+        setHandoffId(nextHandoffs[0].id);
+        applyScheduleSuggestion(nextHandoffs[0]);
+      }
       if (!workerId && nextWorkers?.[0]?.id) setWorkerId(nextWorkers[0].id);
-      setMessage(`Loaded ${nextHandoffs?.length ?? 0} eligible handoff(s) and ${nextWorkers?.length ?? 0} active worker(s).`);
+      setMessage(`Dispatch pipeline refreshed · ${nextHandoffs?.length ?? 0} ready · ${activePipeline?.length ?? 0} active job(s).`);
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [handoffId, workerId]);
+  }, [handoffId, workerId, applyScheduleSuggestion]);
+
+  useEffect(() => { load(); }, []); // intentional initial pipeline load
+
+  const selectHandoff = useCallback((id) => {
+    setHandoffId(id);
+    applyScheduleSuggestion(handoffs.find((handoff) => handoff.id === id) || null);
+  }, [handoffs, applyScheduleSuggestion]);
 
   const schedule = useCallback(async () => {
     if (!handoffId || !workerId || !start || !end) { setError("Select a handoff, worker, start, and end time."); return; }
@@ -207,6 +357,7 @@ function OfficeOperations({ revenueContext }) {
       await updateWorkOrderStatus(workOrder.id, "published", null, appUserId);
       await updateOperationalJobStatus(job.id, "dispatched", null, appUserId);
       setMessage(`DISPATCHED · job ${job.id} · assignment ${assignment.id} · work order ${workOrder.id}. Worker must acknowledge and execute next.`);
+      setHandoffId(""); setStart(""); setEnd(""); setScheduleHint("");
       await load();
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
@@ -214,15 +365,35 @@ function OfficeOperations({ revenueContext }) {
 
   return <section style={styles.card} data-wave3-office-workspace="true">
     <h2 style={styles.title}>Wave 3 Operations · Office Dispatch</h2>
-    <p style={styles.note}>Uses real accepted Revenue handoffs. This Production workspace does not create synthetic data and stops before worker execution and QA.</p>
-    <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Working…" : "Load eligible work"}</button></div>
-    <div style={{...styles.grid, marginTop: 12}}>
-      <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>setHandoffId(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
+    <p style={styles.note}>Uses canonical accepted Revenue handoffs and Operations records. Ready work and active jobs load automatically; Refresh updates the live pipeline.</p>
+
+    <div style={styles.pipeline} data-wave3-dispatch-pipeline="true">
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+        <strong>Dispatch Pipeline</strong>
+        <button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh pipeline"}</button>
+      </div>
+      <div style={{...styles.label,marginTop:12}}>Approved / Ready for dispatch · {handoffs.length}</div>
+      {handoffs.length ? handoffs.map((handoff) => <div key={handoff.id} style={styles.pipelineRow}>
+        <div>{handoff.dispatch_label}</div>
+        <span style={styles.badge}>ready</span>
+        <button style={styles.secondary} onClick={()=>selectHandoff(handoff.id)}>Select for dispatch</button>
+      </div>) : <div style={styles.note}>No approved handoffs are waiting for dispatch.</div>}
+      <div style={{...styles.label,marginTop:14}}>Active Operations · {pipelineJobs.length}</div>
+      {pipelineJobs.length ? pipelineJobs.map((job) => <div key={job.id} style={styles.pipelineRow}>
+        <div>{job.dispatch_label || `Operational job ${handoffIdSnippet(job.id)}`}</div>
+        <span style={styles.badge}>{job.operational_status}</span>
+        <div style={styles.mono}>{job.schedule_window?.scheduled_start ? `${job.schedule_window.scheduled_start} → ${job.schedule_window.scheduled_end || "end pending"}` : "Schedule pending"}</div>
+      </div>) : <div style={styles.note}>No active operational jobs.</div>}
+    </div>
+
+    <div style={{...styles.grid, marginTop: 16}}>
+      <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>selectHandoff(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
       <label><span style={styles.label}>Worker</span><select style={styles.input} value={workerId} onChange={e=>setWorkerId(e.target.value)}><option value="">Select…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.display_name || w.email || w.id}</option>)}</select></label>
       <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>
       <label><span style={styles.label}>End</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>setEnd(e.target.value)} /></label>
       <label><span style={styles.label}>Timezone</span><select style={styles.input} value={timezone} onChange={e=>setTimezone(e.target.value)}><option value="America/Toronto">Ontario · America/Toronto</option><option value="America/Phoenix">Arizona · America/Phoenix</option></select></label>
     </div>
+    {scheduleHint ? <div style={{...styles.note,marginTop:10}} data-wave3-schedule-prefill-hint="true">{scheduleHint}</div> : null}
     <div style={styles.row}><button style={styles.button} onClick={schedule} disabled={busy}>Schedule & Dispatch</button></div>
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
   </section>;
