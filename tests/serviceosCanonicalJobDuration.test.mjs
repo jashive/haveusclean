@@ -107,6 +107,8 @@ test("operator UI surfaces canonical crew/duration without lifecycle clutter", (
   assert.match(operations, /Ready for Dispatch/);
   assert.match(operations, /return "Dispatched"/);
   assert.match(operations, /return "Completed"/);
+  assert.match(operations, /return "Correction Required"/);
+  assert.match(operations, /setEnd\(addHoursToLocalDateTime\(next,duration\)\)/);
   assert.match(operations, /crew_size: crewSize/);
   assert.match(operations, /data-wave3-dispatch-plan="true"/);
   assert.match(operations, /End auto-calculated/);

@@ -47,6 +47,7 @@ const styles = {
   badgeReady: { background: "#173A33", color: "#60E7C6" },
   badgeDispatched: { background: "#1F3358", color: "#AFCBFF" },
   badgeCompleted: { background: "#3A3120", color: "#FFD78A" },
+  badgeCorrection: { background: "#461C25", color: "#FF9EAA" },
   laborMeta: { display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 },
   laborBadge: { display: "inline-flex", alignItems: "center", padding: "3px 7px", borderRadius: 999, border: "1px solid #34465F", color: "#B8C7D9", fontSize: 11, fontWeight: 750 },
   scheduleCard: { marginTop: 12, padding: "10px 12px", borderRadius: 9, border: "1px solid #2D4551", background: "#102329", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" },
@@ -181,14 +182,16 @@ function resolveCrewSize(pricingSnapshot) {
 function pipelineStatusLabel(status) {
   if (status === "ready_to_schedule" || status === "scheduled") return "Ready for Dispatch";
   if (status === "dispatched" || status === "in_progress") return "Dispatched";
-  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return "Completed";
+  if (status === "service_complete" || status === "qa_pending") return "Completed";
+  if (status === "corrective_action_required") return "Correction Required";
   return String(status || "Unknown").replaceAll("_", " ");
 }
 
 function pipelineStatusStyle(status) {
   if (status === "ready_to_schedule" || status === "scheduled") return styles.badgeReady;
   if (status === "dispatched" || status === "in_progress") return styles.badgeDispatched;
-  if (status === "service_complete" || status === "qa_pending" || status === "corrective_action_required") return styles.badgeCompleted;
+  if (status === "service_complete" || status === "qa_pending") return styles.badgeCompleted;
+  if (status === "corrective_action_required") return styles.badgeCorrection;
   return {};
 }
 
@@ -462,7 +465,7 @@ function OfficeOperations({ revenueContext }) {
     <div style={{...styles.grid, marginTop: 16}}>
       <label><span style={styles.label}>Revenue handoff</span><select style={styles.input} value={handoffId} onChange={e=>selectHandoff(e.target.value)}><option value="">Select…</option>{handoffs.map(h=><option key={h.id} value={h.id}>{h.dispatch_label || `Handoff ${handoffIdSnippet(h.id)}`}</option>)}</select></label>
       <label><span style={styles.label}>Worker</span><select style={styles.input} value={workerId} onChange={e=>setWorkerId(e.target.value)}><option value="">Select…</option>{workers.map(w=><option key={w.id} value={w.id}>{w.display_name || w.email || w.id}</option>)}</select></label>
-      <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>setStart(e.target.value)} /></label>
+      <label><span style={styles.label}>Start</span><input style={styles.input} type="datetime-local" value={start} onChange={e=>{const next=e.target.value;setStart(next);const duration=selectedHandoff?.estimated_duration_hours;if(duration&&next){setEnd(addHoursToLocalDateTime(next,duration));setEndAutoCalculated(true);}else{setEndAutoCalculated(false);}}} /></label>
       <label><span style={styles.label}>End{selectedHandoff?.estimated_duration_hours ? <span style={styles.autoTag}>AUTO</span> : null}</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>{setEnd(e.target.value);setEndAutoCalculated(false);}} /></label>
       <label><span style={styles.label}>Timezone</span><select style={styles.input} value={timezone} onChange={e=>setTimezone(e.target.value)}><option value="America/Toronto">Ontario · America/Toronto</option><option value="America/Phoenix">Arizona · America/Phoenix</option></select></label>
     </div>
