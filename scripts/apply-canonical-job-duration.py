@@ -47,12 +47,6 @@ replace(
     '      configurationVersionId: configurationVersion.id ?? null,\n      laborSource: jobHours && teamSize ? (approvedSelections.laborSource || "pricing_calculator") : null,\n    },'
 )
 
-replace(
-    "src/lib/serviceosRevenueUtils.js",
-    '    discountAmount,\n    currency: quote.currency ?? null,\n  };',
-    '    discountAmount,\n    currency: quote.currency ?? null,\n    teamSize: laborEconomics.teamSize,\n    jobHours: laborEconomics.jobHours,\n  };'
-)
-
 Path("tests/serviceosCanonicalJobDuration.test.mjs").write_text(r'''import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
@@ -117,8 +111,6 @@ test("exact sqft produces canonical calculator crew size and duration", () => {
   });
   assert.equal(snapshot.labor_economics.teamSize, 2);
   assert.equal(snapshot.labor_economics.jobHours, 3);
-  assert.equal(snapshot.calculation_outputs.teamSize, 2);
-  assert.equal(snapshot.calculation_outputs.jobHours, 3);
 });
 
 test("missing exact sqft does not invent duration or crew size", () => {
