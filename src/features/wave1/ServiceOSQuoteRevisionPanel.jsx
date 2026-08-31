@@ -5,6 +5,7 @@ import {
   loadQuoteRevisionSources,
 } from '../../lib/serviceosQuoteRevisionClient.js';
 import {
+  buildGovernedResidentialConfigurationSnapshot,
   computeGovernedResidentialQuote,
 } from '../../lib/governedResidentialPricing.js';
 import {
@@ -61,27 +62,37 @@ function configurationVersionFromSnapshot(pricing) {
   };
 }
 
-function pricingPayloadFromQuote({ sourcePricing, quote, revisionType, revisionReason, concessionAmount }) {
+export function pricingPayloadFromQuote({ sourcePricing, configurationVersion, quote, revisionType, revisionReason, concessionAmount }) {
+  const configurationSnapshot = configurationVersion
+    ? buildGovernedResidentialConfigurationSnapshot(configurationVersion)
+    : (sourcePricing.configuration_snapshot || {});
   return {
-    configuration_version_id: sourcePricing.configuration_version_id,
-    currency_code: quote.currencyCode || sourcePricing.currency_code,
+    configuration_version_id: configurationVersion?.id || sourcePricing.configuration_version_id,
+    currency_code: quote.currencyCode || configurationVersion?.configuration?.currency_code || sourcePricing.currency_code,
     tax_name: quote.taxName || sourcePricing.tax_name,
     tax_rate: Number(quote.taxRate ?? sourcePricing.tax_rate ?? 0),
     subtotal_amount: money(quote.preTaxTotal),
-    discount_amount: money((Number(sourcePricing.discount_amount || 0)) + Number(concessionAmount || 0)),
+    discount_amount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),
     tax_amount: money(quote.taxAmount),
     total_amount: money(quote.total),
-    calculator_version: `${sourcePricing.calculator_version || '2.1'}-revision`,
-    configuration_snapshot: sourcePricing.configuration_snapshot || {},
-    labor_economics: sourcePricing.labor_economics || {},
+    calculator_version: `${quote.quoteContractVersion || sourcePricing.calculator_version || '2.1'}-revision`,
+    configuration_snapshot: configurationSnapshot,
+    labor_economics: {
+      teamSize: quote.teamSize ?? null,
+      jobHours: quote.jobHours ?? null,
+      partnerPayTotal: quote.partnerPay ?? quote.partnerPayTotal ?? null,
+      partnerPayEach: quote.partnerPayEach ?? null,
+      profit: quote.profit ?? null,
+      discountPct: quote.discPct ?? null,
+    },
     calculation_inputs: quote.input || sourcePricing.calculation_inputs || {},
     calculation_outputs: {
       preTaxTotal: money(quote.preTaxTotal),
       taxAmount: money(quote.taxAmount),
       taxRate: Number(quote.taxRate ?? sourcePricing.tax_rate ?? 0),
       total: money(quote.total),
-      discountAmount: money((Number(sourcePricing.discount_amount || 0)) + Number(concessionAmount || 0)),
-      currency: quote.currencyCode || sourcePricing.currency_code,
+      discountAmount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),
+      currency: quote.currencyCode || configurationVersion?.configuration?.currency_code || sourcePricing.currency_code,
     },
     raw_calculation_snapshot: {
       ...quote,
@@ -115,7 +126,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
   const [busy, setBusy] = useState(false);
 
   const selected = useMemo(() => rows.find((row) => row.id === selectedId) || null, [rows, selectedId]);
-  const selectedConfigVersion = selected?.pricing ? configurationVersionFromSnapshot(selected.pricing) : null;
+  const selectedConfigVersion = selected?.activeConfigurationVersion || (selected?.pricing ? configurationVersionFromSnapshot(selected.pricing) : null);
 
   async function refresh() {
     if (!token || !organizationId || !businessUnitId) return;
@@ -142,21 +153,22 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
 
   function selectPackage(nextPackageKey) {
     setPackageKey(nextPackageKey);
-    setAddons((current) => removeBundledAddonsForPackage({ packageKey: nextPackageKey, addons: current, configurationVersion: selectedConfigVersion }));
+    setAddons((current) => removeBundledAddonsForPackage({ packageKey: nextPackageKey, addons: current, businessUnitCode: selected?.businessUnitCode, configurationVersion: selectedConfigVersion }));
     setPreview(null);
   }
 
   function toggleAddon(id) {
-    if (isAddonBundledForPackage({ packageKey, addonId: id, configurationVersion: selectedConfigVersion })) return;
+    if (isAddonBundledForPackage({ packageKey, addonId: id, businessUnitCode: selected?.businessUnitCode, configurationVersion: selectedConfigVersion })) return;
     setAddons((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
     setPreview(null);
   }
 
   function buildPreview() {
     if (!selected?.pricing) throw new Error('Select an active quote version to revise.');
+    if (selected.activeConfigurationError) throw new Error(selected.activeConfigurationError);
     const sourcePricing = selected.pricing;
     const sourceScope = selected.sourceScope || {};
-    const configVersion = configurationVersionFromSnapshot(sourcePricing);
+    const configVersion = selected.activeConfigurationVersion || configurationVersionFromSnapshot(sourcePricing);
     const config = configVersion.configuration || {};
 
     if (revisionType === 'approved_concession') {
@@ -165,6 +177,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
       if (!reason.trim()) throw new Error('Approved concession requires a Reason.');
       if (!approvedBy) throw new Error('Approved concession requires Approved By.');
       const sourceSubtotal = Number(sourcePricing.subtotal_amount || 0);
+      if (sourceSubtotal <= 0) throw new Error('Legacy comparison quote has no binding subtotal. Select Scope Adjustment and create a fresh governed single-package revision before applying a concession.');
       if (amount >= sourceSubtotal) throw new Error('Concession must be less than the current pre-tax subtotal.');
       const preTaxTotal = money(sourceSubtotal - amount);
       const taxRate = Number(sourcePricing.tax_rate || 0);
@@ -172,13 +185,15 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
       return {
         quote: {
           preTaxTotal, taxRate, taxAmount, total: money(preTaxTotal + taxAmount),
-          taxName: sourcePricing.tax_name, currencyCode: sourcePricing.currency_code,
+          taxName: sourcePricing.tax_name, currencyCode: selected.canonicalCurrencyCode || sourcePricing.currency_code,
           input: { ...sourceScope, addons: sourceScope.addons || [] },
           addonLines: selected.line_items_snapshot?.[0]?.addons || [],
+          teamSize: sourcePricing.labor_economics?.teamSize ?? null,
+          jobHours: sourcePricing.labor_economics?.jobHours ?? null,
         },
         title: selected.title,
         scope: sourceScope,
-        customerText: `${selected.commercial_snapshot?.customerFacingText || ''}\n\nREVISED PRICE: ${formatQuoteMoney(preTaxTotal, sourcePricing.currency_code)}${taxRate > 0 ? ` + ${sourcePricing.tax_name}` : ''}. This revision reflects an approved pricing concession; the service scope remains unchanged.`,
+        customerText: `${selected.commercial_snapshot?.customerFacingText || ''}\n\nREVISED PRICE: ${formatQuoteMoney(preTaxTotal, selected.canonicalCurrencyCode || sourcePricing.currency_code)}${taxRate > 0 ? ` + ${sourcePricing.tax_name}` : ''}. This revision reflects an approved pricing concession; the service scope remains unchanged.`,
         concessionAmount: amount,
       };
     }
@@ -189,26 +204,29 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
       if (!Number.isFinite(requestedSubtotal) || requestedSubtotal <= 0) throw new Error('Enter the revised partial-home pre-tax price.');
       const partialRule = config.partial_cleaning || {};
       const minimum = Number(partialRule.minimum_charge ?? config.minimum_charge?.partial_cleaning ?? 0);
-      if (minimum > 0 && requestedSubtotal < minimum) throw new Error(`Partial-home scope cannot be quoted below ${formatQuoteMoney(minimum, sourcePricing.currency_code)} without an Approved Concession.`);
-      const taxRate = Number(sourcePricing.tax_rate || 0);
+      const currencyCode = config.currency_code || selected.canonicalCurrencyCode || sourcePricing.currency_code;
+      if (minimum > 0 && requestedSubtotal < minimum) throw new Error(`Partial-home scope cannot be quoted below ${formatQuoteMoney(minimum, currencyCode)} without an Approved Concession.`);
+      const taxRate = Number(config.tax?.rate ?? sourcePricing.tax_rate ?? 0);
       const preTaxTotal = money(requestedSubtotal);
       const taxAmount = money(preTaxTotal * taxRate);
       const quote = {
         preTaxTotal, taxRate, taxAmount, total: money(preTaxTotal + taxAmount),
-        taxName: sourcePricing.tax_name, currencyCode: sourcePricing.currency_code,
+        taxName: config.tax?.label || config.tax?.name || sourcePricing.tax_name, currencyCode,
         input: { ...sourceScope, scopeMode: 'partial_home', partialAreas: partialAreas.trim(), addons },
         addonLines: [],
+        teamSize: null,
+        jobHours: null,
       };
       return {
         quote,
         title: 'Partial Home Cleaning',
         scope: quote.input,
-        customerText: `Hi ${String(selected.customerName || 'there').split(/\s+/)[0]},\n\nWe revised your Have Us Clean quote to fit the requested scope. Included areas: ${partialAreas.trim()}.\n\nRevised price: ${formatQuoteMoney(preTaxTotal, sourcePricing.currency_code)}${taxRate > 0 ? ` + ${sourcePricing.tax_name}, total ${formatQuoteMoney(quote.total, sourcePricing.currency_code)}` : ` total`}.\n\nThis revised quote replaces the prior version.`,
+        customerText: `Hi ${String(selected.customerName || 'there').split(/\s+/)[0]},\n\nWe revised your Have Us Clean quote to fit the requested scope. Included areas: ${partialAreas.trim()}.\n\nRevised price: ${formatQuoteMoney(preTaxTotal, currencyCode)}${taxRate > 0 ? ` + ${quote.taxName}, total ${formatQuoteMoney(quote.total, currencyCode)}` : ` total`}.\n\nThis revised quote replaces the prior version.`,
         concessionAmount: 0,
       };
     }
 
-    const review = getManagementReviewReason({ condition: sourceScope.condition, notes: selected.serviceRequest?.requirements?.scope?.notes || '', packageKey, addons, configurationVersion: configVersion });
+    const review = getManagementReviewReason({ condition: sourceScope.condition, notes: selected.serviceRequest?.requirements?.scope?.notes || '', packageKey, addons, configurationVersion: configVersion, businessUnitCode: selected.businessUnitCode });
     if (review) throw new Error(review);
     const approvedSelections = getDefaultApprovedSelections(configVersion, { condition: sourceScope.condition || 'light', frequency: sourceScope.frequency || 'one_time', sqftBand: sourceScope.sqftBand || '', sqft: sourceScope.sqft ? Number(sourceScope.sqft) : null });
     const raw = computeGovernedResidentialQuote({
@@ -224,7 +242,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
     });
     if (raw?.requiresOfficeReview) throw new Error(raw.reason || 'Revised scope requires management review.');
     const quote = applyGovernedResidentialAddons(raw, configVersion, addons);
-    quote.input = { ...sourceScope, packageKey, addons };
+    quote.input = { ...sourceScope, packageKey, addons, businessUnitCode: selected.businessUnitCode || sourceScope.businessUnitCode || null };
     return {
       quote,
       title: packageLabel(packageKey),
@@ -245,6 +263,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
     try {
       const next = preview || buildPreview();
       const sourcePricing = selected.pricing;
+      const configVersion = selected.activeConfigurationVersion || configurationVersionFromSnapshot(sourcePricing);
       const result = await createRevisedQuoteVersion({
         sourceQuoteVersionId: selected.id,
         revisionType,
@@ -252,12 +271,12 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
         approvedByAppUserId: revisionType === 'approved_concession' ? approvedBy : null,
         concessionAmount: next.concessionAmount,
         estimateScopeSnapshot: next.scope,
-        estimateAssumptions: { pricing_authority: sourcePricing.configuration_snapshot?.version || null, pricing_mode: 'governed_quote_revision', source_quote_version_id: selected.id },
-        pricingSnapshot: pricingPayloadFromQuote({ sourcePricing, quote: next.quote, revisionType, revisionReason: reason.trim(), concessionAmount: next.concessionAmount }),
+        estimateAssumptions: { pricing_authority: configVersion?.version || sourcePricing.configuration_snapshot?.version || null, pricing_mode: 'governed_quote_revision', source_quote_version_id: selected.id },
+        pricingSnapshot: pricingPayloadFromQuote({ sourcePricing, configurationVersion: configVersion, quote: next.quote, revisionType, revisionReason: reason.trim(), concessionAmount: next.concessionAmount }),
         title: next.title,
         lineItemsSnapshot: [{ service: next.title, subtotal: next.quote.preTaxTotal, tax: next.quote.taxAmount, total: next.quote.total, currency_code: next.quote.currencyCode, tax_name: next.quote.taxName, addons: next.quote.addonLines || [], scope: next.scope }],
         commercialSnapshot: { customerFacingText: next.customerText, revision_of_quote_version_id: selected.id },
-        metadata: { source: 'serviceos_quote_revision', scope_mode: revisionType === 'scope_adjustment' ? scopeMode : 'unchanged' },
+        metadata: { source: 'serviceos_quote_revision', scope_mode: revisionType === 'scope_adjustment' ? scopeMode : 'unchanged', business_unit_code: selected.businessUnitCode || null },
         accessToken: token,
       });
       setNotice(`Quote V${result.version_no} created as the active draft. Quote V${selected.version_no} is now Superseded. Use Quote Delivery above to email the new canonical version.`);
@@ -266,6 +285,9 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
     } catch (err) { setError(err?.message || 'Unable to create revised quote.'); }
     finally { setBusy(false); }
   }
+
+  const displayCurrency = selected?.canonicalCurrencyCode || selected?.pricing?.currency_code;
+  const legacyComparison = selected && Number(selected.pricing?.subtotal_amount || 0) === 0 && selected.commercial_snapshot?.selection_pending;
 
   return (
     <section style={styles.panel} data-testid="serviceos-quote-revision-panel">
@@ -280,7 +302,8 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
 
       {selected ? <div style={styles.card}>
         <strong>{selected.customerName} — Quote V{selected.version_no}</strong>
-        <div style={styles.sub}>Current pre-tax: {formatQuoteMoney(selected.pricing?.subtotal_amount, selected.pricing?.currency_code)} · Total: {formatQuoteMoney(selected.pricing?.total_amount, selected.pricing?.currency_code)}</div>
+        <div style={styles.sub}>Current pre-tax: {formatQuoteMoney(selected.pricing?.subtotal_amount, displayCurrency)} · Total: {formatQuoteMoney(selected.pricing?.total_amount, displayCurrency)}</div>
+        {legacyComparison ? <div style={styles.warning}>Legacy comparison quote: V{selected.version_no} has no single binding total. Choose the customer-approved package below; ServiceOS will re-price it from the active governed {selected.businessUnitCode || 'market'} configuration before creating the new draft.</div> : null}
 
         {revisionType === 'scope_adjustment' ? <>
           <div style={styles.grid}>
@@ -288,11 +311,11 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
             {scopeMode === 'full_home' ? <label style={styles.field}><span style={styles.label}>Service tier</span><select style={styles.input} value={packageKey} onChange={(e) => selectPackage(e.target.value)}>{PACKAGE_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label> : null}
           </div>
           {scopeMode === 'full_home' ? <div style={styles.grid}>{OFFICE_ADDON_OPTIONS.map((item) => {
-            const bundled = isAddonBundledForPackage({ packageKey, addonId: item.id, configurationVersion: selectedConfigVersion });
+            const bundled = isAddonBundledForPackage({ packageKey, addonId: item.id, businessUnitCode: selected.businessUnitCode, configurationVersion: selectedConfigVersion });
             return <label key={item.id} style={{ ...styles.field, flexDirection: 'row', alignItems: 'center', ...(bundled ? { opacity: 0.48 } : {}) }} title={bundled ? 'Included in selected package — no additional charge' : undefined}><input type="checkbox" checked={addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> <span>{item.label}{bundled ? ' — Included' : ''}</span></label>;
           })}</div> : <div style={styles.grid}>
             <label style={styles.field}><span style={styles.label}>Areas included</span><textarea style={styles.input} rows={3} value={partialAreas} onChange={(e) => { setPartialAreas(e.target.value); setPreview(null); }} placeholder="Kitchen, bathrooms, floors, main level..." /></label>
-            <label style={styles.field}><span style={styles.label}>Governed partial pre-tax price</span><input style={styles.input} type="number" min="0" step="5" value={partialSubtotal} onChange={(e) => { setPartialSubtotal(e.target.value); setPreview(null); }} /><span style={styles.sub}>HEMS partial-clean minimum is enforced from the frozen configuration. Below-minimum pricing requires Approved Concession.</span></label>
+            <label style={styles.field}><span style={styles.label}>Governed partial pre-tax price</span><input style={styles.input} type="number" min="0" step="5" value={partialSubtotal} onChange={(e) => { setPartialSubtotal(e.target.value); setPreview(null); }} /><span style={styles.sub}>HEMS partial-clean minimum is enforced from the active configuration. Below-minimum pricing requires Approved Concession.</span></label>
           </div>}
         </> : <div style={styles.grid}>
           <label style={styles.field}><span style={styles.label}>Concession amount (pre-tax)</span><input style={styles.input} type="number" min="0" step="5" value={concessionAmount} onChange={(e) => { setConcessionAmount(e.target.value); setPreview(null); }} /></label>
@@ -301,7 +324,7 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
         </div>}
 
         <div style={styles.actions}><button type="button" style={styles.secondary} onClick={handlePreview}>Preview Revision</button><button type="button" style={styles.primary} onClick={handleCreateRevision} disabled={busy}>{busy ? 'Creating…' : 'Create Revised Quote Version'}</button></div>
-        {preview ? <div style={styles.quote}><strong>Preview — {preview.title}</strong><br />Pre-tax: {formatQuoteMoney(preview.quote.preTaxTotal, preview.quote.currencyCode)}<br />Tax: {formatQuoteMoney(preview.quote.taxAmount, preview.quote.currencyCode)}<br />Total: {formatQuoteMoney(preview.quote.total, preview.quote.currencyCode)}<br /><br />{preview.customerText}</div> : null}
+        {preview ? <div style={styles.quote}><strong>Preview — {preview.title}</strong><br />Pre-tax: {formatQuoteMoney(preview.quote.preTaxTotal, preview.quote.currencyCode)}<br />Tax: {formatQuoteMoney(preview.quote.taxAmount, preview.quote.currencyCode)}<br />Total: {formatQuoteMoney(preview.quote.total, preview.quote.currencyCode)}{preview.quote.teamSize ? <><br />Crew Size: {preview.quote.teamSize}</> : null}{preview.quote.jobHours ? <><br />Planned Hours: {preview.quote.jobHours}</> : null}<br /><br />{preview.customerText}</div> : null}
       </div> : <div style={styles.warning}>No active draft/sent quote selected.</div>}
       <p style={styles.sub}>Delivery rule: the revised version starts as Draft. Emailing it through ServiceOS creates a new secure customer decision link for that exact version. The superseded version cannot be newly accepted.</p>
     </section>
