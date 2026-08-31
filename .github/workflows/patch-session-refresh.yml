@@ -1,0 +1,123 @@
+name: One-shot ServiceOS session refresh patch
+
+on:
+  push:
+    branches:
+      - fix/session-refresh-governed-config
+    paths:
+      - .github/workflows/patch-session-refresh.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-test-commit:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/session-refresh-governed-config
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Apply guarded session transport patch
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              count = s.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected exactly one match, found {count}')
+              p.write_text(s.replace(old, new, 1))
+
+          old = '''export async function authenticatedRestFetch(path, accessToken, options = {}) {
+            const { url, anon } = getConfig();
+            const { headers: extraHeaders, ...rest } = options;
+            return fetch(`${url}/rest/v1/${path}`, {
+              ...rest,
+              headers: { apikey: anon, Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", ...(extraHeaders ?? {}) },
+            });
+          }
+          '''
+          new = '''async function rawAuthenticatedRestFetch(path, accessToken, options = {}) {
+            const { url, anon } = getConfig();
+            const { headers: extraHeaders, ...rest } = options;
+            return fetch(`${url}/rest/v1/${path}`, {
+              ...rest,
+              headers: { apikey: anon, Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json", ...(extraHeaders ?? {}) },
+            });
+          }
+
+          export async function authenticatedRestFetch(path, accessToken, options = {}) {
+            let token = accessToken;
+            let stored = getStoredSession();
+
+            // ServiceOS uses a custom REST auth client rather than supabase-js, so there is
+            // no library-managed autoRefreshToken loop. Refresh centrally at the transport
+            // boundary so long-lived operator screens do not keep sending an expired token.
+            if (
+              stored?.access_token &&
+              stored?.refresh_token &&
+              stored.access_token === accessToken &&
+              isTokenExpiredOrNearlyExpired(stored)
+            ) {
+              const refreshed = await refreshSession(stored.refresh_token);
+              token = refreshed.access_token;
+              stored = refreshed;
+            }
+
+            let response = await rawAuthenticatedRestFetch(path, token, options);
+            if (!response.ok) {
+              let bodyText = "";
+              let bodyObj = null;
+              try {
+                bodyText = await response.clone().text();
+                bodyObj = JSON.parse(bodyText);
+              } catch {}
+
+              if (isSupabaseExpiredError(response.status, bodyObj ?? bodyText)) {
+                const latest = getStoredSession();
+                if (!latest?.refresh_token) {
+                  clearSession();
+                  return response;
+                }
+                const refreshed = await refreshSession(latest.refresh_token);
+                response = await rawAuthenticatedRestFetch(path, refreshed.access_token, options);
+              }
+            }
+            return response;
+          }
+          '''
+          replace_once('src/lib/serviceosAuthClient.js', old, new)
+
+          test = Path('tests/serviceosSessionRefreshTransport.test.mjs')
+          test.write_text('''import test from "node:test";\nimport assert from "node:assert/strict";\nimport fs from "node:fs";\n\nconst authSource = fs.readFileSync("src/lib/serviceosAuthClient.js", "utf8");\nconst configSource = fs.readFileSync("src/lib/governedResidentialConfig.js", "utf8");\n\ntest("canonical REST transport refreshes a nearly expired stored session before API/RPC calls", () => {\n  assert.match(authSource, /export async function authenticatedRestFetch\\(path, accessToken, options = \\{\\}\\)/);\n  assert.match(authSource, /stored\\.access_token === accessToken/);\n  assert.match(authSource, /isTokenExpiredOrNearlyExpired\\(stored\\)/);\n  assert.match(authSource, /await refreshSession\\(stored\\.refresh_token\\)/);\n  assert.match(authSource, /rawAuthenticatedRestFetch\\(path, token, options\\)/);\n});\n\ntest("canonical REST transport retries once after Supabase JWT expiry response", () => {\n  assert.match(authSource, /isSupabaseExpiredError\\(response\\.status, bodyObj \\?\\? bodyText\\)/);\n  assert.match(authSource, /const latest = getStoredSession\\(\\)/);\n  assert.match(authSource, /await refreshSession\\(latest\\.refresh_token\\)/);\n  assert.match(authSource, /rawAuthenticatedRestFetch\\(path, refreshed\\.access_token, options\\)/);\n});\n\ntest("governed residential config lookup remains on the canonical authenticated REST transport", () => {\n  assert.match(configSource, /import \\{ authenticatedRestFetch \\} from "\\.\\/serviceosAuthClient\\.js"/);\n  assert.match(configSource, /fetcher = authenticatedRestFetch/);\n  assert.match(configSource, /const res = await fetcher\\(path, accessToken\\)/);\n});\n''')
+
+          replace_once(
+              'package.json',
+              'tests/serviceosAuthClient.test.mjs tests/serviceosPasswordSetup.test.mjs',
+              'tests/serviceosAuthClient.test.mjs tests/serviceosSessionRefreshTransport.test.mjs tests/serviceosPasswordSetup.test.mjs',
+          )
+          PY
+      - run: npm ci
+      - name: Targeted auth and quote regressions
+        run: node --test tests/serviceosAuthClient.test.mjs tests/serviceosSessionRefreshTransport.test.mjs tests/serviceosRevenue.test.mjs tests/serviceosGoal5QuoteRevision.test.mjs
+      - name: Full regression
+        run: npm test
+      - name: Production build
+        run: npm run build
+      - name: Commit tested patch
+        shell: bash
+        run: |
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/lib/serviceosAuthClient.js tests/serviceosSessionRefreshTransport.test.mjs package.json
+          git commit -m "Refresh ServiceOS session at REST transport boundary"
+          git push origin HEAD:fix/session-refresh-governed-config
