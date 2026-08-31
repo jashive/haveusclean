@@ -35,7 +35,7 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
     `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
     `lifecycle_status=${encodeURIComponent("in.(intake,qualified)")}`,
-    `select=${encodeURIComponent("id,title,lifecycle_status,requirements,metadata,customer_id,contact_id,service_location_id,created_at,updated_at")}`,
+    `select=${encodeURIComponent("id,organization_id,business_unit_id,title,lifecycle_status,requirements,metadata,customer_id,contact_id,service_location_id,created_at,updated_at")}`,
     "order=created_at.desc",
     `limit=${safeLimit}`,
   ].join("&");
@@ -48,7 +48,7 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
     `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
     `service_request_id=${encodeURIComponent(`in.(${requestIds.join(",")})`)}`,
-    `select=${encodeURIComponent("id,service_request_id,stage,title,summary,metadata,created_at,updated_at")}`,
+    `select=${encodeURIComponent("id,organization_id,business_unit_id,service_request_id,stage,title,summary,metadata,created_at,updated_at")}`,
     "order=created_at.desc",
   ].join("&");
   const opportunityRes = await authenticatedRestFetch(`opportunity?${opportunityQuery}`, accessToken);

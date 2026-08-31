@@ -10,7 +10,6 @@ import {
   createPricingSnapshot,
   createQuote,
   createQuoteVersion,
-  updateQuoteVersionStatus,
 } from "../../lib/serviceosRevenueClient.js";
 import { promoteExistingLeadForQuote } from "../../lib/serviceosLeadQuoteContinuationClient.js";
 import {
@@ -28,6 +27,8 @@ import {
   formatQuoteMoney,
   getDefaultApprovedSelections,
   getManagementReviewReason,
+  isAddonBundledForPackage,
+  removeBundledAddonsForPackage,
 } from "../../lib/serviceosOfficeQuoteUtils.js";
 
 const DWELLINGS = ["Apartment / Condo", "Townhouse", "Detached House"];
@@ -55,6 +56,7 @@ const s = {
   actions: { display: "flex", gap: 9, flexWrap: "wrap", marginTop: 14 },
   primary: { border: 0, borderRadius: 8, padding: "10px 14px", background: "#00D4AA", color: "#07110F", fontWeight: 850, cursor: "pointer" },
   secondary: { border: "1px solid #3D516B", borderRadius: 8, padding: "9px 13px", background: "#202B3C", color: "#F5F8FC", fontWeight: 800, cursor: "pointer" },
+  disabled: { opacity: 0.48, cursor: "not-allowed" },
   note: { color: "#9AA9BC", fontSize: 12, lineHeight: 1.5, marginTop: 8 },
   warning: { marginTop: 12, border: "1px solid #C78A20", background: "#35270F", color: "#FFD78A", borderRadius: 8, padding: 10, fontSize: 13 },
   error: { marginTop: 12, border: "1px solid #8E3540", background: "#35151A", color: "#FF9EAA", borderRadius: 8, padding: 10, fontSize: 13 },
@@ -134,10 +136,17 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
   }) : "", [quote, form.customerName, form.packageKey, form.frequency]);
 
   function setField(name, value) {
-    setForm((current) => ({ ...current, [name]: value }));
+    setForm((current) => {
+      const next = { ...current, [name]: value };
+      if (name === "packageKey") {
+        next.addons = removeBundledAddonsForPackage({ packageKey: value, addons: current.addons, businessUnitCode, configurationVersion: config });
+      }
+      return next;
+    });
     setQuote(null); setConfig(null); setSaved(null); setError(null); setReview(null);
   }
   function toggleAddon(id) {
+    if (isAddonBundledForPackage({ packageKey: form.packageKey, addonId: id, businessUnitCode, configurationVersion: config })) return;
     setForm((current) => ({ ...current, addons: current.addons.includes(id) ? current.addons.filter((x) => x !== id) : [...current.addons, id] }));
     setQuote(null); setConfig(null); setSaved(null); setError(null); setReview(null);
   }
@@ -149,20 +158,22 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       if (!sr?.id || !opp?.id) throw new Error("This saved lead is missing its canonical service request or opportunity.");
       if (!form.beds || !form.baths) throw new Error("Bedrooms and bathrooms are required to price this residential lead.");
       if (!businessUnitCode) throw new Error("Active business unit is required before quoting.");
-      const firstReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons });
+      const firstReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, businessUnitCode });
       if (firstReview) { setReview(firstReview); return; }
       const requiredVersion = getGovernedResidentialRequiredVersion(businessUnitCode);
       const configurationVersion = await fetchPublishedGovernedResidentialConfig({ accessToken, organizationId: orgId, businessUnitId, jurisdictionId, requiredVersion });
-      const secondReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion });
+      const secondReview = getManagementReviewReason({ condition: form.condition, notes: form.notes, packageKey: form.packageKey, addons: form.addons, configurationVersion, businessUnitCode });
       if (secondReview) { setReview(secondReview); return; }
       const approvedSelections = getDefaultApprovedSelections(configurationVersion, { condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand });
       const raw = computeGovernedResidentialQuote({ configurationVersion, dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, addons: form.addons, approvedSelections });
-      if (raw?.requiresOfficeReview) { setReview(raw.reason || "This scope requires management review."); return; }
+      if (raw?.requiresOfficeReview) { setReview(raw.reason || "Requires Management Review / Custom Pricing"); return; }
       const completed = applyGovernedResidentialAddons(raw, configurationVersion, form.addons);
       completed.input = { dwellingType: form.dwellingType, beds: Number(form.beds), baths: Number(form.baths), sqft: form.sqft ? Number(form.sqft) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, businessUnitCode };
       setConfig(configurationVersion); setQuote(completed);
-    } catch (err) { setError(err?.message || "Unable to generate quote."); }
-    finally { setBusy(false); }
+    } catch (err) {
+      const message = err?.message || "Unable to generate quote.";
+      if (/matrix row not found|office review|approved selection/i.test(message)) setReview(message); else setError(message);
+    } finally { setBusy(false); }
   }
 
   async function saveDraft() {
@@ -182,18 +193,8 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       const pricingSnapshot = await createPricingSnapshot(capturePricingSnapshot({ quote, organizationId: orgId, businessUnitId, opportunityId: promoted.opportunity.id, estimateId: estimate.id, appUserId, configurationVersionId: config.id, configurationSnapshot, governedResidential: true }), accessToken);
       const quoteRecord = await createQuote(buildQuotePayload({ organizationId: orgId, businessUnitId, opportunityId: promoted.opportunity.id, estimateId: estimate.id, lifecycleStatus: "active", metadata, appUserId }), accessToken);
       const quoteVersion = await createQuoteVersion(buildQuoteVersionPayload({ organizationId: orgId, businessUnitId, quoteId: quoteRecord.id, pricingSnapshotId: pricingSnapshot.id, estimateId: estimate.id, versionNo: 1, title: packageLabel(form.packageKey), lineItemsSnapshot: [{ service: packageLabel(form.packageKey), subtotal: quote.preTaxTotal, tax: quote.taxAmount, total: quote.total, currency_code: quote.currencyCode, tax_name: quote.taxName, addons: quote.addonLines || [] }], commercialSnapshot: { customerFacingText: customerText, business_unit_code: businessUnitCode, booking_ready: bookingMissing.length === 0, booking_missing: bookingMissing }, metadata, appUserId }), accessToken);
-      setSaved({ ...promoted, estimate, pricingSnapshot, quote: quoteRecord, quoteVersion, sent: false });
+      setSaved({ ...promoted, estimate, pricingSnapshot, quote: quoteRecord, quoteVersion });
     } catch (err) { setError(err?.message || "Unable to save quote on this lead."); }
-    finally { setBusy(false); }
-  }
-
-  async function recordSent() {
-    if (busy || !saved?.quoteVersion?.id || saved.sent) return;
-    setBusy(true); setError(null);
-    try {
-      const quoteVersion = await updateQuoteVersionStatus(saved.quoteVersion.id, "sent", accessToken);
-      setSaved((current) => ({ ...current, quoteVersion, sent: true }));
-    } catch (err) { setError(err?.message || "Unable to record quote as sent."); }
     finally { setBusy(false); }
   }
 
@@ -219,11 +220,15 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         <label style={s.field}><span style={s.label}>Preferred date</span><input style={s.input} type="date" value={form.preferredDate} onChange={(e) => setField("preferredDate", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Preferred time/window</span><input style={s.input} value={form.preferredWindow} onChange={(e) => setField("preferredWindow", e.target.value)} /></label>
       </div>
-      <div style={{ marginTop: 12 }}><span style={s.label}>Add-ons</span><div style={{ ...s.grid, marginTop: 6 }}>{OFFICE_ADDON_OPTIONS.map((item) => <label key={item.id} style={{ color: "#D9E2EE", fontSize: 13 }}><input type="checkbox" checked={form.addons.includes(item.id)} onChange={() => toggleAddon(item.id)} /> {item.label}</label>)}</div></div>
+      <div style={{ marginTop: 12 }}><span style={s.label}>Add-ons</span><div style={{ ...s.grid, marginTop: 6 }}>{OFFICE_ADDON_OPTIONS.map((item) => {
+        const bundled = isAddonBundledForPackage({ packageKey: form.packageKey, addonId: item.id, businessUnitCode, configurationVersion: config });
+        return <label key={item.id} style={{ color: "#D9E2EE", fontSize: 13, ...(bundled ? s.disabled : {}) }} title={bundled ? "Included in Complete Deep Clean — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> {item.label}{bundled ? " — Included" : ""}</label>;
+      })}</div></div>
+      <div style={s.note}>Complete Deep bundled items are disabled automatically to prevent double charging.</div>
       <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Scope / access / pets / safety notes</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.notes} onChange={(e) => setField("notes", e.target.value)} /></label>
 
       {bookingMissing.length ? <div style={s.warning}><strong>Quote allowed — booking information still incomplete.</strong><ul style={s.checklist}>{bookingMissing.map((item) => <li key={item}>{item}</li>)}</ul></div> : <div style={{ ...s.note, color: "#60E7C6" }}>Booking information checklist is complete.</div>}
-      {review ? <div style={s.warning}><strong>Management review required:</strong> {review}</div> : null}
+      {review ? <div style={s.warning}><strong>{review.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {review}</div> : null}
       {error ? <div style={s.error}><strong>Unable to continue:</strong> {error}</div> : null}
       <div style={s.actions}><button type="button" style={s.primary} disabled={busy} onClick={generateQuote}>{busy ? "Working…" : "Generate Governed Quote"}</button><button type="button" style={s.secondary} disabled={busy} onClick={onClose}>Close</button></div>
 
@@ -231,7 +236,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         <div style={s.label}>Customer total · {currencyCode}</div><div style={s.money}>{formatQuoteMoney(quote.total, currencyCode)}</div>
         <div style={s.note}>{customerText}</div>
         <div style={s.actions}><button type="button" style={s.primary} disabled={busy || !!saved} onClick={saveDraft}>{saved ? "Quote Saved on Existing Lead" : "Save Quote on This Lead"}</button></div>
-        {saved ? <div style={s.note}>Reused Service Request: {saved.serviceRequest?.id}<br />Quote Version: {saved.quoteVersion?.id}<div style={s.actions}><button type="button" style={s.secondary} disabled={busy || saved.sent} onClick={recordSent}>{saved.sent ? "Quote Recorded as Sent" : "I Sent This Quote — Record Sent"}</button></div><strong>Recording sent does not mark the customer accepted or create a job.</strong></div> : null}
+        {saved ? <div style={s.note}>Reused Service Request: {saved.serviceRequest?.id}<br />Quote Version: {saved.quoteVersion?.id}<br /><strong>Next:</strong> use Quote Delivery + Customer Decision below, refresh the quote queue, then choose Send Quote by Email. ServiceOS marks the quote Sent only after Microsoft 365 accepts the delivery.</div> : null}
       </div> : null}
     </div>
   );

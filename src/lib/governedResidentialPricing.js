@@ -180,7 +180,9 @@ export function computeGovernedResidentialQuote({
   const currencyCode = String(config.currency_code ?? "").trim().toUpperCase();
   if (!/^[A-Z]{3}$/.test(currencyCode)) throw new Error("Governed residential pricing requires valid currency_code");
   const startingPrice = findMatrixPrice(config.dwelling_matrix, { dwellingType, beds, baths, packageKey: normalizedPackage });
-  if (!Number.isFinite(startingPrice)) throw new Error("Governed residential pricing matrix row not found");
+  if (!Number.isFinite(startingPrice)) {
+    return requiresOfficeReview("Requires Management Review / Custom Pricing: this property, bed/bath, and service combination is not mapped in the published residential pricing matrix.");
+  }
 
   const normalizedCondition = normalizeCondition(condition);
   let conditionMarkupPct = 0;

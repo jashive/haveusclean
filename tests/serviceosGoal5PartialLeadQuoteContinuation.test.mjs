@@ -5,6 +5,8 @@ import fs from "node:fs";
 const panel = fs.readFileSync("src/features/wave1/ServiceOSLeadIntakePanel.jsx", "utf8");
 const continuation = fs.readFileSync("src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", "utf8");
 const client = fs.readFileSync("src/lib/serviceosLeadQuoteContinuationClient.js", "utf8");
+const intakeClient = fs.readFileSync("src/lib/serviceosLeadIntakeClient.js", "utf8");
+const revenueClient = fs.readFileSync("src/lib/serviceosRevenueClient.js", "utf8");
 
 test("saved partial lead exposes explicit continuation to quote", () => {
   assert.match(panel, /Continue This Lead to Quote/);
@@ -43,9 +45,34 @@ test("existing lead promotion remains business-unit scoped and fail closed", () 
   assert.match(client, /Only open\/proposal opportunities can continue to quote/);
 });
 
-test("sent action remains explicit and does not fabricate acceptance", () => {
-  assert.match(continuation, /I Sent This Quote — Record Sent/);
-  assert.match(continuation, /does not mark the customer accepted or create a job/);
-  assert.match(continuation, /updateQuoteVersionStatus\(saved\.quoteVersion\.id, "sent"/);
-  assert.doesNotMatch(continuation, /"accepted"/);
+test("restored saved leads carry canonical business unit ids needed by the continuation guard", () => {
+  assert.match(intakeClient, /id,organization_id,business_unit_id,title,lifecycle_status/);
+  assert.match(intakeClient, /id,organization_id,business_unit_id,service_request_id,stage/);
+});
+
+test("saved lead continuation anchors to its visible canonical business unit", () => {
+  assert.match(panel, /serviceRequestBusinessUnitId/);
+  assert.match(panel, /serviceRequestBusinessUnitId !== opportunityBusinessUnitId/);
+  assert.match(panel, /visibleRecords\.find\(\(item\) => item\.id === serviceRequestBusinessUnitId\)/);
+  assert.match(panel, /primaryBusinessUnitId: canonicalLeadBusinessUnit\.id/);
+  assert.match(panel, /activeBusinessUnitCode: canonicalLeadBusinessUnit\.code/);
+});
+
+test("changing active market closes stale continuation state", () => {
+  assert.match(panel, /setContinuationLead\(null\);\s*setResult\(null\);\s*refreshRecentLeads\(\)/);
+  assert.match(panel, /\[accessToken, organizationId, businessUnitId\]/);
+});
+
+test("saved-lead quote routes through native provider delivery instead of manual sent marker", () => {
+  assert.doesNotMatch(continuation, /I Sent This Quote — Record Sent/);
+  assert.doesNotMatch(continuation, /updateQuoteVersionStatus/);
+  assert.match(continuation, /Quote Delivery \+ Customer Decision/);
+  assert.match(continuation, /Send Quote by Email/);
+  assert.match(continuation, /Microsoft 365 accepts the delivery/);
+});
+
+test("quote sent lifecycle updates do not supply client-generated sent_at", () => {
+  assert.match(revenueClient, /updateQuoteVersionStatus\(quoteVersionId, newStatus, accessToken\)/);
+  assert.doesNotMatch(revenueClient, /sent_at: new Date\(\)\.toISOString\(\)/);
+  assert.match(revenueClient, /\{ lifecycle_status: "sent" \}/);
 });
