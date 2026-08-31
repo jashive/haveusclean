@@ -24,8 +24,11 @@ test("continuation reuses canonical service request and opportunity instead of c
   assert.doesNotMatch(continuation, /createOpportunity/);
 });
 
-test("quote generation requires pricing inputs but not complete booking identity", () => {
-  assert.match(continuation, /Bedrooms and bathrooms are required to price this residential lead/);
+test("quote generation requires package-appropriate pricing inputs but not complete booking identity", () => {
+  assert.match(continuation, /Bathrooms are required to price this residential lead/);
+  assert.match(continuation, /!kitchenBathPackage && !form\.beds/);
+  assert.match(continuation, /Bedrooms are required for full-home residential matrix pricing/);
+  assert.match(continuation, /Bedrooms \(not used for Kitchen & Bath\)/);
   assert.doesNotMatch(continuation, /Customer name is required/);
   assert.doesNotMatch(continuation, /Service address and city are required/);
   assert.match(continuation, /Quote allowed — booking information still incomplete/);
