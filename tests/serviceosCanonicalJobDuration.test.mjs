@@ -86,6 +86,13 @@ test("missing exact sqft does not invent duration or crew size", () => {
   assert.equal(quote.jobHours, null);
 });
 
+test("all governed quote flows pass exact sqft into canonical labor calculation", () => {
+  const partial = fs.readFileSync(new URL("../src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", import.meta.url), "utf8");
+  const revision = fs.readFileSync(new URL("../src/features/wave1/ServiceOSQuoteRevisionPanel.jsx", import.meta.url), "utf8");
+  assert.match(partial, /getDefaultApprovedSelections\(configurationVersion, \{[^}]*sqft: form\.sqft \? Number\(form\.sqft\) : null/);
+  assert.match(revision, /getDefaultApprovedSelections\(configVersion, \{[^}]*sqft: sourceScope\.sqft \? Number\(sourceScope\.sqft\) : null/);
+});
+
 test("Wave 3 dispatch consumes canonical pricing duration and computes END", () => {
   const source = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
   assert.match(source, /pricingSnapshot\?\.labor_economics\?\.jobHours/);
