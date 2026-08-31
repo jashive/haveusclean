@@ -24,6 +24,10 @@ test('delivery lifecycle records requested sent delivered failed acknowledged wi
   assert.match(service, /delivery_status: 'sent'/);
   assert.match(service, /delivery_status: 'failed'/);
   assert.doesNotMatch(service, /delivery_status: 'delivered'/);
+  assert.match(migration, /sent worker notification requires sent_at/);
+  assert.match(migration, /delivered worker notification requires delivered_at/);
+  assert.match(migration, /failed worker notification requires failed_at/);
+  assert.match(migration, /acknowledged worker notification requires acknowledged_at/);
 });
 
 test('Schedule & Dispatch invokes governed worker notification only after work order publication and dispatch transition', () => {
@@ -36,12 +40,16 @@ test('Schedule & Dispatch invokes governed worker notification only after work o
   assert.match(notifications, /handleWorkerDispatchNotification\(req, res, bearer\(req\)\)/);
 });
 
-test('worker acknowledgment advances notification audit and remains assignment-scoped', () => {
+test('worker acknowledgment advances notification audit and cannot rewrite provider evidence', () => {
   assert.match(workspace, /acknowledgeWorkerNotificationDelivery\(selected\.id\)/);
   assert.match(workspace, /worker_notification_delivery\?worker_assignment_id=eq\./);
   assert.match(workspace, /delivery_status: "acknowledged"/);
   assert.match(migration, /worker_id = public\.current_worker_id\(organization_id\)/);
-  assert.match(migration, /delivery_status = 'acknowledged'/);
+  assert.match(migration, /worker may only acknowledge own notification delivery/);
+  assert.match(migration, /NEW\.provider_message_id IS DISTINCT FROM OLD\.provider_message_id/);
+  assert.match(migration, /NEW\.sent_at IS DISTINCT FROM OLD\.sent_at/);
+  assert.match(migration, /NEW\.metadata IS DISTINCT FROM OLD\.metadata/);
+  assert.match(migration, /invalid worker notification transition/);
 });
 
 test('email and configured SMS are supported while missing channels fail closed', () => {
@@ -51,4 +59,6 @@ test('email and configured SMS are supported while missing channels fail closed'
   assert.match(service, /TWILIO_AUTH_TOKEN/);
   assert.match(service, /TWILIO_FROM_NUMBER/);
   assert.match(service, /no configured deliverable email\/SMS channel/);
+  assert.doesNotMatch(service, /StatusCallback/);
+  assert.doesNotMatch(service, /worker-notification-status/);
 });
