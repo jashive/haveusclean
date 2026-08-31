@@ -47,6 +47,8 @@ const styles = {
 
 function packageLabel(key) { return PACKAGE_OPTIONS.find((item) => item.value === key)?.label || key; }
 function money(value) { return Math.round((Number(value || 0) + Number.EPSILON) * 100) / 100; }
+function nonNegativeMoney(value) { const n = Number(value); return money(Number.isFinite(n) ? Math.max(0, n) : 0); }
+function nonNegativeRate(value) { const n = Number(value); return Number.isFinite(n) ? Math.max(0, n) : 0; }
 
 function configurationVersionFromSnapshot(pricing) {
   const snapshot = pricing?.configuration_snapshot || {};
@@ -72,7 +74,7 @@ export function pricingPayloadFromQuote({ sourcePricing, configurationVersion, q
     tax_name: quote.taxName || sourcePricing.tax_name,
     tax_rate: Number(quote.taxRate ?? sourcePricing.tax_rate ?? 0),
     subtotal_amount: money(quote.preTaxTotal),
-    discount_amount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),
+    discount_amount: nonNegativeMoney(nonNegativeMoney(quote.discountAmt) + nonNegativeMoney(concessionAmount)),
     tax_amount: money(quote.taxAmount),
     total_amount: money(quote.total),
     calculator_version: `${quote.quoteContractVersion || sourcePricing.calculator_version || '2.1'}-revision`,
@@ -83,7 +85,7 @@ export function pricingPayloadFromQuote({ sourcePricing, configurationVersion, q
       partnerPayTotal: quote.partnerPay ?? quote.partnerPayTotal ?? null,
       partnerPayEach: quote.partnerPayEach ?? null,
       profit: quote.profit ?? null,
-      discountPct: quote.discPct ?? null,
+      discountPct: nonNegativeRate(quote.discPct ?? 0),
     },
     calculation_inputs: quote.input || sourcePricing.calculation_inputs || {},
     calculation_outputs: {
@@ -91,7 +93,7 @@ export function pricingPayloadFromQuote({ sourcePricing, configurationVersion, q
       taxAmount: money(quote.taxAmount),
       taxRate: Number(quote.taxRate ?? sourcePricing.tax_rate ?? 0),
       total: money(quote.total),
-      discountAmount: money((Number(quote.discountAmt || 0)) + Number(concessionAmount || 0)),
+      discountAmount: nonNegativeMoney(nonNegativeMoney(quote.discountAmt) + nonNegativeMoney(concessionAmount)),
       currency: quote.currencyCode || configurationVersion?.configuration?.currency_code || sourcePricing.currency_code,
     },
     raw_calculation_snapshot: {
