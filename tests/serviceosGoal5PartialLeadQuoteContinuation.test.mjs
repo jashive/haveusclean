@@ -79,3 +79,14 @@ test("quote sent lifecycle updates do not supply client-generated sent_at", () =
   assert.doesNotMatch(revenueClient, /sent_at: new Date\(\)\.toISOString\(\)/);
   assert.match(revenueClient, /\{ lifecycle_status: "sent" \}/);
 });
+
+
+test("saved lead details persist add-ons and restore them on reopen without creating a quote", () => {
+  assert.match(continuation, /addons: Array\.isArray\(scope\.addons\) \? scope\.addons : \[\]/);
+  assert.match(continuation, /Save Lead Details/);
+  assert.match(continuation, /saveExistingLeadDetails/);
+  assert.match(continuation, /addons: \[\.\.\.form\.addons\]/);
+  const detailSaver = client.slice(client.indexOf("export async function saveExistingLeadDetails"), client.indexOf("export async function promoteExistingLeadForQuote"));
+  assert.match(detailSaver, /patchOne\("service_request"/);
+  assert.doesNotMatch(detailSaver, /patchOne\("opportunity"|stage:\s*"proposal"|pricing_snapshot/);
+});

@@ -211,13 +211,20 @@ export default function ServiceOSQuoteRevisionPanel({ session, revenueContext })
       const taxRate = Number(config.tax?.rate ?? sourcePricing.tax_rate ?? 0);
       const preTaxTotal = money(requestedSubtotal);
       const taxAmount = money(preTaxTotal * taxRate);
+      const workloadSelections = getDefaultApprovedSelections(configVersion, {
+        condition: sourceScope.condition || 'light',
+        frequency: sourceScope.frequency || 'one_time',
+        sqftBand: sourceScope.sqftBand || '',
+        sqft: sourceScope.sqft ? Number(sourceScope.sqft) : null,
+      });
       const quote = {
         preTaxTotal, taxRate, taxAmount, total: money(preTaxTotal + taxAmount),
         taxName: config.tax?.label || config.tax?.name || sourcePricing.tax_name, currencyCode,
         input: { ...sourceScope, scopeMode: 'partial_home', partialAreas: partialAreas.trim(), addons },
         addonLines: [],
-        teamSize: null,
-        jobHours: null,
+        teamSize: workloadSelections.teamSize ?? null,
+        jobHours: workloadSelections.jobHours ?? null,
+        governance: { laborSource: workloadSelections.laborSource || null },
       };
       return {
         quote,
