@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";
+import { getJobHours, getTeamSize } from "../../core/pricing/sharedPricing.js";
 import {
   fetchEligibleJobHandoffs,
   fetchActiveWorkers,
@@ -152,6 +153,11 @@ function addHoursToLocalDateTime(localValue, hours) {
   return formatLocalDateTime(parsed);
 }
 
+function exactScopeSqft(scope) {
+  const value = Number(scope?.sqft ?? scope?.squareFeet ?? scope?.square_feet);
+  return Number.isFinite(value) && value > 0 ? value : null;
+}
+
 function resolveDurationHours(pricingSnapshot, scope) {
   const candidates = [
     pricingSnapshot?.labor_economics?.jobHours,
@@ -164,10 +170,11 @@ function resolveDurationHours(pricingSnapshot, scope) {
     const value = Number(candidate);
     if (Number.isFinite(value) && value > 0) return value;
   }
-  return null;
+  const sqft = exactScopeSqft(scope);
+  return sqft ? getJobHours(sqft) : null;
 }
 
-function resolveCrewSize(pricingSnapshot) {
+function resolveCrewSize(pricingSnapshot, scope) {
   const candidates = [
     pricingSnapshot?.labor_economics?.teamSize,
     pricingSnapshot?.raw_calculation_snapshot?.teamSize,
@@ -176,7 +183,8 @@ function resolveCrewSize(pricingSnapshot) {
     const value = Number(candidate);
     if (Number.isInteger(value) && value > 0) return value;
   }
-  return null;
+  const sqft = exactScopeSqft(scope);
+  return sqft ? getTeamSize(sqft) : null;
 }
 
 function pipelineStatusLabel(status) {
@@ -251,7 +259,7 @@ async function enrichHandoffForDispatch(handoff) {
   const locationLabel = location?.address_line1 ? `${city} / ${location.address_line1}` : city;
   const requestedStartLocal = resolveRequestedStart(scope?.preferredDate, scope?.preferredWindow, serviceRequest?.created_at || handoff.created_at);
   const durationHours = resolveDurationHours(pricingSnapshot, scope);
-  const crewSize = resolveCrewSize(pricingSnapshot);
+  const crewSize = resolveCrewSize(pricingSnapshot, scope);
 
   return {
     ...handoff,

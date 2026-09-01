@@ -11,7 +11,7 @@ import {
   createQuote,
   createQuoteVersion,
 } from "../../lib/serviceosRevenueClient.js";
-import { promoteExistingLeadForQuote } from "../../lib/serviceosLeadQuoteContinuationClient.js";
+import { promoteExistingLeadForQuote, saveExistingLeadDetails } from "../../lib/serviceosLeadQuoteContinuationClient.js";
 import {
   getGovernedResidentialRequiredVersion,
   fetchPublishedGovernedResidentialConfig,
@@ -105,8 +105,8 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
     customerName: text(customer.name), phone: text(customer.phone), email: text(customer.email),
     address: text(location.address), city: text(location.city), postalCode: text(location.postalCode),
     dwellingType: normalizeDwelling(scope.propertyType || scope.dwellingType), beds: numberText(scope.beds), baths: numberText(scope.baths), sqft: numberText(scope.sqft),
-    packageKey: normalizePackage(scope.cleanType || scope.packageKey), condition: "light", frequency: normalizeFrequency(scope.frequency), sqftBand: "",
-    preferredDate: text(scope.preferredDate), preferredWindow: text(scope.preferredWindow), notes: text(scope.notes), addons: [],
+    packageKey: normalizePackage(scope.cleanType || scope.packageKey), condition: text(scope.condition) || "light", frequency: normalizeFrequency(scope.frequency), sqftBand: text(scope.sqftBand),
+    preferredDate: text(scope.preferredDate), preferredWindow: text(scope.preferredWindow), notes: text(scope.notes), addons: Array.isArray(scope.addons) ? scope.addons : [],
   }));
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState(null);
@@ -182,15 +182,31 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
     } finally { setBusy(false); }
   }
 
+  function buildCurrentRequirements() {
+    return {
+      customer: { name: form.customerName.trim() || null, phone: form.phone.trim() || null, email: form.email.trim() || null },
+      location: { address: form.address.trim() || null, city: form.city.trim() || null, postalCode: form.postalCode.trim() || null, jurisdictionId },
+      scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds || 0), baths: form.baths ? Number(form.baths) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: [...form.addons], preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
+    };
+  }
+
+  async function saveLeadDetails() {
+    if (busy || !sr?.id) return;
+    setBusy(true); setError(null); setReview(null);
+    try {
+      const requirements = buildCurrentRequirements();
+      const metadata = { ...(sr.metadata || {}), source: "serviceos_partial_lead_quote_continuation", business_unit_code: businessUnitCode, saved_lead_details: true };
+      await saveExistingLeadDetails({ serviceRequest: sr, requirements, metadata, appUserId, businessUnitId, accessToken });
+      setSaved((current) => ({ ...(current || {}), leadDetailsSaved: true }));
+    } catch (err) { setError(err?.message || "Unable to save lead details."); }
+    finally { setBusy(false); }
+  }
+
   async function saveDraft() {
     if (busy || !quote || !config || saved) return;
     setBusy(true); setError(null);
     try {
-      const requirements = {
-        customer: { name: form.customerName.trim() || null, phone: form.phone.trim() || null, email: form.email.trim() || null },
-        location: { address: form.address.trim() || null, city: form.city.trim() || null, postalCode: form.postalCode.trim() || null, jurisdictionId },
-        scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds || 0), baths: Number(form.baths), packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: form.addons, preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
-      };
+      const requirements = buildCurrentRequirements();
       const metadata = { ...(sr.metadata || {}), source: "serviceos_partial_lead_quote_continuation", business_unit_code: businessUnitCode, booking_ready: bookingMissing.length === 0, booking_missing: bookingMissing };
       const title = `${form.customerName.trim() || "Saved lead"} — ${packageLabel(form.packageKey)}`;
       const promoted = await promoteExistingLeadForQuote({ serviceRequest: sr, opportunity: opp, requirements, metadata, title, summary: "Existing partial lead continued to governed residential quote", appUserId, businessUnitId, accessToken });
@@ -236,7 +252,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       {bookingMissing.length ? <div style={s.warning}><strong>Quote allowed — booking information still incomplete.</strong><ul style={s.checklist}>{bookingMissing.map((item) => <li key={item}>{item}</li>)}</ul></div> : <div style={{ ...s.note, color: "#60E7C6" }}>Booking information checklist is complete.</div>}
       {review ? <div style={s.warning}><strong>{review.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {review.replace(/^Requires Management Review \/ Custom Pricing:\s*/i, "")}</div> : null}
       {error ? <div style={s.error}><strong>Unable to continue:</strong> {error}</div> : null}
-      <div style={s.actions}><button type="button" style={s.primary} disabled={busy} onClick={generateQuote}>{busy ? "Working…" : "Generate Governed Quote"}</button><button type="button" style={s.secondary} disabled={busy} onClick={onClose}>Close</button></div>
+      <div style={s.actions}><button type="button" style={s.secondary} disabled={busy} onClick={saveLeadDetails}>Save Lead Details</button><button type="button" style={s.primary} disabled={busy} onClick={generateQuote}>{busy ? "Working…" : "Generate Governed Quote"}</button><button type="button" style={s.secondary} disabled={busy} onClick={onClose}>Close</button></div>
 
       {quote ? <div style={s.quote}>
         <div style={s.label}>Customer total · {currencyCode}</div><div style={s.money}>{formatQuoteMoney(quote.total, currencyCode)}</div>

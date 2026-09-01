@@ -117,3 +117,14 @@ test("operator UI surfaces canonical crew/duration without lifecycle clutter", (
   assert.match(revenue, /data-testid="serviceos-quote-labor-badges"/);
   assert.match(revenue, /Crew \{quote\.teamSize\}/);
 });
+
+
+test("dispatch restores legacy accepted workload from exact saved sqft without rewriting pricing", () => {
+  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+  assert.match(operations, /function exactScopeSqft\(scope\)/);
+  assert.match(operations, /return sqft \? getJobHours\(sqft\) : null/);
+  assert.match(operations, /return sqft \? getTeamSize\(sqft\) : null/);
+  assert.match(operations, /resolveCrewSize\(pricingSnapshot, scope\)/);
+  const laborResolvers = operations.slice(operations.indexOf("function exactScopeSqft"), operations.indexOf("function pipelineStatusLabel"));
+  assert.doesNotMatch(laborResolvers, /authenticatedRestFetch|PATCH|pricing_snapshot/);
+});

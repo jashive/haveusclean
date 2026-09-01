@@ -23,6 +23,20 @@ async function patchOne(table, id, patch, accessToken) {
   return row;
 }
 
+export async function saveExistingLeadDetails({ serviceRequest, requirements, metadata, appUserId, businessUnitId, accessToken }) {
+  assertId(serviceRequest?.id, "Service request");
+  if (serviceRequest.business_unit_id !== businessUnitId) throw new Error("Selected lead does not belong to the active business unit.");
+  if (!["intake", "qualified"].includes(serviceRequest.lifecycle_status)) {
+    throw new Error(`Only intake/qualified leads can save lead details; current status is ${serviceRequest.lifecycle_status || "unknown"}.`);
+  }
+  return patchOne("service_request", serviceRequest.id, {
+    requirements,
+    description: requirements?.scope?.notes || null,
+    metadata: { ...(serviceRequest.metadata || {}), ...(metadata || {}), partial_intake: true },
+    updated_by_app_user_id: appUserId || null,
+  }, accessToken);
+}
+
 export async function promoteExistingLeadForQuote({
   serviceRequest,
   opportunity,

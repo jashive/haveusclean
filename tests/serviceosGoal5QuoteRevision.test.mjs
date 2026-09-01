@@ -129,3 +129,10 @@ test('revised quote acceptance validates parent quote to opportunity, not stale 
   assert.match(acceptanceLineageHotfix,/response_version IS DISTINCT FROM NEW\.quote_version_id/);
   assert.match(acceptanceLineageHotfix,/response_type_value <> 'accepted'/);
 });
+
+test('partial-home revisions preserve PR #73 workload sizing from exact sqft in both markets', () => {
+  assert.match(panel,/const workloadSelections = getDefaultApprovedSelections\(configVersion,[\s\S]*sqft: sourceScope\.sqft/);
+  assert.match(panel,/teamSize: workloadSelections\.teamSize \?\? null/);
+  assert.match(panel,/jobHours: workloadSelections\.jobHours \?\? null/);
+  assert.doesNotMatch(panel,/teamSize: null,\s*jobHours: null/);
+});
