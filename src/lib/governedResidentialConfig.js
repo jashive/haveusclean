@@ -1,4 +1,4 @@
-import { authenticatedRestFetch } from "./serviceosAuthClient.js";
+import { authenticatedRestFetchWithRefresh } from "./serviceosAuthClient.js";
 
 export const GOVERNED_RESIDENTIAL_CONFIG_TYPE = "residential_pricing";
 // Legacy/default contract retained for isolated callers. Live market-aware quoting must
@@ -55,7 +55,7 @@ export async function fetchPublishedGovernedResidentialConfig({
   businessUnitId,
   jurisdictionId,
   requiredVersion = GOVERNED_RESIDENTIAL_REQUIRED_VERSION,
-  fetcher = authenticatedRestFetch,
+  fetcher = null,
 }) {
   if (!accessToken) throw new Error("Governed residential config lookup failed: accessToken required");
   if (!organizationId) throw new Error("Governed residential config lookup failed: organizationId required");
@@ -86,7 +86,9 @@ export async function fetchPublishedGovernedResidentialConfig({
     `&version=eq.${encode(requiredVersion)}` +
     "&limit=2";
 
-  const res = await fetcher(path, accessToken);
+  const res = fetcher
+    ? await fetcher(path, accessToken)
+    : await authenticatedRestFetchWithRefresh(path);
   if (!res || !res.ok) {
     const text = await res?.text?.().catch(() => "");
     throw new Error(`Governed residential config lookup failed: ${res?.status ?? "network error"} ${text}`);
