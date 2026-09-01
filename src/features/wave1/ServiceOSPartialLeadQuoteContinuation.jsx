@@ -234,7 +234,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
       <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Scope / access / pets / safety notes</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.notes} onChange={(e) => setField("notes", e.target.value)} /></label>
 
       {bookingMissing.length ? <div style={s.warning}><strong>Quote allowed — booking information still incomplete.</strong><ul style={s.checklist}>{bookingMissing.map((item) => <li key={item}>{item}</li>)}</ul></div> : <div style={{ ...s.note, color: "#60E7C6" }}>Booking information checklist is complete.</div>}
-      {review ? <div style={s.warning}><strong>{review.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {review}</div> : null}
+      {review ? <div style={s.warning}><strong>{review.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {review.replace(/^Requires Management Review \/ Custom Pricing:\s*/i, "")}</div> : null}
       {error ? <div style={s.error}><strong>Unable to continue:</strong> {error}</div> : null}
       <div style={s.actions}><button type="button" style={s.primary} disabled={busy} onClick={generateQuote}>{busy ? "Working…" : "Generate Governed Quote"}</button><button type="button" style={s.secondary} disabled={busy} onClick={onClose}>Close</button></div>
 
