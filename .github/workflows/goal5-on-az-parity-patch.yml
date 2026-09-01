@@ -65,14 +65,31 @@ jobs:
           s = s.replace(old, new, 1)
           p.write_text(s)
 
+          p = Path('src/features/wave3/ServiceOSOperationsWorkspace.jsx')
+          s = p.read_text()
+          import_anchor = 'import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";\n'
+          if import_anchor not in s: raise SystemExit('operations import anchor not found')
+          s = s.replace(import_anchor, import_anchor + 'import { getJobHours, getTeamSize } from "../../core/pricing/sharedPricing.js";\n', 1)
+          old_duration = '''function resolveDurationHours(pricingSnapshot, scope) {\n  const candidates = [\n    pricingSnapshot?.labor_economics?.jobHours,\n    pricingSnapshot?.calculation_outputs?.jobHours,\n    pricingSnapshot?.raw_calculation_snapshot?.jobHours,\n    scope?.estimatedDurationHours,\n    scope?.estimated_duration_hours,\n  ];\n  for (const candidate of candidates) {\n    const value = Number(candidate);\n    if (Number.isFinite(value) && value > 0) return value;\n  }\n  return null;\n}\n\nfunction resolveCrewSize(pricingSnapshot) {\n  const candidates = [\n    pricingSnapshot?.labor_economics?.teamSize,\n    pricingSnapshot?.raw_calculation_snapshot?.teamSize,\n  ];\n  for (const candidate of candidates) {\n    const value = Number(candidate);\n    if (Number.isInteger(value) && value > 0) return value;\n  }\n  return null;\n}'''
+          new_duration = '''function exactScopeSqft(scope) {\n  const value = Number(scope?.sqft ?? scope?.squareFeet ?? scope?.square_feet);\n  return Number.isFinite(value) && value > 0 ? value : null;\n}\n\nfunction resolveDurationHours(pricingSnapshot, scope) {\n  const candidates = [\n    pricingSnapshot?.labor_economics?.jobHours,\n    pricingSnapshot?.calculation_outputs?.jobHours,\n    pricingSnapshot?.raw_calculation_snapshot?.jobHours,\n    scope?.estimatedDurationHours,\n    scope?.estimated_duration_hours,\n  ];\n  for (const candidate of candidates) {\n    const value = Number(candidate);\n    if (Number.isFinite(value) && value > 0) return value;\n  }\n  const sqft = exactScopeSqft(scope);\n  return sqft ? getJobHours(sqft) : null;\n}\n\nfunction resolveCrewSize(pricingSnapshot, scope) {\n  const candidates = [\n    pricingSnapshot?.labor_economics?.teamSize,\n    pricingSnapshot?.raw_calculation_snapshot?.teamSize,\n  ];\n  for (const candidate of candidates) {\n    const value = Number(candidate);\n    if (Number.isInteger(value) && value > 0) return value;\n  }\n  const sqft = exactScopeSqft(scope);\n  return sqft ? getTeamSize(sqft) : null;\n}'''
+          if old_duration not in s: raise SystemExit('operations labor resolver anchor not found')
+          s = s.replace(old_duration, new_duration, 1)
+          s = s.replace('  const crewSize = resolveCrewSize(pricingSnapshot);', '  const crewSize = resolveCrewSize(pricingSnapshot, scope);', 1)
+          p.write_text(s)
+
           p = Path('tests/serviceosGoal5PartialLeadQuoteContinuation.test.mjs')
           s = p.read_text()
-          s += '''\n\ntest("saved lead details persist add-ons and restore them on reopen without creating a quote", () => {\n  assert.match(continuation, /addons: Array\.isArray\(scope\.addons\) \? scope\.addons : \[\]/);\n  assert.match(continuation, /Save Lead Details/);\n  assert.match(continuation, /saveExistingLeadDetails/);\n  assert.match(continuation, /addons: \[\.\.\.form\.addons\]/);\n  assert.match(client, /export async function saveExistingLeadDetails/);\n  assert.match(client, /Only intake\/qualified leads can save lead details/);\n  assert.doesNotMatch(client, /saveExistingLeadDetails[\\s\\S]*stage: "proposal"/);\n});\n'''
+          s += '''\n\ntest("saved lead details persist add-ons and restore them on reopen without creating a quote", () => {\n  assert.match(continuation, /addons: Array\.isArray\(scope\.addons\) \? scope\.addons : \[\]/);\n  assert.match(continuation, /Save Lead Details/);\n  assert.match(continuation, /saveExistingLeadDetails/);\n  assert.match(continuation, /addons: \[\.\.\.form\.addons\]/);\n  assert.match(client, /export async function saveExistingLeadDetails/);\n  assert.match(client, /Only intake\/qualified leads can save lead details/);\n  const detailSaver = client.slice(client.indexOf("export async function saveExistingLeadDetails"), client.indexOf("export async function promoteExistingLeadForQuote"));\n  assert.match(detailSaver, /patchOne\("service_request"/);\n  assert.doesNotMatch(detailSaver, /patchOne\("opportunity"|stage:\s*"proposal"|createQuote|pricing_snapshot/);\n});\n'''
           p.write_text(s)
 
           p = Path('tests/serviceosGoal5QuoteRevision.test.mjs')
           s = p.read_text()
           s += '''\n\ntest('partial-home revisions preserve PR #73 workload sizing from exact sqft in both markets', () => {\n  assert.match(panel,/const workloadSelections = getDefaultApprovedSelections\(configVersion,[\\s\\S]*sqft: sourceScope\.sqft/);\n  assert.match(panel,/teamSize: workloadSelections\.teamSize \?\? null/);\n  assert.match(panel,/jobHours: workloadSelections\.jobHours \?\? null/);\n  assert.doesNotMatch(panel,/teamSize: null,\\s*jobHours: null/);\n});\n'''
+          p.write_text(s)
+
+          p = Path('tests/serviceosCanonicalJobDuration.test.mjs')
+          s = p.read_text()
+          s += '''\n\ntest("dispatch restores legacy accepted workload from exact saved sqft without rewriting pricing", () => {\n  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");\n  assert.match(operations, /function exactScopeSqft\(scope\)/);\n  assert.match(operations, /return sqft \? getJobHours\(sqft\) : null/);\n  assert.match(operations, /return sqft \? getTeamSize\(sqft\) : null/);\n  assert.match(operations, /resolveCrewSize\(pricingSnapshot, scope\)/);\n  assert.doesNotMatch(operations, /PATCH[\\s\\S]*pricing_snapshot|update[\\s\\S]*pricing_snapshot/i);\n});\n'''
           p.write_text(s)
           PY
       - name: Install dependencies
@@ -86,6 +103,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx src/lib/serviceosLeadQuoteContinuationClient.js src/features/wave1/ServiceOSQuoteRevisionPanel.jsx tests/serviceosGoal5PartialLeadQuoteContinuation.test.mjs tests/serviceosGoal5QuoteRevision.test.mjs
+          git add src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx src/lib/serviceosLeadQuoteContinuationClient.js src/features/wave1/ServiceOSQuoteRevisionPanel.jsx src/features/wave3/ServiceOSOperationsWorkspace.jsx tests/serviceosGoal5PartialLeadQuoteContinuation.test.mjs tests/serviceosGoal5QuoteRevision.test.mjs tests/serviceosCanonicalJobDuration.test.mjs
           git commit -m "Restore ON AZ workload and saved lead parity"
           git push origin HEAD:fix/goal5-on-az-operational-parity
