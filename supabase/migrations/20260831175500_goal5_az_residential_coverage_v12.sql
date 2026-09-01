@@ -39,9 +39,9 @@ anchors(dwelling_key,beds,baths,essential_refresh,signature_initial_reset,comple
     ('semi_detached_detached',4,3.0,325,420,510,425),
     ('semi_detached_detached',5,4.0,400,500,600,500)
 ),
-standard_combos as (
+standard_combos(dwelling_key,beds,baths) as (
   -- Apartment / condo: studio plus 1-4 bedroom layouts with half-bath coverage.
-  select 'apartments_condos'::text as dwelling_key, 0::int as beds, b::numeric as baths
+  select 'apartments_condos'::text, 0::int, b::numeric
   from generate_series(1.0::numeric,1.5::numeric,0.5::numeric) b
   union all
   select 'apartments_condos', bed, bath
