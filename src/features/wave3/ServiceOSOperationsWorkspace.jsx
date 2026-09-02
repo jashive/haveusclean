@@ -11,9 +11,6 @@ import {
   createScheduleWindow,
   createWorkerAssignment,
   createWorkOrder,
-  createWorkOrderEvent,
-  createCompletionEvidence,
-  createChecklistResult,
   updateOperationalJobStatus,
   updateScheduleWindowStatus,
   updateWorkerAssignmentStatus,
@@ -24,9 +21,6 @@ import {
   buildScheduleWindowPayload,
   buildWorkerAssignmentPayload,
   buildWorkOrderPayload,
-  buildWorkOrderEventPayload,
-  buildCompletionEvidencePayload,
-  buildChecklistResultPayload,
 } from "../../lib/serviceosOperationsUtils.js";
 
 const styles = {
@@ -53,12 +47,27 @@ const styles = {
   laborBadge: { display: "inline-flex", alignItems: "center", padding: "3px 7px", borderRadius: 999, border: "1px solid #34465F", color: "#B8C7D9", fontSize: 11, fontWeight: 750 },
   scheduleCard: { marginTop: 12, padding: "10px 12px", borderRadius: 9, border: "1px solid #2D4551", background: "#102329", display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" },
   autoTag: { marginLeft: 6, padding: "2px 6px", borderRadius: 999, background: "#173A33", color: "#60E7C6", fontSize: 9, fontWeight: 900, letterSpacing: ".04em" },
+  detailCard: { marginTop: 14, padding: 14, borderRadius: 10, border: "1px solid #31425A", background: "#101827" },
+  detailRow: { display: "grid", gridTemplateColumns: "minmax(110px,.5fr) minmax(180px,1.5fr)", gap: 10, padding: "5px 0", alignItems: "start" },
 };
 
 async function getJson(path) {
   const res = await authenticatedRestFetchWithRefresh(path);
   if (!res?.ok) throw new Error(`Operations read failed: HTTP ${res?.status ?? "network"} ${await res?.text().catch(() => "")}`);
   return res.json();
+}
+
+async function postJson(path, payload, fallback) {
+  const res = await authenticatedRestFetchWithRefresh(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const text = await res?.text().catch(() => "");
+  let data = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = text; }
+  if (!res?.ok) throw new Error(data?.message || data?.error || data?.hint || `${fallback}: HTTP ${res?.status ?? "network"}`);
+  return data;
 }
 
 async function postWorkerDispatchNotification(assignmentId, workOrderId) {
@@ -99,6 +108,10 @@ function handoffIdSnippet(id) {
 
 function firstRow(rows) {
   return Array.isArray(rows) ? rows[0] ?? null : rows ?? null;
+}
+
+function humanize(value) {
+  return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function pad2(value) {
@@ -357,7 +370,7 @@ function OfficeOperations({ revenueContext }) {
     finally { setBusy(false); }
   }, [handoffId, workerId, applyScheduleSuggestion]);
 
-  useEffect(() => { load(); }, []); // intentional initial pipeline load
+  useEffect(() => { load(); }, []);
 
   const selectHandoff = useCallback((id) => {
     setHandoffId(id);
@@ -487,6 +500,7 @@ function OfficeOperations({ revenueContext }) {
 function WorkerOperations({ revenueContext }) {
   const [worker, setWorker] = useState(null);
   const [assignments, setAssignments] = useState([]);
+  const [contexts, setContexts] = useState({});
   const [selectedId, setSelectedId] = useState("");
   const [note, setNote] = useState("");
   const [busy, setBusy] = useState(false);
@@ -495,90 +509,114 @@ function WorkerOperations({ revenueContext }) {
   const appUserId = revenueContext?.appUserId ?? null;
 
   const selected = useMemo(()=>assignments.find(a=>a.id===selectedId) ?? null,[assignments,selectedId]);
+  const context = selectedId ? contexts[selectedId] ?? null : null;
+  const scope = context?.scope || {};
+  const addons = Array.isArray(scope?.addons) ? scope.addons : [];
+  const completionLocked = context?.operational_status === "qa_pending" || selected?.assignment_status === "completed";
 
   const load = useCallback(async () => {
     if (!appUserId) return;
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError("");
     try {
       const rows = await getJson(`worker?app_user_id=eq.${encodeURIComponent(appUserId)}&status=eq.active&limit=1`);
       const w = Array.isArray(rows) ? rows[0] : null;
       if (!w) throw new Error("No active canonical worker profile is linked to this user.");
       setWorker(w);
-      const a = await getJson(`worker_assignment?worker_id=eq.${encodeURIComponent(w.id)}&assignment_status=in.(assigned,acknowledged)&order=created_at.desc&limit=20`);
-      setAssignments(Array.isArray(a) ? a : []);
-      if (!selectedId && a?.[0]?.id) setSelectedId(a[0].id);
-      setMessage(`Loaded ${a?.length ?? 0} active assignment(s).`);
+      const a = await getJson(`worker_assignment?worker_id=eq.${encodeURIComponent(w.id)}&assignment_status=in.(assigned,acknowledged,completed)&order=created_at.desc&limit=20`);
+      const nextAssignments = Array.isArray(a) ? a : [];
+      const nextContexts = {};
+      await Promise.all(nextAssignments.map(async (assignment) => {
+        try {
+          const raw = await postJson("rpc/worker_get_assignment_context", { p_worker_assignment_id: assignment.id }, "Unable to load worker job details");
+          nextContexts[assignment.id] = Array.isArray(raw) ? raw[0] : raw;
+        } catch (contextError) {
+          nextContexts[assignment.id] = { assignment_id: assignment.id, operational_job_id: assignment.operational_job_id, context_error: contextError?.message || String(contextError) };
+        }
+      }));
+      setAssignments(nextAssignments);
+      setContexts(nextContexts);
+      const nextSelected = selectedId && nextAssignments.some((assignment) => assignment.id === selectedId)
+        ? selectedId
+        : nextAssignments?.[0]?.id || "";
+      setSelectedId(nextSelected);
+      if (!message) setMessage(`Loaded ${nextAssignments.length} assignment(s).`);
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [appUserId, selectedId]);
+  }, [appUserId, selectedId, message]);
 
-  useEffect(()=>{ load(); }, []); // intentional first-load only
-
-  async function resolveWork() {
-    if (!selected || !worker) throw new Error("Select an assignment first.");
-    const jobs = await getJson(`operational_job?id=eq.${encodeURIComponent(selected.operational_job_id)}&limit=1`);
-    const job = jobs?.[0];
-    if (!job) throw new Error("Assigned operational job is unavailable.");
-    const orders = await getJson(`work_order?operational_job_id=eq.${encodeURIComponent(job.id)}&limit=1`);
-    const workOrder = orders?.[0];
-    if (!workOrder) throw new Error("Assigned work order is unavailable.");
-    return { job, workOrder };
-  }
+  useEffect(()=>{ load(); }, []);
 
   const acknowledge = async () => {
-    setBusy(true); setError(""); setMessage("");
+    if (!selected || selected.assignment_status !== "assigned") return;
+    setBusy(true); setError("");
     try {
       await updateWorkerAssignmentStatus(selected.id, "acknowledged", null, appUserId);
-      try {
-        await acknowledgeWorkerNotificationDelivery(selected.id);
-        setMessage("Assignment acknowledged. Worker notification audit is acknowledged.");
-      } catch (auditError) {
-        setMessage(`Assignment acknowledged. Notification audit sync needs review: ${auditError?.message || String(auditError)}`);
-      }
+      try { await acknowledgeWorkerNotificationDelivery(selected.id); } catch {}
       await load();
-    }
-    catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
+      setMessage("Assignment acknowledged. Review the job details below, then start work when you arrive.");
+    } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
   };
 
   const startWork = async () => {
-    setBusy(true); setError(""); setMessage("");
+    if (!selected) return;
+    setBusy(true); setError("");
     try {
-      const { job, workOrder } = await resolveWork();
-      if (selected.assignment_status !== "acknowledged") throw new Error("Acknowledge the assignment before starting work.");
-      await createWorkOrderEvent(buildWorkOrderEventPayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,workerAssignmentId:selected.id,eventType:"arrived",actorAppUserId:appUserId,actorWorkerId:worker.id,metadata:{source:"wave3_production_workspace"}}));
-      await createWorkOrderEvent(buildWorkOrderEventPayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,workerAssignmentId:selected.id,eventType:"work_started",actorAppUserId:appUserId,actorWorkerId:worker.id,metadata:{source:"wave3_production_workspace"}}));
-      await updateWorkOrderStatus(workOrder.id,"in_progress",null,appUserId);
-      await updateOperationalJobStatus(job.id,"in_progress",null,appUserId);
-      setMessage("Work started. Operations is now in progress.");
+      await postJson("rpc/worker_start_assigned_job", { p_worker_assignment_id: selected.id }, "Unable to start assigned work");
+      await load();
+      setMessage("Work started successfully. Job status is IN PROGRESS.");
     } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
   };
 
   const completeWork = async () => {
+    if (!selected) return;
     if (!note.trim()) { setError("Enter a completion note before submitting to QA."); return; }
-    setBusy(true); setError(""); setMessage("");
+    setBusy(true); setError("");
     try {
-      const { job, workOrder } = await resolveWork();
-      await createCompletionEvidence(buildCompletionEvidencePayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,workerAssignmentId:selected.id,evidenceType:"note",evidencePayload:{note:note.trim()},capturedAt:new Date().toISOString(),capturedByWorkerId:worker.id,capturedByAppUserId:appUserId,metadata:{source:"wave3_production_workspace"}}));
-      await createChecklistResult(buildChecklistResultPayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,checklistItemKey:"worker_completion_confirmation",checklistItemLabel:"Worker completion confirmation",resultStatus:"pass",resultPayload:{note:note.trim()},completedByWorkerId:worker.id,completedByAppUserId:appUserId,completedAt:new Date().toISOString(),metadata:{source:"wave3_production_workspace"}}));
-      await createWorkOrderEvent(buildWorkOrderEventPayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,workerAssignmentId:selected.id,eventType:"work_completed",actorAppUserId:appUserId,actorWorkerId:worker.id,metadata:{source:"wave3_production_workspace"}}));
-      await createWorkOrderEvent(buildWorkOrderEventPayload({organizationId:job.organization_id,businessUnitId:job.business_unit_id,operationalJobId:job.id,workOrderId:workOrder.id,workerAssignmentId:selected.id,eventType:"completion_submitted",actorAppUserId:appUserId,actorWorkerId:worker.id,metadata:{source:"wave3_production_workspace"}}));
-      await updateWorkOrderStatus(workOrder.id,"service_complete",null,appUserId);
-      await updateOperationalJobStatus(job.id,"service_complete",null,appUserId);
-      await updateOperationalJobStatus(job.id,"qa_pending",null,appUserId);
-      setMessage("Service completion submitted. Wave 3 is complete for this job; status is QA PENDING. Wave 4 must perform QA.");
-      setNote(""); await load();
+      await postJson("rpc/worker_submit_completion_to_qa", {
+        p_worker_assignment_id: selected.id,
+        p_completion_note: note.trim(),
+      }, "Unable to submit completion to QA");
+      setNote("");
+      await load();
+      setMessage("Submitted to QA successfully. Your work is complete; QA review is now pending.");
     } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
+  };
+
+  const assignmentLabel = (assignment) => {
+    const c = contexts[assignment.id];
+    if (!c) return `Assignment ${handoffIdSnippet(assignment.id)} · ${humanize(assignment.assignment_status)}`;
+    return `${c.customer_name || "Customer"} · ${c.service_title || "Cleaning service"} · ${humanize(assignment.assignment_status)}`;
   };
 
   return <section style={styles.card} data-wave3-worker-workspace="true">
     <h2 style={styles.title}>Wave 3 Operations · Worker Execution</h2>
-    <p style={styles.note}>Worker actions are limited to assigned jobs. Completion stops at <strong>QA PENDING</strong>; this workspace cannot create, pass, fail, or waive QA inspections.</p>
-    <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>Refresh assignments</button></div>
-    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Assignment</span><select style={styles.input} value={selectedId} onChange={e=>setSelectedId(e.target.value)}><option value="">Select…</option>{assignments.map(a=><option key={a.id} value={a.id}>{a.id} · {a.assignment_status}</option>)}</select></label>
-    {selected ? <div style={{...styles.mono,marginTop:8}}>Operational job: {selected.operational_job_id}</div> : null}
-    <div style={styles.row}><button style={styles.secondary} onClick={acknowledge} disabled={busy||!selected}>Acknowledge</button><button style={styles.button} onClick={startWork} disabled={busy||!selected}>Start Work</button></div>
-    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Completion note</span><textarea style={{...styles.input,minHeight:90}} value={note} onChange={e=>setNote(e.target.value)} placeholder="Describe completed service and evidence." /></label>
-    <div style={styles.row}><button style={styles.button} onClick={completeWork} disabled={busy||!selected}>Submit Completion to QA</button></div>
+    <p style={styles.note}>Your view is limited to your assigned work. Completion stops at <strong>QA PENDING</strong>; workers cannot approve, fail, or waive QA.</p>
+    <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh assignments"}</button></div>
+    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Assigned job</span><select style={styles.input} value={selectedId} onChange={e=>{setSelectedId(e.target.value);setMessage("");setError("");}}><option value="">Select…</option>{assignments.map(a=><option key={a.id} value={a.id}>{assignmentLabel(a)}</option>)}</select></label>
+
+    {context ? <div style={styles.detailCard} data-worker-job-details="true">
+      <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
+        <div><strong style={{fontSize:17}}>{context.customer_name || "Customer"}</strong><div style={styles.note}>{context.service_title || "Cleaning service"}</div></div>
+        <span style={{...styles.badge,...(context.operational_status === "qa_pending" ? styles.badgeCompleted : styles.badgeDispatched)}}>{humanize(context.operational_status)}</span>
+      </div>
+      <div style={styles.detailRow}><span style={styles.label}>Address</span><span>{[context.address_line1, context.city, context.subdivision].filter(Boolean).join(", ") || "Address unavailable"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Schedule</span><span>{context.scheduled_start ? `${context.scheduled_start} → ${context.scheduled_end || "end pending"} (${context.timezone || "local time"})` : "Schedule unavailable"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Package</span><span>{humanize(scope.packageKey || context.checklist?.package || context.service_title)}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Property</span><span>{[scope.dwellingType, scope.beds ? `${scope.beds} bed` : null, scope.baths ? `${scope.baths} bath` : null, scope.sqft ? `${scope.sqft} sqft` : null].filter(Boolean).join(" · ") || "Scope details unavailable"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Condition</span><span>{humanize(scope.condition || "not specified")}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Add-ons</span><span>{addons.length ? addons.map(humanize).join(", ") : "None"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Work order</span><span style={styles.mono}>{handoffIdSnippet(context.work_order_id)} · {humanize(context.work_order_status)}</span></div>
+      {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
+    </div> : null}
+
+    <div style={styles.row}>
+      <button style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>
+      <button style={styles.button} onClick={startWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="dispatched"}>Start Work</button>
+    </div>
+    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Completion note</span><textarea style={{...styles.input,minHeight:90}} value={note} onChange={e=>setNote(e.target.value)} disabled={completionLocked} placeholder={completionLocked ? "Completion submitted to QA." : "Describe completed service and evidence."} /></label>
+    <div style={styles.row}><button style={styles.button} onClick={completeWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="in_progress"}>Submit Completion to QA</button></div>
+    {completionLocked ? <div style={styles.ok}>Submitted to QA. No further worker action is required unless the office or QA team returns the job for correction.</div> : null}
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
   </section>;
 }

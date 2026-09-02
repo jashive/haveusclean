@@ -4,10 +4,12 @@ import fs from "node:fs";
 
 const workspace = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx", "utf8");
 const shell = fs.readFileSync("src/features/wave1/ServiceOSWave1Workspace.jsx", "utf8");
+const workerMigration = fs.readFileSync("supabase/migrations/20260902203500_wave3_worker_execution_governed_transitions.sql", "utf8");
 
-test("Wave 3 production workspace stops at qa_pending and does not perform QA", () => {
-  assert.match(workspace, /updateOperationalJobStatus\(job\.id,"qa_pending"/);
-  assert.match(workspace, /Wave 4 must perform QA/);
+test("Wave 3 worker completion stops at qa_pending and does not perform QA", () => {
+  assert.match(workspace, /rpc\/worker_submit_completion_to_qa/);
+  assert.match(workspace, /Submitted to QA successfully/);
+  assert.match(workerMigration, /set operational_status = 'qa_pending'/);
   assert.doesNotMatch(workspace, /createQaInspection/);
   assert.doesNotMatch(workspace, /updateQaInspectionStatus/);
   assert.doesNotMatch(workspace, /qa_passed/);
@@ -95,4 +97,15 @@ test("Schedule timezone follows accepted market/location context", () => {
   assert.match(workspace, /America\/Phoenix/);
   assert.match(workspace, /America\/Toronto/);
   assert.match(workspace, /setTimezone\(handoff\.suggested_timezone/);
+});
+
+test("Worker view renders safe human-readable assignment context instead of raw UUID-only workflow", () => {
+  assert.match(workspace, /rpc\/worker_get_assignment_context/);
+  assert.match(workspace, /customer_name/);
+  assert.match(workspace, /service_title/);
+  assert.match(workspace, /Address/);
+  assert.match(workspace, /Package/);
+  assert.match(workspace, /Add-ons/);
+  assert.match(workspace, /Instructions/);
+  assert.match(workspace, /Submitted to QA\. No further worker action is required/);
 });
