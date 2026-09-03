@@ -96,8 +96,8 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
       const invoiceRows = await fetchMany(
         `invoice_request?select=id,operational_job_id,request_status,currency_code,total_amount&operational_job_id=in.${encodeURIComponent(toInFilter(jobs.map((job) => job.id)))}&request_status=neq.cancelled`
       );
-      const invoicedJobIds = new Set(invoiceRows.map((row) => row.operational_job_id));
-      setBillingQueue(jobs.filter((job) => !invoicedJobIds.has(job.id)));
+      const invoiceByJobId = new Map(invoiceRows.map((row) => [row.operational_job_id, row]));
+      setBillingQueue(jobs.map((job) => ({ ...job, invoiceRequest: invoiceByJobId.get(job.id) ?? null })));
     } catch (e) {
       setBillingQueue([]);
       setError(e instanceof Error ? e.message : String(e));
@@ -108,7 +108,6 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
 
   useEffect(() => {
     refreshBillingQueue();
-    // A market/business-unit change must refresh the Finance queue instead of reusing stale rows.
   }, [financeAuthorized, activeBusinessUnitId]);
 
   if (!financeAuthorized) return null;
@@ -127,15 +126,9 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
       const workOrder = await fetchOne(`work_order?operational_job_id=eq.${encodeURIComponent(id)}&limit=1`);
       const handoff = await fetchOne(`operational_handoff?operational_job_id=eq.${encodeURIComponent(id)}&limit=1`);
       const correctiveActions = await fetchMany(`corrective_action?operational_job_id=eq.${encodeURIComponent(id)}&order=created_at.asc`);
-      const pricingSnapshot = job.pricing_snapshot_id
-        ? await fetchOne(`pricing_snapshot?id=eq.${encodeURIComponent(job.pricing_snapshot_id)}&limit=1`)
-        : null;
-      const quoteVersion = job.quote_version_id
-        ? await fetchOne(`quote_version?id=eq.${encodeURIComponent(job.quote_version_id)}&limit=1`)
-        : null;
-      const conversionRecord = job.conversion_record_id
-        ? await fetchOne(`conversion_record?id=eq.${encodeURIComponent(job.conversion_record_id)}&limit=1`)
-        : null;
+      const pricingSnapshot = job.pricing_snapshot_id ? await fetchOne(`pricing_snapshot?id=eq.${encodeURIComponent(job.pricing_snapshot_id)}&limit=1`) : null;
+      const quoteVersion = job.quote_version_id ? await fetchOne(`quote_version?id=eq.${encodeURIComponent(job.quote_version_id)}&limit=1`) : null;
+      const conversionRecord = job.conversion_record_id ? await fetchOne(`conversion_record?id=eq.${encodeURIComponent(job.conversion_record_id)}&limit=1`) : null;
       setCaseData({ job, workOrder, handoff, correctiveActions, pricingSnapshot, quoteVersion, conversionRecord });
     } catch (e) {
       setCaseData(null);
@@ -151,11 +144,7 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
     setError("");
     try {
       const result = await assessBillingReadiness(
-        {
-          organizationId: caseData.job.organization_id,
-          businessUnitId: caseData.job.business_unit_id,
-          jurisdictionId: caseData.job.jurisdiction_id ?? null,
-        },
+        { organizationId: caseData.job.organization_id, businessUnitId: caseData.job.business_unit_id, jurisdictionId: caseData.job.jurisdiction_id ?? null },
         caseData.job,
         caseData.workOrder,
         caseData.handoff,
@@ -176,11 +165,7 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
     setError("");
     try {
       const result = await createAndFreezeInvoiceRequest(
-        {
-          organizationId: gate.organization_id,
-          businessUnitId: gate.business_unit_id,
-          jurisdictionId: gate.jurisdiction_id ?? null,
-        },
+        { organizationId: gate.organization_id, businessUnitId: gate.business_unit_id, jurisdictionId: gate.jurisdiction_id ?? null },
         gate,
         caseData.pricingSnapshot,
         caseData.quoteVersion,
@@ -199,17 +184,21 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
   return (
     <section style={styles.card} data-serviceos-finance-workspace="true" data-active-business-unit={activeBusinessUnitCode}>
       <h2 style={styles.title}>Wave 5 Finance</h2>
-      <p style={styles.text}>Finance-only controlled workspace. QA-passed jobs automatically enter the active market Billing Queue until an invoice request exists. QuickBooks send, payment creation, and contractor payout execution are not available here.</p>
+      <p style={styles.text}>Finance-only controlled workspace. QA-passed jobs automatically enter the active market Billing Queue and remain visible while their invoice is pending. QuickBooks send, payment creation, and contractor payout execution are not available here.</p>
 
       <section style={{ ...styles.stat, marginTop: 14 }} aria-label="Billing Queue / Pending Invoices">
         <div style={styles.label}>Billing Queue / Pending Invoices · {activeBusinessUnitCode}</div>
         <div style={styles.queue} data-testid="wave5-billing-queue">
           {queueBusy ? <div style={styles.queueMeta}>Refreshing QA-passed jobs…</div> : null}
-          {!queueBusy && billingQueue.length === 0 ? <div style={styles.queueMeta}>No uninvoiced QA-passed jobs in this business unit.</div> : null}
+          {!queueBusy && billingQueue.length === 0 ? <div style={styles.queueMeta}>No QA-passed jobs in this business unit.</div> : null}
           {billingQueue.map((job) => (
             <button key={job.id} type="button" style={styles.queueButton} onClick={() => loadCase(job.id)}>
               <strong>{job.id}</strong>
-              <div style={styles.queueMeta}>{job.operational_status} · updated {job.updated_at ? new Date(job.updated_at).toLocaleString() : "unknown"}</div>
+              <div style={styles.queueMeta}>
+                {job.operational_status}
+                {job.invoiceRequest ? ` · invoice ${job.invoiceRequest.request_status} · ${job.invoiceRequest.currency_code} ${job.invoiceRequest.total_amount}` : " · invoice not created"}
+                {` · updated ${job.updated_at ? new Date(job.updated_at).toLocaleString() : "unknown"}`}
+              </div>
             </button>
           ))}
         </div>
