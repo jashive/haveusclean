@@ -1,6 +1,8 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { deactivateStaffMember, inviteStaffMember, loadStaffDirectory } from "../../lib/serviceosStaffAdminClient.js";
 
+const WORKFORCE_DASHBOARD_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_WORKFORCE_DASHBOARD_ENABLED === "true";
+
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
   title: { margin: "0 0 6px", fontSize: 18 },
@@ -9,6 +11,7 @@ const styles = {
   input: { width: "100%", boxSizing: "border-box", border: "1px solid #465873", background: "#0D1422", color: "#F5F8FC", borderRadius: 8, padding: "10px 11px" },
   button: { border: 0, borderRadius: 8, background: "#00D4AA", color: "#07110F", padding: "10px 14px", fontWeight: 850, cursor: "pointer" },
   secondary: { border: "1px solid #465873", borderRadius: 8, background: "transparent", color: "#F5F8FC", padding: "8px 11px", fontWeight: 700, cursor: "pointer" },
+  navLink: { display: "inline-block", border: "1px solid #2B7A68", borderRadius: 8, background: "#19352F", color: "#54E5C2", padding: "9px 12px", fontWeight: 800, textDecoration: "none" },
   error: { marginTop: 12, color: "#FF9C9C", fontSize: 13 },
   success: { marginTop: 12, color: "#54E5C2", fontSize: 13 },
   tableWrap: { overflowX: "auto", marginTop: 14 },
@@ -51,10 +54,7 @@ export default function ServiceOSStaffAdminWorkspace() {
     setError("");
     setMessage("");
     try {
-      const result = await inviteStaffMember({
-        ...form,
-        businessUnitCode: requiresBusinessUnit ? form.businessUnitCode : "",
-      });
+      const result = await inviteStaffMember({ ...form, businessUnitCode: requiresBusinessUnit ? form.businessUnitCode : "" });
       setMessage(`Invitation sent to ${result.email}. Canonical role provisioning is complete and awaits invite acceptance.`);
       setForm({ displayName: "", email: "", roleCode: "office_ops", businessUnitCode: "HUC-ON" });
       await refresh();
@@ -83,8 +83,13 @@ export default function ServiceOSStaffAdminWorkspace() {
 
   return (
     <section style={styles.card} data-serviceos-staff-admin="true">
-      <h2 style={styles.title}>Staff Management</h2>
-      <p style={styles.text}>Owner/Admin controlled onboarding. Invitations are sent through the server-side Supabase Auth boundary, then bound to one canonical ServiceOS role and approved business-unit scope.</p>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h2 style={styles.title}>Staff Management</h2>
+          <p style={styles.text}>Owner/Admin controlled onboarding. Invitations are sent through the server-side Supabase Auth boundary, then bound to one canonical ServiceOS role and approved business-unit scope.</p>
+        </div>
+        {WORKFORCE_DASHBOARD_ENABLED ? <a href="/admin/workforce" style={styles.navLink}>Workforce Onboarding & Compliance →</a> : null}
+      </div>
 
       <form onSubmit={handleInvite}>
         <div style={styles.grid}>
