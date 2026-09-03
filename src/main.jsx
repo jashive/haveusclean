@@ -6,6 +6,7 @@ import { isCanonicalServiceOSMode, SERVICEOS_DIAGNOSTICS_PATH } from "./lib/serv
 import "./styles.css";
 
 const LegacyApp = lazy(() => import("./App"));
+const BookPage = lazy(() => import("./pages/book"));
 const ServiceOSDiagnosticsWorkspace = lazy(() => import("./features/pilot/ServiceOSDiagnosticsWorkspace"));
 const ServiceOSWave1Workspace = lazy(() => import("./features/wave1/ServiceOSWave1Workspace"));
 
@@ -50,12 +51,26 @@ function isPasswordSetupRequest() {
   return hasPasswordSession || hasAuthCallbackError;
 }
 
+function isPublicBookingRequest() {
+  if (typeof window === "undefined") return false;
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  return path === "/book" || path.startsWith("/book/");
+}
+
+function RootRouter() {
+  if (isPasswordSetupRequest()) return <ServiceOSPasswordSetup />;
+  if (isPublicBookingRequest()) {
+    return (
+      <Suspense fallback={<div role="status">Loading booking…</div>}>
+        <BookPage />
+      </Suspense>
+    );
+  }
+  return <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>;
+}
+
 ReactDOM.createRoot(document.getElementById("root")).render(
   <React.StrictMode>
-    {isPasswordSetupRequest() ? (
-      <ServiceOSPasswordSetup />
-    ) : (
-      <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>
-    )}
+    <RootRouter />
   </React.StrictMode>
 );
