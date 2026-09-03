@@ -8,6 +8,14 @@
       "destination": "/api/bookings/create?action=quote"
     },
     {
+      "source": "/api/workforce/apply",
+      "destination": "/api/serviceos-staff-admin?workforce=apply"
+    },
+    {
+      "source": "/api/workforce/dashboard",
+      "destination": "/api/serviceos-staff-admin?workforce=dashboard"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
