@@ -2,8 +2,7 @@
 // No customer account/password is required. All writes occur server-side through the
 // canonical ServiceOS environment guard and service-role-only booking RPC.
 
-import { requireServiceosServerTarget } from '../../src/server/serviceosServerEnvironment.js';
-import { calculatePublicBookingQuote } from './quote.js';
+import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
 
 function httpError(status, message, code) {
   return Object.assign(new Error(message), { status, code });
@@ -35,18 +34,6 @@ function validatePostal(market, postalCode) {
   return value;
 }
 
-function serverConfig() {
-  requireServiceosServerTarget(process.env, {
-    allowProduction: true,
-    allowNonProduction: true,
-    requireProductionApproval: true,
-  });
-  const url = text(process.env.SUPABASE_URL).replace(/\/$/, '');
-  const secret = text(process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_SECRET_KEY);
-  if (!url || !secret) throw httpError(503, 'Public booking server configuration is incomplete.', 'BOOKING_SERVER_CONFIG_MISSING');
-  return { url, secret };
-}
-
 async function callBookingRpc(payload, config) {
   const response = await fetch(`${config.url}/rest/v1/rpc/create_public_booking_intake`, {
     method: 'POST',
@@ -76,7 +63,15 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ success: false, error: 'Method not allowed.' });
 
   try {
-    const config = serverConfig();
+    const config = publicBookingServerConfig();
+
+    // /api/bookings/quote is rewritten to this same serverless function so the
+    // Hobby-plan function count stays within the 12-function deployment limit.
+    if (String(req.query?.action || '').toLowerCase() === 'quote') {
+      const quote = await calculatePublicBookingQuote(req.body || {}, config);
+      return res.status(200).json({ success: true, quote });
+    }
+
     const booking = req.body?.bookingData || req.body || {};
     const name = text(booking.fullName || booking.name);
     const email = normalizeEmail(booking.email);
@@ -95,7 +90,6 @@ export default async function handler(req, res) {
     if (!requestedDate || !/^\d{4}-\d{2}-\d{2}$/.test(requestedDate)) throw httpError(400, 'Service date is required.', 'BOOKING_DATE_REQUIRED');
     if (!arrivalWindow) throw httpError(400, 'Arrival window is required.', 'BOOKING_WINDOW_REQUIRED');
 
-    // Recalculate from published governed pricing on the server. Client totals are never trusted.
     const quote = await calculatePublicBookingQuote({
       market,
       dwellingType: booking.dwellingType,
