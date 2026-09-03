@@ -1,311 +1,252 @@
-import React, { useState, useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 
-// Pricing Configurations
-const PRICING_CONFIG = {
-  basePrice: 99,
-  perBed: 25,
-  perBath: 35,
-  frequencies: [
-    { id: 'one-time', label: 'One-Time', discount: 0 },
-    { id: 'weekly', label: 'Weekly', discount: 0.20, badge: 'Save 20%' },
-    { id: 'bi-weekly', label: 'Bi-Weekly', discount: 0.15, badge: 'Save 15%' },
-    { id: 'monthly', label: 'Monthly', discount: 0.10, badge: 'Save 10%' },
-  ],
-  addOns: [
-    { id: 'oven', label: 'Inside Oven', price: 35, icon: '🍳' },
-    { id: 'fridge', label: 'Inside Fridge', price: 30, icon: '🧊' },
-    { id: 'windows', label: 'Interior Windows', price: 45, icon: '🪟' },
-    { id: 'deep-clean', label: 'Deep Clean Upgrade', price: 65, icon: '✨' },
-    { id: 'move-in', label: 'Move-In/Move-Out', price: 85, icon: '📦' },
-  ],
+const MARKET_OPTIONS = [
+  { value: 'HUC-ON', label: 'Ontario', regionLabel: 'Ontario postal code' },
+  { value: 'HUC-AZ', label: 'Arizona', regionLabel: 'Arizona ZIP code' },
+];
+
+const PACKAGE_OPTIONS = [
+  ['essential_refresh', 'Essential Refresh Clean'],
+  ['signature_initial_reset', 'Signature Initial Reset Clean'],
+  ['complete_deep', 'Complete Deep Clean'],
+  ['move_in_move_out', 'Move-In / Move-Out Clean'],
+  ['kitchen_bath_refresh', 'Kitchen & Bath Refresh Clean'],
+  ['kitchen_bath_deep', 'Kitchen & Bath Deep Clean'],
+];
+
+const DWELLING_OPTIONS = [
+  ['apartment', 'Apartment / Condo'],
+  ['townhouse', 'Townhouse'],
+  ['detached', 'Detached / Semi-Detached'],
+];
+
+const FREQUENCY_OPTIONS = [
+  ['one_time', 'One-Time'],
+  ['weekly', 'Weekly'],
+  ['biweekly', 'Biweekly'],
+  ['monthly', 'Monthly'],
+];
+
+const ADDON_OPTIONS = [
+  ['inside_refrigerator', 'Inside refrigerator'],
+  ['inside_oven', 'Inside oven'],
+  ['inside_kitchen_cabinets', 'Inside kitchen cabinets'],
+  ['interior_windows', 'Interior windows'],
+  ['pet_hair_removal', 'Pet hair removal'],
+  ['heavy_baseboard_detailing', 'Heavy baseboard detailing'],
+];
+
+const styles = {
+  shell: { width: '100%', maxWidth: 920, background: '#111827', color: '#F8FAFC', border: '1px solid #273449', borderRadius: 18, padding: 22, boxSizing: 'border-box' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 14 },
+  label: { display: 'grid', gap: 6, fontSize: 13, fontWeight: 750, color: '#CBD5E1' },
+  input: { width: '100%', boxSizing: 'border-box', border: '1px solid #3B4A60', borderRadius: 9, background: '#0B1220', color: '#F8FAFC', padding: '11px 12px', fontSize: 14 },
+  section: { marginTop: 20, paddingTop: 18, borderTop: '1px solid #273449' },
+  title: { margin: '0 0 12px', fontSize: 19 },
+  addOns: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(210px,1fr))', gap: 9 },
+  addon: { display: 'flex', alignItems: 'center', gap: 8, border: '1px solid #334155', borderRadius: 9, padding: 10, fontSize: 13 },
+  actions: { display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 18 },
+  primary: { border: 0, borderRadius: 9, background: '#22D3EE', color: '#06202A', padding: '11px 15px', fontWeight: 850, cursor: 'pointer' },
+  confirm: { border: 0, borderRadius: 9, background: '#34D399', color: '#052E25', padding: '11px 15px', fontWeight: 850, cursor: 'pointer' },
+  disabled: { opacity: 0.5, cursor: 'not-allowed' },
+  quote: { marginTop: 16, background: '#0B1220', border: '1px solid #334155', borderRadius: 12, padding: 15 },
+  money: { fontSize: 26, fontWeight: 900, marginTop: 5 },
+  muted: { color: '#94A3B8', fontSize: 13, lineHeight: 1.5 },
+  error: { color: '#FDA4AF', marginTop: 12, whiteSpace: 'pre-wrap', fontSize: 13 },
 };
 
+function formatMoney(amount, currency) {
+  try {
+    return new Intl.NumberFormat(currency === 'CAD' ? 'en-CA' : 'en-US', {
+      style: 'currency', currency: currency || 'USD',
+    }).format(Number(amount || 0));
+  } catch {
+    return `${currency || ''} ${Number(amount || 0).toFixed(2)}`;
+  }
+}
+
 export default function BookingWidget({ onBookingSubmit }) {
-  const [step, setStep] = useState(1);
-  const [bedrooms, setBedrooms] = useState(1);
-  const [bathrooms, setBathrooms] = useState(1);
-  const [frequency, setFrequency] = useState('bi-weekly');
-  const [selectedAddOns, setSelectedAddOns] = useState([]);
-  const [selectedDate, setSelectedDate] = useState('');
-  const [selectedTimeSlot, setSelectedTimeSlot] = useState('');
-  
-  const [formData, setFormData] = useState({
+  const [form, setForm] = useState({
+    market: 'HUC-ON',
+    dwellingType: 'apartment',
+    packageKey: 'essential_refresh',
+    bedrooms: 1,
+    bathrooms: 1,
+    sqft: '',
+    condition: 'light',
+    frequency: 'one_time',
     fullName: '',
     email: '',
     phone: '',
     address: '',
+    city: '',
+    postalCode: '',
+    selectedDate: '',
+    selectedTimeSlot: '',
     notes: '',
   });
+  const [selectedAddOns, setSelectedAddOns] = useState([]);
+  const [quote, setQuote] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
 
-  // Calculate Subtotal & Discount dynamically
-  const priceSummary = useMemo(() => {
-    let subtotal = PRICING_CONFIG.basePrice;
-    subtotal += Math.max(0, bedrooms - 1) * PRICING_CONFIG.perBed;
-    subtotal += Math.max(0, bathrooms - 1) * PRICING_CONFIG.perBath;
+  const marketInfo = useMemo(() => MARKET_OPTIONS.find((item) => item.value === form.market) || MARKET_OPTIONS[0], [form.market]);
 
-    const addOnTotal = selectedAddOns.reduce((sum, addOnId) => {
-      const item = PRICING_CONFIG.addOns.find((a) => a.id === addOnId);
-      return sum + (item ? item.price : 0);
-    }, 0);
+  function update(name, value) {
+    setForm((current) => ({ ...current, [name]: value }));
+    setQuote(null);
+    setError('');
+  }
 
-    const grossTotal = subtotal + addOnTotal;
-    const selectedFreq = PRICING_CONFIG.frequencies.find((f) => f.id === frequency);
-    const discountAmount = grossTotal * (selectedFreq?.discount || 0);
-    const finalTotal = grossTotal - discountAmount;
+  function toggleAddon(id) {
+    setSelectedAddOns((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
+    setQuote(null);
+    setError('');
+  }
 
-    return { grossTotal, discountAmount, finalTotal };
-  }, [bedrooms, bathrooms, selectedAddOns, frequency]);
+  async function calculateQuote() {
+    setBusy(true);
+    setError('');
+    try {
+      const response = await fetch('/api/bookings/quote', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          market: form.market,
+          dwellingType: form.dwellingType,
+          packageKey: form.packageKey,
+          bedrooms: Number(form.bedrooms),
+          bathrooms: Number(form.bathrooms),
+          sqft: form.sqft === '' ? null : Number(form.sqft),
+          condition: form.condition,
+          frequency: form.frequency,
+          addons: selectedAddOns,
+        }),
+      });
+      const result = await response.json();
+      if (!response.ok || !result.success) throw new Error(result.error || 'Unable to calculate estimate.');
+      if (result.quote?.requiresOfficeReview) throw new Error(result.quote.reason || 'This request needs management review.');
+      setQuote(result.quote);
+    } catch (err) {
+      setQuote(null);
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  }
 
-  const toggleAddOn = (id) => {
-    setSelectedAddOns((prev) =>
-      prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]
-    );
-  };
-
-  const handleInputChange = (e) => {
-    setFormData({ ...formData, [e.target.name]: e.target.value });
-  };
+  async function submitBooking() {
+    if (!quote || busy) return;
+    setBusy(true);
+    setError('');
+    try {
+      await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote });
+    } finally {
+      setBusy(false);
+    }
+  }
 
   return (
-    <div className="max-w-4xl mx-auto bg-slate-900 text-white rounded-2xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col md:flex-row">
-      
-      {/* Left Column: Interactive Form */}
-      <div className="flex-1 p-6 md:p-8 border-b md:border-b-0 md:border-r border-slate-800">
-        
-        {/* Step Indicator */}
-        <div className="flex items-center space-x-2 text-xs font-semibold text-slate-400 mb-6 uppercase tracking-wider">
-          <span className={step === 1 ? 'text-cyan-400' : ''}>1. Service</span>
-          <span>&gt;</span>
-          <span className={step === 2 ? 'text-cyan-400' : ''}>2. Schedule & Contact</span>
-        </div>
-
-        {step === 1 && (
-          <div className="space-y-6">
-            <h2 className="text-xl font-bold">Customize Your Clean</h2>
-
-            {/* Bedrooms & Bathrooms */}
-            <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">Bedrooms</label>
-                <div className="flex items-center space-x-3 bg-slate-800 p-2 rounded-lg justify-between">
-                  <button 
-                    onClick={() => setBedrooms(Math.max(1, bedrooms - 1))}
-                    className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 font-bold"
-                  >-</button>
-                  <span className="font-bold">{bedrooms}</span>
-                  <button 
-                    onClick={() => setBedrooms(bedrooms + 1)}
-                    className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 font-bold"
-                  >+</button>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-sm text-slate-400 mb-2">Bathrooms</label>
-                <div className="flex items-center space-x-3 bg-slate-800 p-2 rounded-lg justify-between">
-                  <button 
-                    onClick={() => setBathrooms(Math.max(1, bathrooms - 1))}
-                    className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 font-bold"
-                  >-</button>
-                  <span className="font-bold">{bathrooms}</span>
-                  <button 
-                    onClick={() => setBathrooms(bathrooms + 0.5)}
-                    className="w-8 h-8 rounded bg-slate-700 hover:bg-slate-600 font-bold"
-                  >+</button>
-                </div>
-              </div>
-            </div>
-
-            {/* Frequency Selector */}
-            <div>
-              <label className="block text-sm text-slate-400 mb-2">Cleaning Frequency</label>
-              <div className="grid grid-cols-2 gap-2">
-                {PRICING_CONFIG.frequencies.map((f) => (
-                  <button
-                    key={f.id}
-                    onClick={() => setFrequency(f.id)}
-                    className={`p-3 rounded-lg border text-left flex flex-col justify-between transition-all ${
-                      frequency === f.id
-                        ? 'border-cyan-500 bg-cyan-950/30 text-white'
-                        : 'border-slate-800 bg-slate-800/50 text-slate-400 hover:border-slate-700'
-                    }`}
-                  >
-                    <span className="font-medium text-sm">{f.label}</span>
-                    {f.badge && (
-                      <span className="text-[10px] text-cyan-400 font-semibold mt-1">
-                        {f.badge}
-                      </span>
-                    )}
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {/* Extra Add-Ons */}
-            <div>
-              <label className="block text-sm text-slate-400 mb-2">Select Add-Ons</label>
-              <div className="grid grid-cols-2 gap-2">
-                {PRICING_CONFIG.addOns.map((addon) => {
-                  const isSelected = selectedAddOns.includes(addon.id);
-                  return (
-                    <button
-                      key={addon.id}
-                      onClick={() => toggleAddOn(addon.id)}
-                      className={`p-2.5 rounded-lg border text-xs flex items-center justify-between transition-all ${
-                        isSelected
-                          ? 'border-cyan-500 bg-cyan-950/30 text-white'
-                          : 'border-slate-800 bg-slate-800/40 text-slate-400 hover:border-slate-700'
-                      }`}
-                    >
-                      <span>{addon.icon} {addon.label}</span>
-                      <span className="font-semibold text-slate-300">+${addon.price}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <button
-              onClick={() => setStep(2)}
-              className="w-full py-3 bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold rounded-lg transition-all"
-            >
-              Continue to Schedule &rarr;
-            </button>
-          </div>
-        )}
-
-        {step === 2 && (
-          <div className="space-y-4">
-            <h2 className="text-xl font-bold">Details & Schedule</h2>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Date</label>
-                <input
-                  type="date"
-                  value={selectedDate}
-                  onChange={(e) => setSelectedDate(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-                />
-              </div>
-              <div>
-                <label className="block text-xs text-slate-400 mb-1">Time Slot</label>
-                <select
-                  value={selectedTimeSlot}
-                  onChange={(e) => setSelectedTimeSlot(e.target.value)}
-                  className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-                >
-                  <option value="">Select Window</option>
-                  <option value="8am-11am">Morning (8 AM - 11 AM)</option>
-                  <option value="11am-2pm">Midday (11 AM - 2 PM)</option>
-                  <option value="2pm-5pm">Afternoon (2 PM - 5 PM)</option>
-                </select>
-              </div>
-            </div>
-
-            <input
-              type="text"
-              name="fullName"
-              placeholder="Full Name"
-              value={formData.fullName}
-              onChange={handleInputChange}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-            />
-            <div className="grid grid-cols-2 gap-3">
-              <input
-                type="email"
-                name="email"
-                placeholder="Email Address"
-                value={formData.email}
-                onChange={handleInputChange}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-              />
-              <input
-                type="tel"
-                name="phone"
-                placeholder="Phone Number"
-                value={formData.phone}
-                onChange={handleInputChange}
-                className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-              />
-            </div>
-            <input
-              type="text"
-              name="address"
-              placeholder="Service Address"
-              value={formData.address}
-              onChange={handleInputChange}
-              className="w-full bg-slate-800 border border-slate-700 rounded-lg p-2.5 text-sm text-white focus:outline-none focus:border-cyan-500"
-            />
-
-            <div className="flex gap-2 pt-2">
-              <button
-                onClick={() => setStep(1)}
-                className="px-4 py-3 bg-slate-800 hover:bg-slate-700 text-slate-300 text-sm font-semibold rounded-lg"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => onBookingSubmit && onBookingSubmit({ ...formData, bedrooms, bathrooms, frequency, selectedAddOns, selectedDate, selectedTimeSlot, priceSummary })}
-                className="flex-1 py-3 bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold rounded-lg transition-all"
-              >
-                Confirm & Pay (${priceSummary.finalTotal.toFixed(2)})
-              </button>
-            </div>
-          </div>
-        )}
-
+    <section style={styles.shell} data-public-booking-widget="true">
+      <h2 style={styles.title}>Tell us about your cleaning</h2>
+      <div style={styles.grid}>
+        <label style={styles.label}>Service market
+          <select style={styles.input} value={form.market} onChange={(e) => update('market', e.target.value)}>
+            {MARKET_OPTIONS.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </label>
+        <label style={styles.label}>Home type
+          <select style={styles.input} value={form.dwellingType} onChange={(e) => update('dwellingType', e.target.value)}>
+            {DWELLING_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label style={styles.label}>Cleaning package
+          <select style={styles.input} value={form.packageKey} onChange={(e) => update('packageKey', e.target.value)}>
+            {PACKAGE_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label style={styles.label}>Frequency
+          <select style={styles.input} value={form.frequency} onChange={(e) => update('frequency', e.target.value)}>
+            {FREQUENCY_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+        </label>
+        <label style={styles.label}>Bedrooms
+          <input style={styles.input} type="number" min="0" step="1" value={form.bedrooms} onChange={(e) => update('bedrooms', e.target.value)} />
+        </label>
+        <label style={styles.label}>Bathrooms
+          <input style={styles.input} type="number" min="0.5" step="0.5" value={form.bathrooms} onChange={(e) => update('bathrooms', e.target.value)} />
+        </label>
+        <label style={styles.label}>Square footage (optional)
+          <input style={styles.input} type="number" min="1" step="1" value={form.sqft} onChange={(e) => update('sqft', e.target.value)} placeholder="e.g. 1500" />
+        </label>
+        <label style={styles.label}>Condition
+          <select style={styles.input} value={form.condition} onChange={(e) => update('condition', e.target.value)}>
+            <option value="light">Light</option>
+            <option value="moderate">Moderate</option>
+            <option value="heavy">Heavy</option>
+          </select>
+        </label>
       </div>
 
-      {/* Right Column: Dynamic Price Summary Card */}
-      <div className="w-full md:w-80 bg-slate-950 p-6 md:p-8 flex flex-col justify-between">
-        <div>
-          <h3 className="text-base font-bold text-slate-200 mb-4 border-b border-slate-800 pb-2">
-            Booking Summary
-          </h3>
-
-          <div className="space-y-3 text-sm">
-            <div className="flex justify-between text-slate-400">
-              <span>{bedrooms} Bed, {bathrooms} Bath</span>
-              <span className="text-white font-medium">${PRICING_CONFIG.basePrice + (bedrooms-1)*25 + (bathrooms-1)*35}</span>
-            </div>
-
-            {selectedAddOns.length > 0 && (
-              <div className="text-xs text-slate-400 space-y-1 pl-2 border-l border-slate-800">
-                {selectedAddOns.map(id => {
-                  const item = PRICING_CONFIG.addOns.find(a => a.id === id);
-                  return (
-                    <div key={id} className="flex justify-between">
-                      <span>+ {item?.label}</span>
-                      <span>${item?.price}</span>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {priceSummary.discountAmount > 0 && (
-              <div className="flex justify-between text-cyan-400 text-xs font-semibold">
-                <span>Recurring Discount</span>
-                <span>-${priceSummary.discountAmount.toFixed(2)}</span>
-              </div>
-            )}
-          </div>
-        </div>
-
-        <div className="mt-8 border-t border-slate-800 pt-4">
-          <div className="flex justify-between items-baseline mb-1">
-            <span className="text-xs uppercase tracking-wider text-slate-400 font-semibold">Total</span>
-            <span className="text-3xl font-extrabold text-cyan-400">
-              ${priceSummary.finalTotal.toFixed(2)}
-            </span>
-          </div>
-          <p className="text-[11px] text-slate-500">
-            Card on file charged only after clean completion.
-          </p>
+      <div style={styles.section}>
+        <h3 style={styles.title}>Optional add-ons</h3>
+        <div style={styles.addOns}>
+          {ADDON_OPTIONS.map(([id, label]) => (
+            <label key={id} style={styles.addon}>
+              <input type="checkbox" checked={selectedAddOns.includes(id)} onChange={() => toggleAddon(id)} /> {label}
+            </label>
+          ))}
         </div>
       </div>
 
-    </div>
+      <div style={styles.actions}>
+        <button type="button" style={{ ...styles.primary, ...(busy ? styles.disabled : {}) }} onClick={calculateQuote} disabled={busy}>
+          {busy ? 'Calculating…' : 'Calculate governed estimate'}
+        </button>
+      </div>
+
+      {quote ? (
+        <div style={styles.quote} data-testid="public-booking-quote">
+          <div style={styles.muted}>{quote.market} · {quote.configurationVersion}</div>
+          <div style={styles.money}>{formatMoney(quote.total, quote.currencyCode)}</div>
+          <div style={styles.muted}>
+            Subtotal {formatMoney(quote.preTaxTotal, quote.currencyCode)} · {quote.taxName || 'Tax'} {Number(quote.taxRate || 0) * 100}% = {formatMoney(quote.taxAmount, quote.currencyCode)}
+          </div>
+        </div>
+      ) : null}
+
+      <div style={styles.section}>
+        <h3 style={styles.title}>Contact & requested appointment</h3>
+        <div style={styles.grid}>
+          <label style={styles.label}>Full name<input style={styles.input} value={form.fullName} onChange={(e) => update('fullName', e.target.value)} /></label>
+          <label style={styles.label}>Email<input style={styles.input} type="email" value={form.email} onChange={(e) => update('email', e.target.value)} /></label>
+          <label style={styles.label}>Phone<input style={styles.input} type="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} /></label>
+          <label style={styles.label}>Street address<input style={styles.input} value={form.address} onChange={(e) => update('address', e.target.value)} /></label>
+          <label style={styles.label}>City<input style={styles.input} value={form.city} onChange={(e) => update('city', e.target.value)} /></label>
+          <label style={styles.label}>{marketInfo.regionLabel}<input style={styles.input} value={form.postalCode} onChange={(e) => update('postalCode', e.target.value)} placeholder={form.market === 'HUC-ON' ? 'A1A 1A1' : '85001'} /></label>
+          <label style={styles.label}>Requested date<input style={styles.input} type="date" value={form.selectedDate} onChange={(e) => update('selectedDate', e.target.value)} /></label>
+          <label style={styles.label}>Arrival window
+            <select style={styles.input} value={form.selectedTimeSlot} onChange={(e) => update('selectedTimeSlot', e.target.value)}>
+              <option value="">Select window</option>
+              <option value="Morning">Morning</option>
+              <option value="Midday">Midday</option>
+              <option value="Afternoon">Afternoon</option>
+              <option value="Flexible">Flexible</option>
+            </select>
+          </label>
+        </div>
+        <label style={{ ...styles.label, marginTop: 14 }}>Notes
+          <textarea style={{ ...styles.input, minHeight: 90 }} value={form.notes} onChange={(e) => update('notes', e.target.value)} />
+        </label>
+      </div>
+
+      <div style={styles.actions}>
+        <button type="button" style={{ ...styles.confirm, ...((!quote || busy) ? styles.disabled : {}) }} onClick={submitBooking} disabled={!quote || busy}>
+          Submit booking request
+        </button>
+      </div>
+      <p style={{ ...styles.muted, marginBottom: 0 }}>No customer password is created. Your request enters Have Us Clean's ServiceOS intake queue for confirmation.</p>
+      {error ? <div role="alert" style={styles.error}>{error}</div> : null}
+    </section>
   );
 }

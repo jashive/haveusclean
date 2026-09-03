@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
 import {
   assessBillingReadiness,
@@ -25,6 +25,9 @@ const styles = {
   stat: { background: "#0F1624", border: "1px solid #28364A", borderRadius: 8, padding: 12 },
   label: { color: "#8291A6", fontSize: 11, fontWeight: 800, textTransform: "uppercase", letterSpacing: ".06em" },
   value: { marginTop: 5, overflowWrap: "anywhere", fontWeight: 750 },
+  queue: { display: "grid", gap: 8, marginTop: 12 },
+  queueButton: { width: "100%", textAlign: "left", border: "1px solid #344359", borderRadius: 9, background: "#0F1624", color: "#F5F8FC", padding: 12, cursor: "pointer" },
+  queueMeta: { color: "#8291A6", fontSize: 12, marginTop: 4 },
 };
 
 async function fetchOne(path) {
@@ -47,15 +50,23 @@ async function fetchMany(path) {
   return Array.isArray(rows) ? rows : [];
 }
 
+function toInFilter(ids) {
+  return `(${ids.map((id) => `"${String(id).replaceAll('"', '')}"`).join(",")})`;
+}
+
 export default function ServiceOSFinanceWorkspace({ revenueContext }) {
   const [jobId, setJobId] = useState("");
   const [caseData, setCaseData] = useState(null);
   const [gate, setGate] = useState(null);
   const [invoice, setInvoice] = useState(null);
+  const [billingQueue, setBillingQueue] = useState([]);
+  const [queueBusy, setQueueBusy] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const role = revenueContext?.roleCode ?? "unknown";
   const financeAuthorized = FINANCE_ENABLED && role === "finance";
+  const activeBusinessUnitId = revenueContext?.primaryBusinessUnitId ?? null;
+  const activeBusinessUnitCode = revenueContext?.activeBusinessUnitCode ?? revenueContext?.businessUnits?.[0] ?? "Unknown";
 
   const blockers = useMemo(() => {
     if (!caseData) return [];
@@ -70,18 +81,49 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
     return list;
   }, [caseData]);
 
+  async function refreshBillingQueue() {
+    if (!financeAuthorized || !activeBusinessUnitId) return;
+    setQueueBusy(true);
+    setError("");
+    try {
+      const jobs = await fetchMany(
+        `operational_job?select=id,operational_status,business_unit_id,customer_id,pricing_snapshot_id,quote_version_id,updated_at&business_unit_id=eq.${encodeURIComponent(activeBusinessUnitId)}&operational_status=in.(qa_passed,closed)&order=updated_at.desc&limit=100`
+      );
+      if (!jobs.length) {
+        setBillingQueue([]);
+        return;
+      }
+      const invoiceRows = await fetchMany(
+        `invoice_request?select=id,operational_job_id,request_status,currency_code,total_amount&operational_job_id=in.${encodeURIComponent(toInFilter(jobs.map((job) => job.id)))}&request_status=neq.cancelled`
+      );
+      const invoicedJobIds = new Set(invoiceRows.map((row) => row.operational_job_id));
+      setBillingQueue(jobs.filter((job) => !invoicedJobIds.has(job.id)));
+    } catch (e) {
+      setBillingQueue([]);
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setQueueBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    refreshBillingQueue();
+    // A market/business-unit change must refresh the Finance queue instead of reusing stale rows.
+  }, [financeAuthorized, activeBusinessUnitId]);
+
   if (!financeAuthorized) return null;
 
-  async function loadCase() {
-    const id = jobId.trim();
+  async function loadCase(selectedJobId = null) {
+    const id = String(selectedJobId || jobId).trim();
     if (!id) return;
+    setJobId(id);
     setBusy(true);
     setError("");
     setGate(null);
     setInvoice(null);
     try {
-      const job = await fetchOne(`operational_job?id=eq.${encodeURIComponent(id)}&limit=1`);
-      if (!job) throw new Error("Operational job not found or not visible to Finance.");
+      const job = await fetchOne(`operational_job?id=eq.${encodeURIComponent(id)}&business_unit_id=eq.${encodeURIComponent(activeBusinessUnitId)}&limit=1`);
+      if (!job) throw new Error("Operational job not found in the active business unit or not visible to Finance.");
       const workOrder = await fetchOne(`work_order?operational_job_id=eq.${encodeURIComponent(id)}&limit=1`);
       const handoff = await fetchOne(`operational_handoff?operational_job_id=eq.${encodeURIComponent(id)}&limit=1`);
       const correctiveActions = await fetchMany(`corrective_action?operational_job_id=eq.${encodeURIComponent(id)}&order=created_at.asc`);
@@ -146,6 +188,7 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
         { appUserId: revenueContext?.appUserId ?? null }
       );
       setInvoice(result);
+      await refreshBillingQueue();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -154,9 +197,26 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
   }
 
   return (
-    <section style={styles.card} data-serviceos-finance-workspace="true">
+    <section style={styles.card} data-serviceos-finance-workspace="true" data-active-business-unit={activeBusinessUnitCode}>
       <h2 style={styles.title}>Wave 5 Finance</h2>
-      <p style={styles.text}>Finance-only controlled workspace. This surface can assess billing readiness and freeze an invoice request from accepted pricing. QuickBooks send, payment creation, and contractor payout execution are not available here.</p>
+      <p style={styles.text}>Finance-only controlled workspace. QA-passed jobs automatically enter the active market Billing Queue until an invoice request exists. QuickBooks send, payment creation, and contractor payout execution are not available here.</p>
+
+      <section style={{ ...styles.stat, marginTop: 14 }} aria-label="Billing Queue / Pending Invoices">
+        <div style={styles.label}>Billing Queue / Pending Invoices · {activeBusinessUnitCode}</div>
+        <div style={styles.queue} data-testid="wave5-billing-queue">
+          {queueBusy ? <div style={styles.queueMeta}>Refreshing QA-passed jobs…</div> : null}
+          {!queueBusy && billingQueue.length === 0 ? <div style={styles.queueMeta}>No uninvoiced QA-passed jobs in this business unit.</div> : null}
+          {billingQueue.map((job) => (
+            <button key={job.id} type="button" style={styles.queueButton} onClick={() => loadCase(job.id)}>
+              <strong>{job.id}</strong>
+              <div style={styles.queueMeta}>{job.operational_status} · updated {job.updated_at ? new Date(job.updated_at).toLocaleString() : "unknown"}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{ ...styles.actions, marginTop: 10 }}>
+          <button type="button" style={{ ...styles.secondary, ...(queueBusy ? styles.disabled : {}) }} onClick={refreshBillingQueue} disabled={queueBusy}>Refresh Billing Queue</button>
+        </div>
+      </section>
 
       <div style={styles.form}>
         <label>
@@ -164,7 +224,7 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
           <input style={styles.input} value={jobId} onChange={(e) => setJobId(e.target.value)} placeholder="Operational job UUID" />
         </label>
         <div style={styles.actions}>
-          <button type="button" style={{ ...styles.secondary, ...(busy ? styles.disabled : {}) }} onClick={loadCase} disabled={busy}>Load Finance Case</button>
+          <button type="button" style={{ ...styles.secondary, ...(busy ? styles.disabled : {}) }} onClick={() => loadCase()} disabled={busy}>Load Finance Case</button>
           <button type="button" style={{ ...styles.button, ...((busy || !caseData) ? styles.disabled : {}) }} onClick={assess} disabled={busy || !caseData}>Assess Billing Readiness</button>
           <button type="button" style={{ ...styles.button, ...((busy || gate?.gate_status !== "ready" || Boolean(invoice)) ? styles.disabled : {}) }} onClick={freezeInvoice} disabled={busy || gate?.gate_status !== "ready" || Boolean(invoice)}>Create Frozen Invoice Request</button>
         </div>
