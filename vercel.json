@@ -4,6 +4,10 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/api/bookings/quote",
+      "destination": "/api/bookings/create?action=quote"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
