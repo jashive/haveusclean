@@ -199,7 +199,7 @@ export default function ServiceOSFinanceWorkspace({ revenueContext }) {
   return (
     <section style={styles.card} data-serviceos-finance-workspace="true" data-active-business-unit={activeBusinessUnitCode}>
       <h2 style={styles.title}>Wave 5 Finance</h2>
-      <p style={styles.text}>Finance-only controlled workspace. QA-passed jobs automatically enter the active market Billing Queue until an invoice request exists. QuickBooks send, payment creation, and contractor payout execution remain outside this browser surface.</p>
+      <p style={styles.text}>Finance-only controlled workspace. QA-passed jobs automatically enter the active market Billing Queue until an invoice request exists. QuickBooks send, payment creation, and contractor payout execution are not available here.</p>
 
       <section style={{ ...styles.stat, marginTop: 14 }} aria-label="Billing Queue / Pending Invoices">
         <div style={styles.label}>Billing Queue / Pending Invoices · {activeBusinessUnitCode}</div>
