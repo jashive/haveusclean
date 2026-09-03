@@ -7,6 +7,7 @@ import "./styles.css";
 
 const LegacyApp = lazy(() => import("./App"));
 const BookPage = lazy(() => import("./pages/book"));
+const WorkforceAdminPage = lazy(() => import("./pages/workforce-admin"));
 const ServiceOSDiagnosticsWorkspace = lazy(() => import("./features/pilot/ServiceOSDiagnosticsWorkspace"));
 const ServiceOSWave1Workspace = lazy(() => import("./features/wave1/ServiceOSWave1Workspace"));
 
@@ -15,11 +16,20 @@ const CANONICAL_SERVICEOS_MODE = isCanonicalServiceOSMode(import.meta.env);
 function ServiceOSRoot() {
   const context = useServiceOSContext();
   const diagnosticsRequested = typeof window !== "undefined" && window.location.pathname === SERVICEOS_DIAGNOSTICS_PATH;
+  const workforceAdminRequested = typeof window !== "undefined" && (window.location.pathname === "/admin/workforce" || window.location.pathname.startsWith("/admin/workforce/"));
 
   if (diagnosticsRequested) {
     return (
       <Suspense fallback={<div role="status">Loading ServiceOS diagnostics…</div>}>
         <ServiceOSDiagnosticsWorkspace session={context?.session ?? null} revenueContext={context?.revenueContext ?? null} />
+      </Suspense>
+    );
+  }
+
+  if (workforceAdminRequested) {
+    return (
+      <Suspense fallback={<div role="status">Loading Workforce Administration…</div>}>
+        <WorkforceAdminPage />
       </Suspense>
     );
   }
