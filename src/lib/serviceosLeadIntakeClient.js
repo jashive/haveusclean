@@ -34,7 +34,7 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
   const requestQuery = [
     `organization_id=eq.${encodeURIComponent(organizationId)}`,
     `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
-    `lifecycle_status=${encodeURIComponent("in.(intake,qualified)")}`,
+    `lifecycle_status=${encodeURIComponent("in.(intake,walkthrough_requested,qualified)")}`,
     `select=${encodeURIComponent("id,organization_id,business_unit_id,title,lifecycle_status,requirements,metadata,customer_id,contact_id,service_location_id,created_at,updated_at")}`,
     "order=created_at.desc",
     `limit=${safeLimit}`,
