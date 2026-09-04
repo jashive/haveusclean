@@ -18,7 +18,7 @@ export default function BookPage() {
         throw new Error(result.error || 'Booking submission failed.');
       }
 
-      setStatus(`Booking received. Reference: ${result.serviceRequestId || result.bookingId || result.job?.id || 'pending'}`);
+      setStatus(`Residential booking received. Reference: ${result.serviceRequestId || result.bookingId || result.job?.id || 'pending'}`);
     } catch (err) {
       console.error('Submission error:', err);
       setStatus(err instanceof Error ? err.message : 'Unable to submit booking.');
@@ -28,8 +28,8 @@ export default function BookPage() {
   return (
     <main className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center" data-public-booking="true">
       <div className="text-center mb-8">
-        <h1 className="text-3xl font-extrabold text-white">Book Your Cleaning Service</h1>
-        <p className="text-slate-400 text-sm mt-2">No account required. Submit your service request and our team will confirm availability.</p>
+        <h1 className="text-3xl font-extrabold text-white">Request Cleaning Service</h1>
+        <p className="text-slate-400 text-sm mt-2">Residential customers can receive a governed estimate. Commercial facilities request an on-site walkthrough for a custom proposal.</p>
       </div>
 
       <BookingWidget onBookingSubmit={handleBookingSubmit} />
