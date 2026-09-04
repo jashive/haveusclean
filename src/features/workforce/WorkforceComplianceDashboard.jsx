@@ -40,6 +40,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
   const [pipeline, setPipeline] = useState(null);
   const [selectedId, setSelectedId] = useState(null);
   const [inspector, setInspector] = useState(null);
+  const [applicantInspector, setApplicantInspector] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
@@ -67,14 +68,20 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
     finally { setLoading(false); }
   }, [api, businessUnitId, accessToken]);
 
-  useEffect(() => { setSelectedId(null); setInspector(null); loadPipeline(); }, [loadPipeline]);
+  useEffect(() => { setSelectedId(null); setInspector(null); setApplicantInspector(null); loadPipeline(); }, [loadPipeline]);
 
-  async function inspect(engagementId) {
-    if (!engagementId) return;
-    setSelectedId(engagementId); setInspector(null); setError(null);
+  async function inspect(candidate) {
+    const id = candidate.engagement_id || candidate.applicant_submission_id;
+    if (!id) return;
+    setSelectedId(id); setInspector(null); setApplicantInspector(null); setError(null);
     try {
-      const data = await api(`/api/workforce/dashboard?action=inspector&businessUnitId=${encodeURIComponent(businessUnitId)}&engagementId=${encodeURIComponent(engagementId)}`);
-      setInspector(data.inspector || null);
+      if (candidate.engagement_id) {
+        const data = await api(`/api/workforce/dashboard?action=inspector&businessUnitId=${encodeURIComponent(businessUnitId)}&engagementId=${encodeURIComponent(candidate.engagement_id)}`);
+        setInspector(data.inspector || null);
+      } else {
+        const data = await api(`/api/workforce/dashboard?action=applicant_inspector&businessUnitId=${encodeURIComponent(businessUnitId)}&applicantSubmissionId=${encodeURIComponent(candidate.applicant_submission_id)}`);
+        setApplicantInspector(data.applicantInspector || null);
+      }
     } catch (err) { setError(err.message); }
   }
 
@@ -82,6 +89,14 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
     setError(null);
     try {
       const data = await api(`/api/workforce/dashboard?action=evidence&businessUnitId=${encodeURIComponent(businessUnitId)}&evidenceId=${encodeURIComponent(evidenceId)}`);
+      if (data.signedUrl) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
+    } catch (err) { setError(err.message); }
+  }
+
+  async function openApplicantDocument(documentCaptureId) {
+    setError(null);
+    try {
+      const data = await api(`/api/workforce/dashboard?action=applicant_evidence&businessUnitId=${encodeURIComponent(businessUnitId)}&documentCaptureId=${encodeURIComponent(documentCaptureId)}`);
       if (data.signedUrl) window.open(data.signedUrl, "_blank", "noopener,noreferrer");
     } catch (err) { setError(err.message); }
   }
@@ -97,7 +112,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
       });
       if (data.activation?.activation_status !== "succeeded") throw new Error(`Activation ${data.activation?.activation_status || "did not succeed"}.`);
       await loadPipeline();
-      await inspect(inspector.engagement_id);
+      await inspect({ engagement_id: inspector.engagement_id });
     } catch (err) { setError(err.message); }
     finally { setLoading(false); }
   }
@@ -117,7 +132,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
           <div key={stage} style={styles.stage}>
             <div style={styles.stageTitle}>{stage} · {byStage[stage]?.length || 0}</div>
             {(byStage[stage] || []).map((candidate) => (
-              <button key={`${candidate.applicant_submission_id || "a"}-${candidate.engagement_id || "e"}`} type="button" style={styles.candidate} onClick={() => inspect(candidate.engagement_id)} disabled={!candidate.engagement_id}>
+              <button key={`${candidate.applicant_submission_id || "a"}-${candidate.engagement_id || "e"}`} type="button" style={styles.candidate} onClick={() => inspect(candidate)}>
                 <div style={{ fontWeight: 800 }}>{candidate.display_name || candidate.applicant_reference}</div>
                 <div style={styles.muted}>{candidate.applied_role_code || "Applicant"}{candidate.engagement_type ? ` · ${candidate.engagement_type}` : ""}</div>
                 {candidate.availability_status ? <span style={styles.badge}>{candidate.availability_status}</span> : null}
@@ -128,7 +143,39 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
         ))}
       </div>
 
-      {selectedId && !inspector ? <div style={{ ...styles.muted, marginTop: 14 }}>Loading compliance inspector…</div> : null}
+      {selectedId && !inspector && !applicantInspector ? <div style={{ ...styles.muted, marginTop: 14 }}>Loading compliance inspector…</div> : null}
+      {applicantInspector ? (
+        <div style={styles.inspector} data-applicant-inspector="true">
+          <div style={styles.header}>
+            <div>
+              <h3 style={{ margin: 0 }}>{applicantInspector.display_name}</h3>
+              <p style={styles.copy}>{applicantInspector.applicant_reference} · {applicantInspector.current_stage} · {applicantInspector.applied_role_code}</p>
+            </div>
+            <button type="button" style={styles.disabledButton} disabled title="Screening, training, and compliance approval are required first">Activate to ServiceOS</button>
+          </div>
+          <div style={styles.twoCol}>
+            <div style={styles.panel}>
+              <strong>Applicant details</strong>
+              <div style={styles.row}><strong>Email</strong><div style={styles.muted}>{applicantInspector.email}</div></div>
+              <div style={styles.row}><strong>Phone</strong><div style={styles.muted}>{applicantInspector.phone}</div></div>
+              <div style={styles.row}><strong>Address</strong><div style={styles.muted}>{applicantInspector.residential_address}</div></div>
+              <div style={styles.row}><strong>Experience</strong><div style={styles.muted}>{applicantInspector.experience_summary}</div></div>
+              <div style={styles.row}><strong>Availability</strong><div style={styles.muted}>{applicantInspector.availability_schedule}</div></div>
+              <div style={styles.row}><strong>Background consent v1.0</strong><span style={styles.badge}>{applicantInspector.background_consent_recorded ? "recorded" : "missing"}</span></div>
+            </div>
+            <div style={styles.panel}>
+              <strong>Applicant documents</strong>
+              <div style={{ ...styles.muted, marginTop: 6, marginBottom: 8 }}>Early uploads remain quarantined until governed compliance review.</div>
+              {safeArray(applicantInspector.documents).map((item) => <div key={item.document_capture_id} style={styles.row}>
+                <div><strong>{item.document_code}</strong> <span style={styles.badge}>{item.capture_status}</span></div>
+                <div style={styles.muted}>Uploaded {item.uploaded_at ? new Date(item.uploaded_at).toLocaleString() : "—"}</div>
+                {item.viewable ? <button type="button" style={{ ...styles.button, marginTop: 6 }} onClick={() => openApplicantDocument(item.document_capture_id)}>Open restricted document (2 min)</button> : null}
+              </div>)}
+              {safeArray(applicantInspector.documents).length === 0 ? <div style={{ ...styles.muted, marginTop: 8 }}>No documents uploaded.</div> : null}
+            </div>
+          </div>
+        </div>
+      ) : null}
       {inspector ? (
         <div style={styles.inspector}>
           <div style={styles.header}>

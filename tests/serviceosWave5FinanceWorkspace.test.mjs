@@ -6,10 +6,10 @@ const workspace = fs.readFileSync(new URL('../src/features/wave5/ServiceOSFinanc
 const shell = fs.readFileSync(new URL('../src/features/wave1/ServiceOSWave1Workspace.jsx', import.meta.url), 'utf8');
 const caMigration = fs.readFileSync(new URL('../supabase/migrations/015_wave5_finance_corrective_action_read.sql', import.meta.url), 'utf8');
 
-test('Wave 5 Finance workspace is independently feature-gated and finance-role only', () => {
+test('Wave 5 Finance workspace is feature-gated for Finance and accepted administrative roles', () => {
   assert.match(workspace, /VITE_SERVICEOS_FINANCE_ENABLED/);
   assert.match(workspace, /role === "finance"/);
-  assert.match(shell, /FINANCE_ENABLED && role === "finance"/);
+  assert.match(shell, /FINANCE_ENABLED && \["owner_admin", "office_ops"\]\.includes\(role\)/);
   assert.match(shell, /data-finance-authorized/);
 });
 
