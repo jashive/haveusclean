@@ -41,6 +41,10 @@ function canContinueRecentLead(row) {
   return row?.service_request?.lifecycle_status === "intake" && row?.opportunity?.stage === "open";
 }
 
+function isCommercialWalkthrough(row) {
+  return row?.service_request?.lifecycle_status === "walkthrough_requested";
+}
+
 export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [form, setForm] = useState(initialForm);
   const [busy, setBusy] = useState(false);
@@ -180,21 +184,22 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
 
       <div style={styles.recent} data-testid="serviceos-recent-saved-leads">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
-          <div><strong>Recent Saved Leads</strong><div style={styles.note}>Canonical active-market leads from ServiceOS, not device memory.</div></div>
+          <div><strong>Recent Saved Leads</strong><div style={styles.note}>Canonical active-market leads from ServiceOS, including commercial walkthrough requests.</div></div>
           <button type="button" style={styles.secondary} disabled={recentBusy} onClick={refreshRecentLeads}>{recentBusy ? "Refreshing…" : "Refresh Leads"}</button>
         </div>
         {recentError ? <div style={styles.error}><strong>Unable to load recent leads:</strong> {recentError}</div> : null}
         {!recentBusy && !recentError && visibleRecentLeads.length === 0 ? <div style={styles.note}>No active saved leads found for this market.</div> : null}
         {visibleRecentLeads.map((row) => {
           const continueAllowed = canContinueRecentLead(row);
+          const walkthroughRequested = isCommercialWalkthrough(row);
           return (
             <div style={styles.recentRow} key={row.service_request.id}>
               <div>
                 <strong>{leadLabel(row)}</strong><br />
                 <span style={styles.note}>Lead: {row.service_request.lifecycle_status} · Opportunity: {row.opportunity?.stage || "unknown"} · Service request: {row.service_request.id.slice(0, 8)}</span>
-                {!continueAllowed ? <div style={styles.note}>Quote workflow already started. Use Customer Response / Acceptance for sent quotes instead of creating another quote.</div> : null}
+                {walkthroughRequested ? <div style={styles.note}>Commercial walkthrough requested. Complete the facility walkthrough and prepare the custom proposal in Revenue / Estimating. Do not create an operational job until explicit proposal acceptance.</div> : (!continueAllowed ? <div style={styles.note}>Quote workflow already started. Use Customer Response / Acceptance for sent quotes instead of creating another quote.</div> : null)}
               </div>
-              {continueAllowed ? <button type="button" style={styles.primary} onClick={() => setContinuationLead(row)}>Open / Continue Quote</button> : <span style={styles.note}>Already in quote workflow</span>}
+              {continueAllowed ? <button type="button" style={styles.primary} onClick={() => setContinuationLead(row)}>Open / Continue Quote</button> : (walkthroughRequested ? <span style={styles.note}>Walkthrough / Estimating</span> : <span style={styles.note}>Already in quote workflow</span>)}
             </div>
           );
         })}
