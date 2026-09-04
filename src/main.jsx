@@ -7,6 +7,7 @@ import "./styles.css";
 
 const LegacyApp = lazy(() => import("./App"));
 const BookPage = lazy(() => import("./pages/book"));
+const ApplyPage = lazy(() => import("./pages/apply"));
 const WorkforceAdminPage = lazy(() => import("./pages/workforce-admin"));
 const ServiceOSDiagnosticsWorkspace = lazy(() => import("./features/pilot/ServiceOSDiagnosticsWorkspace"));
 const ServiceOSWave1Workspace = lazy(() => import("./features/wave1/ServiceOSWave1Workspace"));
@@ -67,8 +68,21 @@ function isPublicBookingRequest() {
   return path === "/book" || path.startsWith("/book/");
 }
 
+function isPublicApplicantRequest() {
+  if (typeof window === "undefined") return false;
+  const path = window.location.pathname.replace(/\/+$/, "") || "/";
+  return path === "/apply" || path.startsWith("/apply/");
+}
+
 function RootRouter() {
   if (isPasswordSetupRequest()) return <ServiceOSPasswordSetup />;
+  if (isPublicApplicantRequest()) {
+    return (
+      <Suspense fallback={<div role="status">Loading application…</div>}>
+        <ApplyPage />
+      </Suspense>
+    );
+  }
   if (isPublicBookingRequest()) {
     return (
       <Suspense fallback={<div role="status">Loading booking…</div>}>

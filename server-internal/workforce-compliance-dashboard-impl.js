@@ -1,12 +1,61 @@
 // Workforce W6/W9 Production boundary recovered from the accepted W1-W10 contract.
 // All HEMS reads/writes stay server-side. Browser callers never receive HEMS table access.
 
+import crypto from "node:crypto";
+
+const APPLICANT_BUCKET = "hems-hr-applicant-evidence";
+const ALLOWED_PROGRAMS = new Set(["HUC_ON_RESIDENTIAL_CLEANER", "HUC_AZ_RESIDENTIAL_CLEANER"]);
+const ALLOWED_DOCUMENTS = new Set(["GOV_ID", "PROOF_OF_INSURANCE_BONDING"]);
+const ALLOWED_MIME_TYPES = new Set(["application/pdf", "image/jpeg", "image/png"]);
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+
 function httpError(status, message, code) {
   return Object.assign(new Error(message), { status, code });
 }
 
 function text(value) {
   return String(value ?? "").trim();
+}
+
+function bounded(value, max, field) {
+  const result = text(value);
+  if (result.length > max) throw httpError(400, `${field} exceeds its allowed length.`, "WORKFORCE_FIELD_TOO_LONG");
+  return result;
+}
+
+function requestOriginAllowed(req) {
+  const origin = text(req.headers?.origin);
+  if (!origin) return true;
+  const configured = text(process.env.WORKFORCE_INTAKE_ALLOWED_ORIGINS)
+    .split(",").map((item) => item.trim()).filter(Boolean);
+  if (configured.length) return configured.includes(origin);
+  try {
+    const host = text(req.headers?.["x-forwarded-host"] || req.headers?.host);
+    return new URL(origin).host === host;
+  } catch { return false; }
+}
+
+function sourceFingerprint(req, secret) {
+  const ip = text(req.headers?.["x-forwarded-for"]).split(",")[0].trim();
+  const agent = bounded(req.headers?.["user-agent"], 1000, "User agent");
+  return crypto.createHmac("sha256", secret).update(`${ip}|${agent}`).digest("hex");
+}
+
+function normalizedUploadResult(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function safeStoragePath(path) {
+  const value = text(path);
+  if (!value || value.startsWith("/") || value.includes("..")) throw httpError(502, "Restricted object path was rejected.", "WORKFORCE_STORAGE_PATH_INVALID");
+  return value.split("/").map(encodeURIComponent).join("/");
+}
+
+function detectedMime(bytes) {
+  if (bytes.length >= 5 && bytes.subarray(0, 5).toString("ascii") === "%PDF-") return "application/pdf";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 8 && bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]))) return "image/png";
+  return null;
 }
 
 function bearerToken(req) {
@@ -85,7 +134,7 @@ async function rpc(name, payload, cfg) {
 }
 
 export async function runWorkforceApply(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Cache-Control", "no-store");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
   if (req.method === "OPTIONS") return res.status(200).end();
@@ -93,20 +142,96 @@ export async function runWorkforceApply(req, res) {
   try {
     const cfg = config();
     const body = req.body || {};
-    const result = await rpc("workforce_submit_application", {
-      p_program_code: text(body.programCode || body.program_code).toUpperCase(),
-      p_legal_name: text(body.legalName || body.legal_name),
-      p_preferred_name: text(body.preferredName || body.preferred_name) || null,
-      p_email: text(body.email).toLowerCase(),
-      p_phone_e164: text(body.phoneE164 || body.phone_e164),
-      p_applied_role_code: text(body.appliedRoleCode || body.applied_role_code),
-      p_applicant_statement: text(body.applicantStatement || body.applicant_statement) || null,
-      p_privacy_notice_version: text(body.privacyNoticeVersion || body.privacy_notice_version),
-      p_consent_to_contact: body.consentToContact === true || body.consent_to_contact === true,
-      p_idempotency_key: text(body.idempotencyKey || body.idempotency_key),
-      p_source_fingerprint_hash: text(body.sourceFingerprintHash || body.source_fingerprint_hash) || null,
-    }, cfg);
-    return res.status(201).json({ success: true, application: result });
+    if (!requestOriginAllowed(req)) throw httpError(403, "Request origin is not allowed.", "WORKFORCE_ORIGIN_DENIED");
+    if (Buffer.byteLength(JSON.stringify(body)) > 20_000) throw httpError(413, "Application payload is too large.", "WORKFORCE_PAYLOAD_TOO_LARGE");
+    if (body.website) return res.status(202).json({ success: true });
+    const action = bounded(body.action || "apply", 40, "Action").toLowerCase();
+
+    if (action === "apply") {
+      const programCode = bounded(body.programCode || body.program_code, 40, "Program code").toUpperCase();
+      if (!ALLOWED_PROGRAMS.has(programCode)) throw httpError(400, "Select Ontario or Arizona.", "WORKFORCE_PROGRAM_INVALID");
+      const legalName = bounded(body.legalName || body.legal_name, 200, "Legal name");
+      const privacyAccepted = body.privacyAccepted === true && (body.consentToContact === true || body.consent_to_contact === true);
+      const backgroundAccepted = body.backgroundConsentAccepted === true;
+      if (!privacyAccepted || !backgroundAccepted) throw httpError(400, "Privacy Notice v1.0 and Background Check Consent v1.0 are required.", "WORKFORCE_CONSENT_REQUIRED");
+      const result = await rpc("workforce_submit_public_application_v2", {
+        p_program_code: programCode,
+        p_legal_name: legalName,
+        p_email: bounded(body.email, 320, "Email").toLowerCase(),
+        p_phone_e164: bounded(body.phoneE164 || body.phone_e164, 16, "Phone"),
+        p_residential_address: bounded(body.residentialAddress, 500, "Address"),
+        p_experience_summary: bounded(body.experienceSummary, 2000, "Experience"),
+        p_availability_schedule: bounded(body.availabilitySchedule, 1200, "Availability"),
+        p_applied_role_code: bounded(body.appliedRoleCode || body.applied_role_code, 80, "Role"),
+        p_privacy_notice_version: bounded(body.privacyNoticeVersion, 100, "Privacy notice version"),
+        p_background_consent_version: bounded(body.backgroundConsentVersion, 100, "Background consent version"),
+        p_privacy_accepted: privacyAccepted,
+        p_background_consent_accepted: backgroundAccepted,
+        p_idempotency_key: bounded(body.idempotencyKey || body.idempotency_key, 180, "Idempotency key"),
+        p_source_fingerprint_hash: sourceFingerprint(req, cfg.secret),
+      }, cfg);
+      const value = normalizedUploadResult(result) || {};
+      return res.status(201).json({ success: true, application: {
+        applicantReference: value.applicant_reference,
+        applicantAccessToken: value.applicant_access_token,
+        stage: value.stage,
+        idempotentReplay: value.idempotent_replay === true,
+      } });
+    }
+
+    if (action === "sign_upload") {
+      const documentCode = bounded(body.documentCode, 80, "Document code").toUpperCase();
+      const mimeType = bounded(body.mimeType, 100, "MIME type").toLowerCase();
+      const byteSize = Number(body.byteSize);
+      if (!ALLOWED_DOCUMENTS.has(documentCode) || !ALLOWED_MIME_TYPES.has(mimeType) || !Number.isInteger(byteSize) || byteSize < 1 || byteSize > MAX_UPLOAD_BYTES) {
+        throw httpError(400, "Document type, format, or size is not allowed.", "WORKFORCE_UPLOAD_INVALID");
+      }
+      const intentRaw = await rpc("workforce_create_applicant_upload_intent", {
+        p_applicant_reference: bounded(body.applicantReference, 40, "Applicant reference"),
+        p_access_token: bounded(body.applicantAccessToken, 128, "Applicant token"),
+        p_document_code: documentCode,
+        p_idempotency_key: bounded(body.idempotencyKey, 180, "Idempotency key"),
+      }, cfg);
+      const intent = normalizedUploadResult(intentRaw) || {};
+      if (intent.bucket_id !== APPLICANT_BUCKET) throw httpError(502, "Applicant upload bucket is invalid.", "WORKFORCE_UPLOAD_BUCKET_INVALID");
+      const path = safeStoragePath(intent.object_path);
+      const signed = await serviceRequest(`/storage/v1/object/upload/sign/${encodeURIComponent(APPLICANT_BUCKET)}/${path}`, {
+        method: "POST", body: JSON.stringify({ upsert: false }),
+      }, cfg);
+      const signedPath = signed?.url || signed?.signedURL || signed?.signedUrl;
+      if (!signedPath) throw httpError(502, "A protected upload URL could not be issued.", "WORKFORCE_UPLOAD_SIGN_FAILED");
+      const uploadUrl = /^https?:\/\//i.test(signedPath) ? signedPath : `${cfg.url}/storage/v1${signedPath.startsWith("/") ? "" : "/"}${signedPath}`;
+      return res.status(200).json({ success: true, upload: { uploadIntentId: intent.upload_intent_id, uploadUrl, expiresAt: intent.expires_at } });
+    }
+
+    if (action === "finalize_upload") {
+      const intentId = bounded(body.uploadIntentId, 36, "Upload intent ID");
+      const lookup = normalizedUploadResult(await rpc("get_applicant_upload_completion_locator", {
+        p_upload_intent_id: intentId,
+        p_applicant_reference: bounded(body.applicantReference, 40, "Applicant reference"),
+        p_access_token: bounded(body.applicantAccessToken, 128, "Applicant token"),
+      }, cfg)) || {};
+      if (lookup.bucket_id !== APPLICANT_BUCKET) throw httpError(502, "Applicant upload locator is invalid.", "WORKFORCE_UPLOAD_LOCATOR_INVALID");
+      const objectResponse = await fetch(`${cfg.url}/storage/v1/object/${encodeURIComponent(APPLICANT_BUCKET)}/${safeStoragePath(lookup.object_path)}`, {
+        headers: { apikey: cfg.secret, Authorization: `Bearer ${cfg.secret}` },
+      });
+      if (!objectResponse.ok) throw httpError(400, "The uploaded document was not found.", "WORKFORCE_UPLOAD_NOT_FOUND");
+      const declaredLength = Number(objectResponse.headers.get("content-length") || 0);
+      if (declaredLength > MAX_UPLOAD_BYTES) throw httpError(400, "The uploaded document exceeds 10 MB.", "WORKFORCE_UPLOAD_TOO_LARGE");
+      const bytes = Buffer.from(await objectResponse.arrayBuffer());
+      if (!bytes.length || bytes.length > MAX_UPLOAD_BYTES) throw httpError(400, "The uploaded document size is invalid.", "WORKFORCE_UPLOAD_SIZE_INVALID");
+      const mimeType = detectedMime(bytes);
+      if (!mimeType) throw httpError(400, "The uploaded file content is not a supported PDF, JPG, or PNG.", "WORKFORCE_UPLOAD_CONTENT_INVALID");
+      const result = await rpc("workforce_quarantine_applicant_upload", {
+        p_upload_intent_id: intentId,
+        p_detected_mime_type: mimeType,
+        p_byte_size: bytes.length,
+        p_sha256: crypto.createHash("sha256").update(bytes).digest("hex"),
+        p_idempotency_key: bounded(body.idempotencyKey, 180, "Idempotency key"),
+      }, cfg);
+      return res.status(200).json({ success: true, document: normalizedUploadResult(result) });
+    }
+    throw httpError(400, "Unsupported applicant action.", "WORKFORCE_APPLY_ACTION_INVALID");
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message || "Application submission failed.", code: error.code || "WORKFORCE_APPLY_ERROR" });
   }
@@ -131,6 +256,24 @@ export async function runWorkforceDashboard(req, res) {
       const inspector = await rpc("get_worker_compliance_inspector", { p_engagement_id: engagementId, p_actor_app_user_id: actor.actorAppUserId }, cfg);
       if (inspector?.business_unit_id !== unit.id) throw httpError(403, "Engagement is outside the selected business unit.", "WORKFORCE_ENGAGEMENT_SCOPE_INVALID");
       return res.status(200).json({ success: true, inspector });
+    }
+    if (action === "applicant_inspector") {
+      const applicantSubmissionId = text(input.applicantSubmissionId || input.applicant_submission_id);
+      if (!applicantSubmissionId) throw httpError(400, "Applicant submission ID is required.", "WORKFORCE_APPLICANT_REQUIRED");
+      const inspector = await rpc("get_applicant_intake_inspector", { p_applicant_submission_id: applicantSubmissionId, p_actor_app_user_id: actor.actorAppUserId }, cfg);
+      if (inspector?.business_unit_id !== unit.id) throw httpError(403, "Applicant is outside the selected business unit.", "WORKFORCE_APPLICANT_SCOPE_INVALID");
+      return res.status(200).json({ success: true, applicantInspector: inspector });
+    }
+    if (action === "applicant_evidence") {
+      const documentCaptureId = text(input.documentCaptureId || input.document_capture_id);
+      if (!documentCaptureId) throw httpError(400, "Applicant document ID is required.", "WORKFORCE_APPLICANT_DOCUMENT_REQUIRED");
+      const locator = await rpc("get_applicant_document_access_locator", { p_document_capture_id: documentCaptureId, p_actor_app_user_id: actor.actorAppUserId }, cfg);
+      if (locator?.business_unit_id !== unit.id || locator?.bucket_id !== APPLICANT_BUCKET) throw httpError(403, "Applicant document is outside the selected business unit.", "WORKFORCE_APPLICANT_DOCUMENT_SCOPE_INVALID");
+      const signed = await serviceRequest(`/storage/v1/object/sign/${encodeURIComponent(APPLICANT_BUCKET)}/${safeStoragePath(locator.object_path)}`, { method: "POST", body: JSON.stringify({ expiresIn: 120 }) }, cfg);
+      const signedPath = signed?.signedURL || signed?.signedUrl || null;
+      if (!signedPath) throw httpError(502, "Applicant document URL could not be signed.", "WORKFORCE_APPLICANT_DOCUMENT_SIGN_FAILED");
+      const signedUrl = /^https?:\/\//i.test(signedPath) ? signedPath : `${cfg.url}/storage/v1${signedPath.startsWith("/") ? "" : "/"}${signedPath}`;
+      return res.status(200).json({ success: true, signedUrl, expiresInSeconds: 120 });
     }
     if (action === "evidence") {
       const evidenceId = text(input.evidenceId || input.evidence_id);
