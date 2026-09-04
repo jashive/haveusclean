@@ -1,0 +1,23 @@
+name: One-time Workforce Public Apply Verification
+
+on:
+  push:
+    paths:
+      - '.github/workflows/verify-workforce-apply-production.yml'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: POST synthetic application to Production logical route
+        shell: bash
+        run: |
+          set -euo pipefail
+          body='{"programCode":"HUC_ON_RESIDENTIAL_CLEANER","legalName":"TEST Workforce HTTP Applicant 2026-09-03","preferredName":"TEST HTTP Applicant","email":"test.workforce.http.20260903@example.com","phoneE164":"+14165550198","appliedRoleCode":"residential_cleaner","applicantStatement":"Synthetic HTTP Production verification audit record.","privacyNoticeVersion":"1.0","consentToContact":true,"idempotencyKey":"TEST-WORKFORCE-HTTP-20260903-1740","sourceFingerprintHash":"test-workforce-http-20260903"}'
+          http_code=$(curl --silent --show-error --output response.json --write-out '%{http_code}' \
+            --request POST 'https://haveusclean.vercel.app/api/workforce/apply' \
+            --header 'Content-Type: application/json' \
+            --data "$body")
+          cat response.json
+          test "$http_code" = "201"
+          node -e "const fs=require('fs');const x=JSON.parse(fs.readFileSync('response.json','utf8'));if(!x.success||!x.application?.applicant_reference||x.application?.stage!=='applied')process.exit(1);console.log('WORKFORCE_PUBLIC_APPLY_PASS',x.application.applicant_reference,x.application.stage)"
