@@ -231,6 +231,32 @@ export async function runWorkforceApply(req, res) {
       }, cfg);
       return res.status(200).json({ success: true, document: normalizedUploadResult(result) });
     }
+    if (action === "training_catalog") {
+      const catalog = await rpc("get_applicant_training_catalog", {
+        p_applicant_reference: bounded(body.applicantReference, 40, "Applicant reference"),
+        p_access_token: bounded(body.applicantAccessToken, 128, "Applicant token"),
+      }, cfg);
+      return res.status(200).json({ success: true, training: normalizedUploadResult(catalog) });
+    }
+    if (action === "training_progress" || action === "training_complete") {
+      const watchedSeconds = Number(body.watchedSeconds);
+      if (!Number.isInteger(watchedSeconds) || watchedSeconds < 0 || watchedSeconds > 14_400) {
+        throw httpError(400, "Training watch progress is invalid.", "WORKFORCE_TRAINING_PROGRESS_INVALID");
+      }
+      const complete = action === "training_complete";
+      const milestone = await rpc("record_applicant_training_milestone", {
+        p_applicant_reference: bounded(body.applicantReference, 40, "Applicant reference"),
+        p_access_token: bounded(body.applicantAccessToken, 128, "Applicant token"),
+        p_training_media_id: bounded(body.trainingMediaId, 36, "Training media ID"),
+        p_watched_seconds: watchedSeconds,
+        p_comprehension_confirmed: complete && body.comprehensionConfirmed === true,
+        p_comprehension_version: complete ? bounded(body.comprehensionVersion, 40, "Comprehension version") : null,
+        p_complete: complete,
+        p_source_fingerprint_hash: sourceFingerprint(req, cfg.secret),
+        p_idempotency_key: bounded(body.idempotencyKey, 180, "Idempotency key"),
+      }, cfg);
+      return res.status(200).json({ success: true, milestone: normalizedUploadResult(milestone) });
+    }
     throw httpError(400, "Unsupported applicant action.", "WORKFORCE_APPLY_ACTION_INVALID");
   } catch (error) {
     return res.status(error.status || 500).json({ success: false, error: error.message || "Application submission failed.", code: error.code || "WORKFORCE_APPLY_ERROR" });
@@ -262,7 +288,8 @@ export async function runWorkforceDashboard(req, res) {
       if (!applicantSubmissionId) throw httpError(400, "Applicant submission ID is required.", "WORKFORCE_APPLICANT_REQUIRED");
       const inspector = await rpc("get_applicant_intake_inspector", { p_applicant_submission_id: applicantSubmissionId, p_actor_app_user_id: actor.actorAppUserId }, cfg);
       if (inspector?.business_unit_id !== unit.id) throw httpError(403, "Applicant is outside the selected business unit.", "WORKFORCE_APPLICANT_SCOPE_INVALID");
-      return res.status(200).json({ success: true, applicantInspector: inspector });
+      const readiness = normalizedUploadResult(await rpc("get_applicant_training_readiness", { p_applicant_submission_id: applicantSubmissionId, p_actor_app_user_id: actor.actorAppUserId }, cfg));
+      return res.status(200).json({ success: true, applicantInspector: { ...inspector, training_readiness: readiness } });
     }
     if (action === "applicant_evidence") {
       const documentCaptureId = text(input.documentCaptureId || input.document_capture_id);
