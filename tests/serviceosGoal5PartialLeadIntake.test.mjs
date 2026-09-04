@@ -75,7 +75,7 @@ test("recent saved leads are reloaded from canonical ServiceOS storage across de
   assert.match(client, /organization_id=eq/);
   assert.match(client, /business_unit_id=eq/);
   assert.match(panel, /Recent Saved Leads/);
-  assert.match(panel, /not device memory/);
+  assert.match(panel, /available after refresh and on another device/);
   assert.match(panel, /Refresh Leads/);
 });
 

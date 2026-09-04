@@ -6,7 +6,7 @@ const main = fs.readFileSync(new URL('../src/main.jsx', import.meta.url), 'utf8'
 const bookingPage = fs.readFileSync(new URL('../src/pages/book.jsx', import.meta.url), 'utf8');
 const bookingWidget = fs.readFileSync(new URL('../src/components/BookingWidget.jsx', import.meta.url), 'utf8');
 const bookingCreate = fs.readFileSync(new URL('../api/bookings/create.js', import.meta.url), 'utf8');
-const bookingQuote = fs.readFileSync(new URL('../api/bookings/quote.js', import.meta.url), 'utf8');
+const bookingQuote = fs.readFileSync(new URL('../server-internal/public-booking-quote.js', import.meta.url), 'utf8');
 const bookingMigration = fs.readFileSync(new URL('../supabase/migrations/20260903194500_public_booking_intake_boundary.sql', import.meta.url), 'utf8');
 const commercialMigration = fs.readFileSync(new URL('../supabase/migrations/20260904001500_commercial_walkthrough_and_workforce_programs.sql', import.meta.url), 'utf8');
 const vercel = fs.readFileSync(new URL('../vercel.json', import.meta.url), 'utf8');
@@ -81,8 +81,8 @@ test('Finance automatically surfaces uninvoiced QA-passed jobs for the active bu
   assert.match(finance, /operational_status=in\.\(qa_passed,closed\)/);
   assert.match(finance, /business_unit_id=eq\.\$\{encodeURIComponent\(activeBusinessUnitId\)\}/);
   assert.match(finance, /invoice_request\?select=/);
-  assert.match(finance, /invoicedJobIds/);
-  assert.match(finance, /setBillingQueue\(jobs\.filter/);
+  assert.match(finance, /invoiceByJobId/);
+  assert.match(finance, /setBillingQueue\(jobs\.map/);
   assert.match(shell, /primaryBusinessUnitId: activeBusinessUnit\.id/);
   assert.match(shell, /activeBusinessUnitCode: activeBusinessUnit\.code/);
 });

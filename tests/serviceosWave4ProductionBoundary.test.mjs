@@ -8,7 +8,7 @@ const prodEnv = await readFile(new URL("../.env.production", import.meta.url), "
 
 test("Wave 4 has an independent production QA gate", () => {
   assert.match(shell, /VITE_SERVICEOS_QA_ENABLED/);
-  assert.match(shell, /role === "qa"/);
+  assert.match(shell, /QA_ENABLED && \["owner_admin", "qa"\]\.includes\(role\)/);
   assert.match(shell, /data-qa-authorized/);
   assert.match(prodEnv, /VITE_SERVICEOS_QA_ENABLED=true/);
 });
