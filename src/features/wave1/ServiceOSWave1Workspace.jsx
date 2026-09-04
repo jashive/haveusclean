@@ -84,20 +84,24 @@ export default function ServiceOSWave1Workspace() {
   const email = session?.user?.email ?? "Unavailable";
   const revenueAuthorized = REVENUE_ENABLED && canManageServiceOSRevenue(role);
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
-  const qaAuthorized = QA_ENABLED && role === "qa";
-  const financeAuthorized = FINANCE_ENABLED && role === "finance";
+  const qaAuthorized = QA_ENABLED && ["owner_admin", "qa"].includes(role);
+  const financeAuthorized = FINANCE_ENABLED && ["owner_admin", "office_ops"].includes(role);
   const staffAdminAuthorized = STAFF_ADMIN_ENABLED && role === "owner_admin";
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
-  const workspaceTitle = financeAuthorized ? "Wave 5 Finance Workspace" : qaAuthorized ? "Wave 4 Quality Assurance Workspace" : operationsAuthorized ? "ServiceOS Operations Workspace" : revenueAuthorized ? "ServiceOS Revenue Workspace" : "Wave 1 Access Workspace";
-  const workspaceSubtitle = financeAuthorized
-    ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
-    : qaAuthorized
-      ? "Controlled QA rollout with Finance and Intelligence gates preserved"
-      : operationsAuthorized
-        ? "Controlled Operations with canonical Revenue, QA, Finance, and Intelligence boundaries preserved"
-        : revenueAuthorized
-          ? "Immediate lead capture, guided qualification, governed quoting, quote revision, native delivery, and explicit customer response for real Have Us Clean leads"
-          : "Canonical authentication and role isolation";
+  const workspaceTitle = role === "owner_admin"
+    ? "ServiceOS Administrative Workspace"
+    : financeAuthorized ? "Wave 5 Finance Workspace" : qaAuthorized ? "Wave 4 Quality Assurance Workspace" : operationsAuthorized ? "ServiceOS Operations Workspace" : revenueAuthorized ? "ServiceOS Revenue Workspace" : "Wave 1 Access Workspace";
+  const workspaceSubtitle = role === "owner_admin"
+    ? "Owner/Admin access across enabled Revenue, Operations, QA, Finance, and Staff Administration gates"
+    : financeAuthorized
+      ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
+      : qaAuthorized
+        ? "Controlled QA rollout with Finance and Intelligence gates preserved"
+        : operationsAuthorized
+          ? "Controlled Operations with canonical Revenue, QA, Finance, and Intelligence boundaries preserved"
+          : revenueAuthorized
+            ? "Immediate lead capture, guided qualification, governed quoting, quote revision, native delivery, and explicit customer response for real Have Us Clean leads"
+            : "Canonical authentication and role isolation";
 
   async function handleLogout() {
     if (loggingOut) return;
@@ -162,7 +166,7 @@ export default function ServiceOSWave1Workspace() {
 
         <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized || staffAdminAuthorized) ? 14 : 0 }}>
           <h2 style={styles.sectionTitle}>ServiceOS rollout gates</h2>
-          <p style={styles.notice}>Revenue, Operations, QA, Finance, and Staff Administration use independent role-aware gates. Intelligence remains dark until its own rollout gate is accepted.</p>
+          <p style={styles.notice}>Revenue, Operations, QA, Finance, and Staff Administration use independent role-aware gates. Owner/Admin may open every enabled administrative gate. Intelligence remains dark until its own rollout gate is accepted.</p>
           <div style={styles.actions}>
             {canOpenServiceOSDiagnostics(role) ? <a href={SERVICEOS_DIAGNOSTICS_PATH} style={styles.link}>Open read-only diagnostics</a> : null}
             <span style={revenueAuthorized ? styles.enabled : styles.disabled}>{revenueAuthorized ? "Revenue · active" : "Revenue · disabled"}</span>
