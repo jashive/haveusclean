@@ -29,12 +29,67 @@ function DirectVideo({ module, onProgress, onEnded }) {
   </video>;
 }
 
+let youtubeApiPromise;
+
+function loadYouTubeApi() {
+  if (window.YT?.Player) return Promise.resolve(window.YT);
+  if (youtubeApiPromise) return youtubeApiPromise;
+  youtubeApiPromise = new Promise((resolve, reject) => {
+    const previous = window.onYouTubeIframeAPIReady;
+    window.onYouTubeIframeAPIReady = () => {
+      previous?.();
+      resolve(window.YT);
+    };
+    const existing = document.querySelector('script[src="https://www.youtube.com/iframe_api"]');
+    if (existing) return;
+    const script = document.createElement("script");
+    script.src = "https://www.youtube.com/iframe_api";
+    script.async = true;
+    script.onerror = () => reject(new Error("YouTube player controls could not be loaded."));
+    document.head.appendChild(script);
+  });
+  return youtubeApiPromise;
+}
+
+function embeddedUrl(value) {
+  const url = new URL(value);
+  if (url.hostname.endsWith("youtube.com") || url.hostname.endsWith("youtube-nocookie.com")) {
+    url.searchParams.set("enablejsapi", "1");
+    url.searchParams.set("playsinline", "1");
+    url.searchParams.set("rel", "0");
+    url.searchParams.set("origin", window.location.origin);
+  }
+  return url.toString();
+}
+
 function EmbeddedVideo({ module, onProgress, onEnded }) {
+  const frameRef = useRef(null);
   const progressHandler = useRef(onProgress);
   const endedHandler = useRef(onEnded);
   useEffect(() => { progressHandler.current = onProgress; endedHandler.current = onEnded; }, [onProgress, onEnded]);
   useEffect(() => {
     const origin = new URL(module.playback_url).origin;
+    const isYouTube = origin.endsWith("youtube.com") || origin.endsWith("youtube-nocookie.com");
+    let player;
+    let progressTimer;
+    let cancelled = false;
+    if (isYouTube) {
+      loadYouTubeApi().then((YT) => {
+        if (cancelled || !frameRef.current) return;
+        player = new YT.Player(frameRef.current, { events: { onStateChange(event) {
+          clearInterval(progressTimer);
+          if (event.data === YT.PlayerState.PLAYING) {
+            progressTimer = setInterval(() => progressHandler.current(Math.floor(player.getCurrentTime() || 0)), 15000);
+          }
+          if (event.data === YT.PlayerState.ENDED) {
+            const seconds = Math.max(Math.floor(player.getDuration() || 0), module.duration_seconds);
+            progressHandler.current(seconds);
+            endedHandler.current(seconds);
+          }
+        } } });
+      }).catch(() => {});
+      return () => { cancelled = true; clearInterval(progressTimer); player?.destroy?.(); };
+    }
     function receive(event) {
       if (event.origin !== origin || event.data?.hucTrainingMediaId !== module.training_media_id) return;
       const seconds = Math.max(0, Math.floor(Number(event.data.currentTime) || 0));
@@ -45,8 +100,9 @@ function EmbeddedVideo({ module, onProgress, onEnded }) {
     return () => window.removeEventListener("message", receive);
   }, [module]);
   return <iframe
+    ref={frameRef}
     className="huc-training-video"
-    src={module.playback_url}
+    src={embeddedUrl(module.playback_url)}
     title={module.title}
     allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
     sandbox="allow-scripts allow-same-origin allow-presentation"

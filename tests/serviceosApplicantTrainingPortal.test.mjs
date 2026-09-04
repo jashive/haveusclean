@@ -7,6 +7,7 @@ const api = fs.readFileSync("server-internal/workforce-compliance-dashboard-impl
 const player = fs.readFileSync("src/features/workforce/ApplicantTrainingPlayer.jsx", "utf8");
 const portal = fs.readFileSync("src/features/workforce/PublicApplicantPortal.jsx", "utf8");
 const portalProfileRls = fs.readFileSync("supabase/migrations/20260904151000_harden_applicant_portal_profile_rls.sql", "utf8");
+const mediaSeed = fs.readFileSync("supabase/migrations/20260904213000_seed_interim_industry_training_media.sql", "utf8");
 
 test("applicant portal profiles are RLS-protected and service-role-only", () => {
   assert.match(portalProfileRls, /applicant_portal_profile enable row level security/i);
@@ -48,4 +49,17 @@ test("portal embeds direct and governed player media without leaving the app", (
   assert.match(player, /application\/vnd\.apple\.mpegurl/);
   assert.match(player, /sandbox="allow-scripts allow-same-origin allow-presentation"/);
   assert.match(player, /Confirm module completion/);
+  assert.match(player, /youtube\.com\/iframe_api/);
+  assert.match(player, /YT\.PlayerState\.ENDED/);
+});
+
+test("interim media configures four logical modules for each jurisdiction", () => {
+  assert.match(mediaSeed, /HUC_FINAL_QA_WALKTHROUGH/);
+  assert.match(mediaSeed, /youtube-nocookie\.com\/embed\/M8bvESowYJg/);
+  assert.match(mediaSeed, /youtube-nocookie\.com\/embed\/sHQVhInihF0/);
+  assert.match(mediaSeed, /youtube-nocookie\.com\/embed\/R5oAqYogEOg/);
+  assert.match(mediaSeed, /youtube-nocookie\.com\/embed\/EEX4-O4fgBU/);
+  assert.match(mediaSeed, /youtube-nocookie\.com\/embed\/r1mp6oE7bhw/);
+  assert.match(mediaSeed, /required_count/);
+  assert.match(mediaSeed, /training module is outside the applicant jurisdiction/);
 });
