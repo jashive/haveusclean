@@ -162,6 +162,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
               <div style={styles.row}><strong>Experience</strong><div style={styles.muted}>{applicantInspector.experience_summary}</div></div>
               <div style={styles.row}><strong>Availability</strong><div style={styles.muted}>{applicantInspector.availability_schedule}</div></div>
               <div style={styles.row}><strong>Background consent v1.0</strong><span style={styles.badge}>{applicantInspector.background_consent_recorded ? "recorded" : "missing"}</span></div>
+              <div style={styles.row}><strong>In-app video training</strong><span style={styles.badge}>{applicantInspector.training_readiness?.completed_count || 0}/{applicantInspector.training_readiness?.required_count || 0} complete</span><div style={styles.muted}>{applicantInspector.training_readiness?.activation_note}</div></div>
             </div>
             <div style={styles.panel}>
               <strong>Applicant documents</strong>
