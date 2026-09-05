@@ -5,7 +5,7 @@ export default function BookPage() {
   const [status, setStatus] = useState('');
 
   const handleBookingSubmit = async (bookingData) => {
-    setStatus('Submitting…');
+    setStatus('Submitting your request…');
     try {
       const response = await fetch('/api/bookings/create', {
         method: 'POST',
@@ -15,25 +15,31 @@ export default function BookPage() {
 
       const result = await response.json();
       if (!response.ok || !result.success) {
-        throw new Error(result.error || 'Booking submission failed.');
+        throw new Error(result.error || 'We could not submit your request. Please try again.');
       }
 
-      setStatus(`Residential booking received. Reference: ${result.serviceRequestId || result.bookingId || result.job?.id || 'pending'}`);
+      setStatus('Your cleaning request is in. Our team will contact you to confirm the appointment.');
     } catch (err) {
-      console.error('Submission error:', err);
-      setStatus(err instanceof Error ? err.message : 'Unable to submit booking.');
+      console.error('Booking submission failed', err);
+      setStatus(err instanceof Error ? err.message : 'We could not submit your request. Please try again.');
     }
   };
 
   return (
-    <main className="min-h-screen bg-slate-950 py-10 px-4 flex flex-col items-center justify-center" data-public-booking="true">
-      <div className="text-center mb-8">
-        <h1 className="text-3xl font-extrabold text-white">Request Cleaning Service</h1>
-        <p className="text-slate-400 text-sm mt-2">No account required. Residential customers can receive a governed estimate. Commercial facilities request an on-site walkthrough for a custom proposal.</p>
-      </div>
-
+    <main className="booking-page" data-public-booking="true">
+      <header className="booking-header">
+        <a className="booking-brand" href="https://haveusclean.ca" aria-label="Have Us Clean home">
+          <span className="booking-brand__mark" aria-hidden="true">H</span><span>Have Us Clean</span>
+        </a>
+        <span className="booking-header__help">Need help? <a href="mailto:haveusclean@gmail.com">Contact us</a></span>
+      </header>
+      <section className="booking-hero">
+        <span className="booking-kicker">A cleaner home, thoughtfully arranged</span>
+        <h1>Book your cleaning in a few simple steps.</h1>
+        <p>No account required. Get a governed residential estimate or request a commercial facility walkthrough.</p>
+      </section>
       <BookingWidget onBookingSubmit={handleBookingSubmit} />
-      {status ? <p role="status" className="text-slate-200 text-sm mt-4">{status}</p> : null}
+      {status ? <p role="status" className="booking-page-status">{status}</p> : null}
     </main>
   );
 }
