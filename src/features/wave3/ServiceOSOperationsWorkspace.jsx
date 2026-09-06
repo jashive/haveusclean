@@ -22,6 +22,7 @@ import {
   buildWorkerAssignmentPayload,
   buildWorkOrderPayload,
 } from "../../lib/serviceosOperationsUtils.js";
+import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
@@ -323,8 +324,22 @@ function OfficeOperations({ revenueContext }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [pipelineSearch, setPipelineSearch] = useState("");
+  const [scheduleDate, setScheduleDate] = useState("");
   const appUserId = revenueContext?.appUserId ?? null;
   const selectedHandoff = useMemo(() => handoffs.find((handoff) => handoff.id === handoffId) ?? null, [handoffs, handoffId]);
+  const filteredHandoffs = useMemo(() => {
+    const query = pipelineSearch.trim().toLowerCase();
+    return handoffs.filter((handoff) => !query || String(handoff.dispatch_label || "").toLowerCase().includes(query));
+  }, [handoffs, pipelineSearch]);
+  const filteredPipelineJobs = useMemo(() => {
+    const query = pipelineSearch.trim().toLowerCase();
+    return pipelineJobs.filter((job) => {
+      const matchesQuery = !query || String(job.dispatch_label || "").toLowerCase().includes(query);
+      const scheduledStart = String(job.schedule_window?.scheduled_start || "");
+      return matchesQuery && (!scheduleDate || scheduledStart.startsWith(scheduleDate));
+    });
+  }, [pipelineJobs, pipelineSearch, scheduleDate]);
 
   const applyScheduleSuggestion = useCallback((handoff) => {
     if (!handoff) { setStart(""); setEnd(""); setEndAutoCalculated(false); setScheduleHint(""); return; }
@@ -460,8 +475,8 @@ function OfficeOperations({ revenueContext }) {
     finally { setBusy(false); }
   }, [handoffId, workerId, start, end, timezone, appUserId, load]);
 
-  return <section style={styles.card} data-wave3-office-workspace="true">
-    <h2 style={styles.title}>Wave 3 Operations · Office Dispatch</h2>
+  return <section style={styles.card} data-wave3-office-workspace="true" className="admin-workspace-card">
+    <div className="admin-section-heading"><div><p className="admin-eyebrow">Operations &amp; Dispatch</p><h2 style={styles.title}>Dispatch schedule and work orders</h2></div><StatusBadge tone="info">{revenueContext?.activeBusinessUnitCode || "HUC"}</StatusBadge></div>
     <p style={styles.note}>Uses canonical accepted Revenue handoffs and Operations records. Ready work and active jobs load automatically; Refresh updates the live pipeline.</p>
 
     <div style={styles.pipeline} data-wave3-dispatch-pipeline="true">
@@ -469,17 +484,22 @@ function OfficeOperations({ revenueContext }) {
         <strong>Dispatch Pipeline</strong>
         <button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh pipeline"}</button>
       </div>
+      <div className="admin-filter-bar admin-filter-bar--dark" aria-label="Dispatch filters">
+        <label className="admin-search-field"><span>Search work</span><input type="search" value={pipelineSearch} onChange={(event) => setPipelineSearch(event.target.value)} placeholder="Customer, service, or location" /></label>
+        <label className="admin-select-field"><span>Territory</span><select value={revenueContext?.activeBusinessUnitCode || ""} disabled aria-label="Active dispatch territory"><option>{revenueContext?.activeBusinessUnitCode || "HUC"}</option></select></label>
+        <label className="admin-select-field"><span>Service date</span><input type="date" value={scheduleDate} onChange={(event) => setScheduleDate(event.target.value)} /></label>
+      </div>
       <div style={{...styles.label,marginTop:12}}>Approved / Ready for dispatch · {handoffs.length}</div>
-      {handoffs.length ? handoffs.map((handoff) => <div key={handoff.id} style={styles.pipelineRow}>
+      {filteredHandoffs.length ? filteredHandoffs.map((handoff) => <div key={handoff.id} style={styles.pipelineRow}>
         <div><div>{handoff.dispatch_label}</div><div style={styles.laborMeta}>{handoff.crew_size ? <span style={styles.laborBadge}>Crew {handoff.crew_size}</span> : null}{handoff.estimated_duration_hours ? <span style={styles.laborBadge}>{handoff.estimated_duration_hours}h planned</span> : null}</div></div>
         <span style={{...styles.badge,...styles.badgeReady}}>Ready for Dispatch</span>
         <button style={styles.secondary} onClick={()=>selectHandoff(handoff.id)}>Select for dispatch</button>
       </div>) : <div style={styles.note}>No approved handoffs are waiting for dispatch.</div>}
       <div style={{...styles.label,marginTop:14}}>Active Operations · {pipelineJobs.length}</div>
-      {pipelineJobs.length ? pipelineJobs.map((job) => <div key={job.id} style={styles.pipelineRow}>
+      {filteredPipelineJobs.length ? filteredPipelineJobs.map((job) => <div key={job.id} style={styles.pipelineRow}>
         <div><div>{job.dispatch_label || `Operational job ${handoffIdSnippet(job.id)}`}</div><div style={styles.laborMeta}>{job.crew_size ? <span style={styles.laborBadge}>Crew {job.crew_size}</span> : null}{job.estimated_duration_hours ? <span style={styles.laborBadge}>{job.estimated_duration_hours}h planned</span> : null}</div></div>
         <span style={{...styles.badge,...pipelineStatusStyle(job.operational_status)}}>{pipelineStatusLabel(job.operational_status)}</span>
-        <div style={styles.mono}>{job.schedule_window?.scheduled_start ? `${job.schedule_window.scheduled_start} → ${job.schedule_window.scheduled_end || "end pending"}` : "Schedule pending"}</div>
+        <div>{job.schedule_window?.scheduled_start ? `${job.schedule_window.scheduled_start} → ${job.schedule_window.scheduled_end || "end pending"}` : "Schedule pending"}<TechnicalDetails><span>Operational job: {job.id}</span><span>Work status: {job.operational_status}</span></TechnicalDetails></div>
       </div>) : <div style={styles.note}>No active operational jobs.</div>}
     </div>
 
@@ -506,6 +526,8 @@ function WorkerOperations({ revenueContext }) {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
+  const [completedTasks, setCompletedTasks] = useState([]);
+  const [qaPhotos, setQaPhotos] = useState([]);
   const appUserId = revenueContext?.appUserId ?? null;
 
   const selected = useMemo(()=>assignments.find(a=>a.id===selectedId) ?? null,[assignments,selectedId]);
@@ -513,6 +535,11 @@ function WorkerOperations({ revenueContext }) {
   const scope = context?.scope || {};
   const addons = Array.isArray(scope?.addons) ? scope.addons : [];
   const completionLocked = context?.operational_status === "qa_pending" || selected?.assignment_status === "completed";
+  const fieldTasks = useMemo(() => {
+    const configured = context?.checklist?.tasks || context?.checklist?.items || context?.checklist;
+    if (Array.isArray(configured)) return configured.map((item) => typeof item === "string" ? item : item?.label || item?.title).filter(Boolean);
+    return ["Review scope and access notes", "Complete room-by-room cleaning checklist", "Complete final quality walkthrough", "Upload required completion photos"];
+  }, [context]);
 
   const load = useCallback(async () => {
     if (!appUserId) return;
@@ -588,8 +615,9 @@ function WorkerOperations({ revenueContext }) {
     return `${c.customer_name || "Customer"} · ${c.service_title || "Cleaning service"} · ${humanize(assignment.assignment_status)}`;
   };
 
-  return <section style={styles.card} data-wave3-worker-workspace="true">
-    <h2 style={styles.title}>Wave 3 Operations · Worker Execution</h2>
+  return <section style={styles.card} data-wave3-worker-workspace="true" className="field-workspace">
+    <p className="admin-eyebrow">Today&apos;s assigned work</p>
+    <h2 style={styles.title}>Cleaner job execution</h2>
     <p style={styles.note}>Your view is limited to your assigned work. Completion stops at <strong>QA PENDING</strong>; workers cannot approve, fail, or waive QA.</p>
     <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh assignments"}</button></div>
     <label style={{display:"block",marginTop:12}}><span style={styles.label}>Assigned job</span><select style={styles.input} value={selectedId} onChange={e=>{setSelectedId(e.target.value);setMessage("");setError("");}}><option value="">Select…</option>{assignments.map(a=><option key={a.id} value={a.id}>{assignmentLabel(a)}</option>)}</select></label>
@@ -606,16 +634,32 @@ function WorkerOperations({ revenueContext }) {
       <div style={styles.detailRow}><span style={styles.label}>Condition</span><span>{humanize(scope.condition || "not specified")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Add-ons</span><span>{addons.length ? addons.map(humanize).join(", ") : "None"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
-      <div style={styles.detailRow}><span style={styles.label}>Work order</span><span style={styles.mono}>{handoffIdSnippet(context.work_order_id)} · {humanize(context.work_order_status)}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Work order</span><span>{humanize(context.work_order_status)}</span></div>
+      <TechnicalDetails><span>Work order: {context.work_order_id}</span><span>Assignment: {selected?.id}</span></TechnicalDetails>
       {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
     </div> : null}
 
+    {context ? <section className="field-checklist" aria-labelledby="field-checklist-title">
+      <div className="field-checklist__heading"><div><p className="admin-eyebrow">Service checklist</p><h3 id="field-checklist-title">Complete every required step</h3></div><StatusBadge tone={completedTasks.length === fieldTasks.length ? "success" : "warning"}>{completedTasks.length}/{fieldTasks.length}</StatusBadge></div>
+      {fieldTasks.map((task, index) => {
+        const key = `${selectedId}:${index}`;
+        const checked = completedTasks.includes(key);
+        return <label className={`field-checklist-item ${checked ? "is-complete" : ""}`} key={key}><input type="checkbox" checked={checked} disabled={completionLocked} onChange={() => setCompletedTasks((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} /><span>{task}</span><b aria-hidden="true">{checked ? "✓" : index + 1}</b></label>;
+      })}
+    </section> : null}
+
+    {context ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
+      <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>Take or select clear before-and-after photos. Files stay on this device until the governed submission action is available.</p></div>
+      <label className="field-photo-button"><input type="file" accept="image/*" capture="environment" multiple onChange={(event) => setQaPhotos(Array.from(event.target.files || []))} /><span>＋ Add photos</span></label>
+      {qaPhotos.length ? <StatusBadge tone="info">{qaPhotos.length} photo{qaPhotos.length === 1 ? "" : "s"} selected</StatusBadge> : null}
+    </section> : null}
+
     <div style={styles.row}>
-      <button style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>
-      <button style={styles.button} onClick={startWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="dispatched"}>Start Work</button>
+      <button className="field-primary-action" style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>
+      <button className="field-primary-action" style={styles.button} onClick={startWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="dispatched"}>Start Work</button>
     </div>
     <label style={{display:"block",marginTop:12}}><span style={styles.label}>Completion note</span><textarea style={{...styles.input,minHeight:90}} value={note} onChange={e=>setNote(e.target.value)} disabled={completionLocked} placeholder={completionLocked ? "Completion submitted to QA." : "Describe completed service and evidence."} /></label>
-    <div style={styles.row}><button style={styles.button} onClick={completeWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="in_progress"}>Submit Completion to QA</button></div>
+    <div style={styles.row}><button className="field-primary-action" style={styles.button} onClick={completeWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="in_progress"}>Submit Completion to QA</button></div>
     {completionLocked ? <div style={styles.ok}>Submitted to QA. No further worker action is required unless the office or QA team returns the job for correction.</div> : null}
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
   </section>;
