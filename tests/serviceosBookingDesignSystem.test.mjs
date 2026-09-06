@@ -7,6 +7,8 @@ const widget = fs.readFileSync(new URL('../src/components/BookingWidget.jsx', im
 const primitives = fs.readFileSync(new URL('../src/components/ui.jsx', import.meta.url), 'utf8');
 const page = fs.readFileSync(new URL('../src/pages/book.jsx', import.meta.url), 'utf8');
 const bookingApi = fs.readFileSync(new URL('../api/bookings/create.js', import.meta.url), 'utf8');
+const notificationDelivery = fs.readFileSync(new URL('../server-internal/intake-notification-delivery.js', import.meta.url), 'utf8');
+const notificationMigration = fs.readFileSync(new URL('../supabase/migrations/20260906181342_residential_revenue_notifications.sql', import.meta.url), 'utf8');
 
 test('Foundation publishes approved brand, semantic, radius, and numeral tokens', () => {
   for (const token of ['--brand-900:#123d35', '--brand-800:#185247', '--brand-700:#216b5d', '--brand-600:#2b8271', '--brand-500:#3d9a87', '--brand-400:#66b5a4', '--brand-300:#91cdbc', '--brand-200:#bce3d8', '--brand-100:#ddf3ed', '--brand-50:#f1faf7', '--ink-950:#14201d']) assert.match(css, new RegExp(token));
@@ -47,4 +49,26 @@ test('Production booking APIs support modern Supabase secrets and preserve JSON 
   assert.match(bookingApi, /return await handleCommercialWalkthrough/);
   assert.match(widget, /async function readApiJson/);
   assert.match(widget, /response\.text\(\)/);
+});
+
+test('Residential submissions create one idempotent Revenue opportunity', () => {
+  assert.match(widget, /makeIdempotencyKey\('residential-booking'\)/);
+  assert.match(bookingApi, /submission_idempotency_key: idempotencyKey/);
+  assert.match(bookingApi, /opportunityId: result\?\.opportunity_id/);
+  assert.match(notificationMigration, /insert into public\.opportunity[\s\S]*?'open'/i);
+  assert.match(notificationMigration, /'queue','revenue_follow_up'/);
+  assert.match(notificationMigration, /scope='public_booking_intake' and key=v_key/);
+});
+
+test('Residential and commercial receipts use private durable Microsoft 365 delivery', () => {
+  assert.match(bookingApi, /kind: 'residential'/);
+  assert.match(bookingApi, /kind: 'commercial'/);
+  assert.match(notificationDelivery, /M365_OPERATIONS_EMAIL \|\| senderEmail/);
+  assert.match(notificationDelivery, /audience: 'customer'/);
+  assert.match(notificationDelivery, /audience: 'operations'/);
+  assert.match(notificationDelivery, /requested appointment and governed estimate/i);
+  assert.match(notificationDelivery, /does not create an instant price or confirmed appointment/i);
+  assert.match(notificationMigration, /force row level security/i);
+  assert.match(notificationMigration, /revoke all on table public\.intake_notification_delivery from public,anon,authenticated/i);
+  assert.match(notificationMigration, /grant select,insert,update on table public\.intake_notification_delivery to service_role/i);
 });

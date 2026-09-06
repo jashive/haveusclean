@@ -27,7 +27,7 @@ const COMMERCIAL_FREQUENCIES = [
 const ADDONS = [['inside_refrigerator', 'Inside refrigerator'], ['inside_oven', 'Inside oven'], ['inside_kitchen_cabinets', 'Inside kitchen cabinets'], ['interior_windows', 'Interior windows'], ['pet_hair_removal', 'Pet hair removal'], ['heavy_baseboard_detailing', 'Heavy baseboard detailing']];
 const STEPS = ['Location', 'Home Specs', 'Frequency & Tier', 'Add-ons', 'Schedule & Contact', 'Confirmation'];
 
-const initialResidential = { market: 'HUC-ON', dwellingType: 'apartment', packageKey: 'essential_refresh', bedrooms: 1, bathrooms: 1, sqft: '', condition: 'light', frequency: 'one_time', fullName: '', email: '', phone: '', address: '', city: '', postalCode: '', selectedDate: '', selectedTimeSlot: '', notes: '' };
+const initialResidential = { market: 'HUC-ON', dwellingType: 'apartment', packageKey: 'essential_refresh', bedrooms: 1, bathrooms: 1, sqft: '', condition: 'light', frequency: 'one_time', fullName: '', email: '', phone: '', address: '', city: '', postalCode: '', selectedDate: '', selectedTimeSlot: '', notes: '', idempotencyKey: makeIdempotencyKey('residential-booking') };
 const initialCommercial = { market: 'HUC-ON', companyName: '', contactName: '', email: '', phone: '', address: '', city: '', postalCode: '', facilityType: 'office', estimatedSquareFeet: '', frequency: 'weekly', walkthroughDate: '', walkthroughTimeWindow: '', notes: '', idempotencyKey: makeIdempotencyKey('commercial-walkthrough') };
 
 function formatMoney(amount, currency) {
@@ -106,7 +106,7 @@ export default function BookingWidget({ onBookingSubmit }) {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not calculate this estimate.'); }
     finally { setBusy(false); }
   }
-  async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); } finally { setBusy(false); } }
+  async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { const result = await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); if (result?.success) setForm((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('residential-booking') })); } finally { setBusy(false); } }
   async function submitCommercial() {
     setBusy(true); setError(''); setCommercialStatus('');
     try { const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: commercial }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') })); }
