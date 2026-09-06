@@ -39,6 +39,13 @@ function makeIdempotencyKey(prefix) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+async function readApiJson(response, fallbackMessage) {
+  const raw = await response.text();
+  if (!raw) return { success: false, error: fallbackMessage };
+  try { return JSON.parse(raw); }
+  catch { return { success: false, error: fallbackMessage }; }
+}
+
 function StepIndicator({ current }) {
   return <nav className="booking-steps" aria-label="Booking progress"><ol>{STEPS.map((label, index) => <li key={label} className={index === current ? 'is-current' : index < current ? 'is-complete' : ''} aria-current={index === current ? 'step' : undefined}><span>{index < current ? '✓' : index + 1}</span><small>{label}</small></li>)}</ol></nav>;
 }
@@ -90,7 +97,7 @@ export default function BookingWidget({ onBookingSubmit }) {
     setBusy(true); setError('');
     try {
       const response = await fetch('/api/bookings/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ market: form.market, dwellingType: form.dwellingType, packageKey: form.packageKey, bedrooms: Number(form.bedrooms), bathrooms: Number(form.bathrooms), sqft: form.sqft === '' ? null : Number(form.sqft), condition: form.condition, frequency: form.frequency, addons: selectedAddOns }) });
-      const result = await response.json();
+      const result = await readApiJson(response, 'We could not calculate this estimate. Please try again.');
       if (!response.ok || !result.success) throw new Error(result.error || 'We could not calculate this estimate.');
       if (result.quote?.requiresOfficeReview) throw new Error(result.quote.reason || 'Our team needs to review this request.');
       // The server-returned configurationVersion remains part of the governed quote snapshot;
@@ -102,7 +109,7 @@ export default function BookingWidget({ onBookingSubmit }) {
   async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); } finally { setBusy(false); } }
   async function submitCommercial() {
     setBusy(true); setError(''); setCommercialStatus('');
-    try { const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: commercial }) }); const result = await response.json(); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') })); }
+    try { const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: commercial }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') })); }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not submit the walkthrough request.'); } finally { setBusy(false); }
   }
   function continueStep() {
