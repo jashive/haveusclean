@@ -42,7 +42,15 @@ test('commercial public flow requires a walkthrough and never produces instant p
   assert.match(bookingWidget, /Commercial Cleaning/);
   assert.match(bookingWidget, /Custom Commercial Proposal — On-Site Facility Walkthrough Required/);
   assert.match(bookingWidget, /Preferred Walkthrough Date & Time Window/);
+  assert.match(bookingWidget, /Business and location/);
+  assert.match(bookingWidget, /Facility dimensions and service rhythm/);
+  assert.match(bookingWidget, /Access and site requirements/);
+  assert.match(bookingWidget, /Preferred walkthrough/);
+  assert.match(bookingWidget, /COMMERCIAL_ACCESS/);
+  assert.match(bookingWidget, /Access requirements:/);
+  assert.match(bookingWidget, /Revenue follow-up queue/);
   assert.match(bookingWidget, /\/api\/bookings\/commercial-walkthrough/);
+  assert.doesNotMatch(bookingWidget.match(/function CommercialWalkthrough[\s\S]*?export default/)?.[0] || '', /StickySummaryCard|Estimated total|calculateQuote/);
   assert.match(vercel, /\/api\/bookings\/commercial-walkthrough/);
   assert.match(bookingCreate, /create_commercial_walkthrough_intake/);
   assert.match(commercialMigration, /'walkthrough_requested'/);
