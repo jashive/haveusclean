@@ -3,6 +3,7 @@
 // canonical ServiceOS environment guard and service-role-only RPC boundaries.
 
 import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
+import { dispatchIntakeNotifications } from '../../server-internal/intake-notification-delivery.js';
 import '../../server-internal/supabase-secret-key-fetch-compat.js';
 
 function httpError(status, message, code) {
@@ -15,6 +16,10 @@ function text(value) {
 
 function normalizeEmail(value) {
   return text(value).toLowerCase();
+}
+
+function displayLabel(value) {
+  return text(value).replace(/_/g, ' ').replace(/\b\w/g, (character) => character.toUpperCase());
 }
 
 function normalizeMarket(value) {
@@ -154,6 +159,26 @@ async function handleCommercialWalkthrough(req, res, config) {
     p_idempotency_key: idempotencyKey,
   }, config, 'Commercial walkthrough request could not be saved. Please try again or contact Have Us Clean.');
 
+  const notifications = await dispatchIntakeNotifications({
+    intake: {
+      kind: 'commercial',
+      submissionKey: idempotencyKey,
+      serviceRequestId: result?.service_request_id,
+      market,
+      contactName,
+      customerEmail: email,
+      phone,
+      address: `${address}, ${city}, ${postalCode}`,
+      walkthroughDate,
+      walkthroughTimeWindow,
+      facilityType: displayLabel(facilityType),
+      estimatedSquareFeet: Math.round(estimatedSquareFeet),
+      frequencyLabel: displayLabel(frequency),
+      notes,
+    },
+    callRpc: (name, payload) => callRpc(name, payload, config),
+  });
+
   return res.status(201).json({
     success: true,
     commercial: true,
@@ -161,6 +186,7 @@ async function handleCommercialWalkthrough(req, res, config) {
     opportunityId: result?.opportunity_id || null,
     lifecycleStatus: result?.lifecycle_status || 'walkthrough_requested',
     market,
+    notifications,
     message: 'Custom Commercial Proposal — On-Site Facility Walkthrough Required',
   });
 }
@@ -198,6 +224,7 @@ export default async function handler(req, res) {
     const postalCode = validatePostal(market, booking.postalCode || booking.zipCode);
     const requestedDate = text(booking.selectedDate || booking.date);
     const arrivalWindow = text(booking.selectedTimeSlot || booking.timeSlot);
+    const idempotencyKey = text(booking.idempotencyKey || booking.idempotency_key) || `residential-${market}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
     if (!name) throw httpError(400, 'Full name is required.', 'BOOKING_NAME_REQUIRED');
     if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw httpError(400, 'A valid email is required.', 'BOOKING_EMAIL_INVALID');
@@ -279,14 +306,42 @@ export default async function handler(req, res) {
         source: 'public_booking',
         customer_auth_created: false,
         public_route: '/book',
+        submission_idempotency_key: idempotencyKey,
       },
     }, config);
+
+    const notifications = await dispatchIntakeNotifications({
+      intake: {
+        kind: 'residential',
+        submissionKey: idempotencyKey,
+        serviceRequestId: result?.service_request_id,
+        market,
+        contactName: name,
+        customerEmail: email,
+        phone,
+        address: `${address}, ${city}, ${postalCode}`,
+        requestedDate,
+        arrivalWindow,
+        serviceLabel: displayLabel(booking.packageKey || 'essential_refresh'),
+        frequencyLabel: displayLabel(booking.frequency || 'one_time'),
+        currencyCode: quote.currencyCode,
+        taxName: quote.taxName,
+        subtotal: quote.preTaxTotal,
+        taxAmount: quote.taxAmount,
+        total: quote.total,
+        notes: text(booking.notes),
+      },
+      callRpc: (rpcName, payload) => callRpc(rpcName, payload, config),
+    });
 
     return res.status(201).json({
       success: true,
       bookingId: result?.booking_id || null,
       serviceRequestId: result?.service_request_id || null,
+      opportunityId: result?.opportunity_id || null,
       customerId: result?.customer_id || null,
+      idempotentReplay: result?.idempotent_replay === true,
+      notifications,
       quote: {
         market,
         currencyCode: quote.currencyCode,
