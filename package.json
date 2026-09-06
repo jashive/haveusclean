@@ -27,6 +27,7 @@
     "stripe": "^18.2.0"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.8",
     "@vitejs/plugin-react": "^4.2.1",
     "nanoid": "3.3.18",
     "playwright": "^1.62.1",

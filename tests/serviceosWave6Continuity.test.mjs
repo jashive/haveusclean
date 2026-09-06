@@ -3,11 +3,10 @@
 
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import os from "node:os";
-import { spawnSync } from "node:child_process";
+import { withTempPostgres as runWithTempPostgres } from "./helpers/tempPostgres.mjs";
 
 import {
   CONTINUITY_TRANSITIONS,
@@ -36,44 +35,8 @@ const clientSource = readFileSync(
   "utf8"
 );
 
-function runChecked(command, args, options = {}) {
-  const result = spawnSync(command, args, { encoding: "utf8", ...options });
-  if (result.status !== 0) {
-    throw new Error(
-      `${command} ${args.join(" ")} failed:\n${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim()
-    );
-  }
-  return result;
-}
-
 async function withTempPostgres(run) {
-  const binDir = process.env.PG_BINDIR || "/usr/lib/postgresql/16/bin";
-  const initdb = path.join(binDir, "initdb");
-  const pgCtl = path.join(binDir, "pg_ctl");
-  const psql = path.join(binDir, "psql");
-  const rootDir = mkdtempSync(path.join(os.tmpdir(), "wave6-pg-"));
-  const dataDir = path.join(rootDir, "data");
-  const socketDir = path.join(rootDir, "socket");
-  const port = String(56000 + Math.floor(Math.random() * 3000));
-  const logFile = path.join(rootDir, "postgres.log");
-  runChecked("mkdir", ["-p", dataDir, socketDir]);
-  try {
-    runChecked(initdb, ["-D", dataDir, "-A", "trust", "-U", "postgres", "--no-locale"]);
-    runChecked(
-      pgCtl,
-      ["-D", dataDir, "-l", logFile, "-o", `-k ${socketDir} -p ${port}`, "-w", "start"],
-      { stdio: "ignore" }
-    );
-    const execSql = (statement) =>
-      runChecked(
-        psql,
-        ["-h", socketDir, "-p", port, "-U", "postgres", "-d", "postgres", "-qAt", "-c", statement]
-      ).stdout.trim();
-    return await run(execSql);
-  } finally {
-    spawnSync(pgCtl, ["-D", dataDir, "-m", "immediate", "-w", "stop"], { stdio: "ignore" });
-    rmSync(rootDir, { recursive: true, force: true });
-  }
+  return runWithTempPostgres("wave6-pg-", 56000, 3000, run);
 }
 
 // ── Session lifecycle ────────────────────────────────────────────────────────
@@ -382,8 +345,8 @@ test("migration immutability trigger blocks mutation of payload evidence fields"
 });
 
 test("PostgreSQL default declared_at and BEFORE INSERT trigger coexist; ordinary continuity declaration succeeds", async () => {
-  await withTempPostgres((execSql) => {
-    execSql(`
+  await withTempPostgres(async (execSql) => {
+    await execSql(`
       CREATE TABLE continuity_session_like (
         id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
         session_code text NOT NULL,
@@ -392,7 +355,7 @@ test("PostgreSQL default declared_at and BEFORE INSERT trigger coexist; ordinary
         declared_by_app_user_id uuid
       );
     `);
-    execSql(`
+    await execSql(`
       CREATE OR REPLACE FUNCTION trg_wave6_guard_continuity_session_insert_like()
       RETURNS trigger
       LANGUAGE plpgsql
@@ -407,13 +370,13 @@ test("PostgreSQL default declared_at and BEFORE INSERT trigger coexist; ordinary
       END;
       $$;
     `);
-    execSql(`
+    await execSql(`
       CREATE TRIGGER trig_wave6_guard_continuity_session_insert_like
       BEFORE INSERT ON continuity_session_like
       FOR EACH ROW
       EXECUTE FUNCTION trg_wave6_guard_continuity_session_insert_like();
     `);
-    const created = execSql(`
+    const created = await execSql(`
       INSERT INTO continuity_session_like (session_code)
       VALUES ('DR-ORDINARY-1')
       RETURNING session_status, declared_at IS NOT NULL, declared_by_app_user_id::text;
@@ -423,7 +386,7 @@ test("PostgreSQL default declared_at and BEFORE INSERT trigger coexist; ordinary
     assert.equal(createdParts[1], "t");
     assert.equal(createdParts[2], "00000000-0000-0000-0000-000000000001");
 
-    const overridden = execSql(`
+    const overridden = await execSql(`
       INSERT INTO continuity_session_like (session_code, declared_at)
       VALUES ('DR-OVERRIDE-1', '2001-01-01T00:00:00Z')
       RETURNING (declared_at > '2001-01-01T00:00:00Z'::timestamptz), declared_by_app_user_id::text;
