@@ -37,6 +37,15 @@ test("uploads use a signed private-storage flow and never expose Supabase secret
   assert.match(server, /createHash\("sha256"\)/);
 });
 
+test("Phase B presents a guided, accessible candidate journey with governed upload states", () => {
+  for (const section of ["Application Intake", "Document Quarantine Vault", "Video Training Player", "Compliance Status"]) assert.match(portal, new RegExp(section, "i"));
+  assert.match(portal, /onDragEnter/);
+  assert.match(portal, /onDrop/);
+  assert.match(portal, /Browse files/);
+  for (const state of ["Empty", "Uploading", "Quarantined & verified", "Error \/ retry"]) assert.match(portal, new RegExp(state, "i"));
+  assert.match(portal, /className="visually-hidden"[\s\S]+type="file"/);
+});
+
 test("early documents are quarantined and cannot bypass screening or activation", () => {
   assert.match(migration, /'quarantined'/);
   assert.match(migration, /Uploading does not advance screening/);
