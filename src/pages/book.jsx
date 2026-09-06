@@ -18,10 +18,15 @@ export default function BookPage() {
         throw new Error(result.error || 'We could not submit your request. Please try again.');
       }
 
-      setStatus('Your cleaning request is in. Our team will contact you to confirm the appointment.');
+      const emailNote = result.notifications?.customer === 'sent'
+        ? ' A confirmation email is on its way.'
+        : ' Your request is saved; email confirmation may be delayed.';
+      setStatus(`Your cleaning request is in. Our team will contact you to confirm the appointment.${emailNote}`);
+      return result;
     } catch (err) {
       console.error('Booking submission failed', err);
       setStatus(err instanceof Error ? err.message : 'We could not submit your request. Please try again.');
+      return null;
     }
   };
 
