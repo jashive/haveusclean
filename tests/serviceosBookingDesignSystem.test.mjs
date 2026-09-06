@@ -10,6 +10,15 @@ const bookingApi = fs.readFileSync(new URL('../api/bookings/create.js', import.m
 const notificationDelivery = fs.readFileSync(new URL('../server-internal/intake-notification-delivery.js', import.meta.url), 'utf8');
 const notificationMigration = fs.readFileSync(new URL('../supabase/migrations/20260906181342_residential_revenue_notifications.sql', import.meta.url), 'utf8');
 
+function contrastRatio(foreground, background) {
+  const luminance = (hex) => {
+    const channels = hex.match(/[a-f\d]{2}/gi).map((value) => Number.parseInt(value, 16) / 255).map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * channels[0] + 0.7152 * channels[1] + 0.0722 * channels[2];
+  };
+  const [lighter, darker] = [luminance(foreground), luminance(background)].sort((a, b) => b - a);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
 test('Foundation publishes approved brand, semantic, radius, and numeral tokens', () => {
   for (const token of ['--brand-900:#123d35', '--brand-800:#185247', '--brand-700:#216b5d', '--brand-600:#2b8271', '--brand-500:#3d9a87', '--brand-400:#66b5a4', '--brand-300:#91cdbc', '--brand-200:#bce3d8', '--brand-100:#ddf3ed', '--brand-50:#f1faf7', '--ink-950:#14201d']) assert.match(css, new RegExp(token));
   assert.match(css, /--success-fg:#177245/);
@@ -41,6 +50,23 @@ test('Commercial intake retains its configurable frequency selector during Phase
   assert.match(widget, /Preferred cleaning frequency/);
   for (const value of ['one_time', 'weekly', 'biweekly', 'three_times_weekly', 'five_times_weekly', 'monthly', 'custom']) {
     assert.match(widget, new RegExp(`\\['${value}'`));
+  }
+});
+
+test('Residential and commercial typography explicitly meet WCAG AA contrast on light surfaces', () => {
+  assert.match(css, /--ink-900:#20302b/);
+  assert.match(css, /\.wizard-card__heading h2\{[^}]*color:var\(--ink-950\)/);
+  assert.match(css, /\.wizard-stack h3\{[^}]*color:var\(--ink-950\)/);
+  assert.match(css, /\.booking-experience \.huc-field__label\{color:var\(--ink-900\)/);
+  assert.match(css, /\.booking-experience \.huc-field__hint\{color:var\(--ink-700\)\}/);
+  assert.match(css, /\.booking-experience \.selection-tile__title\{color:var\(--ink-950\)\}/);
+  assert.match(css, /\.commercial-section__heading h3\{[^}]*color:var\(--ink-950\)/);
+  assert.match(css, /\.commercial-section__heading p\{[^}]*color:var\(--ink-700\)/);
+  assert.match(css, /\.commercial-choice-group legend,\.commercial-form \.huc-field__label\{[^}]*color:var\(--ink-900\)/);
+  assert.match(css, /\.commercial-form \.huc-field__hint\{color:var\(--ink-700\)\}/);
+  for (const foreground of ['14201d', '20302b', '3c4b47']) {
+    assert.ok(contrastRatio(foreground, 'ffffff') >= 4.5, `${foreground} must meet 4.5:1 on white`);
+    assert.ok(contrastRatio(foreground, 'f1faf7') >= 4.5, `${foreground} must meet 4.5:1 on brand-50`);
   }
 });
 
