@@ -32,12 +32,6 @@ export default function BookPage() {
 
   return (
     <main className="booking-page" data-public-booking="true">
-      <header className="booking-header">
-        <a className="booking-brand" href="https://haveusclean.ca" aria-label="Have Us Clean home">
-          <span className="booking-brand__mark" aria-hidden="true">H</span><span>Have Us Clean</span>
-        </a>
-        <span className="booking-header__help">Need help? <a href="mailto:haveusclean@gmail.com">Contact us</a></span>
-      </header>
       <section className="booking-hero">
         <span className="booking-kicker">A cleaner home, thoughtfully arranged</span>
         <h1>Book your cleaning in a few simple steps.</h1>
