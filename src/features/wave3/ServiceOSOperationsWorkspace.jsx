@@ -23,6 +23,7 @@ import {
   buildWorkOrderPayload,
 } from "../../lib/serviceosOperationsUtils.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
+import CleanerExecutionPlaybook from "./CleanerExecutionPlaybook.jsx";
 
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
@@ -535,6 +536,7 @@ function WorkerOperations({ revenueContext }) {
   const scope = context?.scope || {};
   const addons = Array.isArray(scope?.addons) ? scope.addons : [];
   const completionLocked = context?.operational_status === "qa_pending" || selected?.assignment_status === "completed";
+  const executionActive = context?.operational_status === "in_progress";
   const fieldTasks = useMemo(() => {
     const configured = context?.checklist?.tasks || context?.checklist?.items || context?.checklist;
     if (Array.isArray(configured)) return configured.map((item) => typeof item === "string" ? item : item?.label || item?.title).filter(Boolean);
@@ -633,13 +635,16 @@ function WorkerOperations({ revenueContext }) {
       <div style={styles.detailRow}><span style={styles.label}>Property</span><span>{[scope.dwellingType, scope.beds ? `${scope.beds} bed` : null, scope.baths ? `${scope.baths} bath` : null, scope.sqft ? `${scope.sqft} sqft` : null].filter(Boolean).join(" · ") || "Scope details unavailable"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Condition</span><span>{humanize(scope.condition || "not specified")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Add-ons</span><span>{addons.length ? addons.map(humanize).join(", ") : "None"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Access notes</span><span>{context.access_instructions?.notes || context.access_instructions?.instructions || (typeof context.access_instructions === "string" ? context.access_instructions : "No special access notes")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Work order</span><span>{humanize(context.work_order_status)}</span></div>
       <TechnicalDetails><span>Work order: {context.work_order_id}</span><span>Assignment: {selected?.id}</span></TechnicalDetails>
       {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
     </div> : null}
 
-    {context ? <section className="field-checklist" aria-labelledby="field-checklist-title">
+    {executionActive ? <CleanerExecutionPlaybook key={selectedId} context={context} addons={addons} /> : null}
+
+    {executionActive ? <section className="field-checklist" aria-labelledby="field-checklist-title">
       <div className="field-checklist__heading"><div><p className="admin-eyebrow">Service checklist</p><h3 id="field-checklist-title">Complete every required step</h3></div><StatusBadge tone={completedTasks.length === fieldTasks.length ? "success" : "warning"}>{completedTasks.length}/{fieldTasks.length}</StatusBadge></div>
       {fieldTasks.map((task, index) => {
         const key = `${selectedId}:${index}`;
@@ -648,7 +653,7 @@ function WorkerOperations({ revenueContext }) {
       })}
     </section> : null}
 
-    {context ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
+    {executionActive ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
       <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>Take or select clear before-and-after photos. Files stay on this device until the governed submission action is available.</p></div>
       <label className="field-photo-button"><input type="file" accept="image/*" capture="environment" multiple onChange={(event) => setQaPhotos(Array.from(event.target.files || []))} /><span>＋ Add photos</span></label>
       {qaPhotos.length ? <StatusBadge tone="info">{qaPhotos.length} photo{qaPhotos.length === 1 ? "" : "s"} selected</StatusBadge> : null}
@@ -656,10 +661,10 @@ function WorkerOperations({ revenueContext }) {
 
     <div style={styles.row}>
       <button className="field-primary-action" style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>
-      <button className="field-primary-action" style={styles.button} onClick={startWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="dispatched"}>Start Work</button>
+      <button className="field-primary-action" style={styles.button} onClick={startWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="dispatched"}>Start Job</button>
     </div>
-    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Completion note</span><textarea style={{...styles.input,minHeight:90}} value={note} onChange={e=>setNote(e.target.value)} disabled={completionLocked} placeholder={completionLocked ? "Completion submitted to QA." : "Describe completed service and evidence."} /></label>
-    <div style={styles.row}><button className="field-primary-action" style={styles.button} onClick={completeWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"||context?.operational_status!=="in_progress"}>Submit Completion to QA</button></div>
+    {executionActive || completionLocked ? <label style={{display:"block",marginTop:12}}><span style={styles.label}>Completion note</span><textarea style={{...styles.input,minHeight:90}} value={note} onChange={e=>setNote(e.target.value)} disabled={completionLocked} placeholder={completionLocked ? "Completion submitted to QA." : "Describe completed service and evidence."} /></label> : null}
+    {executionActive ? <div style={styles.row}><button className="field-primary-action" style={styles.button} onClick={completeWork} disabled={busy||!selected||selected.assignment_status!=="acknowledged"}>Submit Completion to QA</button></div> : null}
     {completionLocked ? <div style={styles.ok}>Submitted to QA. No further worker action is required unless the office or QA team returns the job for correction.</div> : null}
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
   </section>;
