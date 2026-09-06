@@ -3,6 +3,7 @@
 // canonical ServiceOS environment guard and service-role-only RPC boundaries.
 
 import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
+import '../../server-internal/supabase-secret-key-fetch-compat.js';
 
 function httpError(status, message, code) {
   return Object.assign(new Error(message), { status, code });
@@ -182,7 +183,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ success: true, quote });
     }
     if (action === 'commercial-walkthrough') {
-      return handleCommercialWalkthrough(req, res, config);
+      // Await inside this try/catch so async validation and persistence failures
+      // are always serialized as the endpoint's JSON error contract.
+      return await handleCommercialWalkthrough(req, res, config);
     }
 
     const booking = req.body?.bookingData || req.body || {};
