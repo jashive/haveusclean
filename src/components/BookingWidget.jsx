@@ -24,11 +24,25 @@ const COMMERCIAL_FREQUENCIES = [
   ['monthly', 'Monthly'],
   ['custom', 'Custom Schedule'],
 ];
+const COMMERCIAL_FACILITIES = [
+  ['office', 'Office', 'Professional offices and shared workspaces'],
+  ['medical', 'Medical / Dental', 'Patient-facing and clinical environments'],
+  ['retail', 'Retail', 'Stores, showrooms, and customer areas'],
+  ['industrial', 'Industrial / Warehouse', 'Warehouse offices and support spaces'],
+];
+const COMMERCIAL_ACCESS = [
+  ['after_hours', 'After-hours access'],
+  ['security_check_in', 'Security check-in'],
+  ['alarm_or_key', 'Alarm, key, or access code'],
+  ['loading_dock', 'Loading dock / service entrance'],
+  ['elevator', 'Elevator coordination'],
+  ['occupied_service', 'Service during operating hours'],
+];
 const ADDONS = [['inside_refrigerator', 'Inside refrigerator'], ['inside_oven', 'Inside oven'], ['inside_kitchen_cabinets', 'Inside kitchen cabinets'], ['interior_windows', 'Interior windows'], ['pet_hair_removal', 'Pet hair removal'], ['heavy_baseboard_detailing', 'Heavy baseboard detailing']];
 const STEPS = ['Location', 'Home Specs', 'Frequency & Tier', 'Add-ons', 'Schedule & Contact', 'Confirmation'];
 
 const initialResidential = { market: 'HUC-ON', dwellingType: 'apartment', packageKey: 'essential_refresh', bedrooms: 1, bathrooms: 1, sqft: '', condition: 'light', frequency: 'one_time', fullName: '', email: '', phone: '', address: '', city: '', postalCode: '', selectedDate: '', selectedTimeSlot: '', notes: '', idempotencyKey: makeIdempotencyKey('residential-booking') };
-const initialCommercial = { market: 'HUC-ON', companyName: '', contactName: '', email: '', phone: '', address: '', city: '', postalCode: '', facilityType: 'office', estimatedSquareFeet: '', frequency: 'weekly', walkthroughDate: '', walkthroughTimeWindow: '', notes: '', idempotencyKey: makeIdempotencyKey('commercial-walkthrough') };
+const initialCommercial = { market: 'HUC-ON', companyName: '', contactName: '', email: '', phone: '', address: '', city: '', postalCode: '', facilityType: 'office', estimatedSquareFeet: '', floorCount: '', frequency: 'weekly', accessRequirements: [], walkthroughDate: '', walkthroughTimeWindow: '', notes: '', idempotencyKey: makeIdempotencyKey('commercial-walkthrough') };
 
 function formatMoney(amount, currency) {
   try { return new Intl.NumberFormat(currency === 'CAD' ? 'en-CA' : 'en-US', { style: 'currency', currency: currency || 'USD' }).format(Number(amount || 0)); }
@@ -53,27 +67,51 @@ function StepIndicator({ current }) {
 function CommercialWalkthrough({ commercial, setCommercial, busy, error, status, onSubmit }) {
   const market = MARKETS.find((item) => item.value === commercial.market) || MARKETS[0];
   const update = (name, value) => setCommercial((current) => ({ ...current, [name]: value }));
+  const toggleAccess = (value) => setCommercial((current) => ({ ...current, accessRequirements: current.accessRequirements.includes(value) ? current.accessRequirements.filter((item) => item !== value) : [...current.accessRequirements, value] }));
   return <section className="commercial-intake" data-commercial-walkthrough="true">
-    <div className="wizard-card__heading"><StatusBadge tone="info">Business services</StatusBadge><h2>Request a Commercial Facility Walkthrough</h2><p>We’ll assess your facility, access, frequency, and compliance needs before preparing a custom proposal.</p></div>
-    <div className="commercial-notice"><strong>Custom Commercial Proposal — On-Site Facility Walkthrough Required</strong><span>No instant price or cleaning job is created.</span></div>
-    <div className="form-grid">
-      <FormField label="Service market"><select value={commercial.market} onChange={(e) => update('market', e.target.value)}>{MARKETS.map((item) => <option key={item.value} value={item.value}>{item.title}</option>)}</select></FormField>
-      <FormField label="Company name"><input value={commercial.companyName} onChange={(e) => update('companyName', e.target.value)} /></FormField>
-      <FormField label="Primary contact"><input value={commercial.contactName} onChange={(e) => update('contactName', e.target.value)} /></FormField>
-      <FormField label="Email"><input type="email" value={commercial.email} onChange={(e) => update('email', e.target.value)} /></FormField>
-      <FormField label="Phone"><input type="tel" value={commercial.phone} onChange={(e) => update('phone', e.target.value)} /></FormField>
-      <FormField label="Service address"><input value={commercial.address} onChange={(e) => update('address', e.target.value)} /></FormField>
-      <FormField label="City"><input value={commercial.city} onChange={(e) => update('city', e.target.value)} /></FormField>
-      <FormField label={market.region}><input value={commercial.postalCode} placeholder={market.placeholder} onChange={(e) => update('postalCode', e.target.value)} /></FormField>
-      <FormField label="Facility type"><select value={commercial.facilityType} onChange={(e) => update('facilityType', e.target.value)}><option value="office">Office</option><option value="medical">Medical / Dental</option><option value="retail">Retail</option><option value="industrial">Industrial / Warehouse Office</option></select></FormField>
-      <FormField label="Estimated square footage"><input type="number" min="1" value={commercial.estimatedSquareFeet} onChange={(e) => update('estimatedSquareFeet', e.target.value)} /></FormField>
-      <FormField label="Preferred cleaning frequency"><select value={commercial.frequency} onChange={(e) => update('frequency', e.target.value)}>{COMMERCIAL_FREQUENCIES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FormField>
-      <FormField label="Preferred Walkthrough Date & Time Window"><input type="date" value={commercial.walkthroughDate} onChange={(e) => update('walkthroughDate', e.target.value)} /></FormField>
-      <FormField label="Preferred time window"><select value={commercial.walkthroughTimeWindow} onChange={(e) => update('walkthroughTimeWindow', e.target.value)}><option value="">Select window</option><option>Morning</option><option>Midday</option><option>Afternoon</option><option>Flexible</option></select></FormField>
-      <FormField label="Facility notes / access / requirements" className="form-grid__wide"><textarea value={commercial.notes} onChange={(e) => update('notes', e.target.value)} /></FormField>
-    </div>
-    <Button onClick={onSubmit} disabled={busy}>{busy ? 'Submitting…' : 'Request facility walkthrough'}</Button>
-    {status ? <p role="status" className="form-message form-message--success">{status}</p> : null}{error ? <p role="alert" className="form-message form-message--error">{error}</p> : null}
+    <header className="commercial-hero">
+      <div><StatusBadge tone="info">Commercial cleaning</StatusBadge><h2>Plan a facility walkthrough</h2><p>Tell our estimating team about your site. We’ll confirm the walkthrough, assess the scope, and prepare a tailored proposal.</p></div>
+      <div className="commercial-market-mark" aria-label={`${market.title} service market`}><span>{market.value}</span><strong>{market.title}</strong></div>
+    </header>
+    <div className="commercial-notice"><span className="commercial-notice__icon" aria-hidden="true">✓</span><div><strong>Custom Commercial Proposal — On-Site Facility Walkthrough Required</strong><span>Commercial requests never display residential instant pricing or create a cleaning job. Your request goes directly to the Revenue follow-up queue.</span></div></div>
+    <form className="commercial-form" onSubmit={(event) => { event.preventDefault(); onSubmit(); }}>
+      <section className="commercial-section" aria-labelledby="commercial-location-title">
+        <div className="commercial-section__heading"><span>01</span><div><h3 id="commercial-location-title">Business and location</h3><p>Choose the operating market and tell us where the walkthrough will take place.</p></div></div>
+        <div className="tile-grid tile-grid--two commercial-market-grid">{MARKETS.map((item) => <SelectionTile key={item.value} selected={commercial.market === item.value} title={item.title} description={item.description} meta={`${item.value} · ${item.currency}`} onClick={() => update('market', item.value)} />)}</div>
+        <div className="form-grid">
+          <FormField label="Company name"><input required autoComplete="organization" value={commercial.companyName} onChange={(e) => update('companyName', e.target.value)} /></FormField>
+          <FormField label="Primary contact"><input required autoComplete="name" value={commercial.contactName} onChange={(e) => update('contactName', e.target.value)} /></FormField>
+          <FormField label="Email"><input required type="email" autoComplete="email" value={commercial.email} onChange={(e) => update('email', e.target.value)} /></FormField>
+          <FormField label="Phone"><input required type="tel" autoComplete="tel" value={commercial.phone} onChange={(e) => update('phone', e.target.value)} /></FormField>
+          <FormField label="Service address" className="form-grid__wide"><input required autoComplete="street-address" value={commercial.address} onChange={(e) => update('address', e.target.value)} /></FormField>
+          <FormField label="City"><input required autoComplete="address-level2" value={commercial.city} onChange={(e) => update('city', e.target.value)} /></FormField>
+          <FormField label={market.region}><input required autoComplete="postal-code" value={commercial.postalCode} placeholder={market.placeholder} onChange={(e) => update('postalCode', e.target.value)} /></FormField>
+        </div>
+      </section>
+      <section className="commercial-section" aria-labelledby="commercial-facility-title">
+        <div className="commercial-section__heading"><span>02</span><div><h3 id="commercial-facility-title">Facility dimensions and service rhythm</h3><p>Approximate details are enough—we’ll validate measurements during the walkthrough.</p></div></div>
+        <div className="tile-grid tile-grid--two">{COMMERCIAL_FACILITIES.map(([value, title, description]) => <SelectionTile key={value} selected={commercial.facilityType === value} title={title} description={description} onClick={() => update('facilityType', value)} />)}</div>
+        <div className="commercial-dimensions">
+          <FormField label="Estimated square footage" hint="Approximate is fine"><input required type="number" min="1" inputMode="numeric" value={commercial.estimatedSquareFeet} onChange={(e) => update('estimatedSquareFeet', e.target.value)} /></FormField>
+          <FormField label="Number of floors" hint="Optional"><input type="number" min="1" inputMode="numeric" value={commercial.floorCount} onChange={(e) => update('floorCount', e.target.value)} /></FormField>
+        </div>
+        <fieldset className="commercial-choice-group"><legend>Preferred cleaning frequency</legend><div className="commercial-frequency-grid">{COMMERCIAL_FREQUENCIES.map(([value, label]) => <label key={value} className={commercial.frequency === value ? 'is-selected' : ''}><input type="radio" name="commercial-frequency" value={value} checked={commercial.frequency === value} onChange={(e) => update('frequency', e.target.value)} /><span>{label}</span></label>)}</div></fieldset>
+      </section>
+      <section className="commercial-section" aria-labelledby="commercial-access-title">
+        <div className="commercial-section__heading"><span>03</span><div><h3 id="commercial-access-title">Access and site requirements</h3><p>Select everything our walkthrough coordinator should plan for.</p></div></div>
+        <fieldset className="commercial-choice-group"><legend className="visually-hidden">Access requirements</legend><div className="commercial-access-grid">{COMMERCIAL_ACCESS.map(([value, label]) => <label key={value} className={commercial.accessRequirements.includes(value) ? 'is-selected' : ''}><input type="checkbox" checked={commercial.accessRequirements.includes(value)} onChange={() => toggleAccess(value)} /><span>{label}</span></label>)}</div></fieldset>
+        <FormField label="Scope, compliance, or access notes" hint="Include priority areas, restricted zones, or site-specific requirements."><textarea value={commercial.notes} onChange={(e) => update('notes', e.target.value)} /></FormField>
+      </section>
+      <section className="commercial-section" aria-labelledby="commercial-schedule-title">
+        <div className="commercial-section__heading"><span>04</span><div><h3 id="commercial-schedule-title">Preferred walkthrough</h3><p>Choose a date and arrival window. Our team will confirm availability by email.</p></div></div>
+        <div className="commercial-schedule-grid">
+          <FormField label="Preferred Walkthrough Date & Time Window"><input required type="date" value={commercial.walkthroughDate} onChange={(e) => update('walkthroughDate', e.target.value)} /></FormField>
+          <FormField label="Preferred time window"><select required value={commercial.walkthroughTimeWindow} onChange={(e) => update('walkthroughTimeWindow', e.target.value)}><option value="">Select window</option><option>Morning</option><option>Midday</option><option>Afternoon</option><option>Flexible</option></select></FormField>
+        </div>
+      </section>
+      <footer className="commercial-submit"><div><strong>Ready for an on-site assessment?</strong><span>No payment is collected today.</span></div><Button type="submit" disabled={busy}>{busy ? 'Submitting…' : 'Request facility walkthrough'}</Button></footer>
+      {status ? <div role="status" className="commercial-confirmation"><StatusBadge tone="success">Request received</StatusBadge><strong>We’ll confirm your walkthrough next.</strong><p>{status} A confirmation receipt has been sent to the contact email provided.</p></div> : null}{error ? <p role="alert" className="form-message form-message--error">{error}</p> : null}
+    </form>
   </section>;
 }
 
@@ -109,7 +147,14 @@ export default function BookingWidget({ onBookingSubmit }) {
   async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { const result = await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); if (result?.success) setForm((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('residential-booking') })); } finally { setBusy(false); } }
   async function submitCommercial() {
     setBusy(true); setError(''); setCommercialStatus('');
-    try { const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: commercial }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') })); }
+    try {
+      const operationalNotes = [
+        commercial.floorCount ? `Floors: ${commercial.floorCount}` : '',
+        commercial.accessRequirements.length ? `Access requirements: ${commercial.accessRequirements.map((value) => COMMERCIAL_ACCESS.find(([key]) => key === value)?.[1] || value).join(', ')}` : '',
+        commercial.notes,
+      ].filter(Boolean).join('\n');
+      const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: { ...commercial, notes: operationalNotes } }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') }));
+    }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not submit the walkthrough request.'); } finally { setBusy(false); }
   }
   function continueStep() {
