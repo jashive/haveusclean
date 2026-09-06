@@ -1,4 +1,4 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import ApplicantTrainingPlayer from "./ApplicantTrainingPlayer.jsx";
 import { Button, StatusBadge } from "../../components/ui.jsx";
 
@@ -12,6 +12,39 @@ const DOCUMENTS = [
 ];
 const ACCEPTED_TYPES = ["application/pdf", "image/jpeg", "image/png"];
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
+const APPLICANT_SESSION_KEY = "huc_applicant_session_v1";
+
+function validApplicantSession(value) {
+  return /^APP-[A-Z0-9]+$/.test(String(value?.applicantReference || ""))
+    && String(value?.applicantAccessToken || "").length >= 24;
+}
+
+function resumeUrl(session) {
+  if (!validApplicantSession(session) || typeof window === "undefined") return "";
+  const url = new URL("/apply", window.location.origin);
+  url.hash = new URLSearchParams({ ref: session.applicantReference, token: session.applicantAccessToken }).toString();
+  return url.toString();
+}
+
+function readApplicantSession() {
+  if (typeof window === "undefined") return null;
+  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+  const linked = { applicantReference: hash.get("ref"), applicantAccessToken: hash.get("token") };
+  if (validApplicantSession(linked)) return linked;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(APPLICANT_SESSION_KEY) || "null");
+    return validApplicantSession(stored) ? stored : null;
+  } catch { return null; }
+}
+
+function persistApplicantSession(session) {
+  if (!validApplicantSession(session) || typeof window === "undefined") return;
+  window.localStorage.setItem(APPLICANT_SESSION_KEY, JSON.stringify({
+    applicantReference: session.applicantReference,
+    applicantAccessToken: session.applicantAccessToken,
+  }));
+  window.history.replaceState(null, "", resumeUrl(session));
+}
 
 function requestKey(prefix) {
   const value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`;
@@ -81,15 +114,16 @@ function DocumentUploadZone({ item, file, status, disabled, onSelect }) {
 }
 
 export default function PublicApplicantPortal() {
+  const [result, setResult] = useState(readApplicantSession);
   const [market, setMarket] = useState("ON");
-  const [state, setState] = useState("idle");
+  const [state, setState] = useState(() => result ? "success" : "idle");
   const [error, setError] = useState("");
-  const [result, setResult] = useState(null);
   const [files, setFiles] = useState({});
   const [uploads, setUploads] = useState({});
   const submissionKey = useRef(requestKey("public-apply"));
   const program = PROGRAMS[market];
   const marketOptions = useMemo(() => Object.entries(PROGRAMS), []);
+  useEffect(() => { if (result) persistApplicantSession(result); }, [result]);
   function selectFile(item, file, status) {
     setFiles((current) => ({ ...current, [item.code]: file }));
     setUploads((current) => ({ ...current, [item.code]: status }));
@@ -104,11 +138,11 @@ export default function PublicApplicantPortal() {
     try {
       const response = await api({ action: "apply", programCode: program.code, legalName: values.get("legalName"), email: values.get("email"), phoneE164, residentialAddress: values.get("address"), experienceSummary: values.get("experience"), availabilitySchedule: values.get("availability"), appliedRoleCode: program.role, privacyNoticeVersion: "1.0", backgroundConsentVersion: "1.0", privacyAccepted: values.get("privacyAccepted") === "on", backgroundConsentAccepted: values.get("backgroundConsentAccepted") === "on", consentToContact: true, idempotencyKey: submissionKey.current, website: values.get("website") });
       const session = response.application;
+      persistApplicantSession(session);
       for (const item of DOCUMENTS) {
         try { await uploadDocument(session, item, files[item.code], (status) => setUploads((current) => ({ ...current, [item.code]: status }))); }
         catch (uploadError) { setUploads((current) => ({ ...current, [item.code]: { phase: "error", message: uploadError.message } })); throw uploadError; }
       }
-      sessionStorage.setItem("huc_applicant_reference", session.applicantReference);
       setResult(session); setState("success");
     } catch (err) { setError(`${err.message || "Your application could not be submitted."} Your selections are retained so you can retry.`); setState("idle"); }
   }
@@ -118,7 +152,7 @@ export default function PublicApplicantPortal() {
       <section className="candidate-hero"><p className="candidate-kicker">Join the Have Us Clean team</p><h1>Build a cleaner future with us.</h1><p>Apply, secure your documents, and complete orientation in one guided experience. No account is required.</p></section>
       <FlowSteps submitted={state === "success"} />
       {state === "success" ? <div className="candidate-success">
-        <section className="candidate-card candidate-card--success" aria-labelledby="application-title"><div className="candidate-success__mark" aria-hidden="true">✓</div><div><StatusBadge tone="success">Application received</StatusBadge><h2 id="application-title">Welcome to candidate orientation</h2><p>Your application and protected documents are now in Owner/Admin screening.</p><div className="candidate-reference"><span>Private follow-up reference</span><strong>{result?.applicantReference}</strong></div></div></section>
+        <section className="candidate-card candidate-card--success" aria-labelledby="application-title"><div className="candidate-success__mark" aria-hidden="true">✓</div><div><StatusBadge tone="success">Application received</StatusBadge><h2 id="application-title">Welcome to candidate orientation</h2><p>Your application and protected documents are now in Owner/Admin screening.</p><div className="candidate-reference"><span>Private reference code</span><strong>{result?.applicantReference}</strong></div><div className="candidate-resume"><div><strong>Resume onboarding anytime</strong><p>Bookmark this private link. We also sent it to the email address on your application.</p></div><a className="huc-button huc-button--secondary" href={resumeUrl(result)}>Resume Onboarding</a></div>{result?.resumeEmailStatus === "failed" ? <p className="candidate-alert candidate-alert--warning" role="status">We could not send the resume email. Bookmark or copy the private link above before leaving this page.</p> : null}</div></section>
         <ApplicantTrainingPlayer session={result} request={api} />
         <section className="compliance-status" aria-labelledby="compliance-title"><div><p className="candidate-kicker">Step 4</p><h2 id="compliance-title">Compliance status</h2></div><StatusBadge tone="warning">Screening in progress</StatusBadge><p>Video completion satisfies the orientation milestone only. Document review, screening, practical observation, and compliance approval remain required before ServiceOS activation.</p></section>
       </div> : <form onSubmit={submit} className="candidate-card candidate-form" aria-labelledby="application-title">

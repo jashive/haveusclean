@@ -2,6 +2,7 @@
 // All HEMS reads/writes stay server-side. Browser callers never receive HEMS table access.
 
 import crypto from "node:crypto";
+import { dispatchApplicantResumeEmail } from "./intake-notification-delivery.js";
 
 const APPLICANT_BUCKET = "hems-hr-applicant-evidence";
 const ALLOWED_PROGRAMS = new Set(["HUC_ON_RESIDENTIAL_CLEANER", "HUC_AZ_RESIDENTIAL_CLEANER"]);
@@ -151,13 +152,14 @@ export async function runWorkforceApply(req, res) {
       const programCode = bounded(body.programCode || body.program_code, 40, "Program code").toUpperCase();
       if (!ALLOWED_PROGRAMS.has(programCode)) throw httpError(400, "Select Ontario or Arizona.", "WORKFORCE_PROGRAM_INVALID");
       const legalName = bounded(body.legalName || body.legal_name, 200, "Legal name");
+      const applicantEmail = bounded(body.email, 320, "Email").toLowerCase();
       const privacyAccepted = body.privacyAccepted === true && (body.consentToContact === true || body.consent_to_contact === true);
       const backgroundAccepted = body.backgroundConsentAccepted === true;
       if (!privacyAccepted || !backgroundAccepted) throw httpError(400, "Privacy Notice v1.0 and Background Check Consent v1.0 are required.", "WORKFORCE_CONSENT_REQUIRED");
       const result = await rpc("workforce_submit_public_application_v2", {
         p_program_code: programCode,
         p_legal_name: legalName,
-        p_email: bounded(body.email, 320, "Email").toLowerCase(),
+        p_email: applicantEmail,
         p_phone_e164: bounded(body.phoneE164 || body.phone_e164, 16, "Phone"),
         p_residential_address: bounded(body.residentialAddress, 500, "Address"),
         p_experience_summary: bounded(body.experienceSummary, 2000, "Experience"),
@@ -171,11 +173,20 @@ export async function runWorkforceApply(req, res) {
         p_source_fingerprint_hash: sourceFingerprint(req, cfg.secret),
       }, cfg);
       const value = normalizedUploadResult(result) || {};
-      return res.status(201).json({ success: true, application: {
+      const application = {
         applicantReference: value.applicant_reference,
         applicantAccessToken: value.applicant_access_token,
         stage: value.stage,
         idempotentReplay: value.idempotent_replay === true,
+      };
+      const resumeDelivery = await dispatchApplicantResumeEmail({
+        applicant: application,
+        recipientEmail: applicantEmail,
+        legalName,
+      });
+      return res.status(201).json({ success: true, application: {
+        ...application,
+        resumeEmailStatus: resumeDelivery.status,
       } });
     }
 

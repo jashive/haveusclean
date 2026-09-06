@@ -73,21 +73,38 @@ function embeddedUrl(value) {
   return url.toString();
 }
 
-function EmbeddedVideo({ module, onProgress, onEnded }) {
-  const frameRef = useRef(null);
+function isYouTubeUrl(value) {
+  try {
+    const hostname = new URL(value).hostname;
+    return hostname.endsWith("youtube.com") || hostname.endsWith("youtube-nocookie.com");
+  } catch { return false; }
+}
+
+function youtubeVideoId(value) {
+  try {
+    const url = new URL(value);
+    const parts = url.pathname.split("/").filter(Boolean);
+    return url.searchParams.get("v") || (parts[0] === "embed" ? parts[1] : null);
+  } catch { return null; }
+}
+
+function YouTubeVideo({ module, onProgress, onEnded }) {
+  const mountRef = useRef(null);
   const progressHandler = useRef(onProgress);
   const endedHandler = useRef(onEnded);
   useEffect(() => { progressHandler.current = onProgress; endedHandler.current = onEnded; }, [onProgress, onEnded]);
   useEffect(() => {
-    const origin = new URL(module.playback_url).origin;
-    const isYouTube = origin.endsWith("youtube.com") || origin.endsWith("youtube-nocookie.com");
     let player;
     let progressTimer;
     let cancelled = false;
-    if (isYouTube) {
-      loadYouTubeApi().then((YT) => {
-        if (cancelled || !frameRef.current) return;
-        player = new YT.Player(frameRef.current, { events: { onStateChange(event) {
+    const videoId = youtubeVideoId(module.playback_url);
+    loadYouTubeApi().then((YT) => {
+      if (cancelled || !mountRef.current || !videoId) return;
+      player = new YT.Player(mountRef.current, {
+        videoId,
+        host: "https://www.youtube-nocookie.com",
+        playerVars: { playsinline: 1, rel: 0, origin: window.location.origin },
+        events: { onStateChange(event) {
           clearInterval(progressTimer);
           if (event.data === YT.PlayerState.PLAYING) {
             progressTimer = setInterval(() => progressHandler.current(Math.floor(player.getCurrentTime() || 0)), 15000);
@@ -97,10 +114,18 @@ function EmbeddedVideo({ module, onProgress, onEnded }) {
             progressHandler.current(seconds);
             endedHandler.current(seconds);
           }
-        } } });
-      }).catch(() => {});
-      return () => { cancelled = true; clearInterval(progressTimer); player?.destroy?.(); };
-    }
+        } },
+      });
+    }).catch(() => {});
+    return () => { cancelled = true; clearInterval(progressTimer); player?.destroy?.(); };
+  }, [module.training_media_id, module.playback_url, module.duration_seconds]);
+  return <div ref={mountRef} className="huc-training-video" aria-label={module.title} />;
+}
+
+function EmbeddedVideo({ module, onProgress, onEnded }) {
+  useEffect(() => {
+    if (isYouTubeUrl(module.playback_url)) return undefined;
+    const origin = new URL(module.playback_url).origin;
     function receive(event) {
       if (event.origin !== origin || event.data?.hucTrainingMediaId !== module.training_media_id) return;
       const seconds = Math.max(0, Math.floor(Number(event.data.currentTime) || 0));
@@ -109,9 +134,12 @@ function EmbeddedVideo({ module, onProgress, onEnded }) {
     }
     window.addEventListener("message", receive);
     return () => window.removeEventListener("message", receive);
-  }, [module]);
+  }, [module.training_media_id, module.playback_url, module.duration_seconds, onProgress, onEnded]);
+  if (isYouTubeUrl(module.playback_url)) {
+    return <YouTubeVideo key={module.training_media_id} module={module} onProgress={onProgress} onEnded={onEnded} />;
+  }
   return <iframe
-    ref={frameRef}
+    key={module.training_media_id}
     className="huc-training-video"
     src={embeddedUrl(module.playback_url)}
     title={module.title}
@@ -164,6 +192,8 @@ export default function ApplicantTrainingPlayer({ session, request }) {
         comprehensionVersion: module.comprehension_version, idempotencyKey: `complete-${module.training_media_id}-${module.media_version}`,
       });
       await load();
+      const next = catalog.find((item) => item.training_media_id !== module.training_media_id && item.completion_status !== "completed");
+      if (next) setActiveId(next.training_media_id);
     } catch (err) { setError(err.message || "Training completion could not be recorded."); }
     finally { setSaving(null); }
   }
@@ -195,11 +225,12 @@ export default function ApplicantTrainingPlayer({ session, request }) {
           <div className="candidate-player-card__meta"><div><span>Now playing</span><h3>{active.title}</h3></div><StatusBadge tone={active.completion_status === "completed" ? "success" : "neutral"}>{formatDuration(active.duration_seconds)}</StatusBadge></div>
           <div className="candidate-player-card__frame">
           {active.playback_type === "embed"
-            ? <EmbeddedVideo module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />
-            : <DirectVideo module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />}
+            ? <EmbeddedVideo key={active.training_media_id} module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />
+            : <DirectVideo key={active.training_media_id} module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />}
           </div>
           <div className="candidate-player-card__progress"><span style={{ width: `${modulePercent(active, watched[active.training_media_id] || active.duration_seconds * Number(active.completion_percent || 0) / 100)}%` }} /><small>Playback progress is saved securely every 15 seconds.</small></div>
-          <label className="huc-training-confirm"><input type="checkbox" checked={confirmed[active.training_media_id] || false} onChange={(event) => setConfirmed((current) => ({ ...current, [active.training_media_id]: event.target.checked }))} /> I understand this module and agree to follow the standard shown.</label>
+          <label className="huc-training-confirm"><input type="checkbox" checked={active.completion_status === "completed" || confirmed[active.training_media_id] || false} disabled={active.completion_status === "completed" || !ended[active.training_media_id]} onChange={(event) => setConfirmed((current) => ({ ...current, [active.training_media_id]: event.target.checked }))} /> I understand this module and agree to follow the standard shown.</label>
+          {!ended[active.training_media_id] && active.completion_status !== "completed" ? <p className="candidate-player-card__unlock">Finish this video to unlock the comprehension check.</p> : null}
           <Button type="button" disabled={active.completion_status === "completed" || !ended[active.training_media_id] || !confirmed[active.training_media_id] || saving === active.training_media_id} onClick={() => complete(active)}>
             {active.completion_status === "completed" ? "Module complete" : saving === active.training_media_id ? "Recording milestone…" : "Confirm module completion"}
           </Button>

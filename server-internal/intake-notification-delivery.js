@@ -189,3 +189,45 @@ export async function dispatchIntakeNotifications({ intake, callRpc }) {
   ]);
   return Object.fromEntries(deliveries.map((item) => [item.audience, item.status]));
 }
+
+function applicantResumeUrl(applicant) {
+  const configured = text(process.env.SERVICEOS_PUBLIC_URL).replace(/\/$/, '');
+  const base = configured || 'https://haveusclean.vercel.app';
+  const url = new URL('/apply', base);
+  url.hash = new URLSearchParams({
+    ref: applicant.applicantReference,
+    token: applicant.applicantAccessToken,
+  }).toString();
+  return url.toString();
+}
+
+export async function dispatchApplicantResumeEmail({ applicant, recipientEmail, legalName }) {
+  try {
+    const config = microsoft365Config();
+    const token = await graphToken(config);
+    const link = applicantResumeUrl(applicant);
+    const mailboxPath = `/users/${encodeURIComponent(config.senderEmail)}`;
+    const message = {
+      subject: 'Your private Have Us Clean onboarding link',
+      body: {
+        contentType: 'HTML',
+        content: shell(`<h2 style="margin-top:0">Continue your candidate onboarding</h2><p>Hi ${escapeHtml(legalName)},</p><p>Your application was received. Use the private link below to return to your document and training progress from any device.</p><p style="margin:22px 0"><a href="${escapeHtml(link)}" style="display:inline-block;background:#216b5d;color:#fff;text-decoration:none;font-weight:700;padding:12px 18px;border-radius:10px">Resume Onboarding</a></p><table style="width:100%;border-collapse:collapse;margin:18px 0">${row('Reference code', applicant.applicantReference)}</table><div style="background:#fff3d6;border:1px solid #ebcf8a;border-radius:10px;padding:14px"><strong>Keep this link private.</strong> Anyone with the complete link may access your onboarding progress. Have Us Clean will never ask you to post it publicly.</div><p style="margin-bottom:0">Have Us Clean</p>`, 'Candidate onboarding'),
+      },
+      toRecipients: [{ emailAddress: { address: text(recipientEmail).toLowerCase() } }],
+      internetMessageHeaders: [{ name: 'X-HUC-Notification-Type', value: 'applicant-resume-link' }],
+    };
+    const { data: draft } = await graphRequest(`${mailboxPath}/messages`, token, {
+      method: 'POST', body: JSON.stringify(message),
+    }, 'Microsoft 365 could not create the applicant resume email');
+    const providerMessageId = text(draft?.id);
+    if (!providerMessageId) throw new Error('Microsoft 365 returned no applicant resume message ID');
+    const { response } = await graphRequest(`${mailboxPath}/messages/${encodeURIComponent(providerMessageId)}/send`, token, {
+      method: 'POST',
+    }, 'Microsoft 365 did not accept the applicant resume email');
+    if (response.status !== 202) throw new Error(`Microsoft 365 did not accept the applicant resume email (HTTP ${response.status})`);
+    return { status: 'sent', providerMessageId };
+  } catch (error) {
+    console.error('Applicant resume email delivery failed', { message: text(error?.message) });
+    return { status: 'failed' };
+  }
+}

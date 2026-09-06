@@ -22,6 +22,14 @@
 @media(max-width:640px){.booking-page{padding:0 14px 48px}.booking-header{padding:14px 0}.booking-header__help{font-size:12px}.booking-hero{margin:36px auto 28px}.booking-hero h1{font-size:34px}.booking-hero p{font-size:15px}.service-mode{width:100%}.service-mode .huc-button{flex:1;padding:9px 10px}.booking-steps ol{gap:4px}.booking-steps li span{width:28px;height:28px}.booking-steps li::before{top:13px}.wizard-card,.commercial-intake{padding:20px 16px;border-radius:16px}.tile-grid--two,.tile-grid--three,.form-grid{grid-template-columns:1fr}.selection-tile{min-height:96px}.sticky-summary-card{padding:18px}.wizard-actions{position:sticky;bottom:0;margin-right:-16px;margin-left:-16px;padding:14px 16px;background:rgba(255,255,255,.96);box-shadow:0 -8px 24px rgba(20,32,29,.07);z-index:3}}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}}
 
+.candidate-resume{display:flex;align-items:center;justify-content:space-between;gap:18px;margin-top:12px;border:1px solid var(--brand-100);border-radius:12px;padding:14px;background:var(--brand-50)}
+.candidate-resume strong{color:var(--brand-900)}
+.candidate-resume p{margin-top:3px;font-size:12px}
+.candidate-resume .huc-button{text-decoration:none;white-space:nowrap}
+.candidate-alert--warning{border:1px solid #ebcf8a;color:var(--warning-fg);background:var(--warning-bg)}
+.candidate-player-card__unlock{margin:-7px 0 13px;color:var(--ink-500);font-size:11px}
+@media(max-width:640px){.candidate-resume{display:grid}.candidate-resume .huc-button{width:100%}}
+
 /* Phase B — public candidate orientation. */
 .visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
 .candidate-portal{min-height:100vh;color:var(--ink-950);background:radial-gradient(circle at 85% 0,rgba(221,243,237,.9),transparent 32%),linear-gradient(180deg,#fff 0,var(--neutral-50) 48%,var(--brand-50) 100%)}
