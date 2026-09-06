@@ -147,7 +147,6 @@ export default function PublicApplicantPortal() {
     } catch (err) { setError(`${err.message || "Your application could not be submitted."} Your selections are retained so you can retry.`); setState("idle"); }
   }
   return <main className="candidate-portal">
-    <header className="candidate-header"><a className="candidate-brand" href="/" aria-label="Have Us Clean home"><span aria-hidden="true">H</span>Have Us Clean</a><span>Workforce onboarding</span></header>
     <div className="candidate-shell">
       <section className="candidate-hero"><p className="candidate-kicker">Join the Have Us Clean team</p><h1>Build a cleaner future with us.</h1><p>Apply, secure your documents, and complete orientation in one guided experience. No account is required.</p></section>
       <FlowSteps submitted={state === "success"} />

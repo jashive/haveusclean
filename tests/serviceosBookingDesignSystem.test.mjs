@@ -6,6 +6,8 @@ const css = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const widget = fs.readFileSync(new URL('../src/components/BookingWidget.jsx', import.meta.url), 'utf8');
 const primitives = fs.readFileSync(new URL('../src/components/ui.jsx', import.meta.url), 'utf8');
 const page = fs.readFileSync(new URL('../src/pages/book.jsx', import.meta.url), 'utf8');
+const main = fs.readFileSync(new URL('../src/main.jsx', import.meta.url), 'utf8');
+const appShell = fs.readFileSync(new URL('../src/components/GlobalAppShell.jsx', import.meta.url), 'utf8');
 const bookingApi = fs.readFileSync(new URL('../api/bookings/create.js', import.meta.url), 'utf8');
 const notificationDelivery = fs.readFileSync(new URL('../server-internal/intake-notification-delivery.js', import.meta.url), 'utf8');
 const notificationMigration = fs.readFileSync(new URL('../supabase/migrations/20260906181342_residential_revenue_notifications.sql', import.meta.url), 'utf8');
@@ -33,6 +35,16 @@ test('Foundation exposes the five approved shared primitives', () => {
   for (const name of ['Button', 'FormField', 'SelectionTile', 'StatusBadge', 'StickySummaryCard']) assert.match(primitives, new RegExp(`export (?:const|function) ${name}`));
   assert.match(primitives, /aria-pressed/);
   assert.match(primitives, /aria-label="Booking summary"/);
+  assert.match(main, /<GlobalAppShell publicView>/);
+  assert.match(main, /isPasswordSetupRequest\(\)\) return <GlobalAppShell publicView><ServiceOSPasswordSetup \/><\/GlobalAppShell>/);
+  assert.match(main, /<ServiceOSAuthGate><GlobalAppShell><ServiceOSRoot \/><\/GlobalAppShell><\/ServiceOSAuthGate>/);
+  for (const label of ['Book', 'Careers / Apply', 'Admin / Dispatch', 'HUC-ON', 'HUC-AZ']) assert.match(appShell, new RegExp(label.replace('/', '\\/')));
+  assert.match(appShell, /aria-current/);
+  assert.match(appShell, /href="#main-content"/);
+  assert.match(css, /--content-6xl:72rem/);
+  assert.match(css, /--content-7xl:80rem/);
+  assert.match(css, /\.global-app-shell\{[^}]*background:var\(--neutral-50\)/);
+  assert.doesNotMatch(appShell, /fetch\(|bookingData|FormData|applicant_training_record/);
 });
 
 test('Residential booking is a six-step governed wizard without public diagnostic ids', () => {

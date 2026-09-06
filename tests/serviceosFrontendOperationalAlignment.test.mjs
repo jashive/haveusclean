@@ -19,8 +19,8 @@ test('public booking routes bypass the ServiceOS auth gate in the Vite root rout
   assert.match(main, /isPublicBookingRequest/);
   assert.match(main, /path === "\/book" \|\| path\.startsWith\("\/book\/"\)/);
   assert.match(main, /if \(isPublicBookingRequest\(\)\)[\s\S]*?<BookPage \/>/);
-  assert.match(main, /return <ServiceOSAuthGate><ServiceOSRoot \/><\/ServiceOSAuthGate>/);
-  assert.ok(main.indexOf('if (isPublicBookingRequest())') < main.indexOf('return <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>'));
+  assert.match(main, /return <ServiceOSAuthGate><GlobalAppShell><ServiceOSRoot \/><\/GlobalAppShell><\/ServiceOSAuthGate>/);
+  assert.ok(main.indexOf('if (isPublicBookingRequest())') < main.indexOf('return <ServiceOSAuthGate><GlobalAppShell><ServiceOSRoot /></GlobalAppShell></ServiceOSAuthGate>'));
   assert.match(bookingPage, /No account required/);
 });
 

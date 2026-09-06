@@ -2,6 +2,7 @@ import React, { lazy, Suspense } from "react";
 import ReactDOM from "react-dom/client";
 import ServiceOSAuthGate, { useServiceOSContext } from "./auth/ServiceOSAuthGate";
 import ServiceOSPasswordSetup from "./auth/ServiceOSPasswordSetup";
+import GlobalAppShell from "./components/GlobalAppShell";
 import { isCanonicalServiceOSMode, SERVICEOS_DIAGNOSTICS_PATH } from "./lib/serviceosUiPolicy";
 import "./styles.css";
 
@@ -75,22 +76,22 @@ function isPublicApplicantRequest() {
 }
 
 function RootRouter() {
-  if (isPasswordSetupRequest()) return <ServiceOSPasswordSetup />;
+  if (isPasswordSetupRequest()) return <GlobalAppShell publicView><ServiceOSPasswordSetup /></GlobalAppShell>;
   if (isPublicApplicantRequest()) {
     return (
-      <Suspense fallback={<div role="status">Loading application…</div>}>
-        <ApplyPage />
-      </Suspense>
+      <GlobalAppShell publicView>
+        <Suspense fallback={<div className="global-loading" role="status">Loading application…</div>}><ApplyPage /></Suspense>
+      </GlobalAppShell>
     );
   }
   if (isPublicBookingRequest()) {
     return (
-      <Suspense fallback={<div role="status">Loading booking…</div>}>
-        <BookPage />
-      </Suspense>
+      <GlobalAppShell publicView>
+        <Suspense fallback={<div className="global-loading" role="status">Loading booking…</div>}><BookPage /></Suspense>
+      </GlobalAppShell>
     );
   }
-  return <ServiceOSAuthGate><ServiceOSRoot /></ServiceOSAuthGate>;
+  return <ServiceOSAuthGate><GlobalAppShell><ServiceOSRoot /></GlobalAppShell></ServiceOSAuthGate>;
 }
 
 ReactDOM.createRoot(document.getElementById("root")).render(
