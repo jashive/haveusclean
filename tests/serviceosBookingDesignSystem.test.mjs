@@ -6,6 +6,7 @@ const css = fs.readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8
 const widget = fs.readFileSync(new URL('../src/components/BookingWidget.jsx', import.meta.url), 'utf8');
 const primitives = fs.readFileSync(new URL('../src/components/ui.jsx', import.meta.url), 'utf8');
 const page = fs.readFileSync(new URL('../src/pages/book.jsx', import.meta.url), 'utf8');
+const bookingApi = fs.readFileSync(new URL('../api/bookings/create.js', import.meta.url), 'utf8');
 
 test('Foundation publishes approved brand, semantic, radius, and numeral tokens', () => {
   for (const token of ['--brand-900:#123d35', '--brand-800:#185247', '--brand-700:#216b5d', '--brand-600:#2b8271', '--brand-500:#3d9a87', '--brand-400:#66b5a4', '--brand-300:#91cdbc', '--brand-200:#bce3d8', '--brand-100:#ddf3ed', '--brand-50:#f1faf7', '--ink-950:#14201d']) assert.match(css, new RegExp(token));
@@ -39,4 +40,11 @@ test('Commercial intake retains its configurable frequency selector during Phase
   for (const value of ['one_time', 'weekly', 'biweekly', 'three_times_weekly', 'five_times_weekly', 'monthly', 'custom']) {
     assert.match(widget, new RegExp(`\\['${value}'`));
   }
+});
+
+test('Production booking APIs support modern Supabase secrets and preserve JSON errors', () => {
+  assert.match(bookingApi, /supabase-secret-key-fetch-compat\.js/);
+  assert.match(bookingApi, /return await handleCommercialWalkthrough/);
+  assert.match(widget, /async function readApiJson/);
+  assert.match(widget, /response\.text\(\)/);
 });
