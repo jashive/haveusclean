@@ -6,6 +6,7 @@ import {
   canOpenServiceOSDiagnostics,
   SERVICEOS_DIAGNOSTICS_PATH,
 } from "../../lib/serviceosUiPolicy";
+import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const ServiceOSLeadIntakePanel = lazy(() => import("./ServiceOSLeadIntakePanel"));
 const ServiceOSRevenueWorkspace = lazy(() => import("./ServiceOSRevenueWorkspace"));
@@ -117,6 +118,7 @@ export default function ServiceOSWave1Workspace() {
   return (
     <main
       style={styles.page}
+      className="admin-shell"
       data-serviceos-wave={activeWave}
       data-canonical-workspace="true"
       data-revenue-authorized={revenueAuthorized ? "true" : "false"}
@@ -126,7 +128,7 @@ export default function ServiceOSWave1Workspace() {
       data-staff-admin-authorized={staffAdminAuthorized ? "true" : "false"}
       data-active-business-unit={activeBusinessUnit?.code ?? "unavailable"}
     >
-      <div style={styles.shell}>
+      <div style={styles.shell} className="admin-shell__content">
         <header style={styles.header}>
           <div>
             <div style={styles.eyebrow}>Have Us Clean · ServiceOS 1.0</div>
@@ -139,9 +141,9 @@ export default function ServiceOSWave1Workspace() {
         </header>
 
         <section style={styles.grid} aria-label="Authenticated ServiceOS context">
-          <div style={styles.card}><div style={styles.label}>Authenticated user</div><div style={styles.value}>{email}</div></div>
-          <div style={styles.card}><div style={styles.label}>Canonical role</div><div style={styles.value}>{ROLE_LABELS[role] ?? role}</div><div style={styles.status}>{role}</div></div>
-          <div style={styles.card}><div style={styles.label}>Organization</div><div style={styles.value}>Have Us Clean</div><div style={{ ...styles.notice, marginTop: 6 }}>ID: {organizationId}</div></div>
+          <div style={styles.card} className="admin-context-card"><div style={styles.label}>Signed in</div><div style={styles.value}>{email}</div></div>
+          <div style={styles.card} className="admin-context-card"><div style={styles.label}>Access role</div><div style={styles.value}>{ROLE_LABELS[role] ?? role}</div><StatusBadge tone="success">Active</StatusBadge></div>
+          <div style={styles.card} className="admin-context-card"><div style={styles.label}>Organization</div><div style={styles.value}>Have Us Clean</div><TechnicalDetails><span>Organization ID: {organizationId}</span></TechnicalDetails></div>
           <div style={styles.card}>
             <div style={styles.label}>{canSelectMarket ? "Active market / business unit" : "Business-unit scope"}</div>
             {canSelectMarket ? (

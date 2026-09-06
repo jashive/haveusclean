@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { listRecentInboundLeads, savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
 import ServiceOSPartialLeadQuoteContinuation from "./ServiceOSPartialLeadQuoteContinuation.jsx";
+import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const initialForm = {
   customerName: "", phone: "", email: "", address: "", city: "", postalCode: "",
@@ -54,6 +55,8 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [recentLeads, setRecentLeads] = useState([]);
   const [recentBusy, setRecentBusy] = useState(false);
   const [recentError, setRecentError] = useState(null);
+  const [leadSearch, setLeadSearch] = useState("");
+  const [leadStage, setLeadStage] = useState("all");
 
   const accessToken = session?.access_token || null;
   const organizationId = revenueContext?.orgId || null;
@@ -147,7 +150,24 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   }
 
   const canContinue = !!result?.service_request?.id && !!result?.opportunity?.id && !result?.duplicate_review_required;
-  const visibleRecentLeads = useMemo(() => recentLeads.slice(0, 25), [recentLeads]);
+  const visibleRecentLeads = useMemo(() => {
+    const query = leadSearch.trim().toLowerCase();
+    return recentLeads.filter((row) => {
+      const serviceRequest = row?.service_request || {};
+      const opportunity = row?.opportunity || {};
+      const searchable = [leadLabel(row), serviceRequest?.requirements?.customer?.email, serviceRequest?.requirements?.customer?.phone, serviceRequest?.requirements?.location?.city].filter(Boolean).join(" ").toLowerCase();
+      const stage = opportunity.stage || serviceRequest.lifecycle_status || "new";
+      return (!query || searchable.includes(query)) && (leadStage === "all" || stage === leadStage);
+    }).slice(0, 25);
+  }, [recentLeads, leadSearch, leadStage]);
+
+  function leadStatus(row) {
+    const stage = row?.opportunity?.stage || row?.service_request?.lifecycle_status || "open";
+    if (["won", "accepted", "converted"].includes(stage)) return { label: "WON", tone: "success" };
+    if (["proposal", "estimate_sent", "quote_sent"].includes(stage)) return { label: "ESTIMATE SENT", tone: "info" };
+    if (["contacted", "qualified", "walkthrough_requested"].includes(stage)) return { label: "CONTACTED", tone: "warning" };
+    return { label: "NEW", tone: "neutral" };
+  }
 
   return (
     <section style={styles.panel} data-testid="serviceos-partial-lead-intake">
@@ -179,30 +199,39 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
       </div>
       <div style={styles.note}>Duplicate order: external source ID first; then active phone/email; then exact active name/address. Phone/email or address matches are surfaced for staff review rather than silently creating another active lead.</div>
       {error ? <div style={styles.error}><strong>Unable to save:</strong> {error}</div> : null}
-      {result?.duplicate_review_required ? <div style={styles.warning}><strong>Possible duplicate — review existing lead before quoting.</strong><br />Reason: {result.dedup_reason}<br />Service request: {result.service_request?.id}</div> : null}
-      {result && !result.duplicate_review_required ? <div style={styles.success}><strong>{result.created ? "Lead captured." : "Existing source record returned; no duplicate created."}</strong><br />Service request: {result.service_request?.id}<br />Opportunity: {result.opportunity?.id || "Not available"}{canContinue ? <div style={styles.actions}><button type="button" style={styles.primary} onClick={() => setContinuationLead(result)}>Continue This Lead to Quote</button></div> : null}</div> : null}
+      {result?.duplicate_review_required ? <div style={styles.warning}><strong>Possible duplicate — review existing lead before quoting.</strong><br />Reason: {result.dedup_reason}<TechnicalDetails><span>Service request: {result.service_request?.id}</span></TechnicalDetails></div> : null}
+      {result && !result.duplicate_review_required ? <div style={styles.success}><strong>{result.created ? "Lead captured and added to the follow-up queue." : "Existing source record returned; no duplicate created."}</strong>{canContinue ? <div style={styles.actions}><button type="button" style={styles.primary} onClick={() => setContinuationLead(result)}>Continue This Lead to Quote</button></div> : null}<TechnicalDetails><span>Service request: {result.service_request?.id}</span><span>Opportunity: {result.opportunity?.id || "Not available"}</span></TechnicalDetails></div> : null}
 
       <div style={styles.recent} data-testid="serviceos-recent-saved-leads">
         <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center" }}>
           <div><strong>Recent Saved Leads</strong><div style={styles.note}>Canonical active-market leads from ServiceOS, including commercial walkthrough requests.</div></div>
           <button type="button" style={styles.secondary} disabled={recentBusy} onClick={refreshRecentLeads}>{recentBusy ? "Refreshing…" : "Refresh Leads"}</button>
         </div>
+        <div className="admin-filter-bar" aria-label="Lead queue filters">
+          <label className="admin-search-field"><span>Search leads</span><input type="search" value={leadSearch} onChange={(event) => setLeadSearch(event.target.value)} placeholder="Name, email, phone, or city" /></label>
+          <label className="admin-select-field"><span>Status</span><select value={leadStage} onChange={(event) => setLeadStage(event.target.value)}><option value="all">All active</option><option value="open">New</option><option value="contacted">Contacted</option><option value="proposal">Estimate sent</option><option value="won">Won</option><option value="walkthrough_requested">Walkthrough requested</option></select></label>
+        </div>
         {recentError ? <div style={styles.error}><strong>Unable to load recent leads:</strong> {recentError}</div> : null}
         {!recentBusy && !recentError && visibleRecentLeads.length === 0 ? <div style={styles.note}>No active saved leads found for this market.</div> : null}
+        <div className="admin-data-table" role="table" aria-label="Recent saved leads">
+          <div className="admin-data-table__head" role="row"><span role="columnheader">Customer</span><span role="columnheader">Service</span><span role="columnheader">Status</span><span role="columnheader">Next action</span></div>
         {visibleRecentLeads.map((row) => {
           const continueAllowed = canContinueRecentLead(row);
           const walkthroughRequested = isCommercialWalkthrough(row);
+          const status = leadStatus(row);
+          const requirements = row?.service_request?.requirements || {};
           return (
-            <div style={styles.recentRow} key={row.service_request.id}>
-              <div>
-                <strong>{leadLabel(row)}</strong><br />
-                <span style={styles.note}>Lead: {row.service_request.lifecycle_status} · Opportunity: {row.opportunity?.stage || "unknown"} · Service request: {row.service_request.id.slice(0, 8)}</span>
-                {walkthroughRequested ? <div style={styles.note}>Commercial walkthrough requested. Complete the facility walkthrough and prepare the custom proposal in Revenue / Estimating. Do not create an operational job until explicit proposal acceptance.</div> : (!continueAllowed ? <div style={styles.note}>Quote workflow already started. Use Customer Response / Acceptance for sent quotes instead of creating another quote.</div> : null)}
-              </div>
-              {continueAllowed ? <button type="button" style={styles.primary} onClick={() => setContinuationLead(row)}>Open / Continue Quote</button> : (walkthroughRequested ? <span style={styles.note}>Walkthrough / Estimating</span> : <span style={styles.note}>Already in quote workflow</span>)}
+            <div className="admin-data-table__row" role="row" key={row.service_request.id}>
+              <div role="cell"><strong>{leadLabel(row)}</strong><small>{requirements?.customer?.email || requirements?.customer?.phone || "Contact details pending"}</small></div>
+              <div role="cell"><span>{walkthroughRequested ? "Commercial walkthrough" : requirements?.scope?.cleanType || requirements?.scope?.packageKey || "Residential cleaning"}</span><small>{requirements?.location?.city || "Location pending"}</small></div>
+              <div role="cell"><StatusBadge tone={status.tone}>{status.label}</StatusBadge></div>
+              <div role="cell">{continueAllowed ? <button type="button" className="admin-table-action" onClick={() => setContinuationLead(row)}>Open lead</button> : <span className="admin-table-note">{walkthroughRequested ? "Schedule walkthrough" : "Already in quote workflow"}</span>}</div>
+              {!continueAllowed && !walkthroughRequested ? <span className="admin-table-note">Use Customer Response / Acceptance for sent quotes instead of creating another quote.</span> : null}
+              <TechnicalDetails summary="Technical details"><span>Lead lifecycle: {row.service_request.lifecycle_status}</span><span>Opportunity stage: {row.opportunity?.stage || "unknown"}</span><span>Service request: {row.service_request.id}</span></TechnicalDetails>
             </div>
           );
         })}
+        </div>
       </div>
 
       {continuationLead ? <ServiceOSPartialLeadQuoteContinuation key={`${continuationLead.service_request.id}:${continuationRevenueContext?.primaryBusinessUnitId || "no-bu"}`} leadResult={continuationLead} session={session} revenueContext={continuationRevenueContext} onClose={() => setContinuationLead(null)} /> : null}

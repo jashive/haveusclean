@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { DetailDrawer, StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const STAGES = [
   "Applicant",
@@ -43,9 +44,24 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
   const [applicantInspector, setApplicantInspector] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [candidateSearch, setCandidateSearch] = useState("");
+  const [stageFilter, setStageFilter] = useState("all");
 
   const candidates = safeArray(pipeline?.candidates);
   const byStage = useMemo(() => Object.fromEntries(STAGES.map((stage) => [stage, candidates.filter((item) => item.pipeline_stage === stage)])), [candidates]);
+  const filteredCandidates = useMemo(() => {
+    const query = candidateSearch.trim().toLowerCase();
+    return candidates.filter((candidate) => {
+      const searchable = [candidate.display_name, candidate.applied_role_code, candidate.engagement_type].filter(Boolean).join(" ").toLowerCase();
+      return (!query || searchable.includes(query)) && (stageFilter === "all" || candidate.pipeline_stage === stageFilter);
+    });
+  }, [candidates, candidateSearch, stageFilter]);
+
+  const closeInspector = useCallback(() => {
+    setSelectedId(null);
+    setInspector(null);
+    setApplicantInspector(null);
+  }, []);
 
   const api = useCallback(async (url, options = {}) => {
     if (!accessToken) throw new Error("Workforce dashboard requires an authenticated ServiceOS session.");
@@ -118,7 +134,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
   }
 
   return (
-    <section style={styles.shell} data-workforce-dashboard="true" data-business-unit={businessUnitCode}>
+    <section style={styles.shell} className="admin-workspace-card workforce-workspace" data-workforce-dashboard="true" data-business-unit={businessUnitCode}>
       <div style={styles.header}>
         <div>
           <h2 style={styles.title}>Workforce Onboarding & Compliance</h2>
@@ -127,31 +143,28 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
         <button type="button" style={styles.button} onClick={loadPipeline} disabled={loading}>{loading ? "Refreshing…" : `Refresh ${businessUnitCode}`}</button>
       </div>
       {error ? <div role="alert" style={styles.error}>{error}</div> : null}
-      <div style={styles.grid} aria-label="Workforce onboarding pipeline">
-        {STAGES.map((stage) => (
-          <div key={stage} style={styles.stage}>
-            <div style={styles.stageTitle}>{stage} · {byStage[stage]?.length || 0}</div>
-            {(byStage[stage] || []).map((candidate) => (
-              <button key={`${candidate.applicant_submission_id || "a"}-${candidate.engagement_id || "e"}`} type="button" style={styles.candidate} onClick={() => inspect(candidate)}>
-                <div style={{ fontWeight: 800 }}>{candidate.display_name || candidate.applicant_reference}</div>
-                <div style={styles.muted}>{candidate.applied_role_code || "Applicant"}{candidate.engagement_type ? ` · ${candidate.engagement_type}` : ""}</div>
-                {candidate.availability_status ? <span style={styles.badge}>{candidate.availability_status}</span> : null}
-              </button>
-            ))}
-            {(byStage[stage] || []).length === 0 ? <div style={styles.muted}>No records</div> : null}
-          </div>
-        ))}
+      <div className="admin-stage-summary" aria-label="Workforce stage summary">{STAGES.map((stage) => <button type="button" className={stageFilter === stage ? "is-active" : ""} key={stage} onClick={() => setStageFilter(stageFilter === stage ? "all" : stage)}><span>{stage}</span><strong>{byStage[stage]?.length || 0}</strong></button>)}</div>
+      <div className="admin-filter-bar"><label className="admin-search-field"><span>Search candidates</span><input type="search" value={candidateSearch} onChange={(event) => setCandidateSearch(event.target.value)} placeholder="Name, role, or engagement type" /></label><label className="admin-select-field"><span>Stage</span><select value={stageFilter} onChange={(event) => setStageFilter(event.target.value)}><option value="all">All stages</option>{STAGES.map((stage) => <option value={stage} key={stage}>{stage}</option>)}</select></label></div>
+      <div className="admin-data-table workforce-table" role="table" aria-label="Workforce onboarding pipeline">
+        <div className="admin-data-table__head" role="row"><span role="columnheader">Candidate</span><span role="columnheader">Role</span><span role="columnheader">Stage</span><span role="columnheader">Readiness</span></div>
+        {filteredCandidates.map((candidate) => <button key={`${candidate.applicant_submission_id || "a"}-${candidate.engagement_id || "e"}`} type="button" className="admin-data-table__row admin-data-table__button-row" role="row" onClick={() => inspect(candidate)}>
+          <span role="cell"><strong>{candidate.display_name || "Applicant"}</strong><small>{businessUnitCode}</small></span>
+          <span role="cell">{candidate.applied_role_code || candidate.engagement_type || "Applicant"}</span>
+          <span role="cell"><StatusBadge tone={candidate.pipeline_stage === "ServiceOS Ready" ? "success" : "info"}>{candidate.pipeline_stage}</StatusBadge></span>
+          <span role="cell"><StatusBadge tone={candidate.availability_status === "ready" ? "success" : "warning"}>{candidate.availability_status || "Review required"}</StatusBadge></span>
+        </button>)}
+        {!filteredCandidates.length ? <div className="admin-empty-state">No candidates match these filters.</div> : null}
       </div>
 
       {selectedId && !inspector && !applicantInspector ? <div style={{ ...styles.muted, marginTop: 14 }}>Loading compliance inspector…</div> : null}
+      <DetailDrawer open={Boolean(applicantInspector)} title={applicantInspector?.display_name || "Applicant review"} subtitle={`${applicantInspector?.current_stage || "Applicant"} · ${businessUnitCode}`} onClose={closeInspector} footer={<button type="button" style={styles.disabledButton} disabled title="Screening, training, and compliance approval are required first">Activate to ServiceOS</button>}>
       {applicantInspector ? (
         <div style={styles.inspector} data-applicant-inspector="true">
           <div style={styles.header}>
             <div>
               <h3 style={{ margin: 0 }}>{applicantInspector.display_name}</h3>
-              <p style={styles.copy}>{applicantInspector.applicant_reference} · {applicantInspector.current_stage} · {applicantInspector.applied_role_code}</p>
+              <p style={styles.copy}>{applicantInspector.current_stage} · {applicantInspector.applied_role_code}</p>
             </div>
-            <button type="button" style={styles.disabledButton} disabled title="Screening, training, and compliance approval are required first">Activate to ServiceOS</button>
           </div>
           <div style={styles.twoCol}>
             <div style={styles.panel}>
@@ -163,6 +176,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
               <div style={styles.row}><strong>Availability</strong><div style={styles.muted}>{applicantInspector.availability_schedule}</div></div>
               <div style={styles.row}><strong>Background consent v1.0</strong><span style={styles.badge}>{applicantInspector.background_consent_recorded ? "recorded" : "missing"}</span></div>
               <div style={styles.row}><strong>In-app video training</strong><span style={styles.badge}>{applicantInspector.training_readiness?.completed_count || 0}/{applicantInspector.training_readiness?.required_count || 0} complete</span><div style={styles.muted}>{applicantInspector.training_readiness?.activation_note}</div></div>
+              <TechnicalDetails><span>Applicant reference: {applicantInspector.applicant_reference}</span><span>Submission: {applicantInspector.applicant_submission_id}</span></TechnicalDetails>
             </div>
             <div style={styles.panel}>
               <strong>Applicant documents</strong>
@@ -177,11 +191,12 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
           </div>
         </div>
       ) : null}
+      </DetailDrawer>
+      <DetailDrawer open={Boolean(inspector)} title={inspector?.display_name || "Workforce review"} subtitle={`${inspector?.engagement_type || "Engagement"} · ${businessUnitCode}`} onClose={closeInspector} footer={<button type="button" style={inspector?.readiness?.status === "ready" ? styles.button : styles.disabledButton} disabled={loading || inspector?.readiness?.status !== "ready"} onClick={activate}>Activate to ServiceOS</button>}>
       {inspector ? (
         <div style={styles.inspector}>
           <div style={styles.header}>
             <div><h3 style={{ margin: 0 }}>{inspector.display_name}</h3><p style={styles.copy}>{inspector.engagement_type} · {inspector.legal_classification} · {inspector.engagement_status}</p></div>
-            <button type="button" style={inspector.readiness?.status === "ready" ? styles.button : styles.disabledButton} disabled={loading || inspector.readiness?.status !== "ready"} onClick={activate}>Activate to ServiceOS</button>
           </div>
           <div style={styles.twoCol}>
             <div style={styles.panel}>
@@ -197,6 +212,7 @@ export default function WorkforceComplianceDashboard({ session, revenueContext }
           </div>
         </div>
       ) : null}
+      </DetailDrawer>
     </section>
   );
 }

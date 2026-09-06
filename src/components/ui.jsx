@@ -30,6 +30,36 @@ export function StatusBadge({ tone = 'neutral', children }) {
   return <span className={`status-badge status-badge--${tone}`}>{children}</span>;
 }
 
+export function TechnicalDetails({ summary = 'Technical details', children, className = '' }) {
+  return (
+    <details className={`technical-details ${className}`.trim()}>
+      <summary>{summary}</summary>
+      <div className="technical-details__content">{children}</div>
+    </details>
+  );
+}
+
+export function DetailDrawer({ open, title, subtitle, onClose, children, footer }) {
+  if (!open) return null;
+  return (
+    <div className="admin-drawer-layer" role="presentation">
+      <button className="admin-drawer-backdrop" type="button" aria-label="Close details" onClick={onClose} />
+      <aside className="admin-detail-drawer" role="dialog" aria-modal="true" aria-labelledby="admin-drawer-title">
+        <header className="admin-detail-drawer__header">
+          <div>
+            <p className="admin-eyebrow">Review record</p>
+            <h2 id="admin-drawer-title">{title}</h2>
+            {subtitle ? <p>{subtitle}</p> : null}
+          </div>
+          <button className="admin-icon-button" type="button" onClick={onClose} aria-label="Close details">×</button>
+        </header>
+        <div className="admin-detail-drawer__body">{children}</div>
+        {footer ? <footer className="admin-detail-drawer__footer">{footer}</footer> : null}
+      </aside>
+    </div>
+  );
+}
+
 export function StickySummaryCard({ eyebrow, title, children, footer }) {
   return (
     <aside className="sticky-summary-card" aria-label="Booking summary">
