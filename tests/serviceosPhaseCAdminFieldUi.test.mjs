@@ -61,3 +61,13 @@ test("Phase C remains presentation-only and does not add a serverless function",
     assert.doesNotMatch(source, /api\/phase-c|api\/admin-ui/);
   }
 });
+
+test("375px and 768px responsive guards prevent clipped booking, upload, and field controls", () => {
+  assert.match(css, /\.booking-page\{[^}]*overflow-x:clip/);
+  assert.match(css, /\.candidate-portal\{[^}]*overflow-x:clip/);
+  assert.match(css, /@media\(max-width:640px\)[\s\S]*\.wizard-actions \.huc-button\{[^}]*max-width:100%/);
+  assert.match(css, /\.document-zone__heading\{[^}]*flex-wrap:wrap/);
+  assert.match(css, /\.huc-training-list button\{grid-template-columns:30px minmax\(0,1fr\)/);
+  assert.match(css, /@media\(max-width:520px\)[\s\S]*\.field-workspace\{[^}]*overflow-x:hidden/);
+  assert.match(css, /\.field-checklist-item\{grid-template-columns:22px minmax\(0,1fr\) 30px/);
+});
