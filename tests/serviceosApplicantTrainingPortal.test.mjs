@@ -8,6 +8,7 @@ const player = fs.readFileSync("src/features/workforce/ApplicantTrainingPlayer.j
 const portal = fs.readFileSync("src/features/workforce/PublicApplicantPortal.jsx", "utf8");
 const portalProfileRls = fs.readFileSync("supabase/migrations/20260904151000_harden_applicant_portal_profile_rls.sql", "utf8");
 const mediaSeed = fs.readFileSync("supabase/migrations/20260904213000_seed_interim_industry_training_media.sql", "utf8");
+const styles = fs.readFileSync("src/styles.css", "utf8");
 
 test("applicant portal profiles are RLS-protected and service-role-only", () => {
   assert.match(portalProfileRls, /applicant_portal_profile enable row level security/i);
@@ -51,6 +52,17 @@ test("portal embeds direct and governed player media without leaving the app", (
   assert.match(player, /Confirm module completion/);
   assert.match(player, /youtube\.com\/iframe_api/);
   assert.match(player, /YT\.PlayerState\.ENDED/);
+});
+
+test("Phase B player shows module metadata, progress, and semantic completion states", () => {
+  assert.match(player, /formatDuration/);
+  assert.match(player, /ProgressRing/);
+  assert.match(player, /Required milestones/);
+  assert.match(player, /Playback progress is saved securely every 15 seconds/);
+  assert.match(player, /StatusBadge tone=/);
+  assert.match(styles, /--brand-900/);
+  assert.match(styles, /\.candidate-training/);
+  assert.match(styles, /\.training-progress-ring/);
 });
 
 test("interim media configures four logical modules for each jurisdiction", () => {
