@@ -52,6 +52,10 @@ test("portal embeds direct and governed player media without leaving the app", (
   assert.match(player, /Confirm module completion/);
   assert.match(player, /youtube\.com\/iframe_api/);
   assert.match(player, /YT\.PlayerState\.ENDED/);
+  assert.match(player, /player\?\.destroy\?\.\(\)/);
+  assert.match(player, /videoId,/);
+  assert.match(player, /key=\{active\.training_media_id\}/);
+  assert.match(player, /Finish this video to unlock the comprehension check/);
 });
 
 test("Phase B player shows module metadata, progress, and semantic completion states", () => {

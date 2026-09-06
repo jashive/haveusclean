@@ -8,6 +8,7 @@ const server = fs.readFileSync(new URL("../server-internal/workforce-compliance-
 const dashboard = fs.readFileSync(new URL("../src/features/workforce/WorkforceComplianceDashboard.jsx", import.meta.url), "utf8");
 const migration = fs.readFileSync(new URL("../supabase/migrations/20260904050000_public_applicant_portal_upload_boundary.sql", import.meta.url), "utf8");
 const vercel = JSON.parse(fs.readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+const delivery = fs.readFileSync(new URL("../server-internal/intake-notification-delivery.js", import.meta.url), "utf8");
 
 test("/apply is public and bypasses the ServiceOS authentication gate", () => {
   assert.match(main, /isPublicApplicantRequest/);
@@ -70,4 +71,61 @@ test("Workforce routes stay consolidated under the existing staff-admin function
   assert.equal(apiFiles.length, 12);
   assert.match(JSON.stringify(vercel.rewrites), /serviceos-staff-admin\?workforce=apply/);
   assert.match(JSON.stringify(vercel.rewrites), /serviceos-staff-admin\?workforce=dashboard/);
+});
+
+test("candidate sessions survive refresh and expose a private cross-device resume link", () => {
+  assert.match(portal, /huc_applicant_session_v1/);
+  assert.match(portal, /window\.localStorage\.setItem/);
+  assert.match(portal, /window\.location\.hash/);
+  assert.match(portal, /url\.hash = new URLSearchParams/);
+  assert.match(portal, /Resume Onboarding/);
+  assert.match(portal, /Private reference code/);
+  assert.doesNotMatch(portal, /sessionStorage\.setItem/);
+});
+
+test("existing workforce handler sends the applicant resume link through Microsoft 365", () => {
+  assert.match(server, /dispatchApplicantResumeEmail/);
+  assert.match(server, /resumeEmailStatus/);
+  assert.match(delivery, /export async function dispatchApplicantResumeEmail/);
+  assert.match(delivery, /SERVICEOS_PUBLIC_URL/);
+  assert.match(delivery, /url\.hash = new URLSearchParams/);
+  assert.match(delivery, /applicant-resume-link/);
+  assert.match(delivery, /Keep this link private/);
+});
+
+test("applicant resume delivery creates and sends a fragment-token link", async () => {
+  const priorFetch = globalThis.fetch;
+  const priorEnv = Object.fromEntries(["M365_TENANT_ID", "M365_CLIENT_ID", "M365_CLIENT_SECRET", "M365_SENDER_EMAIL", "SERVICEOS_PUBLIC_URL"].map((key) => [key, process.env[key]]));
+  const requests = [];
+  process.env.M365_TENANT_ID = "tenant";
+  process.env.M365_CLIENT_ID = "client";
+  process.env.M365_CLIENT_SECRET = "secret";
+  process.env.M365_SENDER_EMAIL = "operations@haveusclean.example";
+  process.env.SERVICEOS_PUBLIC_URL = "https://haveusclean.example";
+  globalThis.fetch = async (url, options = {}) => {
+    requests.push({ url: String(url), options });
+    if (String(url).includes("oauth2")) return new Response(JSON.stringify({ access_token: "graph-token" }), { status: 200 });
+    if (String(url).endsWith("/messages")) return new Response(JSON.stringify({ id: "message-1" }), { status: 201 });
+    return new Response(null, { status: 202 });
+  };
+  try {
+    const { dispatchApplicantResumeEmail } = await import("../server-internal/intake-notification-delivery.js");
+    const result = await dispatchApplicantResumeEmail({
+      applicant: { applicantReference: "APP-AMEERA-TEST", applicantAccessToken: "private-token-12345678901234567890" },
+      recipientEmail: "ameera.test@example.com",
+      legalName: "Ameera Shivers",
+      req: { headers: {} },
+    });
+    assert.equal(result.status, "sent");
+    const payload = JSON.parse(requests.find((item) => item.url.endsWith("/messages")).options.body);
+    assert.equal(payload.toRecipients[0].emailAddress.address, "ameera.test@example.com");
+    assert.match(payload.body.content, /https:\/\/haveusclean\.example\/apply#ref=APP-AMEERA-TEST&amp;token=private-token/);
+    assert.doesNotMatch(payload.body.content, /\/apply\?ref=/);
+    assert.ok(requests.some((item) => item.url.endsWith("/messages/message-1/send")));
+  } finally {
+    globalThis.fetch = priorFetch;
+    for (const [key, value] of Object.entries(priorEnv)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
 });
