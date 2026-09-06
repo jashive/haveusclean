@@ -1,8 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { Button, StatusBadge } from "../../components/ui.jsx";
 
 function modulePercent(module, seconds) {
   if (!module.duration_seconds) return 0;
   return Math.min(100, Math.round((seconds / module.duration_seconds) * 100));
+}
+
+function formatDuration(seconds) {
+  const total = Math.max(0, Math.round(Number(seconds) || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, "0")}`;
+}
+
+function ProgressRing({ value, label }) {
+  const percent = Math.max(0, Math.min(100, Number(value) || 0));
+  return <div className="training-progress-ring" style={{ "--training-progress": `${percent * 3.6}deg` }} role="img" aria-label={`${label}: ${percent}%`}><span>{percent}%</span></div>;
 }
 
 function DirectVideo({ module, onProgress, onEnded }) {
@@ -157,31 +168,41 @@ export default function ApplicantTrainingPlayer({ session, request }) {
     finally { setSaving(null); }
   }
 
-  return <section className="huc-training" aria-labelledby="training-title">
-    <div className="huc-training-heading">
-      <div><p className="huc-training-eyebrow">Applicant onboarding</p><h2 id="training-title">Cleaner training</h2></div>
-      <strong>{completed}/{catalog.length} complete</strong>
+  const overallPercent = catalog.length ? Math.round((completed / catalog.length) * 100) : 0;
+
+  return <section className="candidate-training" aria-labelledby="training-title">
+    <div className="candidate-training__heading">
+      <div><p className="candidate-kicker">Step 3 · Video training player</p><h2 id="training-title">Cleaner orientation</h2><p>Watch each required module, then confirm your comprehension to record the milestone.</p></div>
+      <div className="candidate-training__overall"><ProgressRing value={overallPercent} label="Overall training progress" /><strong>{completed}/{catalog.length || 4}<small>modules complete</small></strong></div>
     </div>
-    <p className="huc-help">Watch every required module here, then confirm your comprehension. Training completion never bypasses screening, document review, or compliance approval.</p>
     {error ? <div className="huc-alert huc-alert-error" role="alert">{error}</div> : null}
     <div className="huc-training-layout">
-      <ol className="huc-training-list">
-        {catalog.map((module) => <li key={module.module_code}>
+      <aside className="training-checklist" aria-label="Training milestone checklist"><div className="training-checklist__title"><span>Required milestones</span><StatusBadge tone={completed === catalog.length && catalog.length ? "success" : "info"}>{completed === catalog.length && catalog.length ? "Complete" : "In progress"}</StatusBadge></div><ol className="huc-training-list">
+        {catalog.map((module, index) => {
+          const percent = modulePercent(module, watched[module.training_media_id] || module.duration_seconds * Number(module.completion_percent || 0) / 100);
+          const done = module.completion_status === "completed";
+          return <li key={module.module_code}>
           <button type="button" disabled={!module.playback_configured} aria-current={activeId === module.training_media_id ? "step" : undefined} onClick={() => setActiveId(module.training_media_id)}>
-            <span>{module.completion_status === "completed" ? "✓" : module.playback_configured ? "○" : "—"}</span>
-            <span><strong>{module.title}</strong><small>{module.playback_configured ? `${modulePercent(module, watched[module.training_media_id] || module.duration_seconds * Number(module.completion_percent || 0) / 100)}% watched` : "Video awaiting configuration"}</small></span>
+            <span className="training-checklist__number">{done ? "✓" : index + 1}</span>
+            <span><strong>{module.title}</strong><small>{module.playback_configured ? `${formatDuration(module.duration_seconds)} · ${percent}% watched` : "Video awaiting configuration"}</small></span>
+            <StatusBadge tone={done ? "success" : percent ? "info" : "neutral"}>{done ? "Complete" : percent ? "Started" : "To do"}</StatusBadge>
           </button>
-        </li>)}
-      </ol>
-      <div className="huc-training-stage">
+        </li>;
+        })}
+      </ol></aside>
+      <div className="huc-training-stage candidate-player-card">
         {active ? <>
+          <div className="candidate-player-card__meta"><div><span>Now playing</span><h3>{active.title}</h3></div><StatusBadge tone={active.completion_status === "completed" ? "success" : "neutral"}>{formatDuration(active.duration_seconds)}</StatusBadge></div>
+          <div className="candidate-player-card__frame">
           {active.playback_type === "embed"
             ? <EmbeddedVideo module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />
             : <DirectVideo module={active} onProgress={(seconds) => saveProgress(active, seconds)} onEnded={(seconds) => { setEnded((current) => ({ ...current, [active.training_media_id]: seconds })); saveProgress(active, seconds); }} />}
+          </div>
+          <div className="candidate-player-card__progress"><span style={{ width: `${modulePercent(active, watched[active.training_media_id] || active.duration_seconds * Number(active.completion_percent || 0) / 100)}%` }} /><small>Playback progress is saved securely every 15 seconds.</small></div>
           <label className="huc-training-confirm"><input type="checkbox" checked={confirmed[active.training_media_id] || false} onChange={(event) => setConfirmed((current) => ({ ...current, [active.training_media_id]: event.target.checked }))} /> I understand this module and agree to follow the standard shown.</label>
-          <button type="button" className="huc-submit" disabled={active.completion_status === "completed" || !ended[active.training_media_id] || !confirmed[active.training_media_id] || saving === active.training_media_id} onClick={() => complete(active)}>
+          <Button type="button" disabled={active.completion_status === "completed" || !ended[active.training_media_id] || !confirmed[active.training_media_id] || saving === active.training_media_id} onClick={() => complete(active)}>
             {active.completion_status === "completed" ? "Module complete" : saving === active.training_media_id ? "Recording milestone…" : "Confirm module completion"}
-          </button>
+          </Button>
         </> : <p className="huc-help">Training becomes available when governed video media is configured for the required modules.</p>}
       </div>
     </div>
