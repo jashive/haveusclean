@@ -83,7 +83,7 @@ test("proposal-stage leads remain visible but cannot create a duplicate quote", 
   assert.match(panel, /canContinueRecentLead/);
   assert.match(panel, /lifecycle_status === "intake"/);
   assert.match(panel, /stage === "open"/);
-  assert.match(panel, /Already in quote workflow/);
+  assert.match(panel, /ServiceOSLeadReviewDrawer/);
   assert.match(panel, /Use Customer Response \/ Acceptance for sent quotes instead of creating another quote/);
 });
 

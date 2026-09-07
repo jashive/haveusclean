@@ -148,7 +148,7 @@ export default function ServiceOSCustomerResponsePanel({ session, revenueContext
   }
 
   return (
-    <section style={styles.panel} data-testid="serviceos-customer-response-panel">
+    <section id="customer-response" style={styles.panel} data-testid="serviceos-customer-response-panel">
       <h2 style={styles.heading}>Customer Response / Acceptance</h2>
       <p style={styles.subheading}>This screen does <strong>not send a quote</strong>. Use it only after the quote has actually been sent to the customer and the customer has replied. Only <strong>Accepted</strong> can create the canonical conversion and ready Operations handoff.</p>
 

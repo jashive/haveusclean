@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 
 const panel = fs.readFileSync("src/features/wave1/ServiceOSLeadIntakePanel.jsx", "utf8");
+const drawer = fs.readFileSync("src/features/wave1/ServiceOSLeadReviewDrawer.jsx", "utf8");
 const continuation = fs.readFileSync("src/features/wave1/ServiceOSPartialLeadQuoteContinuation.jsx", "utf8");
 const client = fs.readFileSync("src/lib/serviceosLeadQuoteContinuationClient.js", "utf8");
 const intakeClient = fs.readFileSync("src/lib/serviceosLeadIntakeClient.js", "utf8");
@@ -10,7 +11,8 @@ const revenueClient = fs.readFileSync("src/lib/serviceosRevenueClient.js", "utf8
 
 test("saved partial lead exposes explicit continuation to quote", () => {
   assert.match(panel, /Continue This Lead to Quote/);
-  assert.match(panel, /ServiceOSPartialLeadQuoteContinuation/);
+  assert.match(panel, /ServiceOSLeadReviewDrawer/);
+  assert.match(drawer, /ServiceOSPartialLeadQuoteContinuation/);
   assert.match(panel, /!result\?\.duplicate_review_required/);
 });
 
