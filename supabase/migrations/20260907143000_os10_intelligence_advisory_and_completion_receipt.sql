@@ -176,20 +176,20 @@ begin
     from jobs
   ) select coalesce(jsonb_agg(jsonb_build_object('date',day,'jobs',jobs,'geocoded_jobs',geocoded,'average_consecutive_km',avg_km,
       'density_score',case when geocoded<2 then null else greatest(0,least(100,round(100-(coalesce(avg_km,50)*2)))) end) order by day),'[]'::jsonb)
-    into v_routes from (select scheduled_start::date day,count(*) jobs,count(latitude) geocoded,round(avg(km)::numeric,1) avg_km from distances group by 1) d;
+    into v_routes from (select scheduled_start::date as day,count(*) jobs,count(latitude) geocoded,round(avg(km)::numeric,1) avg_km from distances group by 1) d;
 
-  with days as (select generate_series(p_date_from,p_date_to,'1 day')::date day), declared as (
-    select capacity_date day,sum(available_minutes) available from public.worker_capacity_calendar
+  with days as (select generate_series(p_date_from,p_date_to,'1 day')::date as calendar_date), declared as (
+    select capacity_date as calendar_date,sum(available_minutes) available from public.worker_capacity_calendar
     where organization_id=p_organization_id and business_unit_id=p_business_unit_id and capacity_date between p_date_from and p_date_to group by 1
   ), scheduled as (
-    select sw.scheduled_start::date day,sum(extract(epoch from(sw.scheduled_end-sw.scheduled_start))/60)::integer booked
+    select sw.scheduled_start::date as calendar_date,sum(extract(epoch from(sw.scheduled_end-sw.scheduled_start))/60)::integer booked
     from public.schedule_window sw join public.operational_job oj on oj.id=sw.operational_job_id
     where oj.organization_id=p_organization_id and oj.business_unit_id=p_business_unit_id and sw.status not in('cancelled','rescheduled')
       and sw.scheduled_start::date between p_date_from and p_date_to group by 1
-  ) select coalesce(jsonb_agg(jsonb_build_object('date',d.day,'available_minutes',a.available,'scheduled_minutes',coalesce(s.booked,0),
+  ) select coalesce(jsonb_agg(jsonb_build_object('date',d.calendar_date,'available_minutes',a.available,'scheduled_minutes',coalesce(s.booked,0),
     'utilization_percent',case when a.available>0 then round(coalesce(s.booked,0)*100.0/a.available,1) end,
-    'status',case when a.available is null then 'no_governed_data' when coalesce(s.booked,0)>a.available then 'overbooked' when coalesce(s.booked,0)>=a.available*.85 then 'warning' else 'available' end) order by d.day),'[]'::jsonb)
-    into v_capacity from days d left join declared a using(day) left join scheduled s using(day);
+    'status',case when a.available is null then 'no_governed_data' when coalesce(s.booked,0)>a.available then 'overbooked' when coalesce(s.booked,0)>=a.available*.85 then 'warning' else 'available' end) order by d.calendar_date),'[]'::jsonb)
+    into v_capacity from days d left join declared a using(calendar_date) left join scheduled s using(calendar_date);
 
   with completed as (
     select oj.customer_id,coalesce(nullif(oj.service_scope_snapshot->>'frequency',''),nullif(sr.requirements->>'frequency','')) cadence,
