@@ -24,6 +24,7 @@ import {
 } from "../../lib/serviceosOperationsUtils.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 import CleanerExecutionPlaybook from "./CleanerExecutionPlaybook.jsx";
+import { buildDispatchCascade } from "../../lib/serviceosDispatchCascade.js";
 
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
@@ -116,6 +117,11 @@ function humanize(value) {
   return String(value || "").replaceAll("_", " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
+function formatMoney(value, currency) {
+  if (value == null || !currency) return "Not available";
+  return new Intl.NumberFormat(currency === "CAD" ? "en-CA" : "en-US", { style: "currency", currency }).format(Number(value));
+}
+
 function pad2(value) {
   return String(value).padStart(2, "0");
 }
@@ -141,8 +147,10 @@ function parsePreferredTime(value) {
   const text = String(value || "").trim().toLowerCase();
   if (!text) return null;
   if (text.includes("morning")) return "09:00";
+  if (text.includes("midday")) return "11:00";
   if (text.includes("afternoon")) return "13:00";
   if (text.includes("evening")) return "17:00";
+  if (text.includes("flexible")) return "09:00";
   const match = text.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
   if (!match) return null;
   let hour = Number(match[1]);
@@ -231,7 +239,7 @@ async function enrichHandoffForDispatch(handoff) {
     getJson(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&select=id,customer_id,contact_id,service_location_id&limit=1`),
     getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title,estimate_id&limit=1`),
     handoff.pricing_snapshot_id
-      ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`)
+      ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,currency_code,tax_name,tax_rate,subtotal_amount,tax_amount,total_amount,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`)
       : Promise.resolve([]),
   ]);
   const conversion = firstRow(conversionRows);
@@ -256,17 +264,21 @@ async function enrichHandoffForDispatch(handoff) {
       ? getJson(`customer?id=eq.${encodeURIComponent(conversion.customer_id)}&select=id,display_name&limit=1`)
       : Promise.resolve([]),
     conversion?.contact_id
-      ? getJson(`contact?id=eq.${encodeURIComponent(conversion.contact_id)}&select=id,first_name,last_name&limit=1`)
+      ? getJson(`contact?id=eq.${encodeURIComponent(conversion.contact_id)}&select=id,first_name,last_name,email,phone&limit=1`)
       : Promise.resolve([]),
     conversion?.service_location_id
-      ? getJson(`service_location?id=eq.${encodeURIComponent(conversion.service_location_id)}&select=id,address_line1,city,subdivision&limit=1`)
+      ? getJson(`service_location?id=eq.${encodeURIComponent(conversion.service_location_id)}&select=id,address_line1,address_line2,city,subdivision,postal_code,country_code,access_notes&limit=1`)
       : Promise.resolve([]),
   ]);
 
   const customer = firstRow(customerRows);
   const contact = firstRow(contactRows);
   const location = firstRow(locationRows);
-  const scope = serviceRequest?.requirements?.scope || estimate?.scope_snapshot || {};
+  const booking = serviceRequest?.id
+    ? firstRow(await getJson(`booking?service_request_id=eq.${encodeURIComponent(serviceRequest.id)}&select=id,requested_service_date,requested_arrival_window,service_package,frequency,currency_code,tax_name,tax_rate,estimated_subtotal,estimated_tax,estimated_total,pricing_snapshot&limit=1`))
+    : null;
+  const cascade = buildDispatchCascade({ requirements: serviceRequest?.requirements, estimateScope: estimate?.scope_snapshot, booking, customer, contact, location, pricingSnapshot, quoteTitle: quoteVersion?.title });
+  const scope = cascade.scope;
   const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ").trim();
   const customerName = customer?.display_name || contactName || serviceRequest?.requirements?.customer?.name || "Customer";
   const serviceTier = quoteVersion?.title || "Service details unavailable";
@@ -288,6 +300,7 @@ async function enrichHandoffForDispatch(handoff) {
     estimated_duration_hours: durationHours,
     crew_size: crewSize,
     suggested_timezone: timezoneForScope(scope, location),
+    cascade,
   };
 }
 
@@ -380,11 +393,10 @@ function OfficeOperations({ revenueContext }) {
         setHandoffId(nextHandoffs[0].id);
         applyScheduleSuggestion(nextHandoffs[0]);
       }
-      if (!workerId && nextWorkers?.[0]?.id) setWorkerId(nextWorkers[0].id);
       setMessage(`Dispatch pipeline refreshed · ${nextHandoffs?.length ?? 0} ready · ${activePipeline?.length ?? 0} active job(s).`);
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [handoffId, workerId, applyScheduleSuggestion]);
+  }, [handoffId, applyScheduleSuggestion]);
 
   useEffect(() => { load(); }, []);
 
@@ -417,6 +429,7 @@ function OfficeOperations({ revenueContext }) {
         serviceLocationId: conversion.service_location_id,
         serviceFamily: "residential",
         operationalStatus: "ready_to_schedule",
+        serviceScopeSnapshot: selectedHandoff?.cascade?.scope,
         metadata,
         appUserId,
       }));
@@ -453,7 +466,11 @@ function OfficeOperations({ revenueContext }) {
         operationalJobId: job.id,
         scheduleWindowId: window.id,
         workOrderStatus: "draft",
-        pricingReferenceSnapshot: { quote_version_id: handoff.quote_version_id, pricing_snapshot_id: handoff.pricing_snapshot_id },
+        scopeSnapshot: selectedHandoff?.cascade?.scope,
+        customerInstructionSnapshot: selectedHandoff?.cascade?.customerInstructions,
+        accessInstructionSnapshot: selectedHandoff?.cascade?.accessInstructions,
+        checklistTemplateSnapshot: selectedHandoff?.cascade?.checklist,
+        pricingReferenceSnapshot: { quote_version_id: handoff.quote_version_id, ...selectedHandoff?.cascade?.pricing },
         metadata,
         appUserId,
       }));
@@ -474,7 +491,7 @@ function OfficeOperations({ revenueContext }) {
       await load();
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [handoffId, workerId, start, end, timezone, appUserId, load]);
+  }, [handoffId, workerId, start, end, timezone, appUserId, load, selectedHandoff]);
 
   return <section id="operations-dispatch" style={styles.card} data-wave3-office-workspace="true" className="admin-workspace-card">
     <div className="admin-section-heading"><div><p className="admin-eyebrow">Operations &amp; Dispatch</p><h2 style={styles.title}>Dispatch schedule and work orders</h2></div><StatusBadge tone="info">{revenueContext?.activeBusinessUnitCode || "HUC"}</StatusBadge></div>
@@ -511,9 +528,16 @@ function OfficeOperations({ revenueContext }) {
       <label><span style={styles.label}>End{selectedHandoff?.estimated_duration_hours ? <span style={styles.autoTag}>AUTO</span> : null}</span><input style={styles.input} type="datetime-local" value={end} onChange={e=>{setEnd(e.target.value);setEndAutoCalculated(false);}} /></label>
       <label><span style={styles.label}>Timezone</span><select style={styles.input} value={timezone} onChange={e=>setTimezone(e.target.value)}><option value="America/Toronto">Ontario · America/Toronto</option><option value="America/Phoenix">Arizona · America/Phoenix</option></select></label>
     </div>
-    {selectedHandoff ? <div style={styles.scheduleCard} data-wave3-dispatch-plan="true"><strong>Dispatch plan</strong><div style={styles.laborMeta}>{selectedHandoff.crew_size ? <span style={styles.laborBadge}>Crew {selectedHandoff.crew_size}</span> : null}{selectedHandoff.estimated_duration_hours ? <span style={styles.laborBadge}>{selectedHandoff.estimated_duration_hours}h duration</span> : null}{endAutoCalculated && end ? <span style={{...styles.laborBadge,...styles.badgeReady}}>End auto-calculated</span> : null}</div></div> : null}
+    {selectedHandoff ? <div style={styles.detailCard} data-wave3-dispatch-plan="true">
+      <div style={styles.scheduleCard}><strong>Pre-populated dispatch plan</strong><div style={styles.laborMeta}>{selectedHandoff.crew_size ? <span style={styles.laborBadge}>Crew {selectedHandoff.crew_size}</span> : null}{selectedHandoff.estimated_duration_hours ? <span style={styles.laborBadge}>{selectedHandoff.estimated_duration_hours}h duration</span> : null}{endAutoCalculated && end ? <span style={{...styles.laborBadge,...styles.badgeReady}}>End auto-calculated</span> : null}</div></div>
+      <div style={styles.detailRow}><span style={styles.label}>Customer</span><span>{selectedHandoff.cascade?.customer?.name} · {selectedHandoff.cascade?.customer?.email || "No email"} · {selectedHandoff.cascade?.customer?.phone || "No phone"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Location</span><span>{[selectedHandoff.cascade?.location?.address_line1, selectedHandoff.cascade?.location?.address_line2, selectedHandoff.cascade?.location?.city, selectedHandoff.cascade?.location?.postal_code].filter(Boolean).join(", ")}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Scope</span><span>{humanize(selectedHandoff.cascade?.scope?.packageKey)} · {selectedHandoff.cascade?.scope?.beds ?? "—"} bed · {selectedHandoff.cascade?.scope?.baths ?? "—"} bath · {selectedHandoff.cascade?.scope?.sqft ?? "—"} sq ft · {selectedHandoff.cascade?.scope?.addons?.length ? selectedHandoff.cascade.scope.addons.map(humanize).join(", ") : "No add-ons"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Access</span><span>{selectedHandoff.cascade?.location?.access_notes || "No special access notes"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Accepted total</span><span>{formatMoney(selectedHandoff.cascade?.pricing?.total_amount, selectedHandoff.cascade?.pricing?.currency_code)} · {selectedHandoff.cascade?.pricing?.tax_name || "Tax"} {formatMoney(selectedHandoff.cascade?.pricing?.tax_amount, selectedHandoff.cascade?.pricing?.currency_code)}</span></div>
+    </div> : null}
     {scheduleHint ? <div style={{...styles.note,marginTop:10}} data-wave3-schedule-prefill-hint="true">{scheduleHint}</div> : null}
-    <div style={styles.row}><button style={styles.button} onClick={schedule} disabled={busy}>Schedule & Dispatch</button></div>
+    <div style={styles.row}><button style={styles.button} onClick={schedule} disabled={busy || !handoffId || !workerId || !start || !end}>Assign &amp; Dispatch</button></div>
     {message ? <div style={styles.ok}>{message}</div> : null}{error ? <div style={styles.error}>{error}</div> : null}
   </section>;
 }
@@ -629,7 +653,7 @@ function WorkerOperations({ revenueContext }) {
         <div><strong style={{fontSize:17}}>{context.customer_name || "Customer"}</strong><div style={styles.note}>{context.service_title || "Cleaning service"}</div></div>
         <span style={{...styles.badge,...(context.operational_status === "qa_pending" ? styles.badgeCompleted : styles.badgeDispatched)}}>{humanize(context.operational_status)}</span>
       </div>
-      <div style={styles.detailRow}><span style={styles.label}>Address</span><span>{[context.address_line1, context.city, context.subdivision].filter(Boolean).join(", ") || "Address unavailable"}</span></div>
+      <div style={styles.detailRow}><span style={styles.label}>Address</span><span>{[context.address_line1 || scope.location?.address_line1, scope.location?.address_line2, context.city || scope.location?.city, context.subdivision || scope.location?.subdivision, scope.location?.postal_code].filter(Boolean).join(", ") || "Address unavailable"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Schedule</span><span>{context.scheduled_start ? `${context.scheduled_start} → ${context.scheduled_end || "end pending"} (${context.timezone || "local time"})` : "Schedule unavailable"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Package</span><span>{humanize(scope.packageKey || context.checklist?.package || context.service_title)}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Property</span><span>{[scope.dwellingType, scope.beds ? `${scope.beds} bed` : null, scope.baths ? `${scope.baths} bath` : null, scope.sqft ? `${scope.sqft} sqft` : null].filter(Boolean).join(" · ") || "Scope details unavailable"}</span></div>

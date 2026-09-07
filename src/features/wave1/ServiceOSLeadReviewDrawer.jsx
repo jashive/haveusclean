@@ -43,7 +43,7 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
   const canScheduleWalkthrough = commercial && serviceRequest?.lifecycle_status === "walkthrough_requested";
   const canonicalContactName = [canonicalContact?.first_name, canonicalContact?.last_name].filter(Boolean).join(" ");
   const contactName = customer.name || canonicalContactName || canonicalCustomer?.display_name || serviceRequest?.title || "Lead review";
-  const address = [location.address || location.address_line1 || canonicalLocation?.address_line1, location.city || canonicalLocation?.city, location.subdivision || canonicalLocation?.subdivision, location.postalCode || location.postal_code || canonicalLocation?.postal_code].filter(Boolean).join(", ");
+  const address = [location.address || location.address_line1 || canonicalLocation?.address_line1, location.address_line2 || location.unit || canonicalLocation?.address_line2, location.city || canonicalLocation?.city, location.subdivision || canonicalLocation?.subdivision, location.postalCode || location.postal_code || canonicalLocation?.postal_code].filter(Boolean).join(", ");
   const serviceLabel = commercial ? `${humanize(scope.facility_type)} commercial cleaning` : humanize(scope.cleanType || scope.packageKey || booking?.service_package || "Residential cleaning");
   const preferred = commercial
     ? [scope.preferred_walkthrough_date, scope.preferred_walkthrough_time_window].filter(Boolean).join(" · ")
@@ -80,7 +80,7 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
         <Detail label="Email">{customer.email || canonicalContact?.email}</Detail>
         <Detail label="Phone">{customer.phone || canonicalContact?.phone}</Detail>
         <Detail label="Address">{address}</Detail>
-        <Detail label="Access notes">{scope.access_requirements || scope.accessRequirements || canonicalLocation?.access_notes || canonicalLocation?.metadata?.access_notes || canonicalLocation?.metadata?.access_instructions || scope.notes || scope.customer_notes}</Detail>
+        <Detail label="Access notes">{location.access_notes || location.accessNotes || scope.access_requirements || scope.accessRequirements || canonicalLocation?.access_notes || canonicalLocation?.metadata?.access_notes || canonicalLocation?.metadata?.access_instructions || scope.notes || scope.customer_notes}</Detail>
         <Detail label="Requested time">{preferred}</Detail>
       </dl>
       {Object.values(canonicalRelationsUnavailable).some(Boolean) ? <p className="form-message form-message--warning" role="status">Some saved contact or site details are temporarily unavailable. The original lead request remains available for follow-up.</p> : null}

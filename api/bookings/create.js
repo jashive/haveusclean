@@ -219,6 +219,8 @@ export default async function handler(req, res) {
     const email = normalizeEmail(booking.email);
     const phone = text(booking.phone);
     const address = text(booking.address || booking.serviceAddress);
+    const addressLine2 = text(booking.addressLine2 || booking.unit || booking.apartment);
+    const accessNotes = text(booking.accessNotes || booking.access_notes);
     const city = text(booking.city);
     const market = normalizeMarket(booking.market || booking.businessUnitCode);
     const postalCode = validatePostal(market, booking.postalCode || booking.zipCode);
@@ -252,17 +254,15 @@ export default async function handler(req, res) {
     const subdivision = market === 'HUC-ON' ? 'ON' : 'AZ';
     const countryCode = market === 'HUC-ON' ? 'CA' : 'US';
     const requirements = {
-      bedrooms: Number(booking.bedrooms || 0),
-      bathrooms: Number(booking.bathrooms || 0),
-      sqft: booking.sqft === '' || booking.sqft == null ? null : Number(booking.sqft),
-      dwelling_type: text(booking.dwellingType),
-      package_key: text(booking.packageKey),
-      condition: text(booking.condition || 'light'),
-      frequency: text(booking.frequency || 'one_time'),
-      addons: Array.isArray(quote.input?.addons) ? quote.input.addons : [],
-      requested_service_date: requestedDate,
-      requested_arrival_window: arrivalWindow,
-      customer_notes: text(booking.notes),
+      customer: { name, email, phone },
+      location: { address_line1: address, address_line2: addressLine2 || null, city, subdivision, postal_code: postalCode, country_code: countryCode, access_notes: accessNotes || null },
+      scope: {
+        beds: Number(booking.bedrooms || 0), bathrooms: Number(booking.bathrooms || 0),
+        sqft: booking.sqft === '' || booking.sqft == null ? null : Number(booking.sqft),
+        dwellingType: text(booking.dwellingType), packageKey: text(booking.packageKey), condition: text(booking.condition || 'light'),
+        frequency: text(booking.frequency || 'one_time'), addons: Array.isArray(quote.input?.addons) ? quote.input.addons : [],
+        preferredDate: requestedDate, preferredWindow: arrivalWindow, notes: text(booking.notes) || null,
+      },
     };
 
     const result = await callBookingRpc({

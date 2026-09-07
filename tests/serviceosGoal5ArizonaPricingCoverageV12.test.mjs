@@ -54,7 +54,7 @@ test("saved-lead review banner strips an already-present management-review prefi
 
 test("saved-lead customer identity comes from lead requirements, not operator display text", () => {
   assert.match(continuationSource, /const customer = req\.customer \|\| \{\}/);
-  assert.match(continuationSource, /customerName: text\(customer\.name\)/);
+  assert.match(continuationSource, /customerName: text\(customer\.name \|\| canonicalContactName \|\| canonicalCustomer\.display_name\)/);
   assert.ok(continuationSource.includes('const appUserId = revenueContext?.appUserId || null;'));
   assert.doesNotMatch(continuationSource, /customerName:\s*(?:revenueContext|session|appUserId)/);
 });
