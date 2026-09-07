@@ -99,7 +99,7 @@ export default function ServiceOSWave1Workspace() {
   const email = session?.user?.email ?? "Unavailable";
   const revenueAuthorized = REVENUE_ENABLED && canManageServiceOSRevenue(role);
   const operationsAuthorized = OPERATIONS_ENABLED && ["owner_admin", "office_ops", "worker"].includes(role);
-  const qaAuthorized = QA_ENABLED && ["owner_admin", "qa"].includes(role);
+  const qaAuthorized = QA_ENABLED && ["owner_admin", "office_ops", "qa"].includes(role);
   const financeAuthorized = FINANCE_ENABLED && ["owner_admin", "office_ops"].includes(role);
   const staffAdminAuthorized = STAFF_ADMIN_ENABLED && role === "owner_admin";
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";

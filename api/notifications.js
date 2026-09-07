@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { handleWorkerDispatchNotification } from '../src/server/workerNotificationDelivery.js';
-import { handleCustomerCompletionReceipt } from '../src/server/customerCompletionDelivery.js';
+import { deliverCustomerCompletionReceipt, deliverOperationsCompletionAlert, handleCustomerCompletionReceipt } from '../src/server/customerCompletionDelivery.js';
 
 function envConfig() {
   const url = String(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').replace(/\/$/, '');
@@ -217,6 +217,33 @@ async function handleReminder(req, res) {
   return res.status(200).json({ success: true, message, channel });
 }
 
+async function handleJobCompletion(req, res, accessToken) {
+  if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (!accessToken) return res.status(401).json({ error: 'Authentication required' });
+  const assignmentId = String(req.body?.assignmentId || '').trim();
+  const completionNote = String(req.body?.completionNote || '').trim();
+  if (!assignmentId || !completionNote) return res.status(400).json({ error: 'assignmentId and completionNote are required' });
+  const completion = await parse(await rest('rpc/worker_submit_completion_to_qa', accessToken, {
+    method: 'POST',
+    body: JSON.stringify({ p_worker_assignment_id: assignmentId, p_completion_note: completionNote }),
+  }), 'Unable to submit completion to QA');
+  const workOrderId = String(completion?.work_order_id || '').trim();
+  const results = await Promise.allSettled([
+    deliverCustomerCompletionReceipt(workOrderId, accessToken),
+    deliverOperationsCompletionAlert(workOrderId, accessToken),
+  ]);
+  const failed = results.filter((result) => result.status === 'rejected');
+  return res.status(failed.length ? 202 : 200).json({
+    success: true,
+    completion,
+    notifications: {
+      customer: results[0].status === 'fulfilled' ? 'sent' : 'queued_for_retry',
+      operations: results[1].status === 'fulfilled' ? 'sent' : 'queued_for_retry',
+    },
+    ...(failed.length ? { notificationWarning: 'Completion was saved; one or more email alerts remain in the governed retry queue.' } : {}),
+  });
+}
+
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
@@ -228,6 +255,7 @@ export default async function handler(req, res) {
     if (action === 'quote-email') return await handleQuoteEmail(req, res);
     if (action === 'quote-decision') return await handleQuoteDecision(req, res);
     if (action === 'worker-dispatch') return await handleWorkerDispatchNotification(req, res, bearer(req));
+    if (action === 'job-completion') return await handleJobCompletion(req, res, bearer(req));
     if (action === 'customer-completion') return await handleCustomerCompletionReceipt(req, res, bearer(req));
     return await handleReminder(req, res);
   } catch (error) {
