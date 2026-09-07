@@ -8,12 +8,12 @@ const prodEnv = await readFile(new URL("../.env.production", import.meta.url), "
 
 test("Wave 4 has an independent production QA gate", () => {
   assert.match(shell, /VITE_SERVICEOS_QA_ENABLED/);
-  assert.match(shell, /QA_ENABLED && \["owner_admin", "qa"\]\.includes\(role\)/);
+  assert.match(shell, /QA_ENABLED && \["owner_admin", "office_ops", "qa"\]\.includes\(role\)/);
   assert.match(shell, /data-qa-authorized/);
   assert.match(prodEnv, /VITE_SERVICEOS_QA_ENABLED=true/);
 });
 
-test("Wave 4 QA workspace exposes QA only and preserves later-wave boundaries", () => {
+test("Wave 4 QA workspace exposes governed staff review and preserves later-wave boundaries", () => {
   assert.match(qa, /data-serviceos-workspace="wave4-qa-production"/);
   assert.match(qa, /createQaInspection/);
   assert.match(qa, /updateQaInspectionStatus/);

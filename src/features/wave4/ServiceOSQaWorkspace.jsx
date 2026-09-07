@@ -4,6 +4,7 @@ import {
   createQaInspection,
   createWorkOrderEvent,
   fetchCorrectiveActionsForJob,
+  fetchCompletionEvidenceForJob,
   fetchOperationalJobById,
   fetchQaInspectionsForJob,
   fetchWorkOrderForJob,
@@ -15,6 +16,8 @@ import {
   buildCorrectiveActionPayload,
   buildQaInspectionPayload,
 } from "../../lib/serviceosOperationsUtils.js";
+import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
+import { getSupabaseConfig } from "../../lib/supabaseConfig.js";
 
 const QA_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -48,6 +51,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   const [caseData, setCaseData] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [waiverReason, setWaiverReason] = useState("");
 
   const currentInspection = useMemo(() => {
     const rows = caseData?.qaInspections ?? [];
@@ -83,11 +87,12 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
       if (!["qa_pending", "qa_passed", "corrective_action_required"].includes(job.operational_status)) {
         throw new Error(`Job is not in a QA-stage status: ${job.operational_status}`);
       }
-      const [qaInspections, correctiveActions] = await Promise.all([
+      const [qaInspections, correctiveActions, completionEvidence] = await Promise.all([
         fetchQaInspectionsForJob(job.id, accessToken),
         fetchCorrectiveActionsForJob(job.id, accessToken),
+        fetchCompletionEvidenceForJob(job.id, accessToken),
       ]);
-      setCaseData({ job, workOrder, qaInspections, correctiveActions });
+      setCaseData({ job, workOrder, qaInspections, correctiveActions, completionEvidence });
     } catch (err) {
       setCaseData(null);
       setError(err?.message ?? String(err));
@@ -166,6 +171,53 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
     }
   }, [passInspection, caseData, score, findings, accessToken, appUserId, refresh]);
 
+  const finalizeQa = useCallback(async (outcome) => {
+    if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
+    const reason = waiverReason.trim();
+    if (outcome === "waived" && !reason) {
+      setError("A governed waiver reason is required.");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await authenticatedRestFetchWithRefresh("rpc/staff_finalize_qa_inspection", {
+        method: "POST",
+        body: JSON.stringify({
+          p_qa_inspection_id: currentInspection.id,
+          p_outcome: outcome,
+          p_score: outcome === "passed" ? Number(score) : null,
+          p_findings: findings.trim() || null,
+          p_waiver_reason: outcome === "waived" ? reason : null,
+        }),
+      }).then(async (response) => {
+        if (!response?.ok) throw new Error(`QA finalization failed: ${await response?.text().catch(() => "")}`);
+      });
+      await refresh();
+    } catch (err) {
+      setError(err?.message ?? String(err));
+    } finally {
+      setBusy(false);
+    }
+  }, [currentInspection, caseData, score, findings, waiverReason, refresh]);
+
+  const openEvidence = useCallback(async (row) => {
+    if (!row?.storage_reference) return;
+    try {
+      const { url, anon } = getSupabaseConfig(import.meta.env);
+      const path = row.storage_reference.split("/").map(encodeURIComponent).join("/");
+      const response = await fetch(`${url}/storage/v1/object/authenticated/serviceos-completion-evidence/${path}`, {
+        headers: { apikey: anon, Authorization: `Bearer ${accessToken}` },
+      });
+      if (!response.ok) throw new Error("Completion photo is not available to this reviewer.");
+      const objectUrl = URL.createObjectURL(await response.blob());
+      window.open(objectUrl, "_blank", "noopener,noreferrer");
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+    } catch (err) {
+      setError(err?.message ?? String(err));
+    }
+  }, [accessToken]);
+
   const failQa = useCallback(async () => {
     if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
     setBusy(true);
@@ -211,25 +263,28 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   }, [currentInspection, caseData, score, findings, accessToken, appUserId, refresh]);
 
   if (!QA_ENABLED) return null;
-  if (role !== "qa") return <section style={styles.panel}>QA access denied.</section>;
+  if (!["qa", "owner_admin", "office_ops"].includes(role)) return <section style={styles.panel}>QA access denied.</section>;
 
   return (
     <section style={styles.panel} data-serviceos-workspace="wave4-qa-production">
       <h2 style={styles.title}>Wave 4 Quality Assurance</h2>
-      <p style={styles.copy}>QA-only Production workspace. Finance and Intelligence remain unavailable. Database lifecycle guards remain the final authority.</p>
+      <p style={styles.copy}>Governed QA workspace for QA, Owner/Admin, and Office Operations reviewers. Database lifecycle guards remain the final authority.</p>
       <div style={styles.grid}>
         <label style={styles.field}><span style={styles.label}>Operational job ID</span><input style={styles.input} value={jobId} onChange={(e) => setJobId(e.target.value)} /></label>
         <label style={styles.field}><span style={styles.label}>Work order ID</span><input style={styles.input} value={workOrderId} onChange={(e) => setWorkOrderId(e.target.value)} /></label>
         <label style={styles.field}><span style={styles.label}>QA score</span><input style={styles.input} value={score} onChange={(e) => setScore(e.target.value)} inputMode="decimal" /></label>
         <label style={styles.field}><span style={styles.label}>Findings</span><input style={styles.input} value={findings} onChange={(e) => setFindings(e.target.value)} /></label>
+        <label style={styles.field}><span style={styles.label}>Waiver reason</span><input style={styles.input} value={waiverReason} onChange={(e) => setWaiverReason(e.target.value)} placeholder="Required only when waiving QA" /></label>
       </div>
       <div style={styles.actions}>
         <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={refresh} disabled={busy}>{busy ? "Working…" : "Load / Refresh QA Case"}</button>
         <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={startQa} disabled={busy || !caseData || caseData.job.operational_status !== "qa_pending" || !!currentInspection || !!passedInspection}>Start QA</button>
-        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={passQa} disabled={busy || !passInspection}>{recoverablePassedInspection ? "Finalize Passed QA" : "Pass QA"}</button>
-        <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !currentInspection}>Fail QA + Open Rework</button>
+        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={() => currentInspection ? finalizeQa("passed") : passQa()} disabled={busy || !passInspection}>{recoverablePassedInspection ? "Finalize Passed QA" : "Pass QA"}</button>
+        <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={() => finalizeQa("waived")} disabled={busy || !currentInspection || !waiverReason.trim()}>Waive QA</button>
+        {role !== "office_ops" ? <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !currentInspection}>Fail QA + Open Rework</button> : null}
       </div>
       {recoverablePassedInspection ? <div style={styles.status}>Recovery detected: QA inspection already passed. Finalize the governed work-order/job transition and audit event.</div> : null}
+      {caseData?.completionEvidence?.filter((row) => row.storage_reference).length ? <div style={styles.status}><strong>Completion photos</strong>{caseData.completionEvidence.filter((row) => row.storage_reference).map((row, index) => <div key={row.id} style={{marginTop:8}}><button type="button" style={{...styles.button,...styles.secondary}} onClick={() => openEvidence(row)}>Open photo {index + 1}</button> <span>{row.evidence_type.replaceAll("_", " ")}</span></div>)}</div> : null}
       {caseData ? <div style={styles.status}>Job: {caseData.job.operational_status}{"\n"}Work order: {caseData.workOrder.work_order_status}{"\n"}QA inspections: {(caseData.qaInspections ?? []).length}{"\n"}Corrective actions: {(caseData.correctiveActions ?? []).length}</div> : null}
       {error ? <div role="alert" style={styles.error}>{error}</div> : null}
     </section>

@@ -7,7 +7,7 @@ const shell = fs.readFileSync("src/features/wave1/ServiceOSWave1Workspace.jsx", 
 const workerMigration = fs.readFileSync("supabase/migrations/20260902203500_wave3_worker_execution_governed_transitions.sql", "utf8");
 
 test("Wave 3 worker completion stops at qa_pending and does not perform QA", () => {
-  assert.match(workspace, /rpc\/worker_submit_completion_to_qa/);
+  assert.match(workspace, /notifications\?action=job-completion/);
   assert.match(workspace, /Submitted to QA successfully/);
   assert.match(workerMigration, /set operational_status = 'qa_pending'/);
   assert.doesNotMatch(workspace, /createQaInspection/);

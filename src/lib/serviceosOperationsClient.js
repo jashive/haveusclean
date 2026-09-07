@@ -312,6 +312,15 @@ export async function fetchCorrectiveActionsForJob(operationalJobId, accessToken
   );
 }
 
+export async function fetchCompletionEvidenceForJob(operationalJobId, accessToken) {
+  assertEnabled();
+  return fetchMany(
+    "completion_evidence",
+    `operational_job_id=eq.${encodeURIComponent(operationalJobId)}&order=captured_at.asc`,
+    accessToken
+  );
+}
+
 export async function fetchOperationalHandoffForJob(operationalJobId, accessToken) {
   assertEnabled();
   const rows = await fetchMany(

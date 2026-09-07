@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";
+import { getSupabaseConfig } from "../../lib/supabaseConfig.js";
 import { getJobHours, getTeamSize } from "../../core/pricing/sharedPricing.js";
 import {
   fetchEligibleJobHandoffs,
@@ -15,12 +16,14 @@ import {
   updateScheduleWindowStatus,
   updateWorkerAssignmentStatus,
   updateWorkOrderStatus,
+  createCompletionEvidence,
 } from "../../lib/serviceosOperationsClient.js";
 import {
   buildOperationalJobPayload,
   buildScheduleWindowPayload,
   buildWorkerAssignmentPayload,
   buildWorkOrderPayload,
+  buildCompletionEvidencePayload,
 } from "../../lib/serviceosOperationsUtils.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 import CleanerExecutionPlaybook from "./CleanerExecutionPlaybook.jsx";
@@ -86,16 +89,61 @@ async function postWorkerDispatchNotification(assignmentId, workOrderId) {
   return { ok: response.ok, status: response.status, ...data };
 }
 
-async function postCustomerCompletionReceipt(workOrderId) {
+async function postJobCompletion(assignmentId, completionNote) {
   const accessToken = await getValidAccessToken();
-  const response = await fetch("/api/notifications?action=customer-completion", {
+  const response = await fetch("/api/notifications?action=job-completion", {
     method: "POST",
     headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ workOrderId }),
+    body: JSON.stringify({ assignmentId, completionNote }),
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(data?.error || "Customer completion receipt could not be sent");
+  if (!response.ok && !data?.completion) throw new Error(data?.error || "Job completion could not be submitted");
   return data;
+}
+
+async function sha256Hex(file) {
+  const bytes = await file.arrayBuffer();
+  const digest = await crypto.subtle.digest("SHA-256", bytes);
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+async function persistCompletionPhotos({ files, worker, assignment, context, appUserId }) {
+  if (!files.length) return [];
+  const accessToken = await getValidAccessToken();
+  const { url, anon } = getSupabaseConfig(import.meta.env);
+  const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
+  const persisted = [];
+  for (const [index, file] of files.entries()) {
+    if (!allowed.has(file.type)) throw new Error(`${file.name}: use JPEG, PNG, or WebP.`);
+    if (file.size > 12 * 1024 * 1024) throw new Error(`${file.name}: photos must be 12 MB or smaller.`);
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-100) || `photo-${index + 1}.jpg`;
+    const objectName = `${assignment.organization_id}/${assignment.business_unit_id}/${context.operational_job_id}/${assignment.id}/${crypto.randomUUID()}-${safeName}`;
+    const storagePath = objectName.split("/").map(encodeURIComponent).join("/");
+    const upload = await fetch(`${url}/storage/v1/object/serviceos-completion-evidence/${storagePath}`, {
+      method: "POST",
+      headers: { apikey: anon, Authorization: `Bearer ${accessToken}`, "Content-Type": file.type, "x-upsert": "false" },
+      body: file,
+    });
+    if (!upload.ok) throw new Error(`${file.name}: upload failed (${upload.status}).`);
+    const hash = await sha256Hex(file);
+    const evidence = await createCompletionEvidence(buildCompletionEvidencePayload({
+      organizationId: assignment.organization_id,
+      businessUnitId: assignment.business_unit_id,
+      operationalJobId: context.operational_job_id,
+      workOrderId: context.work_order_id,
+      workerAssignmentId: assignment.id,
+      evidenceType: "photo_after",
+      storageSystem: "supabase_storage",
+      storageReference: objectName,
+      evidencePayload: { original_name: file.name, mime_type: file.type, byte_size: file.size, sha256: hash },
+      capturedAt: new Date().toISOString(),
+      capturedByWorkerId: worker.id,
+      capturedByAppUserId: appUserId,
+      metadata: { source: "worker_mobile_completion", bucket: "serviceos-completion-evidence" },
+    }), accessToken);
+    persisted.push(evidence);
+  }
+  return persisted;
 }
 
 async function acknowledgeWorkerNotificationDelivery(workerAssignmentId) {
@@ -565,6 +613,7 @@ function WorkerOperations({ revenueContext }) {
   const [error, setError] = useState("");
   const [completedTasks, setCompletedTasks] = useState([]);
   const [qaPhotos, setQaPhotos] = useState([]);
+  const [photoState, setPhotoState] = useState("empty");
   const appUserId = revenueContext?.appUserId ?? null;
 
   const selected = useMemo(()=>assignments.find(a=>a.id===selectedId) ?? null,[assignments,selectedId]);
@@ -637,18 +686,16 @@ function WorkerOperations({ revenueContext }) {
     if (!note.trim()) { setError("Enter a completion note before submitting to QA."); return; }
     setBusy(true); setError("");
     try {
-      const completion = await postJson("rpc/worker_submit_completion_to_qa", {
-        p_worker_assignment_id: selected.id,
-        p_completion_note: note.trim(),
-      }, "Unable to submit completion to QA");
-      const completedContext = Array.isArray(completion) ? completion[0] : completion;
-      let receiptWarning = "";
-      try { await postCustomerCompletionReceipt(completedContext?.work_order_id); }
-      catch { receiptWarning = " Customer receipt is queued for office retry."; }
+      setPhotoState(qaPhotos.length ? "uploading" : "empty");
+      await persistCompletionPhotos({ files: qaPhotos, worker, assignment: selected, context, appUserId });
+      if (qaPhotos.length) setPhotoState("verified");
+      const result = await postJobCompletion(selected.id, note.trim());
+      const warning = result?.notificationWarning ? ` ${result.notificationWarning}` : "";
       setNote("");
+      setQaPhotos([]);
       await load();
-      setMessage(`Submitted to QA successfully. Your work is complete; QA review is now pending.${receiptWarning}`);
-    } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
+      setMessage(`Submitted to QA successfully. Your work is complete; QA review is now pending.${warning}`);
+    } catch(e){setPhotoState(qaPhotos.length ? "error" : "empty");setError(e?.message??String(e));} finally{setBusy(false);}
   };
 
   const assignmentLabel = (assignment) => {
@@ -694,9 +741,12 @@ function WorkerOperations({ revenueContext }) {
     </section> : null}
 
     {executionActive ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
-      <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>Take or select clear before-and-after photos. Files stay on this device until the governed submission action is available.</p></div>
-      <label className="field-photo-button"><input type="file" accept="image/*" capture="environment" multiple onChange={(event) => setQaPhotos(Array.from(event.target.files || []))} /><span>＋ Add photos</span></label>
-      {qaPhotos.length ? <StatusBadge tone="info">{qaPhotos.length} photo{qaPhotos.length === 1 ? "" : "s"} selected</StatusBadge> : null}
+      <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>JPEG, PNG, or WebP photos are uploaded to the private completion-evidence vault when you submit.</p></div>
+      <label className="field-photo-button"><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={(event) => { setQaPhotos(Array.from(event.target.files || [])); setPhotoState("empty"); }} /><span>＋ Add photos</span></label>
+      {photoState === "uploading" ? <StatusBadge tone="warning">Uploading…</StatusBadge> : null}
+      {photoState === "verified" ? <StatusBadge tone="success">Quarantined &amp; linked</StatusBadge> : null}
+      {photoState === "error" ? <StatusBadge tone="danger">Upload failed · retry</StatusBadge> : null}
+      {qaPhotos.length && photoState === "empty" ? <StatusBadge tone="info">{qaPhotos.length} photo{qaPhotos.length === 1 ? "" : "s"} ready</StatusBadge> : null}
     </section> : null}
 
     <div style={styles.row}>

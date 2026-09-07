@@ -11,7 +11,8 @@ const operations = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorksp
 
 test("completion receipt is consolidated, post-transition, and idempotent", () => {
   assert.match(api, /action === 'customer-completion'/);
-  assert.match(operations, /worker_submit_completion_to_qa[\s\S]*postCustomerCompletionReceipt/);
+  assert.match(operations, /notifications\?action=job-completion/);
+  assert.match(api, /worker_submit_completion_to_qa[\s\S]*deliverCustomerCompletionReceipt/);
   assert.match(sql, /work_order_status <> 'service_complete'/);
   assert.match(sql, /unique \(work_order_id\)/i);
   assert.match(delivery, /X-HUC-Idempotency-Key/);
