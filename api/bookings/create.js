@@ -4,6 +4,7 @@
 
 import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
 import { dispatchIntakeNotifications } from '../../server-internal/intake-notification-delivery.js';
+import { geocodeServiceAddress } from '../../server-internal/service-location-geocoding.js';
 import '../../server-internal/supabase-secret-key-fetch-compat.js';
 
 function httpError(status, message, code) {
@@ -104,6 +105,24 @@ async function callBookingRpc(payload, config) {
   );
 }
 
+async function persistLocationGeocode(serviceLocationId, address, config) {
+  if (!serviceLocationId) return { status: 'location_unavailable' };
+  const point = await geocodeServiceAddress(address);
+  if (!point) return { status: 'postal_centroid_unavailable' };
+  try {
+    await callRpc('service_role_set_location_geocode', {
+      p_service_location_id: serviceLocationId,
+      p_latitude: point.latitude,
+      p_longitude: point.longitude,
+      p_source: point.source,
+      p_precision: point.precision,
+    }, config, 'Location was saved, but route coordinates could not be recorded.');
+    return { status: 'recorded', source: point.source, precision: point.precision };
+  } catch {
+    return { status: 'persistence_failed', source: point.source, precision: point.precision };
+  }
+}
+
 async function handleCommercialWalkthrough(req, res, config) {
   const booking = req.body?.walkthroughData || req.body?.bookingData || req.body || {};
   const companyName = text(booking.companyName || booking.company_name);
@@ -159,6 +178,8 @@ async function handleCommercialWalkthrough(req, res, config) {
     p_idempotency_key: idempotencyKey,
   }, config, 'Commercial walkthrough request could not be saved. Please try again or contact Have Us Clean.');
 
+  const geocoding = await persistLocationGeocode(result?.service_location_id, { addressLine1: address, city, subdivision, postalCode, countryCode }, config);
+
   const notifications = await dispatchIntakeNotifications({
     intake: {
       kind: 'commercial',
@@ -187,6 +208,7 @@ async function handleCommercialWalkthrough(req, res, config) {
     lifecycleStatus: result?.lifecycle_status || 'walkthrough_requested',
     market,
     notifications,
+    geocoding,
     message: 'Custom Commercial Proposal — On-Site Facility Walkthrough Required',
   });
 }
@@ -310,6 +332,8 @@ export default async function handler(req, res) {
       },
     }, config);
 
+    const geocoding = await persistLocationGeocode(result?.service_location_id, { addressLine1: address, city, subdivision, postalCode, countryCode }, config);
+
     const notifications = await dispatchIntakeNotifications({
       intake: {
         kind: 'residential',
@@ -342,6 +366,7 @@ export default async function handler(req, res) {
       customerId: result?.customer_id || null,
       idempotentReplay: result?.idempotent_replay === true,
       notifications,
+      geocoding,
       quote: {
         market,
         currencyCode: quote.currencyCode,
