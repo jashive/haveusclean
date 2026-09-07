@@ -77,6 +77,8 @@ test("recent saved leads are reloaded from canonical ServiceOS storage across de
   assert.match(panel, /Recent Saved Leads/);
   assert.match(panel, /available after refresh and on another device/);
   assert.match(panel, /Refresh Leads/);
+  assert.match(panel, /window\.addEventListener\("focus", refreshOnFocus\)/);
+  assert.match(panel, /document\.addEventListener\("visibilitychange", refreshWhenVisible\)/);
 });
 
 test("proposal-stage leads remain visible but cannot create a duplicate quote", () => {

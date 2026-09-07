@@ -148,6 +148,9 @@ test("Goal 5.6A owner shell carries active market context while non-owner remain
   assert.match(source, /Arizona — HUC-AZ/);
   assert.match(source, /primaryBusinessUnitId: activeBusinessUnit\.id/);
   assert.match(source, /primaryJurisdictionId: activeBusinessUnit\.jurisdictionId/);
+  assert.match(source, /huc\.serviceos\.active-market\.v1/);
+  assert.match(source, /window\.localStorage\.getItem\(ACTIVE_MARKET_STORAGE_KEY\)/);
+  assert.match(source, /window\.localStorage\.setItem\(ACTIVE_MARKET_STORAGE_KEY, nextMarket\)/);
 });
 
 test("Goal 5.6A migration contains published Arizona USD zero-tax configuration", () => {

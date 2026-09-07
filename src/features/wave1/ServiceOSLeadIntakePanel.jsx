@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listRecentInboundLeads, savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
 import ServiceOSLeadReviewDrawer from "./ServiceOSLeadReviewDrawer.jsx";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
@@ -57,6 +57,7 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
   const [recentError, setRecentError] = useState(null);
   const [leadSearch, setLeadSearch] = useState("");
   const [leadStage, setLeadStage] = useState("all");
+  const refreshSequence = useRef(0);
 
   const accessToken = session?.access_token || null;
   const organizationId = revenueContext?.orgId || null;
@@ -79,26 +80,39 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
     };
   }, [continuationLead, revenueContext]);
 
-  async function refreshRecentLeads() {
+  const refreshRecentLeads = useCallback(async () => {
     if (!accessToken || !organizationId || !businessUnitId) return;
+    const requestSequence = ++refreshSequence.current;
     setRecentBusy(true);
     setRecentError(null);
     try {
       const rows = await listRecentInboundLeads({ accessToken, organizationId, businessUnitId });
-      setRecentLeads(rows);
+      if (requestSequence === refreshSequence.current) setRecentLeads(rows);
     } catch (err) {
-      setRecentError(err?.message || "Unable to load recent leads.");
+      if (requestSequence === refreshSequence.current) setRecentError(err?.message || "Unable to load recent leads.");
     } finally {
-      setRecentBusy(false);
+      if (requestSequence === refreshSequence.current) setRecentBusy(false);
     }
-  }
+  }, [accessToken, organizationId, businessUnitId]);
 
   useEffect(() => {
     setContinuationLead(null);
     setResult(null);
     refreshRecentLeads();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [accessToken, organizationId, businessUnitId]);
+  }, [refreshRecentLeads]);
+
+  useEffect(() => {
+    const refreshOnFocus = () => refreshRecentLeads();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") refreshRecentLeads();
+    };
+    window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    return () => {
+      window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+    };
+  }, [refreshRecentLeads]);
 
   function setField(name, value) {
     setForm((current) => ({ ...current, [name]: value }));
