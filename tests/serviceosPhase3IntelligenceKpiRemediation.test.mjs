@@ -27,6 +27,8 @@ test("compensation and payables are territory and currency governed",()=>{
 test("booking geocoding uses the consolidated function and postal fallback",()=>{
   assert.match(booking,/persistLocationGeocode/); assert.match(booking,/service_role_set_location_geocode/);
   assert.match(geocode,/GOOGLE_MAPS_GEOCODING_API_KEY/); assert.match(geocode,/GEOCODING_POSTAL_CENTROIDS_JSON/);
+  assert.match(geocode,/GOVERNED_POSTAL_CENTROIDS/);
+  assert.match(geocode,/governed_postal_centroid_registry_v1/);
   assert.match(sql,/current_user not in \('service_role','postgres'\)/);
 });
 test("route, capacity, cadence and realized margin have live inputs",()=>{
