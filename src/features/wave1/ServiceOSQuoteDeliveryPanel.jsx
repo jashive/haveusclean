@@ -100,7 +100,7 @@ export default function ServiceOSQuoteDeliveryPanel({ session, revenueContext })
   }
 
   return (
-    <section style={styles.panel} data-testid="serviceos-quote-delivery-panel">
+    <section id="quote-delivery" style={styles.panel} data-testid="serviceos-quote-delivery-panel">
       <h2 style={styles.heading}>Quote Delivery + Customer Decision</h2>
       <p style={styles.sub}>Send the exact saved ServiceOS quote by email. A quote becomes <strong>Sent</strong> only after the email provider accepts the customer address. The customer receives a secure <strong>Accept Quote / Request Changes</strong> link.</p>
       <div style={styles.actions}><button type="button" style={styles.secondary} onClick={refresh} disabled={loading}>{loading ? "Refreshing…" : "Refresh Quote Queue"}</button></div>
