@@ -86,6 +86,18 @@ async function postWorkerDispatchNotification(assignmentId, workOrderId) {
   return { ok: response.ok, status: response.status, ...data };
 }
 
+async function postCustomerCompletionReceipt(workOrderId) {
+  const accessToken = await getValidAccessToken();
+  const response = await fetch("/api/notifications?action=customer-completion", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ workOrderId }),
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(data?.error || "Customer completion receipt could not be sent");
+  return data;
+}
+
 async function acknowledgeWorkerNotificationDelivery(workerAssignmentId) {
   const response = await authenticatedRestFetchWithRefresh(
     `worker_notification_delivery?worker_assignment_id=eq.${encodeURIComponent(workerAssignmentId)}&delivery_status=in.(requested,sent,delivered)`,
@@ -625,13 +637,17 @@ function WorkerOperations({ revenueContext }) {
     if (!note.trim()) { setError("Enter a completion note before submitting to QA."); return; }
     setBusy(true); setError("");
     try {
-      await postJson("rpc/worker_submit_completion_to_qa", {
+      const completion = await postJson("rpc/worker_submit_completion_to_qa", {
         p_worker_assignment_id: selected.id,
         p_completion_note: note.trim(),
       }, "Unable to submit completion to QA");
+      const completedContext = Array.isArray(completion) ? completion[0] : completion;
+      let receiptWarning = "";
+      try { await postCustomerCompletionReceipt(completedContext?.work_order_id); }
+      catch { receiptWarning = " Customer receipt is queued for office retry."; }
       setNote("");
       await load();
-      setMessage("Submitted to QA successfully. Your work is complete; QA review is now pending.");
+      setMessage(`Submitted to QA successfully. Your work is complete; QA review is now pending.${receiptWarning}`);
     } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
   };
 

@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { handleWorkerDispatchNotification } from '../src/server/workerNotificationDelivery.js';
+import { handleCustomerCompletionReceipt } from '../src/server/customerCompletionDelivery.js';
 
 function envConfig() {
   const url = String(process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || '').replace(/\/$/, '');
@@ -227,6 +228,7 @@ export default async function handler(req, res) {
     if (action === 'quote-email') return await handleQuoteEmail(req, res);
     if (action === 'quote-decision') return await handleQuoteDecision(req, res);
     if (action === 'worker-dispatch') return await handleWorkerDispatchNotification(req, res, bearer(req));
+    if (action === 'customer-completion') return await handleCustomerCompletionReceipt(req, res, bearer(req));
     return await handleReminder(req, res);
   } catch (error) {
     console.error('Notification API Error:', error);
