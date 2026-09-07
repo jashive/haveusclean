@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { listRecentInboundLeads, savePartialInboundLead } from "../../lib/serviceosLeadIntakeClient.js";
-import ServiceOSPartialLeadQuoteContinuation from "./ServiceOSPartialLeadQuoteContinuation.jsx";
+import ServiceOSLeadReviewDrawer from "./ServiceOSLeadReviewDrawer.jsx";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const initialForm = {
@@ -225,7 +225,7 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
               <div role="cell"><strong>{leadLabel(row)}</strong><small>{requirements?.customer?.email || requirements?.customer?.phone || "Contact details pending"}</small></div>
               <div role="cell"><span>{walkthroughRequested ? "Commercial walkthrough" : requirements?.scope?.cleanType || requirements?.scope?.packageKey || "Residential cleaning"}</span><small>{requirements?.location?.city || "Location pending"}</small></div>
               <div role="cell"><StatusBadge tone={status.tone}>{status.label}</StatusBadge></div>
-              <div role="cell">{continueAllowed ? <button type="button" className="admin-table-action" onClick={() => setContinuationLead(row)}>Open lead</button> : <span className="admin-table-note">{walkthroughRequested ? "Schedule walkthrough" : "Already in quote workflow"}</span>}</div>
+              <div role="cell"><button type="button" className="admin-table-action" onClick={() => setContinuationLead(row)}>{walkthroughRequested ? "Schedule walkthrough" : "Open lead"}</button></div>
               {!continueAllowed && !walkthroughRequested ? <span className="admin-table-note">Use Customer Response / Acceptance for sent quotes instead of creating another quote.</span> : null}
               <TechnicalDetails summary="Technical details"><span>Lead lifecycle: {row.service_request.lifecycle_status}</span><span>Opportunity stage: {row.opportunity?.stage || "unknown"}</span><span>Service request: {row.service_request.id}</span></TechnicalDetails>
             </div>
@@ -234,7 +234,15 @@ export default function ServiceOSLeadIntakePanel({ session, revenueContext }) {
         </div>
       </div>
 
-      {continuationLead ? <ServiceOSPartialLeadQuoteContinuation key={`${continuationLead.service_request.id}:${continuationRevenueContext?.primaryBusinessUnitId || "no-bu"}`} leadResult={continuationLead} session={session} revenueContext={continuationRevenueContext} onClose={() => setContinuationLead(null)} /> : null}
+      <ServiceOSLeadReviewDrawer
+        key={`${continuationLead?.service_request?.id || "closed"}:${continuationRevenueContext?.primaryBusinessUnitId || "no-bu"}`}
+        lead={continuationLead}
+        session={session}
+        revenueContext={continuationRevenueContext}
+        onClose={() => setContinuationLead(null)}
+        onRefresh={refreshRecentLeads}
+        onNavigate={(target) => document.getElementById(target)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+      />
     </section>
   );
 }
