@@ -100,13 +100,17 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
   const req = sr?.requirements || {};
   const customer = req.customer || {};
   const location = req.location || {};
-  const scope = req.scope || {};
+  const scope = req.scope || req;
+  const canonicalCustomer = leadResult?.canonical_customer || {};
+  const canonicalContact = leadResult?.canonical_contact || {};
+  const canonicalLocation = leadResult?.canonical_location || {};
+  const canonicalContactName = [canonicalContact.first_name, canonicalContact.last_name].filter(Boolean).join(" ").trim();
   const [form, setForm] = useState(() => ({
-    customerName: text(customer.name), phone: text(customer.phone), email: text(customer.email),
-    address: text(location.address), city: text(location.city), postalCode: text(location.postalCode),
-    dwellingType: normalizeDwelling(scope.propertyType || scope.dwellingType), beds: numberText(scope.beds), baths: numberText(scope.baths), sqft: numberText(scope.sqft),
-    packageKey: normalizePackage(scope.cleanType || scope.packageKey), condition: text(scope.condition) || "light", frequency: normalizeFrequency(scope.frequency), sqftBand: text(scope.sqftBand),
-    preferredDate: text(scope.preferredDate), preferredWindow: text(scope.preferredWindow), notes: text(scope.notes), addons: Array.isArray(scope.addons) ? scope.addons : [],
+    customerName: text(customer.name || canonicalContactName || canonicalCustomer.display_name), phone: text(customer.phone || canonicalContact.phone), email: text(customer.email || canonicalContact.email),
+    address: text(location.address || location.address_line1 || canonicalLocation.address_line1), addressLine2: text(location.address_line2 || location.unit || canonicalLocation.address_line2), city: text(location.city || canonicalLocation.city), postalCode: text(location.postalCode || location.postal_code || canonicalLocation.postal_code), accessNotes: text(location.access_notes || location.accessNotes || canonicalLocation.access_notes),
+    dwellingType: normalizeDwelling(scope.propertyType || scope.dwellingType || scope.dwelling_type), beds: numberText(scope.beds ?? scope.bedrooms), baths: numberText(scope.baths ?? scope.bathrooms), sqft: numberText(scope.sqft ?? scope.square_feet),
+    packageKey: normalizePackage(scope.cleanType || scope.packageKey || scope.package_key || leadResult?.booking?.service_package), condition: text(scope.condition) || "light", frequency: normalizeFrequency(scope.frequency || leadResult?.booking?.frequency), sqftBand: text(scope.sqftBand || scope.sqft_band),
+    preferredDate: text(scope.preferredDate || scope.requested_service_date || leadResult?.booking?.requested_service_date), preferredWindow: text(scope.preferredWindow || scope.requested_arrival_window || leadResult?.booking?.requested_arrival_window), notes: text(scope.notes || scope.customer_notes), addons: Array.isArray(scope.addons) ? scope.addons : [],
   }));
   const [busy, setBusy] = useState(false);
   const [quote, setQuote] = useState(null);
@@ -185,7 +189,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
   function buildCurrentRequirements() {
     return {
       customer: { name: form.customerName.trim() || null, phone: form.phone.trim() || null, email: form.email.trim() || null },
-      location: { address: form.address.trim() || null, city: form.city.trim() || null, postalCode: form.postalCode.trim() || null, jurisdictionId },
+      location: { address: form.address.trim() || null, address_line1: form.address.trim() || null, address_line2: form.addressLine2.trim() || null, city: form.city.trim() || null, subdivision: location.subdivision || canonicalLocation.subdivision || (businessUnitCode === "HUC-AZ" ? "AZ" : "ON"), postalCode: form.postalCode.trim() || null, postal_code: form.postalCode.trim() || null, country_code: location.country_code || canonicalLocation.country_code || (businessUnitCode === "HUC-AZ" ? "US" : "CA"), access_notes: form.accessNotes.trim() || null, jurisdictionId },
       scope: { dwellingType: form.dwellingType, sqft: form.sqft ? Number(form.sqft) : null, beds: Number(form.beds || 0), baths: form.baths ? Number(form.baths) : null, packageKey: form.packageKey, condition: form.condition, frequency: form.frequency, sqftBand: form.sqftBand || null, addons: [...form.addons], preferredDate: form.preferredDate || null, preferredWindow: form.preferredWindow || null, notes: form.notes.trim() || null },
     };
   }
@@ -229,6 +233,7 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         <label style={s.field}><span style={s.label}>Phone</span><input style={s.input} value={form.phone} onChange={(e) => setField("phone", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Email</span><input style={s.input} value={form.email} onChange={(e) => setField("email", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Service address</span><input style={s.input} value={form.address} onChange={(e) => setField("address", e.target.value)} /></label>
+        <label style={s.field}><span style={s.label}>Unit / Apt</span><input style={s.input} value={form.addressLine2} onChange={(e) => setField("addressLine2", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>City</span><input style={s.input} value={form.city} onChange={(e) => setField("city", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>{businessUnitCode === "HUC-AZ" ? "ZIP code" : "Postal code"}</span><input style={s.input} value={form.postalCode} onChange={(e) => setField("postalCode", e.target.value)} /></label>
         <label style={s.field}><span style={s.label}>Property type *</span><select style={s.input} value={form.dwellingType} onChange={(e) => setField("dwellingType", e.target.value)}>{DWELLINGS.map((x) => <option key={x}>{x}</option>)}</select></label>
@@ -247,7 +252,8 @@ export default function ServiceOSPartialLeadQuoteContinuation({ leadResult, sess
         return <label key={item.id} style={{ color: "#D9E2EE", fontSize: 13, ...(bundled ? s.disabled : {}) }} title={bundled ? "Included in selected package — no additional charge" : undefined}><input type="checkbox" checked={form.addons.includes(item.id)} disabled={bundled} onChange={() => toggleAddon(item.id)} /> {item.label}{bundled ? " — Included" : ""}</label>;
       })}</div></div>
       <div style={s.note}>Complete Deep bundled items are disabled automatically. Kitchen & Bath Deep includes refrigerator and oven; cabinets remain selectable at the published rate.</div>
-      <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Scope / access / pets / safety notes</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.notes} onChange={(e) => setField("notes", e.target.value)} /></label>
+      <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Access instructions</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.accessNotes} onChange={(e) => setField("accessNotes", e.target.value)} /></label>
+      <label style={{ ...s.field, marginTop: 12 }}><span style={s.label}>Scope / pets / safety notes</span><textarea style={{ ...s.input, minHeight: 70 }} value={form.notes} onChange={(e) => setField("notes", e.target.value)} /></label>
 
       {bookingMissing.length ? <div style={s.warning}><strong>Quote allowed — booking information still incomplete.</strong><ul style={s.checklist}>{bookingMissing.map((item) => <li key={item}>{item}</li>)}</ul></div> : <div style={{ ...s.note, color: "#60E7C6" }}>Booking information checklist is complete.</div>}
       {review ? <div style={s.warning}><strong>{review.includes("Requires Management Review / Custom Pricing") ? "Requires Management Review / Custom Pricing" : "Management review required"}:</strong> {review.replace(/^Requires Management Review \/ Custom Pricing:\s*/i, "")}</div> : null}
