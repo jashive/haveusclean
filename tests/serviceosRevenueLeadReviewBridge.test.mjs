@@ -61,3 +61,12 @@ test("booking snapshot enrichment failure keeps the lead queue usable", () => {
   assert.match(drawer, /Pricing snapshot is temporarily unavailable/);
   assert.match(drawer, /Lead details remain available/);
 });
+
+test("canonical lead enrichments use deployed columns and fail independently", () => {
+  assert.match(client, /country_code,access_notes,metadata/);
+  assert.doesNotMatch(client, /country_code,access_instructions/);
+  assert.match(client, /Optional \$\{table\} enrichment unavailable/);
+  assert.match(client, /canonical_relations_unavailable/);
+  assert.match(drawer, /canonicalLocation\?\.access_notes/);
+  assert.match(drawer, /original lead request remains available/i);
+});

@@ -28,6 +28,7 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
   const canonicalCustomer = lead?.canonical_customer || null;
   const canonicalContact = lead?.canonical_contact || null;
   const canonicalLocation = lead?.canonical_location || null;
+  const canonicalRelationsUnavailable = lead?.canonical_relations_unavailable || {};
   const commercial = serviceRequest?.service_category === "commercial" || serviceRequest?.lifecycle_status === "walkthrough_requested";
   const market = revenueContext?.activeBusinessUnitCode || "HUC";
   const currency = market === "HUC-AZ" ? "USD" : "CAD";
@@ -79,9 +80,10 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
         <Detail label="Email">{customer.email || canonicalContact?.email}</Detail>
         <Detail label="Phone">{customer.phone || canonicalContact?.phone}</Detail>
         <Detail label="Address">{address}</Detail>
-        <Detail label="Access notes">{scope.access_requirements || scope.accessRequirements || canonicalLocation?.access_instructions || scope.notes || scope.customer_notes}</Detail>
+        <Detail label="Access notes">{scope.access_requirements || scope.accessRequirements || canonicalLocation?.access_notes || canonicalLocation?.metadata?.access_notes || canonicalLocation?.metadata?.access_instructions || scope.notes || scope.customer_notes}</Detail>
         <Detail label="Requested time">{preferred}</Detail>
       </dl>
+      {Object.values(canonicalRelationsUnavailable).some(Boolean) ? <p className="form-message form-message--warning" role="status">Some saved contact or site details are temporarily unavailable. The original lead request remains available for follow-up.</p> : null}
     </section>
 
     <section className="lead-review-section" aria-labelledby="lead-scope-heading">
