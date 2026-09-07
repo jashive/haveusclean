@@ -24,6 +24,7 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
   const location = requirements.location || {};
   const scope = requirements.scope || requirements;
   const booking = lead?.booking || null;
+  const bookingSnapshotUnavailable = Boolean(lead?.booking_snapshot_unavailable);
   const canonicalCustomer = lead?.canonical_customer || null;
   const canonicalContact = lead?.canonical_contact || null;
   const canonicalLocation = lead?.canonical_location || null;
@@ -85,6 +86,7 @@ export default function ServiceOSLeadReviewDrawer({ lead, session, revenueContex
 
     <section className="lead-review-section" aria-labelledby="lead-scope-heading">
       <h3 id="lead-scope-heading">Scope and pricing snapshot</h3>
+      {bookingSnapshotUnavailable ? <p className="form-message form-message--warning" role="status">Pricing snapshot is temporarily unavailable. Lead details remain available below so follow-up can continue.</p> : null}
       <dl className="lead-review-grid">
         <Detail label="Service">{serviceLabel}</Detail>
         <Detail label="Frequency">{humanize(scope.frequency || booking?.frequency)}</Detail>

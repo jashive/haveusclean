@@ -66,8 +66,16 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
     `service_request_id=${encodeURIComponent(`in.(${requestIds.join(",")})`)}`,
     `select=${encodeURIComponent("id,service_request_id,booking_status,requested_service_date,requested_arrival_window,service_package,frequency,currency_code,tax_name,tax_rate,estimated_subtotal,estimated_tax,estimated_total,pricing_snapshot")}`,
   ].join("&");
-  const bookingRes = await authenticatedRestFetch(`booking?${bookingQuery}`, accessToken);
-  const bookings = await parseResponse(bookingRes, "Unable to load booking pricing snapshots");
+  let bookings = [];
+  let bookingSnapshotUnavailable = false;
+  try {
+    const bookingRes = await authenticatedRestFetch(`booking?${bookingQuery}`, accessToken);
+    bookings = await parseResponse(bookingRes, "Unable to load booking pricing snapshots");
+  } catch {
+    // Pricing detail is optional queue enrichment. A snapshot permission or
+    // availability failure must not hide otherwise actionable canonical leads.
+    bookingSnapshotUnavailable = true;
+  }
   const bookingByServiceRequest = new Map(
     (Array.isArray(bookings) ? bookings : []).map((booking) => [booking.service_request_id, booking])
   );
@@ -95,6 +103,7 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
       service_request: serviceRequest,
       opportunity: opportunityByServiceRequest.get(serviceRequest.id) || null,
       booking: bookingByServiceRequest.get(serviceRequest.id) || null,
+      booking_snapshot_unavailable: bookingSnapshotUnavailable,
       canonical_customer: customerById.get(serviceRequest.customer_id) || null,
       canonical_contact: contactById.get(serviceRequest.contact_id) || null,
       canonical_location: locationById.get(serviceRequest.service_location_id) || null,
