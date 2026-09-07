@@ -1,4 +1,5 @@
 import test from "node:test";
+import "./serviceosOs10IntelligenceAdvisory.test.mjs";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import "./serviceosFinancialPerformance.test.mjs";

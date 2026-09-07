@@ -10,6 +10,7 @@ import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 
 const ServiceOSLeadIntakePanel = lazy(() => import("./ServiceOSLeadIntakePanel"));
 const FinancialPerformancePanel = lazy(() => import("./FinancialPerformancePanel"));
+const Os10IntelligenceDashboard = lazy(() => import("../intelligence/Os10IntelligenceDashboard"));
 const ServiceOSRevenueWorkspace = lazy(() => import("./ServiceOSRevenueWorkspace"));
 const ServiceOSQuoteDeliveryPanel = lazy(() => import("./ServiceOSQuoteDeliveryPanel"));
 const ServiceOSQuoteRevisionPanel = lazy(() => import("./ServiceOSQuoteRevisionPanel"));
@@ -207,6 +208,7 @@ export default function ServiceOSWave1Workspace() {
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
             {role === "owner_admin" ? <FinancialPerformancePanel revenueContext={activeRevenueContext} /> : null}
+            {role === "owner_admin" ? <Os10IntelligenceDashboard revenueContext={activeRevenueContext} /> : null}
             <ServiceOSLeadIntakePanel session={session} revenueContext={activeRevenueContext} />
             <ServiceOSRevenueWorkspace session={session} revenueContext={activeRevenueContext} />
             <ServiceOSQuoteDeliveryPanel session={session} revenueContext={activeRevenueContext} />
