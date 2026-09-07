@@ -60,15 +60,65 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
     }
   }
 
+  const bookingQuery = [
+    `organization_id=eq.${encodeURIComponent(organizationId)}`,
+    `business_unit_id=eq.${encodeURIComponent(businessUnitId)}`,
+    `service_request_id=${encodeURIComponent(`in.(${requestIds.join(",")})`)}`,
+    `select=${encodeURIComponent("id,service_request_id,booking_status,requested_service_date,requested_arrival_window,service_package,frequency,currency_code,tax_name,tax_rate,estimated_subtotal,estimated_tax,estimated_total,pricing_snapshot")}`,
+  ].join("&");
+  const bookingRes = await authenticatedRestFetch(`booking?${bookingQuery}`, accessToken);
+  const bookings = await parseResponse(bookingRes, "Unable to load booking pricing snapshots");
+  const bookingByServiceRequest = new Map(
+    (Array.isArray(bookings) ? bookings : []).map((booking) => [booking.service_request_id, booking])
+  );
+
+  async function loadCanonical(table, ids, select) {
+    const scopedIds = unique(ids);
+    if (!scopedIds.length) return new Map();
+    const res = await authenticatedRestFetch(
+      `${table}?id=${encodeURIComponent(`in.(${scopedIds.join(",")})`)}&select=${encodeURIComponent(select)}`,
+      accessToken
+    );
+    const rows = await parseResponse(res, `Unable to load lead ${table}`);
+    return new Map((Array.isArray(rows) ? rows : []).map((row) => [row.id, row]));
+  }
+  const [customerById, contactById, locationById] = await Promise.all([
+    loadCanonical("customer", serviceRequests.map((row) => row.customer_id), "id,display_name,customer_type,status"),
+    loadCanonical("contact", serviceRequests.map((row) => row.contact_id), "id,customer_id,first_name,last_name,email,phone,is_primary"),
+    loadCanonical("service_location", serviceRequests.map((row) => row.service_location_id), "id,customer_id,jurisdiction_id,address_line1,address_line2,city,subdivision,postal_code,country_code,access_instructions"),
+  ]);
+
   return serviceRequests
     .map((serviceRequest) => ({
       created: false,
       restored_from_canonical_store: true,
       service_request: serviceRequest,
       opportunity: opportunityByServiceRequest.get(serviceRequest.id) || null,
+      booking: bookingByServiceRequest.get(serviceRequest.id) || null,
+      canonical_customer: customerById.get(serviceRequest.customer_id) || null,
+      canonical_contact: contactById.get(serviceRequest.contact_id) || null,
+      canonical_location: locationById.get(serviceRequest.service_location_id) || null,
       duplicate_review_required: false,
     }))
     .filter((row) => row.opportunity?.id);
+}
+
+export async function scheduleCommercialWalkthrough({ accessToken, serviceRequestId, scheduledAt, timezone, notes }) {
+  assertRevenueEnabled();
+  if (!serviceRequestId) throw new Error("Service request is required");
+  if (!scheduledAt) throw new Error("Walkthrough date and time are required");
+  if (!timezone) throw new Error("Walkthrough timezone is required");
+  const res = await authenticatedRestFetch("rpc/schedule_commercial_walkthrough", accessToken, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      p_service_request_id: serviceRequestId,
+      p_scheduled_at: new Date(scheduledAt).toISOString(),
+      p_timezone: timezone,
+      p_notes: String(notes || "").trim() || null,
+    }),
+  });
+  return parseResponse(res, "Unable to schedule walkthrough");
 }
 
 export async function savePartialInboundLead({
