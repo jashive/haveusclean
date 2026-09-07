@@ -18,6 +18,7 @@ const ServiceOSCustomerResponsePanel = lazy(() => import("./ServiceOSCustomerRes
 const ServiceOSOperationsWorkspace = lazy(() => import("../wave3/ServiceOSOperationsWorkspace"));
 const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"));
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
+const CleanerPayablesPanel = lazy(() => import("../wave5/CleanerPayablesPanel"));
 const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
 
 const REVENUE_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
@@ -209,6 +210,7 @@ export default function ServiceOSWave1Workspace() {
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
             {role === "owner_admin" ? <FinancialPerformancePanel revenueContext={activeRevenueContext} /> : null}
             {role === "owner_admin" ? <Os10IntelligenceDashboard revenueContext={activeRevenueContext} /> : null}
+            {["owner_admin","office_ops"].includes(role) ? <CleanerPayablesPanel revenueContext={activeRevenueContext} /> : null}
             <ServiceOSLeadIntakePanel session={session} revenueContext={activeRevenueContext} />
             <ServiceOSRevenueWorkspace session={session} revenueContext={activeRevenueContext} />
             <ServiceOSQuoteDeliveryPanel session={session} revenueContext={activeRevenueContext} />
