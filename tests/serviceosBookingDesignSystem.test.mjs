@@ -69,8 +69,9 @@ test('Residential and commercial typography explicitly meet WCAG AA contrast on 
   assert.match(css, /--ink-900:#20302b/);
   assert.match(css, /\.wizard-card__heading h2\{[^}]*color:var\(--ink-950\)/);
   assert.match(css, /\.wizard-stack h3\{[^}]*color:var\(--ink-950\)/);
-  assert.match(css, /\.booking-experience \.huc-field__label\{color:var\(--ink-900\)/);
-  assert.match(css, /\.booking-experience \.huc-field__hint\{color:var\(--ink-700\)\}/);
+  assert.match(css, /\.booking-experience \.huc-field__label\{color:var\(--ink-950\)/);
+  assert.match(css, /\.booking-experience \.huc-field__hint\{[^}]*color:var\(--ink-700\)/);
+  assert.match(css, /\.booking-experience \.huc-field input,\.booking-experience \.huc-field select,\.booking-experience \.huc-field textarea\{color:var\(--ink-950\)\}/);
   assert.match(css, /\.booking-experience \.selection-tile__title\{color:var\(--ink-950\)\}/);
   assert.match(css, /\.commercial-section__heading h3\{[^}]*color:var\(--ink-950\)/);
   assert.match(css, /\.commercial-section__heading p\{[^}]*color:var\(--ink-700\)/);
@@ -80,6 +81,15 @@ test('Residential and commercial typography explicitly meet WCAG AA contrast on 
     assert.ok(contrastRatio(foreground, 'ffffff') >= 4.5, `${foreground} must meet 4.5:1 on white`);
     assert.ok(contrastRatio(foreground, 'f1faf7') >= 4.5, `${foreground} must meet 4.5:1 on brand-50`);
   }
+});
+
+test('Bundled residential add-ons explain their disabled state without double charging', () => {
+  assert.match(widget, /getBundledAddonIdsForPackage/);
+  assert.match(widget, /included=\{included\}/);
+  assert.match(widget, /disabled=\{included\}/);
+  assert.match(widget, /Included in selected tier/);
+  assert.match(primitives, /selection-tile__included-badge/);
+  assert.match(css, /\.selection-tile:disabled\{cursor:not-allowed;opacity:1/);
 });
 
 test('Production booking APIs support modern Supabase secrets and preserve JSON errors', () => {

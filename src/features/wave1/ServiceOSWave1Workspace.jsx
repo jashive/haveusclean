@@ -38,6 +38,18 @@ const MARKET_LABELS = {
   "HUC-AZ": "Arizona — HUC-AZ",
 };
 
+const ACTIVE_MARKET_STORAGE_KEY = "huc.serviceos.active-market.v1";
+
+function getStoredActiveMarket() {
+  if (typeof window === "undefined") return "HUC-ON";
+  try {
+    const stored = window.localStorage.getItem(ACTIVE_MARKET_STORAGE_KEY);
+    return Object.hasOwn(MARKET_LABELS, stored) ? stored : "HUC-ON";
+  } catch {
+    return "HUC-ON";
+  }
+}
+
 const styles = {
   page: { minHeight: "100vh", background: "#0A0F1E", color: "#F5F8FC", fontFamily: "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", padding: "32px 20px 48px", boxSizing: "border-box" },
   shell: { maxWidth: 1040, margin: "0 auto" },
@@ -65,7 +77,7 @@ export default function ServiceOSWave1Workspace() {
   const session = context?.session ?? null;
   const revenueContext = context?.revenueContext ?? null;
   const [loggingOut, setLoggingOut] = useState(false);
-  const [selectedBusinessUnitCode, setSelectedBusinessUnitCode] = useState("HUC-ON");
+  const [selectedBusinessUnitCode, setSelectedBusinessUnitCode] = useState(getStoredActiveMarket);
 
   const role = revenueContext?.roleCode ?? "unknown";
   const organizationId = revenueContext?.orgId ?? "Unavailable";
@@ -116,6 +128,16 @@ export default function ServiceOSWave1Workspace() {
     }
   }
 
+  function handleMarketChange(event) {
+    const nextMarket = event.target.value;
+    setSelectedBusinessUnitCode(nextMarket);
+    try {
+      window.localStorage.setItem(ACTIVE_MARKET_STORAGE_KEY, nextMarket);
+    } catch {
+      // Storage may be unavailable in hardened/private browser contexts; the in-memory switch still works.
+    }
+  }
+
   return (
     <main
       style={styles.page}
@@ -151,7 +173,7 @@ export default function ServiceOSWave1Workspace() {
               <select
                 style={styles.marketSelect}
                 value={activeBusinessUnit?.code ?? ""}
-                onChange={(event) => setSelectedBusinessUnitCode(event.target.value)}
+                onChange={handleMarketChange}
                 aria-label="Active Have Us Clean market"
               >
                 {businessUnitRecords.map((item) => <option key={item.id} value={item.code}>{MARKET_LABELS[item.code] ?? `${item.name} — ${item.code}`}</option>)}

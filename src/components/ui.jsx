@@ -15,12 +15,13 @@ export function FormField({ label, hint, error, className = '', children }) {
   );
 }
 
-export function SelectionTile({ selected = false, title, description, meta, className = '', ...props }) {
+export function SelectionTile({ selected = false, included = false, title, tooltip, description, meta, className = '', ...props }) {
   return (
-    <button type="button" aria-pressed={selected} className={`selection-tile ${selected ? 'is-selected' : ''} ${className}`.trim()} {...props}>
+    <button type="button" aria-pressed={selected} title={tooltip} className={`selection-tile ${selected ? 'is-selected' : ''} ${included ? 'is-included' : ''} ${className}`.trim()} {...props}>
       <span className="selection-tile__check" aria-hidden="true">{selected ? '✓' : ''}</span>
       <span className="selection-tile__title">{title}</span>
       {description ? <span className="selection-tile__description">{description}</span> : null}
+      {included ? <span className="selection-tile__included-badge">Included in selected tier</span> : null}
       {meta ? <span className="selection-tile__meta">{meta}</span> : null}
     </button>
   );
