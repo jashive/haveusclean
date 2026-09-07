@@ -6,6 +6,7 @@ const panel = fs.readFileSync(new URL("../src/features/wave1/ServiceOSLeadIntake
 const drawer = fs.readFileSync(new URL("../src/features/wave1/ServiceOSLeadReviewDrawer.jsx", import.meta.url), "utf8");
 const client = fs.readFileSync(new URL("../src/lib/serviceosLeadIntakeClient.js", import.meta.url), "utf8");
 const migration = fs.readFileSync(new URL("../supabase/migrations/20260906235900_revenue_lead_review_walkthrough_bridge.sql", import.meta.url), "utf8");
+const bookingRlsMigration = fs.readFileSync(new URL("../supabase/migrations/20260907001558_revenue_booking_rls_read_hotfix.sql", import.meta.url), "utf8");
 
 test("Revenue queue actions open the governed lead review drawer", () => {
   assert.match(panel, /ServiceOSLeadReviewDrawer/);
@@ -42,4 +43,21 @@ test("drawer preserves customer acceptance and cleaner-controlled start boundari
 test("lead review does not add a serverless API route", () => {
   assert.match(client, /rpc\/schedule_commercial_walkthrough/);
   assert.doesNotMatch(client, /\/api\/.*walkthrough/);
+});
+
+test("booking snapshot access is read-only and territory scoped", () => {
+  assert.match(bookingRlsMigration, /grant select on table public\.booking to authenticated/i);
+  assert.match(bookingRlsMigration, /revoke all on table public\.booking from public, anon/i);
+  assert.match(bookingRlsMigration, /for select\s+to authenticated/i);
+  assert.match(bookingRlsMigration, /has_bu_role[\s\S]*organization_id[\s\S]*business_unit_id/i);
+  assert.match(bookingRlsMigration, /owner_admin[\s\S]*office_ops/i);
+  assert.doesNotMatch(bookingRlsMigration, /grant\s+(insert|update|delete|all)/i);
+  assert.doesNotMatch(bookingRlsMigration, /security definer/i);
+});
+
+test("booking snapshot enrichment failure keeps the lead queue usable", () => {
+  assert.match(client, /bookingSnapshotUnavailable = true/);
+  assert.match(client, /booking_snapshot_unavailable: bookingSnapshotUnavailable/);
+  assert.match(drawer, /Pricing snapshot is temporarily unavailable/);
+  assert.match(drawer, /Lead details remain available/);
 });
