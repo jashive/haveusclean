@@ -641,8 +641,11 @@ function WorkerOperations({ revenueContext }) {
       const nextContexts = {};
       await Promise.all(nextAssignments.map(async (assignment) => {
         try {
-          const raw = await postJson("rpc/worker_get_assignment_context", { p_worker_assignment_id: assignment.id }, "Unable to load worker job details");
-          nextContexts[assignment.id] = Array.isArray(raw) ? raw[0] : raw;
+          const [raw,payables] = await Promise.all([
+            postJson("rpc/worker_get_assignment_context", { p_worker_assignment_id: assignment.id }, "Unable to load worker job details"),
+            getJson(`contractor_payable?select=id,computed_amount,currency_code,payable_status,basis_value,compensation_method&worker_assignment_id=eq.${encodeURIComponent(assignment.id)}&order=created_at.desc&limit=1`).catch(()=>[]),
+          ]);
+          nextContexts[assignment.id] = { ...(Array.isArray(raw) ? raw[0] : raw), earnedPayable: Array.isArray(payables) ? payables[0] ?? null : null };
         } catch (contextError) {
           nextContexts[assignment.id] = { assignment_id: assignment.id, operational_job_id: assignment.operational_job_id, context_error: contextError?.message || String(contextError) };
         }
@@ -725,6 +728,7 @@ function WorkerOperations({ revenueContext }) {
       <div style={styles.detailRow}><span style={styles.label}>Access notes</span><span>{context.access_instructions?.notes || context.access_instructions?.instructions || (typeof context.access_instructions === "string" ? context.access_instructions : "No special access notes")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Work order</span><span>{humanize(context.work_order_status)}</span></div>
+      {context.earnedPayable ? <div style={styles.detailRow} data-worker-earned-payout="true"><span style={styles.label}>Earned payout</span><span><strong>{new Intl.NumberFormat("en",{style:"currency",currency:context.earnedPayable.currency_code}).format(Number(context.earnedPayable.computed_amount))}</strong> · {humanize(context.earnedPayable.payable_status)}{context.earnedPayable.compensation_method==="hourly" ? ` · ${Number(context.earnedPayable.basis_value).toFixed(2)} actual hours` : " · governed flat contract"}</span></div> : null}
       <TechnicalDetails><span>Work order: {context.work_order_id}</span><span>Assignment: {selected?.id}</span></TechnicalDetails>
       {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
     </div> : null}
