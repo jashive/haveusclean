@@ -476,7 +476,7 @@ function OfficeOperations({ revenueContext }) {
     finally { setBusy(false); }
   }, [handoffId, workerId, start, end, timezone, appUserId, load]);
 
-  return <section style={styles.card} data-wave3-office-workspace="true" className="admin-workspace-card">
+  return <section id="operations-dispatch" style={styles.card} data-wave3-office-workspace="true" className="admin-workspace-card">
     <div className="admin-section-heading"><div><p className="admin-eyebrow">Operations &amp; Dispatch</p><h2 style={styles.title}>Dispatch schedule and work orders</h2></div><StatusBadge tone="info">{revenueContext?.activeBusinessUnitCode || "HUC"}</StatusBadge></div>
     <p style={styles.note}>Uses canonical accepted Revenue handoffs and Operations records. Ready work and active jobs load automatically; Refresh updates the live pipeline.</p>
 
