@@ -82,18 +82,28 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
 
   async function loadCanonical(table, ids, select) {
     const scopedIds = unique(ids);
-    if (!scopedIds.length) return new Map();
-    const res = await authenticatedRestFetch(
-      `${table}?id=${encodeURIComponent(`in.(${scopedIds.join(",")})`)}&select=${encodeURIComponent(select)}`,
-      accessToken
-    );
-    const rows = await parseResponse(res, `Unable to load lead ${table}`);
-    return new Map((Array.isArray(rows) ? rows : []).map((row) => [row.id, row]));
+    if (!scopedIds.length) return { rowsById: new Map(), unavailable: false };
+    try {
+      const res = await authenticatedRestFetch(
+        `${table}?id=${encodeURIComponent(`in.(${scopedIds.join(",")})`)}&select=${encodeURIComponent(select)}`,
+        accessToken
+      );
+      const rows = await parseResponse(res, `Unable to load lead ${table}`);
+      return {
+        rowsById: new Map((Array.isArray(rows) ? rows : []).map((row) => [row.id, row])),
+        unavailable: false,
+      };
+    } catch (error) {
+      // Canonical relations enrich the actionable service-request queue. Keep
+      // the queue available if one relation is temporarily unavailable.
+      console.warn(`[Revenue] Optional ${table} enrichment unavailable`, error);
+      return { rowsById: new Map(), unavailable: true };
+    }
   }
-  const [customerById, contactById, locationById] = await Promise.all([
+  const [customerResult, contactResult, locationResult] = await Promise.all([
     loadCanonical("customer", serviceRequests.map((row) => row.customer_id), "id,display_name,customer_type,status"),
     loadCanonical("contact", serviceRequests.map((row) => row.contact_id), "id,customer_id,first_name,last_name,email,phone,is_primary"),
-    loadCanonical("service_location", serviceRequests.map((row) => row.service_location_id), "id,customer_id,jurisdiction_id,address_line1,address_line2,city,subdivision,postal_code,country_code,access_instructions"),
+    loadCanonical("service_location", serviceRequests.map((row) => row.service_location_id), "id,customer_id,jurisdiction_id,address_line1,address_line2,city,subdivision,postal_code,country_code,access_notes,metadata"),
   ]);
 
   return serviceRequests
@@ -104,9 +114,14 @@ export async function listRecentInboundLeads({ accessToken, organizationId, busi
       opportunity: opportunityByServiceRequest.get(serviceRequest.id) || null,
       booking: bookingByServiceRequest.get(serviceRequest.id) || null,
       booking_snapshot_unavailable: bookingSnapshotUnavailable,
-      canonical_customer: customerById.get(serviceRequest.customer_id) || null,
-      canonical_contact: contactById.get(serviceRequest.contact_id) || null,
-      canonical_location: locationById.get(serviceRequest.service_location_id) || null,
+      canonical_customer: customerResult.rowsById.get(serviceRequest.customer_id) || null,
+      canonical_contact: contactResult.rowsById.get(serviceRequest.contact_id) || null,
+      canonical_location: locationResult.rowsById.get(serviceRequest.service_location_id) || null,
+      canonical_relations_unavailable: {
+        customer: customerResult.unavailable,
+        contact: contactResult.unavailable,
+        service_location: locationResult.unavailable,
+      },
       duplicate_review_required: false,
     }))
     .filter((row) => row.opportunity?.id);
