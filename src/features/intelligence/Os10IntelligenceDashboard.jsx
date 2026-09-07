@@ -25,7 +25,8 @@ export function RetentionChurnPanel({ rows }) {
 }
 
 export function MarginDriftPanel({ rows, currencyCode }) {
-  return <AdvisoryCard title="Margin drift" description={`Live elapsed-time projection in ${currencyCode}; completed ledgers remain authoritative.`}>{rows?.length ? <ul>{rows.map((row,index) => <li key={`${row.job_label}-${index}`}><span>{row.job_label} · {row.elapsed_hours}h / {row.quoted_hours}h</span><StatusBadge tone={row.drift_status === "negative" ? "danger" : row.drift_status === "watch" ? "warning" : "success"}>{row.drift_status.replaceAll("_", " ")}</StatusBadge></li>)}</ul> : <Empty>No active jobs have governed timing and pricing evidence.</Empty>}</AdvisoryCard>;
+  const money=(value)=>value==null?"—":new Intl.NumberFormat("en",{style:"currency",currency:currencyCode}).format(Number(value));
+  return <AdvisoryCard title="Margin drift" description={`Active projections and sealed completed-job results in ${currencyCode}.`}>{rows?.length ? <ul>{rows.map((row,index) => <li key={`${row.job_label}-${row.record_type}-${index}`}><span><b>{row.job_label}</b> · {row.record_type === "realized" ? `Quoted margin ${money(row.quoted_margin)} → realized ${money(row.actual_margin)} (${row.actual_margin_percent ?? "—"}%)` : `${row.elapsed_hours}h elapsed / ${row.quoted_hours}h quoted`}</span><StatusBadge tone={row.drift_status === "negative" ? "danger" : row.drift_status === "watch" ? "warning" : "success"}>{row.record_type === "realized" ? "realized" : row.drift_status.replaceAll("_", " ")}</StatusBadge></li>)}</ul> : <Empty>No active timing projection or completed profitability snapshot is available.</Empty>}</AdvisoryCard>;
 }
 
 export default function Os10IntelligenceDashboard({ revenueContext }) {
