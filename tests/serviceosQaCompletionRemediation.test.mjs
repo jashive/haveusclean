@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import "./serviceosPhase3IntelligenceKpiRemediation.test.mjs";
 
 const sql = fs.readFileSync("supabase/migrations/20260907190000_qa_completion_pipeline_remediation.sql", "utf8");
 const qa = fs.readFileSync("src/features/wave4/ServiceOSQaWorkspace.jsx", "utf8");
