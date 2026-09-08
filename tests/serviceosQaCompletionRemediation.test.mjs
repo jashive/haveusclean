@@ -52,7 +52,7 @@ test("completion photos use a private scoped bucket and append-only evidence", (
   assert.match(sql, /can_read_completion_object/);
   assert.match(worker, /storage\/v1\/object\/serviceos-completion-evidence/);
   assert.match(worker, /createCompletionEvidence/);
-  assert.match(worker, /evidenceType: "photo_after"/);
+  assert.match(worker, /evidenceType: entry\.requirement\?\.evidence_type \|\| "photo_after"/);
   assert.match(worker, /sha256/);
   assert.doesNotMatch(sql, /for (update|delete) to authenticated/i);
 });
