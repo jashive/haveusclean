@@ -6,7 +6,10 @@ const [ui, shell, leads, operations, workforce, css] = await Promise.all([
   readFile(new URL("../src/components/ui.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/features/wave1/ServiceOSWave1Workspace.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/features/wave1/ServiceOSLeadIntakePanel.jsx", import.meta.url), "utf8"),
-  readFile(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8"),
+  Promise.all([
+    readFile(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/wave3/TechnicianExecutionCard.jsx", import.meta.url), "utf8"),
+  ]).then((sources) => sources.join("\n")),
   readFile(new URL("../src/features/workforce/WorkforceComplianceDashboard.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
 ]);

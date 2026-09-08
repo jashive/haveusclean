@@ -6,7 +6,8 @@ import { buildOperationalJobPayload, buildWorkOrderPayload } from "../src/lib/se
 
 const bookingApi = fs.readFileSync(new URL("../api/bookings/create.js", import.meta.url), "utf8");
 const bookingUi = fs.readFileSync(new URL("../src/components/BookingWidget.jsx", import.meta.url), "utf8");
-const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8")
+  + fs.readFileSync(new URL("../src/lib/serviceosDispatchReadModel.js", import.meta.url), "utf8");
 const migration = fs.readFileSync(new URL("../supabase/migrations/20260907010000_zero_entry_booking_location_cascade.sql", import.meta.url), "utf8");
 
 test("public booking captures the complete zero-entry intake shape", () => {

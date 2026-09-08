@@ -28,7 +28,7 @@ export function buildDispatchCascade({ requirements = {}, estimateScope = {}, bo
     country_code: firstValue(location.country_code, nestedLocation.country_code, nestedLocation.countryCode),
     access_notes: firstValue(location.access_notes, nestedLocation.access_notes, nestedLocation.accessNotes, requirements.access_notes),
   };
-  const scope = {
+  const legacyScope = {
     packageKey: firstValue(sourceScope.packageKey, sourceScope.package_key, estimateScope.packageKey, estimateScope.package_key, booking.service_package),
     dwellingType: firstValue(sourceScope.dwellingType, sourceScope.dwelling_type, sourceScope.propertyType, estimateScope.dwellingType, estimateScope.dwelling_type),
     beds: numericValue(sourceScope.beds, sourceScope.bedrooms, estimateScope.beds, estimateScope.bedrooms),
@@ -42,6 +42,9 @@ export function buildDispatchCascade({ requirements = {}, estimateScope = {}, bo
     notes: firstValue(sourceScope.notes, sourceScope.customer_notes, requirements.customer_notes),
     location: normalizedLocation,
   };
+  const configurationVersionId = pricingSnapshot.configuration_version_id || booking.pricing_configuration_version_id || booking.pricing_snapshot?.configuration_version_id || null;
+  const definition = residentialDefinitionSnapshot(legacyScope, configurationVersionId);
+  const scope = adaptLegacyResidentialScope(legacyScope);
   const customerSnapshot = {
     name: firstValue(customer.display_name, nestedCustomer.name, [contact.first_name, contact.last_name].filter(Boolean).join(" ").trim()),
     email: firstValue(contact.email, nestedCustomer.email),
@@ -55,6 +58,7 @@ export function buildDispatchCascade({ requirements = {}, estimateScope = {}, bo
     subtotal_amount: numericValue(pricingSnapshot.subtotal_amount, booking.estimated_subtotal),
     tax_amount: numericValue(pricingSnapshot.tax_amount, booking.estimated_tax),
     total_amount: numericValue(pricingSnapshot.total_amount, booking.estimated_total),
+    configuration_version_id: configurationVersionId,
   };
   return {
     customer: customerSnapshot,
@@ -63,6 +67,9 @@ export function buildDispatchCascade({ requirements = {}, estimateScope = {}, bo
     pricing,
     customerInstructions: { ...customerSnapshot, notes: scope.notes || "" },
     accessInstructions: { notes: normalizedLocation.access_notes || "" },
-    checklist: { package: scope.packageKey || quoteTitle || "", service_family: "residential", addons: scope.addons },
+    serviceDefinition: definition,
+    checklist: { package: scope.packageKey || quoteTitle || "", service_family: "residential", addons: scope.addons, ...definition.checklist_contract },
+    evidenceRequirements: definition.qa_evidence_contract.requirements,
   };
 }
+import { adaptLegacyResidentialScope, residentialDefinitionSnapshot } from "../core/serviceDefinitions/serviceDefinitionContract.js";

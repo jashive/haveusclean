@@ -6,6 +6,9 @@ import {
   fetchJobHandoffById,
   fetchConversionRecordById,
   fetchServiceLocationById,
+  fetchPricingSnapshotById,
+  fetchServiceDefinitionVersionByConfigurationVersion,
+  fetchRequiredEvidencePoliciesByConfigurationVersion,
   createOperationalJob,
   createScheduleWindow,
   createWorkerAssignment,
@@ -15,6 +18,8 @@ import {
   updateWorkerAssignmentStatus,
   updateWorkOrderStatus,
 } from "../../lib/serviceosOperationsClient.js";
+import { materializeWave4Governance } from "../../lib/serviceosWave4Runtime.js";
+import { evaluateDispatchConstraints, flattenChecklistItems, normalizeEvidenceContract, validateServiceDefinitionVersion } from "../../core/serviceDefinitions/serviceDefinitionContract.js";
 import {
   buildOperationalJobPayload,
   buildScheduleWindowPayload,
@@ -284,6 +289,30 @@ function OfficeOperations({ revenueContext }) {
       if (!conversion) throw new Error("Conversion lineage is unavailable.");
       const location = await fetchServiceLocationById(conversion.service_location_id);
       if (!location?.jurisdiction_id) throw new Error("Service location jurisdiction is unavailable.");
+      const pricingSnapshot = await fetchPricingSnapshotById(handoff.pricing_snapshot_id);
+      if (!pricingSnapshot?.configuration_version_id) throw new Error("Accepted pricing snapshot has no configuration authority.");
+      const definition = validateServiceDefinitionVersion(await fetchServiceDefinitionVersionByConfigurationVersion(pricingSnapshot.configuration_version_id));
+      const selectedWorker = workers.find((worker) => worker.id === workerId);
+      if (!selectedWorker) throw new Error("Selected worker is no longer active.");
+      const declaredCapabilities = Array.isArray(selectedWorker.metadata?.capabilities) ? selectedWorker.metadata.capabilities : [];
+      const compatibilityCapabilities = definition.service_key === "residential_cleaning"
+        ? [...new Set([...declaredCapabilities, "residential_cleaning"])]
+        : declaredCapabilities;
+      const dispatchEvaluation = evaluateDispatchConstraints(
+        definition.dispatch_contract,
+        {
+          capabilities: compatibilityCapabilities,
+          equipment: Array.isArray(selectedWorker.metadata?.equipment) ? selectedWorker.metadata.equipment : [],
+        },
+        Number(selectedHandoff?.crew_size || 1)
+      );
+      if (!dispatchEvaluation.eligible) {
+        throw new Error(`Selected worker does not satisfy this service definition: ${[
+          ...dispatchEvaluation.missing_capabilities,
+          ...dispatchEvaluation.missing_equipment,
+        ].join(", ") || "crew size constraint"}`);
+      }
+      const sourcePolicyRows = await fetchRequiredEvidencePoliciesByConfigurationVersion(pricingSnapshot.configuration_version_id);
       const metadata = { source: "wave3_production_workspace", synthetic: false };
       const job = await createOperationalJob(buildOperationalJobPayload({
         organizationId: handoff.organization_id,
@@ -296,9 +325,9 @@ function OfficeOperations({ revenueContext }) {
         customerId: conversion.customer_id,
         contactId: conversion.contact_id,
         serviceLocationId: conversion.service_location_id,
-        serviceFamily: "residential",
+        serviceFamily: definition.service_key || "residential_cleaning",
         operationalStatus: "ready_to_schedule",
-        serviceScopeSnapshot: selectedHandoff?.cascade?.scope,
+        serviceScopeSnapshot: { ...selectedHandoff?.cascade?.scope, service_definition_version_id: definition.id },
         metadata,
         appUserId,
       }));
@@ -335,14 +364,36 @@ function OfficeOperations({ revenueContext }) {
         operationalJobId: job.id,
         scheduleWindowId: window.id,
         workOrderStatus: "draft",
-        scopeSnapshot: selectedHandoff?.cascade?.scope,
+        scopeSnapshot: { ...selectedHandoff?.cascade?.scope, service_definition_version_id: definition.id, measurement_contract: definition.measurement_contract },
         customerInstructionSnapshot: selectedHandoff?.cascade?.customerInstructions,
         accessInstructionSnapshot: selectedHandoff?.cascade?.accessInstructions,
-        checklistTemplateSnapshot: selectedHandoff?.cascade?.checklist,
+        checklistTemplateSnapshot: definition.checklist_contract,
         pricingReferenceSnapshot: { quote_version_id: handoff.quote_version_id, ...selectedHandoff?.cascade?.pricing },
         metadata,
         appUserId,
       }));
+      await materializeWave4Governance({
+        organizationId: handoff.organization_id,
+        businessUnitId: handoff.business_unit_id,
+        jurisdictionId: location.jurisdiction_id,
+        operationalJobId: job.id,
+        workOrderId: workOrder.id,
+        configurationVersionId: pricingSnapshot.configuration_version_id,
+        checklistVersionReference: `${definition.service_definition_id}:${definition.id}`,
+        taskDefinitionReference: definition.id,
+        sopReferenceSnapshot: [],
+        governanceSnapshot: {
+          service_definition_id: definition.service_definition_id,
+          service_definition_version_id: definition.id,
+          measurement_contract: definition.measurement_contract,
+          duration_contract: definition.duration_contract,
+          dispatch_contract: definition.dispatch_contract,
+          checklist_contract: definition.checklist_contract,
+          qa_evidence_contract: definition.qa_evidence_contract,
+        },
+        sourcePolicyRows,
+        appUserId,
+      });
       await updateWorkOrderStatus(workOrder.id, "published", null, appUserId);
       await updateOperationalJobStatus(job.id, "dispatched", null, appUserId);
       let notificationSummary = "notification audit unavailable";
@@ -361,7 +412,7 @@ function OfficeOperations({ revenueContext }) {
       invalidateServiceOSWorkspace({ businessUnitId: handoff.business_unit_id, operationalJobId: job.id, affectedDomains: ["operations"] });
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [handoffId, workerId, start, end, timezone, appUserId, load, selectedHandoff]);
+  }, [handoffId, workerId, start, end, timezone, appUserId, load, selectedHandoff, workers]);
 
   return <section id="operations-dispatch" style={styles.card} data-wave3-office-workspace="true" className="admin-workspace-card">
     <div className="admin-section-heading"><div><p className="admin-eyebrow">Operations &amp; Dispatch</p><h2 style={styles.title}>Dispatch schedule and work orders</h2></div><StatusBadge tone="info">{revenueContext?.activeBusinessUnitCode || "HUC"}</StatusBadge></div>
@@ -432,9 +483,20 @@ function WorkerOperations({ revenueContext }) {
   const completionLocked = context?.operational_status === "qa_pending" || selected?.assignment_status === "completed";
   const executionActive = context?.operational_status === "in_progress";
   const fieldTasks = useMemo(() => {
+    if (Array.isArray(context?.checklist?.sections)) return flattenChecklistItems(context.checklist);
     const configured = context?.checklist?.tasks || context?.checklist?.items || context?.checklist;
-    if (Array.isArray(configured)) return configured.map((item) => typeof item === "string" ? item : item?.label || item?.title).filter(Boolean);
-    return ["Review scope and access notes", "Complete room-by-room cleaning checklist", "Complete final quality walkthrough", "Upload required completion photos"];
+    if (Array.isArray(configured)) return configured.map((item, index) => typeof item === "string" ? { key: `legacy_${index}`, label: item, required: true } : item).filter((item) => item?.label || item?.title);
+    return [{ key: "review_scope", label: "Review scope and access notes", required: true }, { key: "complete_service_scope", label: "Complete the configured service scope", required: true }, { key: "final_quality_walkthrough", label: "Complete final quality walkthrough", required: true }, { key: "upload_completion_evidence", label: "Upload required completion evidence", required: true }];
+  }, [context]);
+  const evidenceRequirements = useMemo(() => {
+    if (Array.isArray(context?.evidenceRequirements) && context.evidenceRequirements.length) return context.evidenceRequirements.map((item) => ({
+      requirement_key: item.requirement_key,
+      evidence_type: item.evidence_type,
+      evidence_tag: item.storage_rule_payload?.evidence_tag || item.metadata?.evidence_tag || item.requirement_key,
+      label: item.metadata?.label || item.requirement_key,
+      required_count: item.required_count,
+    }));
+    return normalizeEvidenceContract(context?.checklist?.qa_evidence_contract || { requirements: [{ requirement_key: "service_after", evidence_type: "photo_after", evidence_tag: "after_clean", label: "Completed service", required_count: 1 }] }).requirements;
   }, [context]);
 
   const load = useCallback(async () => {
@@ -454,7 +516,11 @@ function WorkerOperations({ revenueContext }) {
             postJson("rpc/worker_get_assignment_context", { p_worker_assignment_id: assignment.id }, "Unable to load worker job details"),
             getJson(`contractor_payable?select=id,computed_amount,currency_code,payable_status,basis_value,compensation_method&worker_assignment_id=eq.${encodeURIComponent(assignment.id)}&order=created_at.desc&limit=1`).catch(()=>[]),
           ]);
-          nextContexts[assignment.id] = { ...(Array.isArray(raw) ? raw[0] : raw), earnedPayable: Array.isArray(payables) ? payables[0] ?? null : null };
+          const normalized = Array.isArray(raw) ? raw[0] : raw;
+          const evidenceRequirements = normalized?.work_order_id
+            ? await getJson(`work_order_evidence_requirement?work_order_id=eq.${encodeURIComponent(normalized.work_order_id)}&order=requirement_key.asc`).catch(() => [])
+            : [];
+          nextContexts[assignment.id] = { ...normalized, evidenceRequirements, earnedPayable: Array.isArray(payables) ? payables[0] ?? null : null };
         } catch (contextError) {
           nextContexts[assignment.id] = { assignment_id: assignment.id, operational_job_id: assignment.operational_job_id, context_error: contextError?.message || String(contextError) };
         }
@@ -488,7 +554,7 @@ function WorkerOperations({ revenueContext }) {
       throw uploadError;
     }
   }, [appUserId, context, selected, updatePhotoEntry, worker]);
-  const addPhotos = (files) => setPhotoEntries((current) => [...current, ...files.map((file, index) => mobileEvidenceEntry(file, current.length + index))]);
+  const addPhotos = (files, requirement) => setPhotoEntries((current) => [...current, ...files.map((file, index) => mobileEvidenceEntry(file, current.length + index, requirement))]);
   const retryPhoto = async (id) => {
     const entry = photoEntries.find((item) => item.id === id);
     if (!entry) return;
@@ -570,7 +636,7 @@ function WorkerOperations({ revenueContext }) {
 
     {executionActive ? <TechnicianExecutionCard tasks={fieldTasks} completedTasks={completedTasks} assignmentId={selectedId} disabled={completionLocked} onToggle={(key) => setCompletedTasks((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} /> : null}
 
-    {executionActive ? <ResilientEvidenceUploader entries={photoEntries} disabled={busy || completionLocked} onFiles={addPhotos} onRetry={retryPhoto} /> : null}
+    {executionActive ? <ResilientEvidenceUploader entries={photoEntries} requirements={evidenceRequirements} disabled={busy || completionLocked} onFiles={addPhotos} onRetry={retryPhoto} /> : null}
 
     <div style={styles.row}>
       <button className="field-primary-action" style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>

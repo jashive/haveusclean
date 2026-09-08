@@ -80,7 +80,7 @@ export async function enrichHandoffForDispatch(handoff) {
   const [conversion, quoteVersion, pricingSnapshot] = await Promise.all([
     getJson(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&select=id,customer_id,contact_id,service_location_id&limit=1`).then(firstRow),
     getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title,estimate_id&limit=1`).then(firstRow),
-    handoff.pricing_snapshot_id ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,currency_code,tax_name,tax_rate,subtotal_amount,tax_amount,total_amount,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`).then(firstRow) : null,
+    handoff.pricing_snapshot_id ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,configuration_version_id,currency_code,tax_name,tax_rate,subtotal_amount,tax_amount,total_amount,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`).then(firstRow) : null,
   ]);
   const estimate = quoteVersion?.estimate_id ? firstRow(await getJson(`estimate?id=eq.${encodeURIComponent(quoteVersion.estimate_id)}&select=id,opportunity_id,scope_snapshot&limit=1`)) : null;
   const opportunity = estimate?.opportunity_id ? firstRow(await getJson(`opportunity?id=eq.${encodeURIComponent(estimate.opportunity_id)}&select=id,service_request_id&limit=1`)) : null;

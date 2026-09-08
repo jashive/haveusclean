@@ -6,6 +6,7 @@ import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../se
 import { dispatchIntakeNotifications } from '../../server-internal/intake-notification-delivery.js';
 import { geocodeServiceAddress } from '../../server-internal/service-location-geocoding.js';
 import '../../server-internal/supabase-secret-key-fetch-compat.js';
+import { adaptLegacyResidentialScope } from '../../src/core/serviceDefinitions/serviceDefinitionContract.js';
 
 function httpError(status, message, code) {
   return Object.assign(new Error(message), { status, code });
@@ -278,13 +279,13 @@ export default async function handler(req, res) {
     const requirements = {
       customer: { name, email, phone },
       location: { address_line1: address, address_line2: addressLine2 || null, city, subdivision, postal_code: postalCode, country_code: countryCode, access_notes: accessNotes || null },
-      scope: {
+      scope: adaptLegacyResidentialScope({
         beds: Number(booking.bedrooms || 0), bathrooms: Number(booking.bathrooms || 0),
         sqft: booking.sqft === '' || booking.sqft == null ? null : Number(booking.sqft),
         dwellingType: text(booking.dwellingType), packageKey: text(booking.packageKey), condition: text(booking.condition || 'light'),
         frequency: text(booking.frequency || 'one_time'), addons: Array.isArray(quote.input?.addons) ? quote.input.addons : [],
         preferredDate: requestedDate, preferredWindow: arrivalWindow, notes: text(booking.notes) || null,
-      },
+      }),
     };
 
     const result = await callBookingRpc({
