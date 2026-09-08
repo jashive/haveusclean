@@ -98,5 +98,5 @@ test("office panel allows sparse lead capture and keeps Save Lead as intake-only
 
 test("partial intake panel is available only inside authorized Revenue surface", () => {
   assert.match(shell, /const ServiceOSLeadIntakePanel = lazy/);
-  assert.match(shell, /\{revenueAuthorized \? \([\s\S]*<ServiceOSLeadIntakePanel/);
+  assert.match(shell, /\{!cockpitAuthorized && revenueAuthorized \? \([\s\S]*<ServiceOSLeadIntakePanel/);
 });

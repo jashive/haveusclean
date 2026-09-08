@@ -9,10 +9,12 @@ import {
   uploadBackoffDelay,
 } from "../src/lib/serviceosMobileEvidence.js";
 
-const [workspace, components, uploader, css] = await Promise.all([
+const [workspace, components, uploader, page, main, css] = await Promise.all([
   readFile(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/features/wave3/TechnicianExecutionCard.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/lib/serviceosMobileEvidence.js", import.meta.url), "utf8"),
+  readFile(new URL("../src/pages/work-order.jsx", import.meta.url), "utf8"),
+  readFile(new URL("../src/main.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/styles.css", import.meta.url), "utf8"),
 ]);
 
@@ -22,6 +24,15 @@ test("mobile evidence entries begin queued and expose the governed state progres
   assert.equal(entry.name, "kitchen.jpg");
   assert.equal(entry.storageUploaded, false);
   assert.deepEqual(MOBILE_EVIDENCE_STATES, ["queued", "uploading", "verifying", "linked", "error"]);
+});
+
+test("dedicated work-order route is authenticated, assignment scoped, and mobile focused", () => {
+  assert.match(main, /window\.location\.pathname\.match\(\/\^\\\/work-order/);
+  assert.match(page, /role !== "worker"/);
+  assert.match(page, /targetWorkOrderId=\{workOrderId\}/);
+  assert.match(workspace, /contexts\[assignment\.id\]\?\.work_order_id === targetWorkOrderId/);
+  assert.match(workspace, /google\.com\/maps\/dir/);
+  assert.match(css, /\.sticky-earned-payout\{position:sticky/);
 });
 
 test("storage retry policy is bounded exponential backoff and only retries transient failures", () => {

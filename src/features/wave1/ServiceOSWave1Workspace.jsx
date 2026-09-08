@@ -22,6 +22,7 @@ const CleanerPayablesPanel = lazy(() => import("../wave5/CleanerPayablesPanel"))
 const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
 const ExecutiveKpiBar = lazy(() => import("../admin/ExecutiveKpiBar"));
 const ServiceOSFlightControlBoard = lazy(() => import("../admin/ServiceOSFlightControlBoard"));
+const AdminCockpitLayout = lazy(() => import("../admin/AdminCockpitLayout"));
 
 const REVENUE_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
 const OPERATIONS_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === "true";
@@ -105,6 +106,7 @@ export default function ServiceOSWave1Workspace() {
   const qaAuthorized = QA_ENABLED && ["owner_admin", "office_ops", "qa"].includes(role);
   const financeAuthorized = FINANCE_ENABLED && ["owner_admin", "office_ops"].includes(role);
   const staffAdminAuthorized = STAFF_ADMIN_ENABLED && role === "owner_admin";
+  const cockpitAuthorized = ["owner_admin", "office_ops"].includes(role) && operationsAuthorized && qaAuthorized && financeAuthorized;
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
   const workspaceTitle = role === "owner_admin"
     ? "ServiceOS Administrative Workspace"
@@ -207,10 +209,10 @@ export default function ServiceOSWave1Workspace() {
           </div>
         </section>
 
-        {staffAdminAuthorized ? <Suspense fallback={<div role="status">Loading Staff Management…</div>}><ServiceOSStaffAdminWorkspace /></Suspense> : null}
-        {role === "owner_admin" ? <Suspense fallback={<div role="status">Loading executive metrics…</div>}><ExecutiveKpiBar revenueContext={activeRevenueContext} /></Suspense> : null}
-        {["owner_admin", "office_ops"].includes(role) && operationsAuthorized && qaAuthorized && financeAuthorized ? <Suspense fallback={<div role="status">Loading Flight Control…</div>}><ServiceOSFlightControlBoard session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
-        {revenueAuthorized ? (
+        {cockpitAuthorized ? <Suspense fallback={<div role="status">Loading administrative cockpit…</div>}><AdminCockpitLayout session={session} revenueContext={activeRevenueContext} staffAdminAuthorized={staffAdminAuthorized} /></Suspense> : null}
+        {!cockpitAuthorized && staffAdminAuthorized ? <Suspense fallback={<div role="status">Loading Staff Management…</div>}><ServiceOSStaffAdminWorkspace /></Suspense> : null}
+        {!cockpitAuthorized && role === "owner_admin" ? <Suspense fallback={<div role="status">Loading executive metrics…</div>}><ExecutiveKpiBar revenueContext={activeRevenueContext} /></Suspense> : null}
+        {!cockpitAuthorized && revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
             {role === "owner_admin" ? <FinancialPerformancePanel revenueContext={activeRevenueContext} /> : null}
             {role === "owner_admin" ? <Os10IntelligenceDashboard revenueContext={activeRevenueContext} /> : null}
@@ -222,9 +224,9 @@ export default function ServiceOSWave1Workspace() {
             <ServiceOSCustomerResponsePanel session={session} revenueContext={activeRevenueContext} />
           </Suspense>
         ) : null}
-        {operationsAuthorized ? <Suspense fallback={<div role="status">Loading Operations…</div>}><ServiceOSOperationsWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
-        {qaAuthorized ? <Suspense fallback={<div role="status">Loading QA…</div>}><ServiceOSQaWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
-        {financeAuthorized ? <Suspense fallback={<div role="status">Loading Finance…</div>}><ServiceOSFinanceWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
+        {!cockpitAuthorized && operationsAuthorized ? <Suspense fallback={<div role="status">Loading Operations…</div>}><ServiceOSOperationsWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
+        {!cockpitAuthorized && qaAuthorized ? <Suspense fallback={<div role="status">Loading QA…</div>}><ServiceOSQaWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
+        {!cockpitAuthorized && financeAuthorized ? <Suspense fallback={<div role="status">Loading Finance…</div>}><ServiceOSFinanceWorkspace session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
       </div>
     </main>
   );

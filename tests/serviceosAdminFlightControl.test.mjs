@@ -7,8 +7,9 @@ import {
   serviceOSInvalidationMatches,
 } from "../src/lib/serviceosFinancialPerformance.js";
 
-const [shell, kpi, board, client, css] = await Promise.all([
+const [shell, cockpit, kpi, board, client, css] = await Promise.all([
   readFile(new URL("../src/features/wave1/ServiceOSWave1Workspace.jsx", import.meta.url), "utf8"),
+  readFile(new URL("../src/features/admin/AdminCockpitLayout.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/features/admin/ExecutiveKpiBar.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/features/admin/ServiceOSFlightControlBoard.jsx", import.meta.url), "utf8"),
   readFile(new URL("../src/lib/serviceosFlightControl.js", import.meta.url), "utf8"),
@@ -35,14 +36,21 @@ test("executive KPI bar uses governed financial performance without a new API", 
   assert.match(kpi, /fetchFinancialPerformance/);
   assert.match(kpi, /SERVICEOS_WORKSPACE_INVALIDATED_EVENT/);
   assert.doesNotMatch(kpi, /\/api\//);
-  assert.match(shell, /<ExecutiveKpiBar revenueContext=\{activeRevenueContext\}/);
+  assert.match(cockpit, /<ExecutiveKpiBar revenueContext=\{revenueContext\}/);
 });
 
 test("administrative cockpit composes four governed lanes and actions", () => {
   for (const label of ["Inbound & Dispatch", "In-Flight", "QA Review", "Settlement", "Pass QA", "Waive", "Approve payout"]) assert.match(board, new RegExp(label));
   for (const rpc of ["get_qa_review_queue", "get_cleaner_payables_dashboard", "staff_finalize_qa_inspection", "staff_approve_contractor_payables"]) assert.match(client, new RegExp(rpc));
-  assert.match(shell, /<ServiceOSFlightControlBoard session=\{session\}/);
+  assert.match(shell, /<AdminCockpitLayout session=\{session\}/);
+  assert.match(cockpit, /<ServiceOSFlightControlBoard session=\{session\}/);
   assert.doesNotMatch(board + client, /\/api\/flight|\/api\/cockpit/);
+});
+
+test("cockpit keeps detailed administration in one secondary drawer", () => {
+  for (const label of ["SecondaryWorkspaceDrawer", "Operations", "Full QA", "Payables history", "Finance & logs"]) assert.match(cockpit, new RegExp(label));
+  for (const action of ["AssignmentQuickAction", "QaEvidenceDrawer", "SettlementQuickAction"]) assert.match(board, new RegExp(action));
+  assert.match(cockpit, /data-admin-default-view="flight-control"/);
 });
 
 test("cockpit refreshes on events, focus, visibility, and bounded polling", () => {
