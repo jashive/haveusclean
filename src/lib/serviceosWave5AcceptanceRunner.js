@@ -69,12 +69,12 @@ function failClosed(reason) {
 // ── Canonical effective compensation version resolution ───────────────────────
 
 async function resolveEffectiveCompensationVersion(workerId, organizationId, businessUnitId, serviceFamily, serviceCompletedAt) {
-  // Build filter: exact worker, org, BU, status approved or active
+  // Retired versions remain authoritative inside their closed historical interval.
   let filter =
     `worker_id=eq.${encodeURIComponent(workerId)}` +
     `&organization_id=eq.${encodeURIComponent(organizationId)}` +
     `&business_unit_id=eq.${encodeURIComponent(businessUnitId)}` +
-    `&compensation_status=in.(approved,active)`;
+    `&compensation_status=in.(approved,active,retired)`;
 
   // Effective date filtering: effective_from <= serviceCompletedAt
   if (serviceCompletedAt) {
