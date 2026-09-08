@@ -47,10 +47,11 @@ test("administrative cockpit composes four governed lanes and actions", () => {
   assert.doesNotMatch(board + client, /\/api\/flight|\/api\/cockpit/);
 });
 
-test("cockpit keeps detailed administration in one secondary drawer", () => {
-  for (const label of ["SecondaryWorkspaceDrawer", "Operations", "Full QA", "Payables history", "Finance & logs"]) assert.match(cockpit, new RegExp(label));
+test("cockpit exposes persistent commercial workspaces without a secondary drawer", () => {
+  for (const label of ["AdminWorkspaceNavigation", "PipelineDispatchWorkspace", "ServiceOSStaffAdminWorkspace", "CleanerPayablesPanel"]) assert.match(cockpit, new RegExp(label));
   for (const action of ["AssignmentQuickAction", "QaEvidenceDrawer", "SettlementQuickAction"]) assert.match(board, new RegExp(action));
   assert.match(cockpit, /data-admin-default-view="flight-control"/);
+  assert.doesNotMatch(cockpit, /SecondaryWorkspaceDrawer/);
 });
 
 test("cockpit refreshes on events, focus, visibility, and bounded polling", () => {
