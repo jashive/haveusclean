@@ -1,6 +1,32 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
+
+const governedQaUi=fs.readFileSync("src/features/wave4/ServiceOSQaWorkspace.jsx","utf8");
+const governedQaSql=fs.readFileSync("supabase/migrations/20260908132856_governed_qa_review_queue.sql","utf8");
+
+test("QA workspace uses a governed territory queue without manual UUID inputs",()=>{
+  assert.match(governedQaUi,/get_qa_review_queue/);
+  assert.match(governedQaUi,/primaryBusinessUnitId/);
+  assert.doesNotMatch(governedQaUi,/Operational job ID/);
+  assert.doesNotMatch(governedQaUi,/Work order ID/);
+  assert.match(governedQaUi,/customer_name/);
+  assert.match(governedQaUi,/cleaner_names/);
+  assert.match(governedQaUi,/photo_count/);
+});
+
+test("QA queue RPC is authenticated and territory scoped",()=>{
+  assert.match(governedQaSql,/auth\.uid\(\) is null/);
+  assert.match(governedQaSql,/has_bu_role\(p_organization_id,p_business_unit_id,array\['owner_admin','office_ops','qa'\]/);
+  assert.match(governedQaSql,/j\.organization_id=p_organization_id and j\.business_unit_id=p_business_unit_id/);
+  assert.match(governedQaSql,/j\.operational_status='qa_pending'/);
+});
+
+test("QA queue actions retain atomic Phase 3 finalization",()=>{
+  assert.match(governedQaUi,/rpc\/staff_finalize_qa_inspection/);
+  assert.match(governedQaUi,/finalizeQa\("passed"\)/);
+  assert.match(governedQaUi,/finalizeQa\("waived"\)/);
+});
 import "./serviceosPhase3IntelligenceKpiRemediation.test.mjs";
 
 const sql = fs.readFileSync("supabase/migrations/20260907190000_qa_completion_pipeline_remediation.sql", "utf8");
