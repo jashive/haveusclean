@@ -20,6 +20,8 @@ const ServiceOSQaWorkspace = lazy(() => import("../wave4/ServiceOSQaWorkspace"))
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
 const CleanerPayablesPanel = lazy(() => import("../wave5/CleanerPayablesPanel"));
 const ServiceOSStaffAdminWorkspace = lazy(() => import("../admin/ServiceOSStaffAdminWorkspace"));
+const ExecutiveKpiBar = lazy(() => import("../admin/ExecutiveKpiBar"));
+const ServiceOSFlightControlBoard = lazy(() => import("../admin/ServiceOSFlightControlBoard"));
 
 const REVENUE_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_REVENUE_ENABLED === "true";
 const OPERATIONS_ENABLED = typeof import.meta !== "undefined" && import.meta.env?.VITE_SERVICEOS_OPERATIONS_ENABLED === "true";
@@ -206,6 +208,8 @@ export default function ServiceOSWave1Workspace() {
         </section>
 
         {staffAdminAuthorized ? <Suspense fallback={<div role="status">Loading Staff Management…</div>}><ServiceOSStaffAdminWorkspace /></Suspense> : null}
+        {role === "owner_admin" ? <Suspense fallback={<div role="status">Loading executive metrics…</div>}><ExecutiveKpiBar revenueContext={activeRevenueContext} /></Suspense> : null}
+        {["owner_admin", "office_ops"].includes(role) && operationsAuthorized && qaAuthorized && financeAuthorized ? <Suspense fallback={<div role="status">Loading Flight Control…</div>}><ServiceOSFlightControlBoard session={session} revenueContext={activeRevenueContext} /></Suspense> : null}
         {revenueAuthorized ? (
           <Suspense fallback={<div role="status">Loading Revenue…</div>}>
             {role === "owner_admin" ? <FinancialPerformancePanel revenueContext={activeRevenueContext} /> : null}

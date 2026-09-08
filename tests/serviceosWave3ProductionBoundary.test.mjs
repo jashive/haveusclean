@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 
-const workspace = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx", "utf8");
+const workspace = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx", "utf8") + fs.readFileSync("src/lib/serviceosDispatchReadModel.js", "utf8");
 const shell = fs.readFileSync("src/features/wave1/ServiceOSWave1Workspace.jsx", "utf8");
 const workerMigration = fs.readFileSync("supabase/migrations/20260902203500_wave3_worker_execution_governed_transitions.sql", "utf8");
 

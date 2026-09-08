@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";
 import { getSupabaseConfig } from "../../lib/supabaseConfig.js";
-import { getJobHours, getTeamSize } from "../../core/pricing/sharedPricing.js";
 import {
   fetchEligibleJobHandoffs,
   fetchActiveWorkers,
@@ -27,7 +26,8 @@ import {
 } from "../../lib/serviceosOperationsUtils.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 import CleanerExecutionPlaybook from "./CleanerExecutionPlaybook.jsx";
-import { buildDispatchCascade } from "../../lib/serviceosDispatchCascade.js";
+import { invalidateServiceOSWorkspace, SERVICEOS_WORKSPACE_INVALIDATED_EVENT, serviceOSInvalidationMatches } from "../../lib/serviceosFinancialPerformance.js";
+import { enrichHandoffForDispatch, fetchActiveDispatchPipeline } from "../../lib/serviceosDispatchReadModel.js";
 
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
@@ -191,42 +191,6 @@ function formatLocalDateTime(date) {
   return `${date.getFullYear()}-${pad2(date.getMonth() + 1)}-${pad2(date.getDate())}T${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
 }
 
-function parsePreferredDate(value, referenceDate) {
-  const text = String(value || "").trim();
-  if (!text) return null;
-  const iso = text.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
-  const reference = referenceDate ? new Date(referenceDate) : new Date();
-  const year = Number.isNaN(reference.getTime()) ? new Date().getFullYear() : reference.getFullYear();
-  const parsed = new Date(`${text} ${year}`);
-  if (Number.isNaN(parsed.getTime())) return null;
-  return `${parsed.getFullYear()}-${pad2(parsed.getMonth() + 1)}-${pad2(parsed.getDate())}`;
-}
-
-function parsePreferredTime(value) {
-  const text = String(value || "").trim().toLowerCase();
-  if (!text) return null;
-  if (text.includes("morning")) return "09:00";
-  if (text.includes("midday")) return "11:00";
-  if (text.includes("afternoon")) return "13:00";
-  if (text.includes("evening")) return "17:00";
-  if (text.includes("flexible")) return "09:00";
-  const match = text.match(/(?:^|\s)(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
-  if (!match) return null;
-  let hour = Number(match[1]);
-  const minute = Number(match[2] || 0);
-  const meridiem = match[3]?.toLowerCase();
-  if (meridiem === "pm" && hour < 12) hour += 12;
-  if (meridiem === "am" && hour === 12) hour = 0;
-  if (hour > 23 || minute > 59) return null;
-  return `${pad2(hour)}:${pad2(minute)}`;
-}
-
-function resolveRequestedStart(preferredDate, preferredWindow, referenceDate) {
-  const date = parsePreferredDate(preferredDate, referenceDate);
-  const time = parsePreferredTime(preferredWindow);
-  return date && time ? `${date}T${time}` : null;
-}
 
 function addHoursToLocalDateTime(localValue, hours) {
   if (!localValue || !Number.isFinite(Number(hours)) || Number(hours) <= 0) return "";
@@ -236,39 +200,6 @@ function addHoursToLocalDateTime(localValue, hours) {
   return formatLocalDateTime(parsed);
 }
 
-function exactScopeSqft(scope) {
-  const value = Number(scope?.sqft ?? scope?.squareFeet ?? scope?.square_feet);
-  return Number.isFinite(value) && value > 0 ? value : null;
-}
-
-function resolveDurationHours(pricingSnapshot, scope) {
-  const candidates = [
-    pricingSnapshot?.labor_economics?.jobHours,
-    pricingSnapshot?.calculation_outputs?.jobHours,
-    pricingSnapshot?.raw_calculation_snapshot?.jobHours,
-    scope?.estimatedDurationHours,
-    scope?.estimated_duration_hours,
-  ];
-  for (const candidate of candidates) {
-    const value = Number(candidate);
-    if (Number.isFinite(value) && value > 0) return value;
-  }
-  const sqft = exactScopeSqft(scope);
-  return sqft ? getJobHours(sqft) : null;
-}
-
-function resolveCrewSize(pricingSnapshot, scope) {
-  const candidates = [
-    pricingSnapshot?.labor_economics?.teamSize,
-    pricingSnapshot?.raw_calculation_snapshot?.teamSize,
-  ];
-  for (const candidate of candidates) {
-    const value = Number(candidate);
-    if (Number.isInteger(value) && value > 0) return value;
-  }
-  const sqft = exactScopeSqft(scope);
-  return sqft ? getTeamSize(sqft) : null;
-}
 
 function pipelineStatusLabel(status) {
   if (status === "ready_to_schedule" || status === "scheduled") return "Ready for Dispatch";
@@ -290,98 +221,6 @@ function timezoneForScope(scope, location) {
   const code = scope?.businessUnitCode || scope?.business_unit_code || "";
   const subdivision = String(location?.subdivision || "").toUpperCase();
   return code === "HUC-AZ" || subdivision === "AZ" ? "America/Phoenix" : "America/Toronto";
-}
-
-async function enrichHandoffForDispatch(handoff) {
-  if (!handoff?.id) return handoff;
-
-  const [conversionRows, quoteVersionRows, pricingRows] = await Promise.all([
-    getJson(`conversion_record?id=eq.${encodeURIComponent(handoff.conversion_record_id)}&select=id,customer_id,contact_id,service_location_id&limit=1`),
-    getJson(`quote_version?id=eq.${encodeURIComponent(handoff.quote_version_id)}&select=id,title,estimate_id&limit=1`),
-    handoff.pricing_snapshot_id
-      ? getJson(`pricing_snapshot?id=eq.${encodeURIComponent(handoff.pricing_snapshot_id)}&select=id,currency_code,tax_name,tax_rate,subtotal_amount,tax_amount,total_amount,labor_economics,calculation_outputs,raw_calculation_snapshot&limit=1`)
-      : Promise.resolve([]),
-  ]);
-  const conversion = firstRow(conversionRows);
-  const quoteVersion = firstRow(quoteVersionRows);
-  const pricingSnapshot = firstRow(pricingRows);
-
-  const estimateRows = quoteVersion?.estimate_id
-    ? await getJson(`estimate?id=eq.${encodeURIComponent(quoteVersion.estimate_id)}&select=id,opportunity_id,scope_snapshot&limit=1`)
-    : [];
-  const estimate = firstRow(estimateRows);
-  const opportunityRows = estimate?.opportunity_id
-    ? await getJson(`opportunity?id=eq.${encodeURIComponent(estimate.opportunity_id)}&select=id,service_request_id&limit=1`)
-    : [];
-  const opportunity = firstRow(opportunityRows);
-  const serviceRequestRows = opportunity?.service_request_id
-    ? await getJson(`service_request?id=eq.${encodeURIComponent(opportunity.service_request_id)}&select=id,requirements,created_at&limit=1`)
-    : [];
-  const serviceRequest = firstRow(serviceRequestRows);
-
-  const [customerRows, contactRows, locationRows] = await Promise.all([
-    conversion?.customer_id
-      ? getJson(`customer?id=eq.${encodeURIComponent(conversion.customer_id)}&select=id,display_name&limit=1`)
-      : Promise.resolve([]),
-    conversion?.contact_id
-      ? getJson(`contact?id=eq.${encodeURIComponent(conversion.contact_id)}&select=id,first_name,last_name,email,phone&limit=1`)
-      : Promise.resolve([]),
-    conversion?.service_location_id
-      ? getJson(`service_location?id=eq.${encodeURIComponent(conversion.service_location_id)}&select=id,address_line1,address_line2,city,subdivision,postal_code,country_code,access_notes&limit=1`)
-      : Promise.resolve([]),
-  ]);
-
-  const customer = firstRow(customerRows);
-  const contact = firstRow(contactRows);
-  const location = firstRow(locationRows);
-  const booking = serviceRequest?.id
-    ? firstRow(await getJson(`booking?service_request_id=eq.${encodeURIComponent(serviceRequest.id)}&select=id,requested_service_date,requested_arrival_window,service_package,frequency,currency_code,tax_name,tax_rate,estimated_subtotal,estimated_tax,estimated_total,pricing_snapshot&limit=1`))
-    : null;
-  const cascade = buildDispatchCascade({ requirements: serviceRequest?.requirements, estimateScope: estimate?.scope_snapshot, booking, customer, contact, location, pricingSnapshot, quoteTitle: quoteVersion?.title });
-  const scope = cascade.scope;
-  const contactName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ").trim();
-  const customerName = customer?.display_name || contactName || serviceRequest?.requirements?.customer?.name || "Customer";
-  const serviceTier = quoteVersion?.title || "Service details unavailable";
-  const city = location?.city || location?.subdivision || "Location unavailable";
-  const locationLabel = location?.address_line1 ? `${city} / ${location.address_line1}` : city;
-  const requestedStartLocal = resolveRequestedStart(scope?.preferredDate, scope?.preferredWindow, serviceRequest?.created_at || handoff.created_at);
-  const durationHours = resolveDurationHours(pricingSnapshot, scope);
-  const crewSize = resolveCrewSize(pricingSnapshot, scope);
-
-  return {
-    ...handoff,
-    dispatch_label: `${customerName} — ${serviceTier} — ${locationLabel} (${handoffIdSnippet(handoff.id)})`,
-    customer_name: customerName,
-    service_tier: serviceTier,
-    location_label: locationLabel,
-    requested_date: scope?.preferredDate || null,
-    requested_window: scope?.preferredWindow || null,
-    requested_start_local: requestedStartLocal,
-    estimated_duration_hours: durationHours,
-    crew_size: crewSize,
-    suggested_timezone: timezoneForScope(scope, location),
-    cascade,
-  };
-}
-
-async function fetchActiveDispatchPipeline() {
-  const jobs = await getJson([
-    "operational_job?select=id,job_handoff_id,operational_status,created_at",
-    "operational_status=in.(ready_to_schedule,scheduled,dispatched,in_progress,service_complete,qa_pending,corrective_action_required)",
-    "order=created_at.desc",
-    "limit=50",
-  ].join("&"));
-  if (!Array.isArray(jobs) || jobs.length === 0) return [];
-  return Promise.all(jobs.map(async (job) => {
-    try {
-      const handoff = firstRow(await getJson(`job_handoff?id=eq.${encodeURIComponent(job.job_handoff_id)}&select=id,organization_id,business_unit_id,conversion_record_id,quote_version_id,pricing_snapshot_id,handoff_status,created_at&limit=1`));
-      const enriched = handoff ? await enrichHandoffForDispatch(handoff) : null;
-      const scheduleWindow = firstRow(await getJson(`schedule_window?operational_job_id=eq.${encodeURIComponent(job.id)}&select=scheduled_start,scheduled_end,timezone,status&order=created_at.desc&limit=1`));
-      return { ...job, ...enriched, schedule_window: scheduleWindow };
-    } catch {
-      return { ...job, dispatch_label: `Operational job ${handoffIdSnippet(job.id)}` };
-    }
-  }));
 }
 
 function OfficeOperations({ revenueContext }) {
@@ -459,11 +298,27 @@ function OfficeOperations({ revenueContext }) {
   }, [handoffId, applyScheduleSuggestion]);
 
   useEffect(() => { load(); }, []);
+  useEffect(() => {
+    const refresh = (event) => { if (serviceOSInvalidationMatches(event, revenueContext?.primaryBusinessUnitId)) load(); };
+    window.addEventListener(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, refresh);
+    return () => window.removeEventListener(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, refresh);
+  }, [load, revenueContext?.primaryBusinessUnitId]);
 
   const selectHandoff = useCallback((id) => {
     setHandoffId(id);
     applyScheduleSuggestion(handoffs.find((handoff) => handoff.id === id) || null);
   }, [handoffs, applyScheduleSuggestion]);
+
+  useEffect(() => {
+    const openDispatch = (event) => {
+      const id = event?.detail?.handoffId;
+      if (!id || !handoffs.some((handoff) => handoff.id === id)) return;
+      selectHandoff(id);
+      document.getElementById("operations-dispatch")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    };
+    window.addEventListener("serviceos:open-dispatch", openDispatch);
+    return () => window.removeEventListener("serviceos:open-dispatch", openDispatch);
+  }, [handoffs, selectHandoff]);
 
   const schedule = useCallback(async () => {
     if (!handoffId || !workerId || !start || !end) { setError("Select a handoff, worker, start, and end time."); return; }
@@ -549,6 +404,7 @@ function OfficeOperations({ revenueContext }) {
       setMessage(`DISPATCHED · job ${job.id} · assignment ${assignment.id} · work order ${workOrder.id} · ${notificationSummary}. Worker must acknowledge and execute next.`);
       setHandoffId(""); setStart(""); setEnd(""); setEndAutoCalculated(false); setScheduleHint("");
       await load();
+      invalidateServiceOSWorkspace({ businessUnitId: handoff.business_unit_id, operationalJobId: job.id, affectedDomains: ["operations"] });
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
   }, [handoffId, workerId, start, end, timezone, appUserId, load, selectedHandoff]);
@@ -746,7 +602,7 @@ function WorkerOperations({ revenueContext }) {
 
     {executionActive ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
       <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>JPEG, PNG, or WebP photos are uploaded to the private completion-evidence vault when you submit.</p></div>
-      <label className="field-photo-button"><input type="file" accept="image/jpeg,image/png,image/webp" capture="environment" multiple onChange={(event) => { setQaPhotos(Array.from(event.target.files || [])); setPhotoState("empty"); }} /><span>＋ Add photos</span></label>
+      <label className="field-photo-button"><input type="file" accept="image/*" capture="environment" multiple onChange={(event) => { setQaPhotos(Array.from(event.target.files || [])); setPhotoState("empty"); }} /><span>＋ Add photos</span></label>
       {photoState === "uploading" ? <StatusBadge tone="warning">Uploading…</StatusBadge> : null}
       {photoState === "verified" ? <StatusBadge tone="success">Quarantined &amp; linked</StatusBadge> : null}
       {photoState === "error" ? <StatusBadge tone="danger">Upload failed · retry</StatusBadge> : null}

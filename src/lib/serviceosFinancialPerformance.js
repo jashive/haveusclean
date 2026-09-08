@@ -2,10 +2,21 @@ import { authenticatedRestFetchWithRefresh } from "./serviceosAuthClient.js";
 
 export const MARKET_CURRENCY = Object.freeze({ "HUC-ON": "CAD", "HUC-AZ": "USD" });
 export const SERVICEOS_FINANCIAL_INVALIDATED_EVENT = "serviceos:financial-invalidated";
+export const SERVICEOS_WORKSPACE_INVALIDATED_EVENT = "serviceos:workspace-invalidated";
+
+export function invalidateServiceOSWorkspace(detail = {}) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, { detail }));
+}
 
 export function invalidateServiceOSFinancials(detail = {}) {
   if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
   window.dispatchEvent(new CustomEvent(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, { detail }));
+  invalidateServiceOSWorkspace({ ...detail, affectedDomains: detail.affectedDomains ?? ["financials", "settlement"] });
+}
+
+export function serviceOSInvalidationMatches(event, businessUnitId) {
+  return !event?.detail?.businessUnitId || event.detail.businessUnitId === businessUnitId;
 }
 
 export function formatFinancialAmount(value, currencyCode) {

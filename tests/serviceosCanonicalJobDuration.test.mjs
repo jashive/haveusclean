@@ -94,7 +94,7 @@ test("all governed quote flows pass exact sqft into canonical labor calculation"
 });
 
 test("Wave 3 dispatch consumes canonical pricing duration and computes END", () => {
-  const source = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+  const source = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/lib/serviceosDispatchReadModel.js", import.meta.url), "utf8");
   assert.match(source, /pricingSnapshot\?\.labor_economics\?\.jobHours/);
   assert.match(source, /setEnd\(duration \? addHoursToLocalDateTime\(requested, duration\) : ""\)/);
   assert.match(source, /function addHoursToLocalDateTime\(localValue, hours\)/);
@@ -102,7 +102,7 @@ test("Wave 3 dispatch consumes canonical pricing duration and computes END", () 
 
 
 test("operator UI surfaces canonical crew/duration without lifecycle clutter", () => {
-  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/lib/serviceosDispatchReadModel.js", import.meta.url), "utf8");
   const revenue = fs.readFileSync(new URL("../src/features/wave1/ServiceOSRevenueWorkspace.jsx", import.meta.url), "utf8");
   assert.match(operations, /Ready for Dispatch/);
   assert.match(operations, /return "Dispatched"/);
@@ -120,7 +120,7 @@ test("operator UI surfaces canonical crew/duration without lifecycle clutter", (
 
 
 test("dispatch restores legacy accepted workload from exact saved sqft without rewriting pricing", () => {
-  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8");
+  const operations = fs.readFileSync(new URL("../src/features/wave3/ServiceOSOperationsWorkspace.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/lib/serviceosDispatchReadModel.js", import.meta.url), "utf8");
   assert.match(operations, /function exactScopeSqft\(scope\)/);
   assert.match(operations, /return sqft \? getJobHours\(sqft\) : null/);
   assert.match(operations, /return sqft \? getTeamSize\(sqft\) : null/);
