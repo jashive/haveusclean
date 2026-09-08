@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 import { fetchOs10IntelligenceDashboard, isoDate } from "../../lib/serviceosIntelligenceDashboard.js";
+import { SERVICEOS_FINANCIAL_INVALIDATED_EVENT } from "../../lib/serviceosFinancialPerformance.js";
 
 function Empty({ children = "No governed data is available for this period." }) {
   return <div className="intelligence-empty"><StatusBadge tone="neutral">No governed data</StatusBadge><p>{children}</p></div>;
@@ -40,6 +41,7 @@ export default function Os10IntelligenceDashboard({ revenueContext }) {
     finally { setLoading(false); }
   }, [revenueContext?.orgId,revenueContext?.primaryBusinessUnitId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { const refreshMargins = (event) => { if (!event?.detail?.businessUnitId || event.detail.businessUnitId === revenueContext?.primaryBusinessUnitId) load(); }; window.addEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, refreshMargins); return () => window.removeEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, refreshMargins); }, [load, revenueContext?.primaryBusinessUnitId]);
   return <section className="intelligence-dashboard" aria-labelledby="intelligence-title"><header className="intelligence-dashboard__header"><div><p className="admin-eyebrow">OS 1.0 advisory layer</p><h2 id="intelligence-title">Operational intelligence</h2><p>Forward-looking signals never change schedules, pricing, or customer status automatically.</p></div><button className="huc-button huc-button--secondary" onClick={load} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button></header>
     {error ? <div className="financial-alert" role="alert">{error}</div> : null}
     <div className="intelligence-grid"><RouteDensityPanel rows={data?.route_density}/><CapacityForecastPanel rows={data?.capacity}/><RetentionChurnPanel rows={data?.retention}/><MarginDriftPanel rows={data?.margin_drift} currencyCode={data?.scope?.currency_code || "—"}/></div>

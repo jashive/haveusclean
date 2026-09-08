@@ -1,6 +1,12 @@
 import { authenticatedRestFetchWithRefresh } from "./serviceosAuthClient.js";
 
 export const MARKET_CURRENCY = Object.freeze({ "HUC-ON": "CAD", "HUC-AZ": "USD" });
+export const SERVICEOS_FINANCIAL_INVALIDATED_EVENT = "serviceos:financial-invalidated";
+
+export function invalidateServiceOSFinancials(detail = {}) {
+  if (typeof window === "undefined" || typeof window.dispatchEvent !== "function") return;
+  window.dispatchEvent(new CustomEvent(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, { detail }));
+}
 
 export function formatFinancialAmount(value, currencyCode) {
   if (!MARKET_CURRENCY["HUC-ON"] || !["CAD", "USD"].includes(currencyCode)) return "Unavailable";
