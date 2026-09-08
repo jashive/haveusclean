@@ -7,9 +7,9 @@ export const MOBILE_EVIDENCE_STATES = Object.freeze(["queued", "uploading", "ver
 export const MOBILE_UPLOAD_MAX_ATTEMPTS = 4;
 export const MOBILE_UPLOAD_BASE_DELAY_MS = 400;
 
-export function mobileEvidenceEntry(file, index = 0) {
+export function mobileEvidenceEntry(file, index = 0, requirement = null) {
   const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${index}`;
-  return { id, file, name: file?.name || `photo-${index + 1}.jpg`, state: "queued", attempt: 0, objectName: null, storageUploaded: false, evidenceId: null, error: "" };
+  return { id, file, name: file?.name || `photo-${index + 1}.jpg`, state: "queued", attempt: 0, objectName: null, storageUploaded: false, evidenceId: null, error: "", requirement };
 }
 
 export function isRetryableUploadFailure(error) {
@@ -93,10 +93,17 @@ export async function persistMobileEvidenceEntry({ entry, worker, assignment, co
     operationalJobId: context.operational_job_id,
     workOrderId: context.work_order_id,
     workerAssignmentId: assignment.id,
-    evidenceType: "photo_after",
+    evidenceType: entry.requirement?.evidence_type || "photo_after",
     storageSystem: "supabase_storage",
     storageReference: objectName,
-    evidencePayload: { original_name: entry.name, mime_type: entry.file.type, byte_size: entry.file.size, sha256: hash },
+    evidencePayload: {
+      original_name: entry.name,
+      mime_type: entry.file.type,
+      byte_size: entry.file.size,
+      sha256: hash,
+      requirement_key: entry.requirement?.requirement_key || "service_after",
+      evidence_tag: entry.requirement?.evidence_tag || "after_clean",
+    },
     capturedAt: new Date().toISOString(),
     capturedByWorkerId: worker.id,
     capturedByAppUserId: appUserId,
