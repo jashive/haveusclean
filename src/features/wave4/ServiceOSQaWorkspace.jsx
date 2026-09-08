@@ -18,6 +18,7 @@ import {
 } from "../../lib/serviceosOperationsUtils.js";
 import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
 import { getSupabaseConfig } from "../../lib/supabaseConfig.js";
+import { invalidateServiceOSFinancials } from "../../lib/serviceosFinancialPerformance.js";
 
 const QA_ENABLED =
   typeof import.meta !== "undefined" &&
@@ -64,6 +65,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [waiverReason, setWaiverReason] = useState("");
+  const [finalizationSummary, setFinalizationSummary] = useState(null);
 
   const currentInspection = useMemo(() => {
     const rows = caseData?.qaInspections ?? [];
@@ -215,7 +217,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
         }),accessToken);
         inspection = await updateQaInspectionStatus(inspection.id,"in_progress",accessToken,appUserId);
       }
-      await authenticatedRestFetchWithRefresh("rpc/staff_finalize_qa_inspection", {
+      const result = await authenticatedRestFetchWithRefresh("rpc/staff_finalize_qa_inspection", {
         method: "POST",
         body: JSON.stringify({
           p_qa_inspection_id: inspection.id,
@@ -225,8 +227,14 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
           p_waiver_reason: outcome === "waived" ? reason : null,
         }),
       }).then(async (response) => {
-        if (!response?.ok) throw new Error(`QA finalization failed: ${await response?.text().catch(() => "")}`);
+        const text = await response?.text().catch(() => "");
+        let payload = null;
+        try { payload = text ? JSON.parse(text) : null; } catch { payload = null; }
+        if (!response?.ok) throw new Error(`QA finalization failed: ${text}`);
+        return Array.isArray(payload) ? payload[0] : payload;
       });
+      setFinalizationSummary(result?.financial_summary ?? null);
+      invalidateServiceOSFinancials({ businessUnitId: caseData.job.business_unit_id, operationalJobId: caseData.job.id, source: "qa_finalization" });
       await loadQueue();
       setSelectedCase(null);
       setCaseData(null);
@@ -335,6 +343,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
         <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !caseData}>Fail QA + Open Rework</button>
       </div>
       {recoverablePassedInspection ? <div style={styles.status}>Recovery detected: QA inspection already passed. Finalize the governed work-order/job transition and audit event.</div> : null}
+      {finalizationSummary ? <div style={styles.status}><strong>Financial close complete</strong>{"\n"}Revenue recognized: {new Intl.NumberFormat("en",{style:"currency",currency:finalizationSummary.currency_code}).format(Number(finalizationSummary.recognized_revenue_amount))}{"\n"}Cleaner labor accrued: {new Intl.NumberFormat("en",{style:"currency",currency:finalizationSummary.currency_code}).format(Number(finalizationSummary.direct_labor_cost))}{"\n"}Net contribution: {new Intl.NumberFormat("en",{style:"currency",currency:finalizationSummary.currency_code}).format(Number(finalizationSummary.net_contribution))}{"\n"}Payroll status: Pending</div> : null}
       {caseData?.completionEvidence?.filter((row) => row.storage_reference).length ? <div style={styles.status}><strong>Completion photos</strong>{caseData.completionEvidence.filter((row) => row.storage_reference).map((row, index) => <div key={row.id} style={{marginTop:8}}><button type="button" style={{...styles.button,...styles.secondary}} onClick={() => openEvidence(row)}>Open photo {index + 1}</button> <span>{row.evidence_type.replaceAll("_", " ")}</span></div>)}</div> : null}
       {caseData ? <div style={styles.status}>Job: {caseData.job.operational_status}{"\n"}Work order: {caseData.workOrder.work_order_status}{"\n"}QA inspections: {(caseData.qaInspections ?? []).length}{"\n"}Corrective actions: {(caseData.correctiveActions ?? []).length}</div> : null}
       {error ? <div role="alert" style={styles.error}>{error}</div> : null}

@@ -1,15 +1,15 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
-import { fetchFinancialPerformance, formatContributionMargin, formatFinancialAmount, MARKET_CURRENCY } from "../../lib/serviceosFinancialPerformance.js";
+import { fetchFinancialPerformance, formatContributionMargin, formatFinancialAmount, MARKET_CURRENCY, SERVICEOS_FINANCIAL_INVALIDATED_EVENT } from "../../lib/serviceosFinancialPerformance.js";
 
 export function FinancialKpiGrid({ kpis, currencyCode }) {
   const cards = [
     ["Gross bookings", formatFinancialAmount(kpis?.gross_bookings, currencyCode), "Accepted quote subtotal, excluding tax"],
-    ["Cleaner payouts", formatFinancialAmount(kpis?.cleaner_payouts, currencyCode), "Approved and paid contractor payables"],
+    ["Cleaner Labor Accrued", formatFinancialAmount(kpis?.cleaner_labor_accrued, currencyCode), "Earned labor recognized at QA completion"],
     ["Net contribution", formatFinancialAmount(kpis?.net_contribution, currencyCode), "Recognized revenue less direct costs"],
     ["Contribution margin", formatContributionMargin(kpis?.contribution_margin_percent), "Weighted across governed job snapshots"],
   ];
-  return <div className="financial-kpi-grid">{cards.map(([label, value, hint]) => <article className="financial-kpi-card" key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>)}</div>;
+  return <><div className="financial-kpi-grid">{cards.map(([label, value, hint]) => <article className="financial-kpi-card" key={label}><span>{label}</span><strong>{value}</strong><small>{hint}</small></article>)}</div><div className="financial-settlement-badges" aria-label="Payroll settlement status"><StatusBadge tone="warning">Pending {formatFinancialAmount(kpis?.payroll_pending, currencyCode)}</StatusBadge><StatusBadge tone="info">Approved {formatFinancialAmount(kpis?.payroll_approved, currencyCode)}</StatusBadge><StatusBadge tone="success">Paid {formatFinancialAmount(kpis?.payroll_paid, currencyCode)}</StatusBadge></div></>;
 }
 
 export function UnitEconomicsBreakdown({ data, currencyCode }) {
@@ -34,9 +34,10 @@ export default function FinancialPerformancePanel({ revenueContext }) {
   const period = useMemo(() => ({ end: new Date().toISOString(), start: new Date(Date.now() - 30 * 86400000).toISOString() }), [businessUnitId]);
   const load = useCallback(async () => { if (!organizationId || !businessUnitId || !currencyCode) return; setLoading(true); setError(""); try { setData(await fetchFinancialPerformance({ organizationId, businessUnitId, periodStart: period.start, periodEnd: period.end })); } catch (e) { setError(e?.message || "Financial performance could not be loaded."); } finally { setLoading(false); } }, [organizationId, businessUnitId, currencyCode, period]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => { const refreshFinancials = (event) => { if (!event?.detail?.businessUnitId || event.detail.businessUnitId === businessUnitId) load(); }; window.addEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, refreshFinancials); return () => window.removeEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT, refreshFinancials); }, [businessUnitId, load]);
   return <section className="financial-performance-panel" data-financial-performance="territory-isolated">
     <header><div><p className="admin-eyebrow">Financial performance · last 30 days</p><h2>{marketCode} unit economics</h2><p>Governed values are isolated in {currencyCode}. Tax is excluded from operating contribution.</p></div><button className="huc-button huc-button--secondary" onClick={load} disabled={loading}>{loading ? "Refreshing…" : "Refresh"}</button></header>
     {error ? <div className="financial-alert" role="alert">{error}</div> : <><FinancialKpiGrid kpis={data?.kpis} currencyCode={currencyCode} /><div className="financial-section-heading"><div><h3>Job-level unit economics</h3><p>Latest append-only profitability snapshot per job.</p></div><StatusBadge tone="info">{data?.unit_economics?.jobs_count ?? 0} jobs</StatusBadge></div><UnitEconomicsBreakdown data={data} currencyCode={currencyCode} /></>}
-    <TechnicalDetails summary="Metric definitions"><p><b>Gross bookings:</b> accepted quote subtotal, excluding tax.</p><p><b>Cleaner payouts:</b> approved or paid contractor payables.</p><p><b>Net contribution:</b> recognized revenue less cleaner and other direct costs.</p><p><b>Contribution margin:</b> total net contribution divided by total recognized revenue.</p></TechnicalDetails>
+    <TechnicalDetails summary="Metric definitions"><p><b>Gross bookings:</b> accepted quote subtotal, excluding tax.</p><p><b>Cleaner Labor Accrued:</b> earned labor sealed in governed profitability snapshots at QA completion, independent of payroll settlement.</p><p><b>Pending / Approved / Paid:</b> downstream contractor-payable settlement states.</p><p><b>Net contribution:</b> recognized revenue less labor accrued and other direct costs.</p><p><b>Contribution margin:</b> total net contribution divided by total recognized revenue.</p></TechnicalDetails>
   </section>;
 }

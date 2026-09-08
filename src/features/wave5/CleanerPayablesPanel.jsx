@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh } from "../../lib/serviceosAuthClient.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
+import { SERVICEOS_FINANCIAL_INVALIDATED_EVENT } from "../../lib/serviceosFinancialPerformance.js";
 
 async function rpc(name, body) {
   const response = await authenticatedRestFetchWithRefresh(`rpc/${name}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -23,6 +24,7 @@ export default function CleanerPayablesPanel({ revenueContext }) {
     setData(dashboard);setWorkers(Array.isArray(workerRows)?workerRows:[]);setWorkerId((current)=>current||workerRows?.[0]?.id||"");
   }catch(e){setError(e?.message||String(e));}finally{setBusy(false);}},[orgId,businessUnitId]);
   useEffect(()=>{load();},[load]);
+  useEffect(()=>{const refreshPayables=(event)=>{if(!event?.detail?.businessUnitId||event.detail.businessUnitId===businessUnitId)load();};window.addEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT,refreshPayables);return()=>window.removeEventListener(SERVICEOS_FINANCIAL_INVALIDATED_EVENT,refreshPayables);},[businessUnitId,load]);
   const rows=Array.isArray(data?.rows)?data.rows:[],currency=data?.scope?.currency_code||"USD";
   const csv=useMemo(()=>["Cleaner,Work Order,Actual Hours,Hourly Rate,Amount,Currency,Status,Created",...rows.map(r=>[r.worker_name,r.work_order_number,r.actual_hours,r.hourly_rate,r.amount,r.currency_code,r.status,r.created_at].map(v=>`"${String(v??"").replaceAll('"','""')}"`).join(","))].join("\n"),[rows]);
   function exportCsv(){const url=URL.createObjectURL(new Blob([csv],{type:"text/csv;charset=utf-8"}));const a=document.createElement("a");a.href=url;a.download=`cleaner-payables-${data?.scope?.market_code||"market"}.csv`;a.click();URL.revokeObjectURL(url);}
@@ -37,4 +39,3 @@ export default function CleanerPayablesPanel({ revenueContext }) {
     {rows.length?<div className="financial-table" role="table" aria-label="Cleaner payables"><div className="financial-table__row financial-table__head" role="row"><span>Cleaner</span><span>Hours</span><span>Rate</span><span>Amount</span><span>Status</span><span>Work order</span></div>{rows.map(row=><div className="financial-table__row" role="row" key={row.id}><span><b>{row.worker_name}</b></span><span>{row.compensation_method==="hourly"?Number(row.actual_hours).toFixed(2):"Flat"}</span><span>{row.compensation_method==="hourly"?money(row.hourly_rate,row.currency_code):"Contract"}</span><span>{money(row.amount,row.currency_code)}</span><span><StatusBadge tone={row.status==="pending"?"warning":"success"}>{row.status}</StatusBadge></span><span>{row.work_order_number||"Work order"}<TechnicalDetails><span>Payable: {row.id}</span></TechnicalDetails></span></div>)}</div>:<div className="financial-empty-state"><StatusBadge tone="neutral">No governed data</StatusBadge><h3>No cleaner payables in this territory</h3><p>Payables appear after QA approval and require an active compensation version.</p></div>}
   </section>;
 }
-
