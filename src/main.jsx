@@ -12,6 +12,7 @@ const ApplyPage = lazy(() => import("./pages/apply"));
 const WorkforceAdminPage = lazy(() => import("./pages/workforce-admin"));
 const ServiceOSDiagnosticsWorkspace = lazy(() => import("./features/pilot/ServiceOSDiagnosticsWorkspace"));
 const ServiceOSWave1Workspace = lazy(() => import("./features/wave1/ServiceOSWave1Workspace"));
+const WorkOrderPage = lazy(() => import("./pages/work-order"));
 
 const CANONICAL_SERVICEOS_MODE = isCanonicalServiceOSMode(import.meta.env);
 
@@ -19,6 +20,11 @@ function ServiceOSRoot() {
   const context = useServiceOSContext();
   const diagnosticsRequested = typeof window !== "undefined" && window.location.pathname === SERVICEOS_DIAGNOSTICS_PATH;
   const workforceAdminRequested = typeof window !== "undefined" && (window.location.pathname === "/admin/workforce" || window.location.pathname.startsWith("/admin/workforce/"));
+  const workOrderMatch = typeof window !== "undefined" ? window.location.pathname.match(/^\/work-order\/([^/]+)\/?$/) : null;
+
+  if (workOrderMatch) {
+    return <Suspense fallback={<div role="status">Loading assigned work…</div>}><WorkOrderPage workOrderId={decodeURIComponent(workOrderMatch[1])} /></Suspense>;
+  }
 
   if (diagnosticsRequested) {
     return (

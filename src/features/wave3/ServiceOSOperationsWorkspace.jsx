@@ -463,7 +463,7 @@ function OfficeOperations({ revenueContext }) {
   </section>;
 }
 
-function WorkerOperations({ revenueContext }) {
+export function WorkerOperations({ revenueContext, targetWorkOrderId = "", dedicated = false }) {
   const [worker, setWorker] = useState(null);
   const [assignments, setAssignments] = useState([]);
   const [contexts, setContexts] = useState({});
@@ -536,6 +536,11 @@ function WorkerOperations({ revenueContext }) {
 
   useEffect(()=>{ load(); }, []);
   useEffect(() => {
+    if (!targetWorkOrderId) return;
+    const match = assignments.find((assignment) => contexts[assignment.id]?.work_order_id === targetWorkOrderId);
+    if (match) setSelectedId(match.id);
+  }, [assignments, contexts, targetWorkOrderId]);
+  useEffect(() => {
     const refresh = (event) => { if (serviceOSInvalidationMatches(event, selected?.business_unit_id)) load(); };
     const onVisibility = () => { if (document.visibilityState === "visible") load(); };
     window.addEventListener(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, refresh);
@@ -606,19 +611,23 @@ function WorkerOperations({ revenueContext }) {
     return `${c.customer_name || "Customer"} · ${c.service_title || "Cleaning service"} · ${humanize(assignment.assignment_status)}`;
   };
 
-  return <section style={styles.card} data-wave3-worker-workspace="true" className="field-workspace">
+  const address = context ? [context.address_line1 || scope.location?.address_line1, scope.location?.address_line2, context.city || scope.location?.city, context.subdivision || scope.location?.subdivision, scope.location?.postal_code].filter(Boolean).join(", ") : "";
+  const routeUnavailable = Boolean(targetWorkOrderId && !busy && assignments.length && !assignments.some((assignment) => contexts[assignment.id]?.work_order_id === targetWorkOrderId));
+
+  return <section style={styles.card} data-wave3-worker-workspace="true" data-dedicated-work-order={dedicated ? "true" : "false"} className={`field-workspace ${dedicated ? "field-workspace--dedicated" : ""}`}>
     <p className="admin-eyebrow">Today&apos;s assigned work</p>
     <h2 style={styles.title}>Cleaner job execution</h2>
     <p style={styles.note}>Your view is limited to your assigned work. Completion stops at <strong>QA PENDING</strong>; workers cannot approve, fail, or waive QA.</p>
     <div style={styles.row}><button style={styles.secondary} onClick={load} disabled={busy}>{busy ? "Refreshing…" : "Refresh assignments"}</button></div>
-    <label style={{display:"block",marginTop:12}}><span style={styles.label}>Assigned job</span><select style={styles.input} value={selectedId} onChange={e=>{setSelectedId(e.target.value);setMessage("");setError("");}}><option value="">Select…</option>{assignments.map(a=><option key={a.id} value={a.id}>{assignmentLabel(a)}</option>)}</select></label>
+    {!dedicated ? <label style={{display:"block",marginTop:12}}><span style={styles.label}>Assigned job</span><select style={styles.input} value={selectedId} onChange={e=>{setSelectedId(e.target.value);setMessage("");setError("");}}><option value="">Select…</option>{assignments.map(a=><option key={a.id} value={a.id}>{assignmentLabel(a)}</option>)}</select></label> : null}
+    {routeUnavailable ? <div style={styles.error} role="alert">This work order is not assigned to your active worker profile.</div> : null}
 
     {context ? <div style={styles.detailCard} data-worker-job-details="true">
       <div style={{display:"flex",justifyContent:"space-between",gap:10,alignItems:"center",flexWrap:"wrap"}}>
         <div><strong style={{fontSize:17}}>{context.customer_name || "Customer"}</strong><div style={styles.note}>{context.service_title || "Cleaning service"}</div></div>
         <span style={{...styles.badge,...(context.operational_status === "qa_pending" ? styles.badgeCompleted : styles.badgeDispatched)}}>{humanize(context.operational_status)}</span>
       </div>
-      <div style={styles.detailRow}><span style={styles.label}>Address</span><span>{[context.address_line1 || scope.location?.address_line1, scope.location?.address_line2, context.city || scope.location?.city, context.subdivision || scope.location?.subdivision, scope.location?.postal_code].filter(Boolean).join(", ") || "Address unavailable"}</span></div>
+      <div className="field-property-address"><span style={styles.label}>Property address</span><strong>{address || "Address unavailable"}</strong>{address ? <a className="huc-button" href={`https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(address)}`} target="_blank" rel="noreferrer">Navigate to property</a> : null}</div>
       <div style={styles.detailRow}><span style={styles.label}>Schedule</span><span>{context.scheduled_start ? `${context.scheduled_start} → ${context.scheduled_end || "end pending"} (${context.timezone || "local time"})` : "Schedule unavailable"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Package</span><span>{humanize(scope.packageKey || context.checklist?.package || context.service_title)}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Property</span><span>{[scope.dwellingType, scope.beds ? `${scope.beds} bed` : null, scope.baths ? `${scope.baths} bath` : null, scope.sqft ? `${scope.sqft} sqft` : null].filter(Boolean).join(" · ") || "Scope details unavailable"}</span></div>
@@ -627,7 +636,7 @@ function WorkerOperations({ revenueContext }) {
       <div style={styles.detailRow}><span style={styles.label}>Access notes</span><span>{context.access_instructions?.notes || context.access_instructions?.instructions || (typeof context.access_instructions === "string" ? context.access_instructions : "No special access notes")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Work order</span><span>{humanize(context.work_order_status)}</span></div>
-      <EarnedPayoutBanner payable={context.earnedPayable} qaPending={context.operational_status === "qa_pending"} />
+      <div className={dedicated ? "sticky-earned-payout" : ""}><EarnedPayoutBanner payable={context.earnedPayable} qaPending={context.operational_status === "qa_pending"} /></div>
       <TechnicalDetails><span>Work order: {context.work_order_id}</span><span>Assignment: {selected?.id}</span></TechnicalDetails>
       {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
     </div> : null}
