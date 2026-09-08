@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { authenticatedRestFetchWithRefresh, getValidAccessToken } from "../../lib/serviceosAuthClient.js";
-import { getSupabaseConfig } from "../../lib/supabaseConfig.js";
 import {
   fetchEligibleJobHandoffs,
   fetchActiveWorkers,
@@ -15,19 +14,19 @@ import {
   updateScheduleWindowStatus,
   updateWorkerAssignmentStatus,
   updateWorkOrderStatus,
-  createCompletionEvidence,
 } from "../../lib/serviceosOperationsClient.js";
 import {
   buildOperationalJobPayload,
   buildScheduleWindowPayload,
   buildWorkerAssignmentPayload,
   buildWorkOrderPayload,
-  buildCompletionEvidencePayload,
 } from "../../lib/serviceosOperationsUtils.js";
 import { StatusBadge, TechnicalDetails } from "../../components/ui.jsx";
 import CleanerExecutionPlaybook from "./CleanerExecutionPlaybook.jsx";
 import { invalidateServiceOSWorkspace, SERVICEOS_WORKSPACE_INVALIDATED_EVENT, serviceOSInvalidationMatches } from "../../lib/serviceosFinancialPerformance.js";
 import { enrichHandoffForDispatch, fetchActiveDispatchPipeline } from "../../lib/serviceosDispatchReadModel.js";
+import { mobileEvidenceEntry, persistMobileEvidenceEntry } from "../../lib/serviceosMobileEvidence.js";
+import { EarnedPayoutBanner, ResilientEvidenceUploader, TechnicianExecutionCard } from "./TechnicianExecutionCard.jsx";
 
 const styles = {
   card: { background: "#151D2C", border: "1px solid #28364A", borderRadius: 12, padding: 18, marginTop: 14 },
@@ -99,51 +98,6 @@ async function postJobCompletion(assignmentId, completionNote) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok && !data?.completion) throw new Error(data?.error || "Job completion could not be submitted");
   return data;
-}
-
-async function sha256Hex(file) {
-  const bytes = await file.arrayBuffer();
-  const digest = await crypto.subtle.digest("SHA-256", bytes);
-  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
-}
-
-async function persistCompletionPhotos({ files, worker, assignment, context, appUserId }) {
-  if (!files.length) return [];
-  const accessToken = await getValidAccessToken();
-  const { url, anon } = getSupabaseConfig(import.meta.env);
-  const allowed = new Set(["image/jpeg", "image/png", "image/webp"]);
-  const persisted = [];
-  for (const [index, file] of files.entries()) {
-    if (!allowed.has(file.type)) throw new Error(`${file.name}: use JPEG, PNG, or WebP.`);
-    if (file.size > 12 * 1024 * 1024) throw new Error(`${file.name}: photos must be 12 MB or smaller.`);
-    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-100) || `photo-${index + 1}.jpg`;
-    const objectName = `${assignment.organization_id}/${assignment.business_unit_id}/${context.operational_job_id}/${assignment.id}/${crypto.randomUUID()}-${safeName}`;
-    const storagePath = objectName.split("/").map(encodeURIComponent).join("/");
-    const upload = await fetch(`${url}/storage/v1/object/serviceos-completion-evidence/${storagePath}`, {
-      method: "POST",
-      headers: { apikey: anon, Authorization: `Bearer ${accessToken}`, "Content-Type": file.type, "x-upsert": "false" },
-      body: file,
-    });
-    if (!upload.ok) throw new Error(`${file.name}: upload failed (${upload.status}).`);
-    const hash = await sha256Hex(file);
-    const evidence = await createCompletionEvidence(buildCompletionEvidencePayload({
-      organizationId: assignment.organization_id,
-      businessUnitId: assignment.business_unit_id,
-      operationalJobId: context.operational_job_id,
-      workOrderId: context.work_order_id,
-      workerAssignmentId: assignment.id,
-      evidenceType: "photo_after",
-      storageSystem: "supabase_storage",
-      storageReference: objectName,
-      evidencePayload: { original_name: file.name, mime_type: file.type, byte_size: file.size, sha256: hash },
-      capturedAt: new Date().toISOString(),
-      capturedByWorkerId: worker.id,
-      capturedByAppUserId: appUserId,
-      metadata: { source: "worker_mobile_completion", bucket: "serviceos-completion-evidence" },
-    }), accessToken);
-    persisted.push(evidence);
-  }
-  return persisted;
 }
 
 async function acknowledgeWorkerNotificationDelivery(workerAssignmentId) {
@@ -468,8 +422,7 @@ function WorkerOperations({ revenueContext }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [completedTasks, setCompletedTasks] = useState([]);
-  const [qaPhotos, setQaPhotos] = useState([]);
-  const [photoState, setPhotoState] = useState("empty");
+  const [photoEntries, setPhotoEntries] = useState([]);
   const appUserId = revenueContext?.appUserId ?? null;
 
   const selected = useMemo(()=>assignments.find(a=>a.id===selectedId) ?? null,[assignments,selectedId]);
@@ -508,16 +461,41 @@ function WorkerOperations({ revenueContext }) {
       }));
       setAssignments(nextAssignments);
       setContexts(nextContexts);
-      const nextSelected = selectedId && nextAssignments.some((assignment) => assignment.id === selectedId)
-        ? selectedId
-        : nextAssignments?.[0]?.id || "";
-      setSelectedId(nextSelected);
-      if (!message) setMessage(`Loaded ${nextAssignments.length} assignment(s).`);
+      setSelectedId((current) => current && nextAssignments.some((assignment) => assignment.id === current)
+        ? current
+        : nextAssignments?.[0]?.id || "");
     } catch (e) { setError(e?.message ?? String(e)); }
     finally { setBusy(false); }
-  }, [appUserId, selectedId, message]);
+  }, [appUserId]);
 
   useEffect(()=>{ load(); }, []);
+  useEffect(() => {
+    const refresh = (event) => { if (serviceOSInvalidationMatches(event, selected?.business_unit_id)) load(); };
+    const onVisibility = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, refresh);
+    window.addEventListener("focus", refresh);
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") load(); }, 30000);
+    return () => { window.removeEventListener(SERVICEOS_WORKSPACE_INVALIDATED_EVENT, refresh); window.removeEventListener("focus", refresh); document.removeEventListener("visibilitychange", onVisibility); window.clearInterval(timer); };
+  }, [load, selected?.business_unit_id]);
+
+  const updatePhotoEntry = useCallback((id, patch) => setPhotoEntries((current) => current.map((entry) => entry.id === id ? { ...entry, ...patch } : entry)), []);
+  const uploadPhoto = useCallback(async (entry) => {
+    try {
+      return await persistMobileEvidenceEntry({ entry, worker, assignment: selected, context, appUserId, onState: (patch) => updatePhotoEntry(entry.id, patch) });
+    } catch (uploadError) {
+      updatePhotoEntry(entry.id, { state: "error", error: uploadError?.message || String(uploadError) });
+      throw uploadError;
+    }
+  }, [appUserId, context, selected, updatePhotoEntry, worker]);
+  const addPhotos = (files) => setPhotoEntries((current) => [...current, ...files.map((file, index) => mobileEvidenceEntry(file, current.length + index))]);
+  const retryPhoto = async (id) => {
+    const entry = photoEntries.find((item) => item.id === id);
+    if (!entry) return;
+    setBusy(true); setError("");
+    try { await uploadPhoto(entry); } catch (retryError) { setError(retryError?.message || String(retryError)); }
+    finally { setBusy(false); }
+  };
 
   const acknowledge = async () => {
     if (!selected || selected.assignment_status !== "assigned") return;
@@ -545,16 +523,15 @@ function WorkerOperations({ revenueContext }) {
     if (!note.trim()) { setError("Enter a completion note before submitting to QA."); return; }
     setBusy(true); setError("");
     try {
-      setPhotoState(qaPhotos.length ? "uploading" : "empty");
-      await persistCompletionPhotos({ files: qaPhotos, worker, assignment: selected, context, appUserId });
-      if (qaPhotos.length) setPhotoState("verified");
+      const pendingPhotos = photoEntries.filter((entry) => entry.state !== "linked");
+      for (const entry of pendingPhotos) await uploadPhoto(entry);
       const result = await postJobCompletion(selected.id, note.trim());
       const warning = result?.notificationWarning ? ` ${result.notificationWarning}` : "";
       setNote("");
-      setQaPhotos([]);
+      setPhotoEntries([]);
       await load();
       setMessage(`Submitted to QA successfully. Your work is complete; QA review is now pending.${warning}`);
-    } catch(e){setPhotoState(qaPhotos.length ? "error" : "empty");setError(e?.message??String(e));} finally{setBusy(false);}
+    } catch(e){setError(e?.message??String(e));} finally{setBusy(false);}
   };
 
   const assignmentLabel = (assignment) => {
@@ -584,30 +561,16 @@ function WorkerOperations({ revenueContext }) {
       <div style={styles.detailRow}><span style={styles.label}>Access notes</span><span>{context.access_instructions?.notes || context.access_instructions?.instructions || (typeof context.access_instructions === "string" ? context.access_instructions : "No special access notes")}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Instructions</span><span>{context.customer_instructions?.notes || scope.notes || "No special instructions"}</span></div>
       <div style={styles.detailRow}><span style={styles.label}>Work order</span><span>{humanize(context.work_order_status)}</span></div>
-      {context.earnedPayable ? <div style={styles.detailRow} data-worker-earned-payout="true"><span style={styles.label}>Earned payout</span><span><strong>{new Intl.NumberFormat("en",{style:"currency",currency:context.earnedPayable.currency_code}).format(Number(context.earnedPayable.computed_amount))}</strong> · {humanize(context.earnedPayable.payable_status)}{context.earnedPayable.compensation_method==="hourly" ? ` · ${Number(context.earnedPayable.basis_value).toFixed(2)} actual hours` : " · governed flat contract"}</span></div> : null}
+      <EarnedPayoutBanner payable={context.earnedPayable} qaPending={context.operational_status === "qa_pending"} />
       <TechnicalDetails><span>Work order: {context.work_order_id}</span><span>Assignment: {selected?.id}</span></TechnicalDetails>
       {context.context_error ? <div style={styles.error}>{context.context_error}</div> : null}
     </div> : null}
 
     {executionActive ? <CleanerExecutionPlaybook key={selectedId} context={context} addons={addons} /> : null}
 
-    {executionActive ? <section className="field-checklist" aria-labelledby="field-checklist-title">
-      <div className="field-checklist__heading"><div><p className="admin-eyebrow">Service checklist</p><h3 id="field-checklist-title">Complete every required step</h3></div><StatusBadge tone={completedTasks.length === fieldTasks.length ? "success" : "warning"}>{completedTasks.length}/{fieldTasks.length}</StatusBadge></div>
-      {fieldTasks.map((task, index) => {
-        const key = `${selectedId}:${index}`;
-        const checked = completedTasks.includes(key);
-        return <label className={`field-checklist-item ${checked ? "is-complete" : ""}`} key={key}><input type="checkbox" checked={checked} disabled={completionLocked} onChange={() => setCompletedTasks((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} /><span>{task}</span><b aria-hidden="true">{checked ? "✓" : index + 1}</b></label>;
-      })}
-    </section> : null}
+    {executionActive ? <TechnicianExecutionCard tasks={fieldTasks} completedTasks={completedTasks} assignmentId={selectedId} disabled={completionLocked} onToggle={(key) => setCompletedTasks((current) => current.includes(key) ? current.filter((item) => item !== key) : [...current, key])} /> : null}
 
-    {executionActive ? <section className="field-photo-zone" aria-labelledby="field-photo-title">
-      <div><p className="admin-eyebrow">Quality evidence</p><h3 id="field-photo-title">Add completion photos</h3><p>JPEG, PNG, or WebP photos are uploaded to the private completion-evidence vault when you submit.</p></div>
-      <label className="field-photo-button"><input type="file" accept="image/*" capture="environment" multiple onChange={(event) => { setQaPhotos(Array.from(event.target.files || [])); setPhotoState("empty"); }} /><span>＋ Add photos</span></label>
-      {photoState === "uploading" ? <StatusBadge tone="warning">Uploading…</StatusBadge> : null}
-      {photoState === "verified" ? <StatusBadge tone="success">Quarantined &amp; linked</StatusBadge> : null}
-      {photoState === "error" ? <StatusBadge tone="danger">Upload failed · retry</StatusBadge> : null}
-      {qaPhotos.length && photoState === "empty" ? <StatusBadge tone="info">{qaPhotos.length} photo{qaPhotos.length === 1 ? "" : "s"} ready</StatusBadge> : null}
-    </section> : null}
+    {executionActive ? <ResilientEvidenceUploader entries={photoEntries} disabled={busy || completionLocked} onFiles={addPhotos} onRetry={retryPhoto} /> : null}
 
     <div style={styles.row}>
       <button className="field-primary-action" style={styles.secondary} onClick={acknowledge} disabled={busy||!selected||selected.assignment_status!=="assigned"}>Acknowledge</button>

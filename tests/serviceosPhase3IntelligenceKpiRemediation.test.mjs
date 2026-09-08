@@ -7,7 +7,8 @@ const booking=fs.readFileSync("api/bookings/create.js","utf8");
 const geocode=fs.readFileSync("server-internal/service-location-geocoding.js","utf8");
 const dashboard=fs.readFileSync("src/features/intelligence/Os10IntelligenceDashboard.jsx","utf8");
 const payables=fs.readFileSync("src/features/wave5/CleanerPayablesPanel.jsx","utf8");
-const worker=fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx","utf8");
+const worker=fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx","utf8")
+  + fs.readFileSync("src/features/wave3/TechnicianExecutionCard.jsx","utf8");
 
 test("QA finalization seals payables and realized profitability atomically",()=>{
   assert.match(sql,/staff_finalize_qa_inspection[\s\S]*for v_a in select \* from public\.worker_assignment/);

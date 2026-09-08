@@ -31,7 +31,8 @@ import "./serviceosPhase3IntelligenceKpiRemediation.test.mjs";
 
 const sql = fs.readFileSync("supabase/migrations/20260907190000_qa_completion_pipeline_remediation.sql", "utf8");
 const qa = fs.readFileSync("src/features/wave4/ServiceOSQaWorkspace.jsx", "utf8");
-const worker = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx", "utf8");
+const worker = fs.readFileSync("src/features/wave3/ServiceOSOperationsWorkspace.jsx", "utf8")
+  + fs.readFileSync("src/lib/serviceosMobileEvidence.js", "utf8");
 const api = fs.readFileSync("api/notifications.js", "utf8");
 const delivery = fs.readFileSync("src/server/customerCompletionDelivery.js", "utf8");
 
