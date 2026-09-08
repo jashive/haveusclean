@@ -319,7 +319,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   if (!["qa", "owner_admin", "office_ops"].includes(role)) return <section style={styles.panel}>QA access denied.</section>;
 
   return (
-    <section style={styles.panel} data-serviceos-workspace="wave4-qa-production">
+    <section id="qa-workspace" style={styles.panel} data-serviceos-workspace="wave4-qa-production">
       <h2 style={styles.title}>Wave 4 Quality Assurance</h2>
       <p style={styles.copy}>Review completed jobs for {businessUnitCode}. Select a customer to load the governed QA case; database lifecycle guards remain the final authority.</p>
       <div style={styles.actions}><button type="button" style={{...styles.button,...styles.secondary}} onClick={loadQueue} disabled={busy}>{busy ? "Refreshing…" : `Refresh ${businessUnitCode}`}</button></div>
