@@ -109,10 +109,10 @@ export default function ServiceOSWave1Workspace() {
   const cockpitAuthorized = ["owner_admin", "office_ops"].includes(role) && operationsAuthorized && qaAuthorized && financeAuthorized;
   const activeWave = financeAuthorized ? "wave5" : qaAuthorized ? "wave4" : operationsAuthorized ? "wave3" : revenueAuthorized ? "wave2" : "wave1";
   const workspaceTitle = role === "owner_admin"
-    ? "ServiceOS Administrative Workspace"
+    ? "Operations Command Center"
     : financeAuthorized ? "Wave 5 Finance Workspace" : qaAuthorized ? "Wave 4 Quality Assurance Workspace" : operationsAuthorized ? "ServiceOS Operations Workspace" : revenueAuthorized ? "ServiceOS Revenue Workspace" : "Wave 1 Access Workspace";
   const workspaceSubtitle = role === "owner_admin"
-    ? "Owner/Admin access across enabled Revenue, Operations, QA, Finance, and Staff Administration gates"
+    ? `${activeBusinessUnit?.code ?? "ServiceOS"} · Daily operations, dispatch, team, and financial control`
     : financeAuthorized
       ? "Controlled Finance rollout with provider execution and Intelligence gates preserved"
       : qaAuthorized
@@ -157,7 +157,7 @@ export default function ServiceOSWave1Workspace() {
       data-staff-admin-authorized={staffAdminAuthorized ? "true" : "false"}
       data-active-business-unit={activeBusinessUnit?.code ?? "unavailable"}
     >
-      <div style={styles.shell} className="admin-shell__content">
+      <div style={{ ...styles.shell, maxWidth: cockpitAuthorized ? 1480 : styles.shell.maxWidth }} className="admin-shell__content">
         <header style={styles.header}>
           <div>
             <div style={styles.eyebrow}>Have Us Clean · ServiceOS 1.0</div>
@@ -169,7 +169,7 @@ export default function ServiceOSWave1Workspace() {
           </button>
         </header>
 
-        <section style={styles.grid} aria-label="Authenticated ServiceOS context">
+        {!cockpitAuthorized ? <section style={styles.grid} aria-label="Authenticated ServiceOS context">
           <div style={styles.card} className="admin-context-card"><div style={styles.label}>Signed in</div><div style={styles.value}>{email}</div></div>
           <div style={styles.card} className="admin-context-card"><div style={styles.label}>Access role</div><div style={styles.value}>{ROLE_LABELS[role] ?? role}</div><StatusBadge tone="success">Active</StatusBadge></div>
           <div style={styles.card} className="admin-context-card"><div style={styles.label}>Organization</div><div style={styles.value}>Have Us Clean</div><TechnicalDetails><span>Organization ID: {organizationId}</span></TechnicalDetails></div>
@@ -187,15 +187,15 @@ export default function ServiceOSWave1Workspace() {
             ) : <div style={styles.value}>{businessUnits.length ? businessUnits.join(", ") : "No visible business unit"}</div>}
             {activeBusinessUnit ? <div style={{ ...styles.notice, marginTop: 6 }}>Active: {MARKET_LABELS[activeBusinessUnit.code] ?? activeBusinessUnit.name}</div> : null}
           </div>
-        </section>
+        </section> : null}
 
-        <section style={{ ...styles.card, marginBottom: 14 }}>
+        {!cockpitAuthorized ? <section style={{ ...styles.card, marginBottom: 14 }}>
           <h2 style={styles.sectionTitle}>Canonical access status</h2>
           <p style={styles.notice}>ServiceOS is the operational system of record. Incomplete leads may be captured before qualification. Quote preparation does not fabricate customer acceptance, conversion, job handoff, or accounting events. Quote revision also does not fabricate customer acceptance, conversion, job handoff, or accounting events. Revised quotes create a new canonical version and preserve the prior version as Superseded. Native quote delivery marks a quote Sent only after email-provider acceptance. Only an explicit recorded Accepted response may cross the Revenue → Operations boundary.</p>
           <div style={styles.status}>Canonical shell active · {activeBusinessUnit?.code ?? "No BU"}</div>
-        </section>
+        </section> : null}
 
-        <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized || staffAdminAuthorized) ? 14 : 0 }}>
+        {!cockpitAuthorized ? <section style={{ ...styles.card, marginBottom: (revenueAuthorized || operationsAuthorized || qaAuthorized || financeAuthorized || staffAdminAuthorized) ? 14 : 0 }}>
           <h2 style={styles.sectionTitle}>ServiceOS rollout gates</h2>
           <p style={styles.notice}>Revenue, Operations, QA, Finance, and Staff Administration use independent role-aware gates. Owner/Admin may open every enabled administrative gate. Intelligence remains dark until its own rollout gate is accepted.</p>
           <div style={styles.actions}>
@@ -207,9 +207,9 @@ export default function ServiceOSWave1Workspace() {
             <span style={staffAdminAuthorized ? styles.enabled : styles.disabled}>{staffAdminAuthorized ? "Staff Admin · active" : "Staff Admin · disabled"}</span>
             <span style={styles.disabled}>Intelligence · disabled</span>
           </div>
-        </section>
+        </section> : null}
 
-        {cockpitAuthorized ? <Suspense fallback={<div role="status">Loading administrative cockpit…</div>}><AdminCockpitLayout session={session} revenueContext={activeRevenueContext} staffAdminAuthorized={staffAdminAuthorized} /></Suspense> : null}
+        {cockpitAuthorized ? <Suspense fallback={<div role="status">Loading administrative cockpit…</div>}><AdminCockpitLayout session={session} revenueContext={activeRevenueContext} staffAdminAuthorized={staffAdminAuthorized} marketControl={canSelectMarket ? <label className="admin-market-control"><span>Territory</span><select value={activeBusinessUnit?.code ?? ""} onChange={handleMarketChange} aria-label="Active Have Us Clean market">{businessUnitRecords.map((item) => <option key={item.id} value={item.code}>{MARKET_LABELS[item.code] ?? `${item.name} — ${item.code}`}</option>)}</select></label> : <span className="admin-market-readonly">{activeBusinessUnit?.code ?? businessUnits[0] ?? "No territory"}</span>} /></Suspense> : null}
         {!cockpitAuthorized && staffAdminAuthorized ? <Suspense fallback={<div role="status">Loading Staff Management…</div>}><ServiceOSStaffAdminWorkspace /></Suspense> : null}
         {!cockpitAuthorized && role === "owner_admin" ? <Suspense fallback={<div role="status">Loading executive metrics…</div>}><ExecutiveKpiBar revenueContext={activeRevenueContext} /></Suspense> : null}
         {!cockpitAuthorized && revenueAuthorized ? (
