@@ -229,6 +229,28 @@ export async function fetchOperationalJobById(id, accessToken) {
   return fetchOneById("operational_job", id, accessToken);
 }
 
+export async function fetchPricingSnapshotById(id, accessToken) {
+  assertEnabled();
+  return fetchOneById("pricing_snapshot", id, accessToken);
+}
+
+export async function fetchServiceDefinitionVersionByConfigurationVersion(configurationVersionId, accessToken) {
+  assertEnabled();
+  const rows = await fetchMany(
+    "service_definition_version",
+    `configuration_version_id=eq.${encodeURIComponent(configurationVersionId)}&limit=2`,
+    accessToken
+  );
+  if (!Array.isArray(rows) || rows.length !== 1) {
+    throw new Error(`Expected exactly one service definition for configuration version ${configurationVersionId}`);
+  }
+  const definition = await fetchOneById("service_definition", rows[0].service_definition_id, accessToken);
+  if (!definition?.service_key) {
+    throw new Error(`Service definition identity is unavailable for configuration version ${configurationVersionId}`);
+  }
+  return { ...rows[0], service_key: definition.service_key, service_family_key: definition.service_family_key };
+}
+
 export async function fetchOperationalJobByHandoffId(handoffId, accessToken) {
   assertEnabled();
   const rows = await fetchMany(
