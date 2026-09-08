@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   createCorrectiveAction,
   createQaInspection,
@@ -38,14 +38,26 @@ const styles = {
   secondary: { background: "#26364B", color: "#F5F8FC" },
   status: { marginTop: 14, padding: 12, borderRadius: 8, background: "#0D1422", color: "#C6D2E0", whiteSpace: "pre-wrap" },
   error: { marginTop: 14, color: "#FF8F8F" },
+  queue: { display: "grid", gap: 10, marginTop: 16 },
+  queueButton: { width: "100%", display: "grid", gridTemplateColumns: "minmax(170px,1.2fr) minmax(220px,2fr) minmax(150px,1fr) auto", gap: 12, alignItems: "center", textAlign: "left", border: "1px solid #344359", borderRadius: 12, background: "#0D1422", color: "#F5F8FC", padding: 14, cursor: "pointer" },
+  selectedQueueButton: { borderColor: "#00D4AA", boxShadow: "0 0 0 2px rgba(0,212,170,.18)" },
+  meta: { display: "block", color: "#AEBAC9", fontSize: 13, marginTop: 4 },
+  badge: { display: "inline-flex", alignItems: "center", minHeight: 28, borderRadius: 999, padding: "4px 9px", background: "#26364B", color: "#E9F2FC", fontSize: 12, fontWeight: 800 },
+  empty: { marginTop: 16, padding: 20, border: "1px dashed #344359", borderRadius: 12, color: "#AEBAC9", textAlign: "center" },
 };
+
+function formatDate(value) { return value ? new Intl.DateTimeFormat(undefined,{dateStyle:"medium",timeStyle:"short"}).format(new Date(value)) : "Date unavailable"; }
+function formatDuration(minutes) { if (!Number.isFinite(Number(minutes))) return "Duration unavailable"; const total=Number(minutes); return `${Math.floor(total/60)}h ${total%60}m`; }
 
 export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   const role = revenueContext?.roleCode ?? "unknown";
   const accessToken = session?.access_token ?? null;
   const appUserId = revenueContext?.appUserId ?? null;
-  const [jobId, setJobId] = useState("");
-  const [workOrderId, setWorkOrderId] = useState("");
+  const organizationId = revenueContext?.orgId ?? null;
+  const businessUnitId = revenueContext?.primaryBusinessUnitId ?? null;
+  const businessUnitCode = revenueContext?.activeBusinessUnitCode ?? "Active market";
+  const [queue, setQueue] = useState([]);
+  const [selectedCase, setSelectedCase] = useState(null);
   const [score, setScore] = useState("100");
   const [findings, setFindings] = useState("QA review completed; no deficiencies found.");
   const [caseData, setCaseData] = useState(null);
@@ -72,18 +84,27 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
 
   const passInspection = currentInspection ?? recoverablePassedInspection;
 
-  const refresh = useCallback(async () => {
+  const loadQueue = useCallback(async () => {
+    if (!organizationId || !businessUnitId) return;
+    setBusy(true); setError("");
+    try {
+      const response = await authenticatedRestFetchWithRefresh("rpc/get_qa_review_queue", { method:"POST", body:JSON.stringify({p_organization_id:organizationId,p_business_unit_id:businessUnitId,p_limit:100}) });
+      const payload = await response?.json().catch(()=>null);
+      if (!response?.ok) throw new Error(payload?.message || payload?.error || "Unable to load the QA review queue.");
+      setQueue(Array.isArray(payload) ? payload : []);
+    } catch (err) { setQueue([]); setError(err?.message ?? String(err)); }
+    finally { setBusy(false); }
+  }, [organizationId,businessUnitId]);
+
+  const refresh = useCallback(async (target = selectedCase) => {
     setError("");
-    if (!jobId.trim() || !workOrderId.trim()) {
-      setError("Operational job ID and work order ID are required.");
-      return;
-    }
+    if (!target?.operational_job_id || !target?.work_order_id) return;
     setBusy(true);
     try {
-      const job = await fetchOperationalJobById(jobId.trim(), accessToken);
-      const workOrder = await fetchWorkOrderForJob(jobId.trim(), accessToken);
+      const job = await fetchOperationalJobById(target.operational_job_id, accessToken);
+      const workOrder = await fetchWorkOrderForJob(target.operational_job_id, accessToken);
       if (!job) throw new Error("Operational job not found or not visible to this QA role.");
-      if (!workOrder || workOrder.id !== workOrderId.trim()) throw new Error("Work order does not match the selected operational job.");
+      if (!workOrder || workOrder.id !== target.work_order_id) throw new Error("Work order does not match the selected operational job.");
       if (!["qa_pending", "qa_passed", "corrective_action_required"].includes(job.operational_status)) {
         throw new Error(`Job is not in a QA-stage status: ${job.operational_status}`);
       }
@@ -99,7 +120,11 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
     } finally {
       setBusy(false);
     }
-  }, [jobId, workOrderId, accessToken]);
+  }, [selectedCase, accessToken]);
+
+  const selectCase = useCallback(async (row) => { setSelectedCase(row); setCaseData(null); await refresh(row); }, [refresh]);
+  useEffect(() => { setSelectedCase(null); setCaseData(null); loadQueue(); }, [loadQueue]);
+  useEffect(() => { const onFocus=()=>loadQueue(); window.addEventListener("focus",onFocus); return()=>window.removeEventListener("focus",onFocus); }, [loadQueue]);
 
   const startQa = useCallback(async () => {
     if (!caseData?.job || !caseData?.workOrder) return;
@@ -172,7 +197,7 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   }, [passInspection, caseData, score, findings, accessToken, appUserId, refresh]);
 
   const finalizeQa = useCallback(async (outcome) => {
-    if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
+    if (!caseData?.job || !caseData?.workOrder) return;
     const reason = waiverReason.trim();
     if (outcome === "waived" && !reason) {
       setError("A governed waiver reason is required.");
@@ -181,10 +206,19 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
     setBusy(true);
     setError("");
     try {
+      let inspection = currentInspection;
+      if (!inspection) {
+        inspection = await createQaInspection(buildQaInspectionPayload({
+          organizationId:caseData.job.organization_id,businessUnitId:caseData.job.business_unit_id,
+          operationalJobId:caseData.job.id,workOrderId:caseData.workOrder.id,inspectorAppUserId:appUserId,
+          inspectionStatus:"pending",inspectionType:"standard",findings:{},metadata:{source:"wave4_governed_queue",synthetic:false},
+        }),accessToken);
+        inspection = await updateQaInspectionStatus(inspection.id,"in_progress",accessToken,appUserId);
+      }
       await authenticatedRestFetchWithRefresh("rpc/staff_finalize_qa_inspection", {
         method: "POST",
         body: JSON.stringify({
-          p_qa_inspection_id: currentInspection.id,
+          p_qa_inspection_id: inspection.id,
           p_outcome: outcome,
           p_score: outcome === "passed" ? Number(score) : null,
           p_findings: findings.trim() || null,
@@ -193,13 +227,15 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
       }).then(async (response) => {
         if (!response?.ok) throw new Error(`QA finalization failed: ${await response?.text().catch(() => "")}`);
       });
-      await refresh();
+      await loadQueue();
+      setSelectedCase(null);
+      setCaseData(null);
     } catch (err) {
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
     }
-  }, [currentInspection, caseData, score, findings, waiverReason, refresh]);
+  }, [currentInspection, caseData, score, findings, waiverReason, loadQueue, appUserId, accessToken]);
 
   const openEvidence = useCallback(async (row) => {
     if (!row?.storage_reference) return;
@@ -219,20 +255,29 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   }, [accessToken]);
 
   const failQa = useCallback(async () => {
-    if (!currentInspection || !caseData?.job || !caseData?.workOrder) return;
+    if (!caseData?.job || !caseData?.workOrder) return;
     setBusy(true);
     setError("");
     try {
       const note = findings.trim();
       if (!note) throw new Error("Findings are required for a failed QA inspection.");
-      await updateQaInspectionStatus(currentInspection.id, "failed", accessToken, appUserId, { score: Number(score) || 0 });
+      let inspection = currentInspection;
+      if (!inspection) {
+        inspection = await createQaInspection(buildQaInspectionPayload({
+          organizationId:caseData.job.organization_id,businessUnitId:caseData.job.business_unit_id,
+          operationalJobId:caseData.job.id,workOrderId:caseData.workOrder.id,inspectorAppUserId:appUserId,
+          inspectionStatus:"pending",inspectionType:"standard",findings:{},metadata:{source:"wave4_governed_queue",synthetic:false},
+        }),accessToken);
+        inspection = await updateQaInspectionStatus(inspection.id,"in_progress",accessToken,appUserId);
+      }
+      await updateQaInspectionStatus(inspection.id, "failed", accessToken, appUserId, { score: Number(score) || 0 });
       const corrective = await createCorrectiveAction(
         buildCorrectiveActionPayload({
           organizationId: caseData.job.organization_id,
           businessUnitId: caseData.job.business_unit_id,
           operationalJobId: caseData.job.id,
           workOrderId: caseData.workOrder.id,
-          qaInspectionId: currentInspection.id,
+          qaInspectionId: inspection.id,
           actionStatus: "open",
           actionType: "rework",
           description: note,
@@ -268,20 +313,26 @@ export default function ServiceOSQaWorkspace({ session, revenueContext }) {
   return (
     <section style={styles.panel} data-serviceos-workspace="wave4-qa-production">
       <h2 style={styles.title}>Wave 4 Quality Assurance</h2>
-      <p style={styles.copy}>Governed QA workspace for QA, Owner/Admin, and Office Operations reviewers. Database lifecycle guards remain the final authority.</p>
-      <div style={styles.grid}>
-        <label style={styles.field}><span style={styles.label}>Operational job ID</span><input style={styles.input} value={jobId} onChange={(e) => setJobId(e.target.value)} /></label>
-        <label style={styles.field}><span style={styles.label}>Work order ID</span><input style={styles.input} value={workOrderId} onChange={(e) => setWorkOrderId(e.target.value)} /></label>
+      <p style={styles.copy}>Review completed jobs for {businessUnitCode}. Select a customer to load the governed QA case; database lifecycle guards remain the final authority.</p>
+      <div style={styles.actions}><button type="button" style={{...styles.button,...styles.secondary}} onClick={loadQueue} disabled={busy}>{busy ? "Refreshing…" : `Refresh ${businessUnitCode}`}</button></div>
+      <div style={styles.queue} role="list" aria-label={`${businessUnitCode} jobs pending QA`}>
+        {queue.map((row)=><button className="qa-review-queue__item" key={row.operational_job_id} type="button" role="listitem" style={{...styles.queueButton,...(selectedCase?.operational_job_id===row.operational_job_id?styles.selectedQueueButton:{})}} onClick={()=>selectCase(row)} disabled={busy}>
+          <span><strong>{row.customer_name}</strong><span style={styles.meta}>{row.cleaner_names}</span></span>
+          <span><strong>{row.service_address || "Address unavailable"}</strong><span style={styles.meta}>{row.service_tier}</span></span>
+          <span><strong>{formatDate(row.service_date || row.service_completed_at)}</strong><span style={styles.meta}>{formatDuration(row.elapsed_minutes)}</span></span>
+          <span style={styles.badge}>{row.photo_count} photo{row.photo_count===1?"":"s"}</span>
+        </button>)}
+      </div>
+      {!busy && queue.length===0 ? <div style={styles.empty}>No jobs are waiting for QA in {businessUnitCode}.</div> : null}
+      {selectedCase ? <div style={styles.grid}>
         <label style={styles.field}><span style={styles.label}>QA score</span><input style={styles.input} value={score} onChange={(e) => setScore(e.target.value)} inputMode="decimal" /></label>
         <label style={styles.field}><span style={styles.label}>Findings</span><input style={styles.input} value={findings} onChange={(e) => setFindings(e.target.value)} /></label>
         <label style={styles.field}><span style={styles.label}>Waiver reason</span><input style={styles.input} value={waiverReason} onChange={(e) => setWaiverReason(e.target.value)} placeholder="Required only when waiving QA" /></label>
-      </div>
+      </div> : null}
       <div style={styles.actions}>
-        <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={refresh} disabled={busy}>{busy ? "Working…" : "Load / Refresh QA Case"}</button>
-        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={startQa} disabled={busy || !caseData || caseData.job.operational_status !== "qa_pending" || !!currentInspection || !!passedInspection}>Start QA</button>
-        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={() => currentInspection ? finalizeQa("passed") : passQa()} disabled={busy || !passInspection}>{recoverablePassedInspection ? "Finalize Passed QA" : "Pass QA"}</button>
-        <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={() => finalizeQa("waived")} disabled={busy || !currentInspection || !waiverReason.trim()}>Waive QA</button>
-        {role !== "office_ops" ? <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !currentInspection}>Fail QA + Open Rework</button> : null}
+        <button type="button" style={{ ...styles.button, ...styles.primary }} onClick={() => recoverablePassedInspection ? passQa() : finalizeQa("passed")} disabled={busy || !caseData}>{recoverablePassedInspection ? "Finalize Passed QA" : "Pass QA"}</button>
+        <button type="button" style={{ ...styles.button, ...styles.secondary }} onClick={() => finalizeQa("waived")} disabled={busy || !caseData || !waiverReason.trim()}>Waive QA</button>
+        <button type="button" style={{ ...styles.button, ...styles.danger }} onClick={failQa} disabled={busy || !caseData}>Fail QA + Open Rework</button>
       </div>
       {recoverablePassedInspection ? <div style={styles.status}>Recovery detected: QA inspection already passed. Finalize the governed work-order/job transition and audit event.</div> : null}
       {caseData?.completionEvidence?.filter((row) => row.storage_reference).length ? <div style={styles.status}><strong>Completion photos</strong>{caseData.completionEvidence.filter((row) => row.storage_reference).map((row, index) => <div key={row.id} style={{marginTop:8}}><button type="button" style={{...styles.button,...styles.secondary}} onClick={() => openEvidence(row)}>Open photo {index + 1}</button> <span>{row.evidence_type.replaceAll("_", " ")}</span></div>)}</div> : null}
