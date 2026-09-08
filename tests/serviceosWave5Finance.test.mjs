@@ -2827,6 +2827,29 @@ test("138. compensation version resolution includes effective_from/effective_to,
   );
 });
 
+test("138b. historical retired compensation remains eligible inside its effective interval", () => {
+  assert.ok(
+    acceptanceRunnerSrc.includes("compensation_status=in.(approved,active,retired)"),
+    "acceptance resolution must include historically retired compensation versions"
+  );
+  assert.ok(
+    wave5RuntimeSrc.includes('["approved", "active", "retired"]'),
+    "runtime payable creation must accept historically retired compensation versions"
+  );
+  const migration = readFileSync(
+    resolve(ROOT, "supabase/migrations/20260908150000_preserve_historical_compensation_for_qa.sql"),
+    "utf8"
+  );
+  assert.ok(
+    migration.includes("compensation_status in (''approved'',''active'',''retired'')"),
+    "QA finalization must resolve retired versions by effective interval"
+  );
+  assert.ok(
+    migration.includes("NOT IN (''approved'', ''active'', ''retired'')"),
+    "DB payable guard must accept retired historical versions"
+  );
+});
+
 // 139. Multiple genuinely effective compensation versions — fail closed
 test("139. multiple effective compensation versions causes fail closed", () => {
   const src = acceptanceRunnerSrc;

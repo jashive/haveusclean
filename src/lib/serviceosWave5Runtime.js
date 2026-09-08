@@ -476,9 +476,9 @@ export async function createPayableForAssignment(scope, workerAssignment, operat
   const { organizationId, businessUnitId } = scope;
   const { accessToken, appUserId } = opts;
 
-  if (!["approved", "active"].includes(compensationVersion?.compensation_status)) {
+  if (!["approved", "active", "retired"].includes(compensationVersion?.compensation_status)) {
     throw new Error(
-      `createPayableForAssignment: compensation version must be approved or active (is: ${compensationVersion?.compensation_status})`
+      `createPayableForAssignment: compensation version must be approved, active, or historically retired (is: ${compensationVersion?.compensation_status})`
     );
   }
 
