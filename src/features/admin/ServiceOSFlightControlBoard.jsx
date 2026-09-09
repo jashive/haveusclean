@@ -34,7 +34,7 @@ function elapsed(startedAt, now) {
 }
 
 function Lane({ id, title, eyebrow, count, children, empty }) {
-  return <section className="flight-control-lane" aria-labelledby={`${id}-title`}>
+  return <section className="flight-control-lane" aria-labelledby={`${id}-title`} data-tip={`${title} contains ${count} current item${count === 1 ? "" : "s"}. Open a card action to move work forward.`}>
     <header><div><p>{eyebrow}</p><h3 id={`${id}-title`}>{title}</h3></div><span>{count}</span></header>
     <div className="flight-control-lane__body">{count ? children : <div className="flight-control-empty"><StatusBadge tone="neutral">Clear</StatusBadge><p>{empty}</p></div>}</div>
   </section>;
@@ -45,7 +45,7 @@ export function AssignmentQuickAction({ row }) {
     window.dispatchEvent(new CustomEvent("serviceos:open-secondary-workspace", { detail: { workspace: "operations" } }));
     window.setTimeout(() => window.dispatchEvent(new CustomEvent("serviceos:open-dispatch", { detail: { handoffId: row.id } })), 50);
   };
-  return <button className="huc-button" onClick={open}>Assign cleaner</button>;
+  return <button className="huc-button" data-tip="Open Dispatch with this accepted job selected and assign an operable cleaner." onClick={open}>Assign cleaner</button>;
 }
 
 export function QaEvidenceDrawer({ row, busy, waiverReason, onWaiverReason, onFinalize }) {
@@ -76,14 +76,14 @@ export function QaEvidenceDrawer({ row, busy, waiverReason, onWaiverReason, onFi
     return () => { active = false; objectUrls.forEach((url) => URL.revokeObjectURL(url)); };
   }, [open, row.operational_job_id]);
   return <div className="qa-evidence-drawer">
-    <button className="huc-button huc-button--secondary" onClick={() => setOpen((current) => !current)} aria-expanded={open}>{open ? "Close evidence" : `Review ${row.photo_count || 0} photo${row.photo_count === 1 ? "" : "s"}`}</button>
+    <button className="huc-button huc-button--secondary" data-tip="Inspect linked completion evidence before passing or waiving QA." onClick={() => setOpen((current) => !current)} aria-expanded={open}>{open ? "Close evidence" : `Review ${row.photo_count || 0} photo${row.photo_count === 1 ? "" : "s"}`}</button>
     {open ? <div className="qa-evidence-drawer__panel"><p>{row.photo_count ? `${row.photo_count} governed completion photo${row.photo_count === 1 ? " is" : "s are"} linked to this case.` : "No completion photo is linked. Review the evidence policy before waiving."}</p>{photos.length ? <div className="qa-evidence-preview-grid">{photos.map((photo, index) => <a href={photo.objectUrl} target="_blank" rel="noreferrer" key={photo.id}><img src={photo.objectUrl} alt={`${photo.evidence_type?.replaceAll("_", " ") || "Completion evidence"} ${index + 1}`} /><span>{photo.evidence_type?.replaceAll("_", " ")}</span></a>)}</div> : null}{evidenceError ? <div className="financial-alert" role="alert">{evidenceError}</div> : null}<div className="flight-control-card__actions"><button className="huc-button" disabled={busy} onClick={() => onFinalize("passed")}>Pass QA</button><button className="huc-button huc-button--secondary" onClick={() => window.dispatchEvent(new CustomEvent("serviceos:open-secondary-workspace", { detail: { workspace: "qa" } }))}>Full QA record</button></div><label className="flight-control-waiver"><span>Governed waiver reason</span><input value={waiverReason} onChange={(event) => onWaiverReason(event.target.value)} placeholder="Required for waiver" /><button className="huc-button huc-button--secondary" disabled={busy || !waiverReason.trim()} onClick={() => onFinalize("waived")}>Waive QA</button></label></div> : null}
   </div>;
 }
 
 export function SettlementQuickAction({ row, role, busy, onApprove }) {
   return row.status === "pending" && role === "owner_admin"
-    ? <button className="huc-button" disabled={busy} onClick={onApprove}>Approve payout</button>
+    ? <button className="huc-button" data-tip="Approve the accrued cleaner liability; payment remains a separate disbursement step." disabled={busy} onClick={onApprove}>Approve payout</button>
     : <button className="huc-button huc-button--secondary" onClick={() => window.dispatchEvent(new CustomEvent("serviceos:open-secondary-workspace", { detail: { workspace: "payables" } }))}>Payables history</button>;
 }
 
