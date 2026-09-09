@@ -2,7 +2,7 @@
 // No customer account/password is required. All writes occur server-side through the
 // canonical ServiceOS environment guard and service-role-only RPC boundaries.
 
-import { calculatePublicBookingQuote, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
+import { calculatePublicBookingQuote, loadPublicBookingCatalog, publicBookingServerConfig } from '../../server-internal/public-booking-quote.js';
 import { dispatchIntakeNotifications } from '../../server-internal/intake-notification-delivery.js';
 import { geocodeServiceAddress } from '../../server-internal/service-location-geocoding.js';
 import '../../server-internal/supabase-secret-key-fetch-compat.js';
@@ -228,6 +228,10 @@ export default async function handler(req, res) {
     // Logical endpoints are rewritten to this same serverless function so the
     // Hobby-plan function count stays within the 12-function deployment limit.
     if (action === 'quote') {
+      if (req.body?.catalog === true) {
+        const catalog = await loadPublicBookingCatalog(req.body, config);
+        return res.status(200).json({ success: true, catalog });
+      }
       const quote = await calculatePublicBookingQuote(req.body || {}, config);
       return res.status(200).json({ success: true, quote });
     }

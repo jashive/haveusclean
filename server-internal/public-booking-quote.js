@@ -4,7 +4,7 @@ import {
   GOVERNED_RESIDENTIAL_REQUIRED_STATUS,
   getGovernedResidentialRequiredVersion,
 } from '../src/lib/governedResidentialConfig.js';
-import { computeGovernedResidentialQuote } from '../src/lib/governedResidentialPricing.js';
+import { computeGovernedResidentialQuote, getGovernedResidentialCatalog } from '../src/lib/governedResidentialPricing.js';
 import {
   applyGovernedResidentialAddons,
   getDefaultApprovedSelections,
@@ -111,5 +111,16 @@ export async function calculatePublicBookingQuote(body, config = publicBookingSe
     configurationVersionId: configurationVersion.id,
     configurationVersion: configurationVersion.version,
     input: { dwellingType, beds, baths, packageKey, condition, frequency, sqft, addons },
+  };
+}
+
+export async function loadPublicBookingCatalog(body, config = publicBookingServerConfig()) {
+  const businessUnitCode = normalizeMarket(body?.market || body?.businessUnitCode);
+  const context = await loadMarketContext(businessUnitCode, config);
+  const configurationVersion = await loadPublishedPricing(context, config);
+  return {
+    market: businessUnitCode,
+    configurationVersion: configurationVersion.version,
+    combinations: getGovernedResidentialCatalog(configurationVersion),
   };
 }
