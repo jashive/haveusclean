@@ -37,3 +37,17 @@ test("Ontario and Arizona both load their published catalog by selected market",
   assert.match(widget, /\[form\.market\]/);
   assert.match(api, /Logical endpoints are rewritten to this same serverless function/);
 });
+
+test("3 bedroom / 3 bathroom is exposed by both governed market catalogs", () => {
+  const configuration = (dwellingMatrix) => ({ configuration: { dwelling_matrix: dwellingMatrix } });
+  const ontario = getGovernedResidentialCatalog(configuration({ townhouses: {
+    "3bed_3bath": { essential_refresh: 300, signature_initial_reset: 375, complete_deep: 495, move_in_move_out: 350 },
+  } }));
+  const arizona = getGovernedResidentialCatalog(configuration({
+    apartments_condos: { "3bed_3bath": { essential_refresh: 250 } },
+    townhouses: { "3bed_3bath": { essential_refresh: 255 } },
+    semi_detached_detached: { "3bed_3bath": { essential_refresh: 275 } },
+  }));
+  assert.deepEqual(ontario, [{ dwellingType: "townhouse", bedrooms: 3, bathrooms: 3 }]);
+  assert.equal(arizona.filter((item) => item.bedrooms === 3 && item.bathrooms === 3).length, 3);
+});
