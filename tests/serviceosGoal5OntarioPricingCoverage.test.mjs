@@ -97,8 +97,8 @@ function azConfig() {
   };
 }
 
-test("Ontario live market resolves successor pricing version v1.1", () => {
-  assert.equal(getGovernedResidentialRequiredVersion("HUC-ON"), "ON-2026-08-v1.1");
+test("Ontario live market resolves 3 bed / 3 bath pricing version v1.2", () => {
+  assert.equal(getGovernedResidentialRequiredVersion("HUC-ON"), "ON-2026-08-v1.2");
 });
 
 test("Ontario v1.1 townhouse 3 bed / 2 bath Complete Deep is CA$460 plus HST", () => {
@@ -260,5 +260,18 @@ test("Ontario v1.1 migration preserves v1.0 and publishes the derived 3/2 townho
   assert.match(sql, /'complete_deep', 460/);
   assert.match(sql, /'essential_refresh', 260/);
   assert.match(sql, /owner_approved_midpoint_bridge_from_adjacent_3bed_townhouse_rows/);
+  assert.match(sql, /not exists/);
+});
+
+test("Ontario v1.2 publishes governed townhouse 3 bed / 3 bath coverage", () => {
+  const sql = fs.readFileSync(new URL("../supabase/migrations/20260909180000_goal5_on_3bed_3bath_coverage_v12.sql", import.meta.url), "utf8");
+  assert.match(sql, /ON-2026-08-v1\.1/);
+  assert.match(sql, /ON-2026-08-v1\.2/);
+  assert.match(sql, /3bed_3bath/);
+  assert.match(sql, /'essential_refresh', 300/);
+  assert.match(sql, /'signature_initial_reset', 375/);
+  assert.match(sql, /'complete_deep', 495/);
+  assert.match(sql, /'move_in_move_out', 350/);
+  assert.match(sql, /owner_authorized_adjacent_half_bath_progression/);
   assert.match(sql, /not exists/);
 });
