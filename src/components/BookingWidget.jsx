@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Button, FormField, SelectionTile, StatusBadge, StickySummaryCard } from './ui';
 import { getBundledAddonIdsForPackage } from '../lib/serviceosOfficeQuoteUtils.js';
 
@@ -42,8 +42,8 @@ const COMMERCIAL_ACCESS = [
 const ADDONS = [['inside_refrigerator', 'Inside refrigerator'], ['inside_oven', 'Inside oven'], ['inside_kitchen_cabinets', 'Inside kitchen cabinets'], ['interior_windows', 'Interior windows'], ['pet_hair_removal', 'Pet hair removal'], ['heavy_baseboard_detailing', 'Heavy baseboard detailing']];
 const STEPS = ['Location', 'Home Specs', 'Frequency & Tier', 'Add-ons', 'Schedule & Contact', 'Confirmation'];
 
-const initialResidential = { market: 'HUC-ON', dwellingType: 'apartment', packageKey: 'essential_refresh', bedrooms: 1, bathrooms: 1, sqft: '', condition: 'light', frequency: 'one_time', fullName: '', email: '', phone: '', address: '', addressLine2: '', city: '', postalCode: '', selectedDate: '', selectedTimeSlot: '', accessNotes: '', notes: '', idempotencyKey: makeIdempotencyKey('residential-booking') };
-const initialCommercial = { market: 'HUC-ON', companyName: '', contactName: '', email: '', phone: '', address: '', city: '', postalCode: '', facilityType: 'office', estimatedSquareFeet: '', floorCount: '', frequency: 'weekly', accessRequirements: [], walkthroughDate: '', walkthroughTimeWindow: '', notes: '', idempotencyKey: makeIdempotencyKey('commercial-walkthrough') };
+const createInitialResidential = () => ({ market: 'HUC-ON', dwellingType: 'apartment', packageKey: 'essential_refresh', bedrooms: 1, bathrooms: 1, sqft: '', condition: 'light', frequency: 'one_time', fullName: '', email: '', phone: '', address: '', addressLine2: '', city: '', postalCode: '', selectedDate: '', selectedTimeSlot: '', accessNotes: '', notes: '', idempotencyKey: makeIdempotencyKey('residential-booking') });
+const createInitialCommercial = () => ({ market: 'HUC-ON', companyName: '', contactName: '', email: '', phone: '', address: '', city: '', postalCode: '', facilityType: 'office', estimatedSquareFeet: '', floorCount: '', frequency: 'weekly', accessRequirements: [], walkthroughDate: '', walkthroughTimeWindow: '', notes: '', idempotencyKey: makeIdempotencyKey('commercial-walkthrough') });
 
 function formatMoney(amount, currency) {
   try { return new Intl.NumberFormat(currency === 'CAD' ? 'en-CA' : 'en-US', { style: 'currency', currency: currency || 'USD' }).format(Number(amount || 0)); }
@@ -119,8 +119,10 @@ function CommercialWalkthrough({ commercial, setCommercial, busy, error, status,
 export default function BookingWidget({ onBookingSubmit }) {
   const [mode, setMode] = useState('residential');
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState(initialResidential);
-  const [commercial, setCommercial] = useState(initialCommercial);
+  const [form, setForm] = useState(createInitialResidential);
+  const [commercial, setCommercial] = useState(createInitialCommercial);
+  const [homeCatalog, setHomeCatalog] = useState([]);
+  const [catalogBusy, setCatalogBusy] = useState(true);
   const [selectedAddOns, setSelectedAddOns] = useState([]);
   const [quote, setQuote] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -130,6 +132,23 @@ export default function BookingWidget({ onBookingSubmit }) {
   const packageLabel = PACKAGES.find(([key]) => key === form.packageKey)?.[1];
   const frequencyLabel = FREQUENCIES.find(([key]) => key === form.frequency)?.[1];
   const bundledAddOns = useMemo(() => getBundledAddonIdsForPackage({ packageKey: form.packageKey, businessUnitCode: form.market }), [form.packageKey, form.market]);
+  const homeSizes = useMemo(() => homeCatalog.filter((item) => item.dwellingType === form.dwellingType), [homeCatalog, form.dwellingType]);
+  useEffect(() => {
+    let active = true;
+    setCatalogBusy(true);
+    setHomeCatalog([]);
+    fetch('/api/bookings/quote', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ catalog: true, market: form.market }) })
+      .then((response) => readApiJson(response, 'Published home sizes are temporarily unavailable.'))
+      .then((result) => { if (!result.success) throw new Error(result.error); if (active) setHomeCatalog(result.catalog?.combinations || []); })
+      .catch(() => { if (active) { setHomeCatalog([]); setError('Published home sizes are temporarily unavailable. Please try again.'); } })
+      .finally(() => { if (active) setCatalogBusy(false); });
+    return () => { active = false; };
+  }, [form.market]);
+  useEffect(() => {
+    if (!homeSizes.length) return;
+    const currentIsPublished = homeSizes.some((item) => Number(item.bedrooms) === Number(form.bedrooms) && Number(item.bathrooms) === Number(form.bathrooms));
+    if (!currentIsPublished) setForm((current) => ({ ...current, bedrooms: homeSizes[0].bedrooms, bathrooms: homeSizes[0].bathrooms }));
+  }, [homeSizes, form.bedrooms, form.bathrooms]);
   const update = (name, value) => { setForm((current) => ({ ...current, [name]: value })); setQuote(null); setError(''); };
   const selectPackage = (packageKey) => {
     const included = getBundledAddonIdsForPackage({ packageKey, businessUnitCode: form.market });
@@ -151,7 +170,7 @@ export default function BookingWidget({ onBookingSubmit }) {
     } catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not calculate this estimate.'); }
     finally { setBusy(false); }
   }
-  async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { const result = await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); if (result?.success) setForm((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('residential-booking') })); } finally { setBusy(false); } }
+  async function submitBooking() { if (!quote || busy) return; setBusy(true); setError(''); try { const result = await onBookingSubmit?.({ ...form, selectedAddOns, governedQuote: quote }); if (result?.success) { setForm(createInitialResidential()); setSelectedAddOns([]); setQuote(null); setStep(0); } } finally { setBusy(false); } }
   async function submitCommercial() {
     setBusy(true); setError(''); setCommercialStatus('');
     try {
@@ -160,7 +179,7 @@ export default function BookingWidget({ onBookingSubmit }) {
         commercial.accessRequirements.length ? `Access requirements: ${commercial.accessRequirements.map((value) => COMMERCIAL_ACCESS.find(([key]) => key === value)?.[1] || value).join(', ')}` : '',
         commercial.notes,
       ].filter(Boolean).join('\n');
-      const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: { ...commercial, notes: operationalNotes } }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial((current) => ({ ...current, idempotencyKey: makeIdempotencyKey('commercial-walkthrough') }));
+      const response = await fetch('/api/bookings/commercial-walkthrough', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ walkthroughData: { ...commercial, notes: operationalNotes } }) }); const result = await readApiJson(response, 'We could not submit the walkthrough request. Please try again.'); if (!response.ok || !result.success) throw new Error(result.error || 'We could not submit the walkthrough request.'); setCommercialStatus('Your request is in. Our estimating team will contact you to confirm the walkthrough.'); setCommercial(createInitialCommercial());
     }
     catch (caught) { setError(caught instanceof Error ? caught.message : 'We could not submit the walkthrough request.'); } finally { setBusy(false); }
   }
@@ -176,7 +195,7 @@ export default function BookingWidget({ onBookingSubmit }) {
 
   const panels = [
     <div className="tile-grid tile-grid--two" key="location">{MARKETS.map((item) => <SelectionTile key={item.value} selected={form.market === item.value} title={item.title} description={item.description} meta={`${item.currency} · ${item.tax}`} onClick={() => update('market', item.value)} />)}</div>,
-    <div className="wizard-stack" key="home"><div className="tile-grid tile-grid--three">{DWELLINGS.map(([value, title]) => <SelectionTile key={value} selected={form.dwellingType === value} title={title} onClick={() => update('dwellingType', value)} />)}</div><div className="form-grid"><FormField label="Bedrooms"><input type="number" min="0" step="1" value={form.bedrooms} onChange={(e) => update('bedrooms', e.target.value)} /></FormField><FormField label="Bathrooms"><input type="number" min="0.5" step="0.5" value={form.bathrooms} onChange={(e) => update('bathrooms', e.target.value)} /></FormField><FormField label="Square footage" hint="Optional"><input type="number" min="1" value={form.sqft} onChange={(e) => update('sqft', e.target.value)} /></FormField><FormField label="Current condition"><select value={form.condition} onChange={(e) => update('condition', e.target.value)}><option value="light">Light upkeep</option><option value="moderate">Needs extra attention</option><option value="heavy">Heavy buildup</option></select></FormField></div></div>,
+    <div className="wizard-stack" key="home"><div className="tile-grid tile-grid--three">{DWELLINGS.map(([value, title]) => <SelectionTile key={value} selected={form.dwellingType === value} title={title} onClick={() => update('dwellingType', value)} />)}</div><div className="form-grid"><FormField label="Published home size" hint="Only combinations available in this market are shown."><select data-testid="governed-home-size" disabled={catalogBusy || !homeSizes.length} value={`${form.bedrooms}:${form.bathrooms}`} onChange={(event) => { const [bedrooms, bathrooms] = event.target.value.split(':').map(Number); setForm((current) => ({ ...current, bedrooms, bathrooms })); setQuote(null); setError(''); }}>{catalogBusy ? <option>Loading published sizes…</option> : homeSizes.map((item) => <option key={`${item.bedrooms}:${item.bathrooms}`} value={`${item.bedrooms}:${item.bathrooms}`}>{item.bedrooms} bedroom{item.bedrooms === 1 ? '' : 's'} · {item.bathrooms} bathroom{item.bathrooms === 1 ? '' : 's'}</option>)}</select></FormField><FormField label="Square footage" hint="Optional"><input type="number" min="1" value={form.sqft} onChange={(e) => update('sqft', e.target.value)} /></FormField><FormField label="Current condition"><select value={form.condition} onChange={(e) => update('condition', e.target.value)}><option value="light">Light upkeep</option><option value="moderate">Needs extra attention</option><option value="heavy">Heavy buildup</option></select></FormField></div></div>,
     <div className="wizard-stack" key="service"><h3>Choose your cleaning tier</h3><div className="tile-grid tile-grid--two">{PACKAGES.map(([value, title, description]) => <SelectionTile key={value} selected={form.packageKey === value} title={title} description={description} onClick={() => selectPackage(value)} />)}</div><h3>How often should we visit?</h3><div className="tile-grid tile-grid--four">{FREQUENCIES.map(([value, title, meta]) => <SelectionTile key={value} selected={form.frequency === value} title={title} meta={meta} onClick={() => update('frequency', value)} />)}</div></div>,
     <div className="tile-grid tile-grid--two" key="addons">{ADDONS.map(([value, title]) => { const included = bundledAddOns.has(value); return <SelectionTile key={value} selected={included || selectedAddOns.includes(value)} included={included} disabled={included} title={title} tooltip={included ? 'Included in selected tier' : undefined} description={included ? 'Already included at no additional charge.' : 'Add to this cleaning'} onClick={() => toggleAddon(value)} />; })}</div>,
     <div className="form-grid" key="contact"><FormField label="Full name"><input autoComplete="name" value={form.fullName} onChange={(e) => update('fullName', e.target.value)} /></FormField><FormField label="Email"><input type="email" autoComplete="email" value={form.email} onChange={(e) => update('email', e.target.value)} /></FormField><FormField label="Phone"><input type="tel" autoComplete="tel" value={form.phone} onChange={(e) => update('phone', e.target.value)} /></FormField><FormField label="Street address"><input autoComplete="address-line1" value={form.address} onChange={(e) => update('address', e.target.value)} /></FormField><FormField label="Unit / Apt"><input autoComplete="address-line2" value={form.addressLine2} onChange={(e) => update('addressLine2', e.target.value)} /></FormField><FormField label="City"><input autoComplete="address-level2" value={form.city} onChange={(e) => update('city', e.target.value)} /></FormField><FormField label={market.region}><input autoComplete="postal-code" value={form.postalCode} placeholder={market.placeholder} onChange={(e) => update('postalCode', e.target.value)} /></FormField><FormField label="Requested date"><input type="date" value={form.selectedDate} onChange={(e) => update('selectedDate', e.target.value)} /></FormField><FormField label="Arrival window"><select value={form.selectedTimeSlot} onChange={(e) => update('selectedTimeSlot', e.target.value)}><option value="">Select window</option><option>Morning</option><option>Midday</option><option>Afternoon</option><option>Flexible</option></select></FormField><FormField label="Access instructions" hint="Share parking, entry, concierge, alarm, pet, or key instructions." className="form-grid__wide"><textarea value={form.accessNotes} onChange={(e) => update('accessNotes', e.target.value)} /></FormField><FormField label="Anything else we should know?" className="form-grid__wide"><textarea value={form.notes} onChange={(e) => update('notes', e.target.value)} /></FormField></div>,

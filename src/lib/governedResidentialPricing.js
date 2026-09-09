@@ -118,6 +118,47 @@ function resolveDwellingMatrixTypeKey(matrix, dwellingType) {
   return matchingEntry?.[0] ?? null;
 }
 
+function publicDwellingType(matrixKey) {
+  const normalizedKey = normalizeToken(matrixKey);
+  if (DWELLING_TYPE_ALIASES.apartments_condos.includes(normalizedKey)) return "apartment";
+  if (DWELLING_TYPE_ALIASES.townhouses.includes(normalizedKey)) return "townhouse";
+  if (DWELLING_TYPE_ALIASES.semi_detached_detached.includes(normalizedKey)) return "detached";
+  return null;
+}
+
+function matrixRowDimensions(key, value) {
+  const explicitBeds = toNumber(value?.beds, Number.NaN);
+  const explicitBaths = toNumber(value?.baths, Number.NaN);
+  if (Number.isFinite(explicitBeds) && Number.isFinite(explicitBaths)) return { bedrooms: explicitBeds, bathrooms: explicitBaths };
+  const match = normalizeToken(key).match(/^(\d+(?:_\d+)?)bed_(\d+(?:_\d+)?)bath$/);
+  if (!match) return null;
+  return { bedrooms: Number(match[1].replace("_", ".")), bathrooms: Number(match[2].replace("_", ".")) };
+}
+
+export function getGovernedResidentialCatalog(configurationVersion) {
+  const matrix = configurationVersion?.configuration?.dwelling_matrix;
+  if (!matrix || typeof matrix !== "object") throw new Error("Governed residential catalog requires dwelling_matrix");
+  const combinations = [];
+  if (Array.isArray(matrix)) {
+    for (const row of matrix) {
+      const dwellingType = publicDwellingType(row?.dwelling_type);
+      const dimensions = matrixRowDimensions("", row);
+      if (dwellingType && dimensions) combinations.push({ dwellingType, ...dimensions });
+    }
+  } else {
+    for (const [matrixKey, rows] of Object.entries(matrix)) {
+      const dwellingType = publicDwellingType(matrixKey);
+      if (!dwellingType || !rows || typeof rows !== "object") continue;
+      for (const [rowKey, row] of Object.entries(rows)) {
+        const dimensions = matrixRowDimensions(rowKey, row);
+        if (dimensions) combinations.push({ dwellingType, ...dimensions });
+      }
+    }
+  }
+  const unique = new Map(combinations.map((item) => [`${item.dwellingType}:${item.bedrooms}:${item.bathrooms}`, item]));
+  return [...unique.values()].sort((a, b) => a.dwellingType.localeCompare(b.dwellingType) || a.bedrooms - b.bedrooms || a.bathrooms - b.bathrooms);
+}
+
 function mapFrequencyRule(recurringService, normalizedFrequency) {
   if (normalizedFrequency === "weekly") return recurringService?.weekly_discount;
   if (normalizedFrequency === "biweekly") return recurringService?.biweekly_discount;
