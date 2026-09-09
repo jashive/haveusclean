@@ -16,6 +16,6 @@ export function workspaceFromPath(pathname) {
 
 export default function AdminWorkspaceNavigation({ active, onSelect }) {
   return <nav className="admin-workspace-navigation" aria-label="ServiceOS workspaces">
-    {ADMIN_WORKSPACES.map((item) => <button key={item.id} type="button" className={active === item.id ? "is-active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onSelect(item)}>{item.label}</button>)}
+    {ADMIN_WORKSPACES.map((item) => <button key={item.id} type="button" data-tour={`workspace-${item.id}`} className={active === item.id ? "is-active" : ""} aria-current={active === item.id ? "page" : undefined} onClick={() => onSelect(item)}>{item.label}</button>)}
   </nav>;
 }

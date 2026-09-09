@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { outstandingPayables, profitabilityTone } from "../src/lib/serviceosFinancialLedgers.js";
+import { outstandingPayables, profitabilityLabel, profitabilityTone } from "../src/lib/serviceosFinancialLedgers.js";
 
 const workspace = fs.readFileSync(new URL("../src/features/admin/FinancialLedgersWorkspace.jsx", import.meta.url), "utf8");
 const settlement = fs.readFileSync(new URL("../src/features/admin/PayableSettlementBoard.jsx", import.meta.url), "utf8");
@@ -22,6 +22,9 @@ test("profitability thresholds are deterministic and investor-readable", () => {
   assert.equal(profitabilityTone(29.99), "danger");
   assert.equal(profitabilityTone(null), "neutral");
   assert.equal(profitabilityTone(undefined), "neutral");
+  assert.equal(profitabilityLabel(50), "Healthy");
+  assert.equal(profitabilityLabel(30), "Watch");
+  assert.equal(profitabilityLabel(29.99), "At Risk");
 });
 
 test("financial workspace composes one territory-aware read model", () => {
@@ -35,7 +38,10 @@ test("financial workspace composes one territory-aware read model", () => {
 test("settlement board uses the existing governed approval RPC boundary", () => {
   assert.match(client, /get_cleaner_payables_dashboard/);
   assert.match(client, /staff_approve_contractor_payables/);
-  assert.match(settlement, /Approve payout/);
+  assert.match(settlement, /"Approve"/);
+  assert.match(settlement, /Disburse/);
+  assert.match(settlement, /Settled/);
+  assert.match(client, /staff_mark_contractor_payables_paid/);
   assert.match(settlement, /\/admin\/dispatch/);
   assert.doesNotMatch(client + settlement, /\/api\/financial/);
 });

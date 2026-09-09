@@ -45,6 +45,18 @@ export function approveContractorPayable({ organizationId, businessUnitId, payab
   });
 }
 
+export function disburseContractorPayable({ organizationId, businessUnitId, payableId, paymentMethod, paymentReference }) {
+  return rpc("staff_mark_contractor_payables_paid", {
+    p_organization_id: organizationId,
+    p_business_unit_id: businessUnitId,
+    p_payable_ids: [payableId],
+    p_payment_method: paymentMethod,
+    p_payment_reference: paymentReference,
+    p_paid_at: new Date().toISOString(),
+    p_note: "Disbursement recorded in Financial Ledgers workspace",
+  });
+}
+
 export function outstandingPayables(payables) {
   return Number(payables?.pending_total || 0) + Number(payables?.approved_total || 0);
 }
@@ -56,4 +68,12 @@ export function profitabilityTone(value) {
   if (margin >= 50) return "success";
   if (margin >= 30) return "warning";
   return "danger";
+}
+
+
+export function profitabilityLabel(value) {
+  if (value === null || value === undefined || value === "" || !Number.isFinite(Number(value))) return "Unrated";
+  if (Number(value) >= 50) return "Healthy";
+  if (Number(value) >= 30) return "Watch";
+  return "At Risk";
 }
