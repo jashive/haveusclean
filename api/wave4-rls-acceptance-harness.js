@@ -18,6 +18,7 @@
 import runWave4RlsAcceptanceImpl from "../server-internal/wave4-rls-acceptance-harness-impl.js";
 import { runWave5RlsAcceptanceHandler } from "../src/server/wave5RlsAcceptanceHarness.js";
 import { requireServiceosServerTarget } from "../src/server/serviceosServerEnvironment.js";
+import handleGrowthInstantlyWebhook from "../server-internal/growth-instantly-webhook.js";
 
 const CONTRACT_VERSION = "wave4-rls-acceptance-v2";
 const WAVE5_CONTRACT_VERSION = "wave5-rls-acceptance-v1";
@@ -61,6 +62,9 @@ function rejectInvalidTarget(res, contractVersion) {
 }
 
 export default async function handler(req, res) {
+  if (req.query?.growth === "instantly-webhook") {
+    return handleGrowthInstantlyWebhook(req, res);
+  }
   if (req.method === "POST") {
     let dispatchBody = {};
     try {

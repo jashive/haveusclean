@@ -30,7 +30,7 @@ test("team workspace is routed in the commercial admin shell without a new funct
   const apiFileCount = countApiFiles(new URL("../api/", import.meta.url));
   assert.match(layout, /TeamHiringWorkspace/);
   assert.equal(vercel.functions ? Object.keys(vercel.functions).length : 0, 0);
-  assert.equal(vercel.rewrites.length, 5);
+  assert.equal(vercel.rewrites.length, 6);
   assert.equal(apiFileCount, 12);
 });
 

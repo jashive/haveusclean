@@ -20,6 +20,10 @@
       "destination": "/api/serviceos-staff-admin?workforce=dashboard"
     },
     {
+      "source": "/api/growth/instantly-webhook",
+      "destination": "/api/wave4-rls-acceptance-harness?growth=instantly-webhook"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
