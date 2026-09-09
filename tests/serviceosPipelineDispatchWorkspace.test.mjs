@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
-import { filterWorkOrderHistory, normalizeDispatchJob } from "../src/lib/serviceosPipelineDispatch.js";
+import { dispatchJobBadge, filterWorkOrderHistory, normalizeDispatchJob } from "../src/lib/serviceosPipelineDispatch.js";
 
 const [workspace, navigation, calendar, queue, history, client] = await Promise.all([
   readFile(new URL("../src/features/admin/PipelineDispatchWorkspace.jsx", import.meta.url), "utf8"),
@@ -29,8 +29,22 @@ test("work-order search is deterministic across customer, address, cleaner, and 
 });
 
 test("workspace composes calendar, unscheduled queue, history, and existing assignment workflow", () => {
-  for (const component of ["DispatchCalendar", "UnscheduledWorkQueue", "WorkOrderHistoryTable", "ServiceOSOperationsWorkspace"]) assert.match(workspace, new RegExp(component));
+  for (const component of ["DispatchCalendar", "UnscheduledWorkQueue", "WorkOrderHistoryTable", "DispatchAssignmentModal"]) assert.match(workspace, new RegExp(component));
   assert.match(calendar, /Governed schedule/); assert.match(queue, /Unscheduled work/); assert.match(history, /type="search"/); assert.match(client, /authenticatedRestFetchWithRefresh/); assert.match(client, /fetchEligibleJobHandoffs/); assert.match(client, /enrichHandoffForDispatch/); assert.doesNotMatch(client + workspace, /\/api\//);
+});
+
+test("commercial walkthroughs and recurring work have distinct deterministic badges", () => {
+  assert.deepEqual(dispatchJobBadge({ isCommercial: true }), { label: "Commercial", tone: "commercial" });
+  assert.deepEqual(dispatchJobBadge({ isCommercial: false }), { label: "Recurring", tone: "recurring" });
+  const commercial = normalizeDispatchJob({ id: "job-2", operational_status: "scheduled", service_family: "commercial_janitorial", service_scope_snapshot: { square_feet: 12000 }, schedule_window: [], work_order: [], worker_assignment: [] });
+  assert.equal(commercial.isCommercial, true); assert.equal(commercial.squareFeet, 12000);
+});
+
+test("calendar assignment uses existing governed schedule and worker clients", () => {
+  assert.match(client, /updateScheduledDispatchAssignment/);
+  assert.match(client, /updateWorkerAssignmentStatus/);
+  assert.match(client, /createWorkerAssignment/);
+  assert.doesNotMatch(client, /service_role/);
 });
 
 test("Pipeline & Dispatch adds no schema migration or serverless function", () => {

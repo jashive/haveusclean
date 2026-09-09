@@ -173,7 +173,7 @@ export default function ServiceOSFlightControlBoard({ session, revenueContext })
 
   if (!["owner_admin", "office_ops"].includes(role)) return null;
 
-  return <section className="flight-control-board" aria-labelledby="flight-control-title" data-flight-control-market={marketCode}>
+  return <section className="flight-control-board" aria-labelledby="flight-control-title" data-flight-control-market={marketCode} data-tour="flight-control-cards">
     <header className="flight-control-board__header"><div><p className="admin-eyebrow">Administrative flight control · {marketCode}</p><h2 id="flight-control-title">Live service lifecycle</h2><p>One governed operating view from accepted work through cleaner settlement.</p></div><div><StatusBadge tone={error ? "danger" : "success"}>{total} active</StatusBadge><button className="huc-button huc-button--secondary" onClick={() => load()} disabled={loading}>{loading ? "Refreshing…" : "Refresh board"}</button></div></header>
     {error ? <div className="financial-alert" role="alert">{error}</div> : null}
     {notice ? <div className="financial-alert financial-alert--success" role="status">{notice}</div> : null}
