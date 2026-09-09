@@ -70,6 +70,6 @@ export default function ExecutiveKpiBar({ revenueContext, financialData, outstan
 
   return <section className="executive-kpi-bar" aria-labelledby="executive-kpi-title" data-market-code={marketCode}>
     <header><div><p className="admin-eyebrow">Executive unit economics · last 30 days</p><h2 id="executive-kpi-title">{marketCode} flight metrics</h2></div><StatusBadge tone={visibleError ? "danger" : "success"}>{currencyCode || "Market required"}</StatusBadge></header>
-    {visibleError ? <div className="financial-alert" role="alert">{visibleError}</div> : <div className="executive-kpi-bar__grid" aria-busy={visibleLoading}>{cards.map(([label, value, hint]) => <article key={label}><span>{label}</span><strong>{visibleLoading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
+    {visibleError ? <div className="financial-alert" role="alert">{visibleError}</div> : <div className="executive-kpi-bar__grid" aria-busy={visibleLoading}>{cards.map(([label, value, hint]) => <article key={label} data-tip="Real-time gross booking volume and realized margin"><span>{label}</span><strong>{visibleLoading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
   </section>;
 }
