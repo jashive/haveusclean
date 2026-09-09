@@ -37,9 +37,10 @@ test("hover-tip preference defaults on and persists an explicit dismissal", () =
 });
 
 test("hover tips cover dispatch, team, and financial workspaces", () => {
-  for (const phrase of ["Click or drag to schedule onto calendar", "Drop zone for dispatch allocation", "Commercial facility walkthrough inquiry"]) assert.match(dispatch, new RegExp(phrase));
-  for (const phrase of ["5-stage screening pipeline", "Promote applicant to next onboarding milestone", "Toggle active dispatch eligibility", "Assigned operating jurisdiction"]) assert.match(team, new RegExp(phrase));
-  for (const phrase of ["Real-time gross booking volume and realized margin", "Trigger governed ledger payout disburse", "Healthy ≥50%, Watch ≥30%, At Risk <30%"] ) assert.ok(financials.includes(phrase));
+  for (const phrase of ["Click or drag to assign an operable contractor and schedule a slot.", "Scheduled operational commitments by territory.", "Commercial facility inquiry — requires square footage walkthrough inspection."]) assert.ok(dispatch.includes(phrase));
+  for (const phrase of ["Applicant profile — review background checks and advance stage.", "Promote applicant to next onboarding milestone", "Switch contractor between active roster and operable dispatch queue.", "Assigned operating jurisdiction"]) assert.ok(team.includes(phrase));
+  for (const phrase of ["Total gross contract value scheduled and realized across active territories.", "Contractor labor liability accrued against completed and active work orders.", "Operating margin retained after direct contractor payouts and supplies.", "Pending and approved contractor earnings awaiting disbursement batching.", "Governed disbursement trigger writing to immutable append-only ledger.", "Healthy ≥50%, Watch ≥30%, At Risk <30%"] ) assert.ok(financials.includes(phrase));
+  assert.doesNotMatch(financials, /Real-time gross booking volume and realized margin/);
   assert.match(tips, /Don’t show tips again/);
 });
 
