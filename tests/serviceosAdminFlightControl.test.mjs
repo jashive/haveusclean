@@ -32,7 +32,7 @@ test("flight-control pipeline states are mutually exclusive", () => {
 });
 
 test("executive KPI bar uses governed financial performance without a new API", () => {
-  for (const label of ["Gross Booking Value", "Cleaner Labor Accrual %", "Net Realized Margin %", "Completed Jobs"]) assert.match(kpi, new RegExp(label));
+  for (const label of ["Gross Booking Value", "Cleaner Labor Accrual %", "Net Realized Margin %", "Outstanding Payables"]) assert.match(kpi, new RegExp(label));
   assert.match(kpi, /fetchFinancialPerformance/);
   assert.match(kpi, /SERVICEOS_WORKSPACE_INVALIDATED_EVENT/);
   assert.doesNotMatch(kpi, /\/api\//);
@@ -48,7 +48,7 @@ test("administrative cockpit composes four governed lanes and actions", () => {
 });
 
 test("cockpit exposes persistent commercial workspaces without a secondary drawer", () => {
-  for (const label of ["AdminWorkspaceNavigation", "PipelineDispatchWorkspace", "TeamHiringWorkspace", "CleanerPayablesPanel"]) assert.match(cockpit, new RegExp(label));
+  for (const label of ["AdminWorkspaceNavigation", "PipelineDispatchWorkspace", "TeamHiringWorkspace", "FinancialLedgersWorkspace"]) assert.match(cockpit, new RegExp(label));
   for (const action of ["AssignmentQuickAction", "QaEvidenceDrawer", "SettlementQuickAction"]) assert.match(board, new RegExp(action));
   assert.match(cockpit, /data-admin-default-view="flight-control"/);
   assert.doesNotMatch(cockpit, /SecondaryWorkspaceDrawer/);
