@@ -39,6 +39,12 @@ function money(value) {
   return Math.round((numeric + Number.EPSILON) * 100) / 100;
 }
 
+function preferredOrMinimum(range) {
+  const preferred = Number(range?.preferred);
+  if (Number.isFinite(preferred)) return preferred;
+  return Number(range?.min ?? Number.NaN);
+}
+
 function completeDeepIncludedAddonIds(configurationVersion) {
   const config = configurationVersion?.configuration || {};
   const packageRule = config.packages?.complete_deep_clean ?? config.packages?.complete_deep ?? {};
@@ -105,9 +111,9 @@ export function getDefaultApprovedSelections(configurationVersion, { condition, 
   if (normalizedCondition === "moderate") approved.conditionMarkupPct = Number(config.condition_adjustments?.moderate?.minimum_markup ?? Number.NaN);
   else if (normalizedCondition === "heavy") approved.conditionMarkupPct = Number(config.condition_adjustments?.heavy?.minimum_markup ?? Number.NaN);
 
-  if (normalizedFrequency === "weekly") approved.recurringDiscountPct = Number(config.recurring_service?.weekly_discount?.min ?? Number.NaN);
-  else if (normalizedFrequency === "biweekly") approved.recurringDiscountPct = Number(config.recurring_service?.biweekly_discount?.min ?? Number.NaN);
-  else if (normalizedFrequency === "monthly") approved.recurringDiscountPct = Number(config.recurring_service?.monthly_discount?.min ?? Number.NaN);
+  if (normalizedFrequency === "weekly") approved.recurringDiscountPct = preferredOrMinimum(config.recurring_service?.weekly_discount);
+  else if (normalizedFrequency === "biweekly") approved.recurringDiscountPct = preferredOrMinimum(config.recurring_service?.biweekly_discount);
+  else if (normalizedFrequency === "monthly") approved.recurringDiscountPct = preferredOrMinimum(config.recurring_service?.monthly_discount);
 
   if (sqftBand === "additional_250_500_sqft") {
     approved.sqftBand = sqftBand;
