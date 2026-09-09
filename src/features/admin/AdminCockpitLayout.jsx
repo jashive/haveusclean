@@ -5,7 +5,7 @@ import AdminWorkspaceNavigation, { workspaceFromPath } from "./AdminWorkspaceNav
 const ExecutiveKpiBar = lazy(() => import("./ExecutiveKpiBar"));
 const ServiceOSFlightControlBoard = lazy(() => import("./ServiceOSFlightControlBoard"));
 const PipelineDispatchWorkspace = lazy(() => import("./PipelineDispatchWorkspace"));
-const ServiceOSStaffAdminWorkspace = lazy(() => import("./ServiceOSStaffAdminWorkspace"));
+const TeamHiringWorkspace = lazy(() => import("./TeamHiringWorkspace"));
 const CleanerPayablesPanel = lazy(() => import("../wave5/CleanerPayablesPanel"));
 const ServiceOSFinanceWorkspace = lazy(() => import("../wave5/ServiceOSFinanceWorkspace"));
 
@@ -38,7 +38,7 @@ export default function AdminCockpitLayout({ session, revenueContext, staffAdmin
     <Suspense fallback={<WorkspaceLoading />}>
       {workspace === "flight-control" ? <><ExecutiveKpiBar revenueContext={revenueContext} /><ServiceOSFlightControlBoard session={session} revenueContext={revenueContext} /></> : null}
       {workspace === "pipeline-dispatch" ? <PipelineDispatchWorkspace session={session} revenueContext={revenueContext} /> : null}
-      {workspace === "team-hiring" ? staffAdminAuthorized ? <ServiceOSStaffAdminWorkspace /> : <div className="admin-permission-state">Owner access is required for team administration.</div> : null}
+      {workspace === "team-hiring" ? staffAdminAuthorized ? <TeamHiringWorkspace session={session} revenueContext={revenueContext} /> : <div className="admin-permission-state">Owner access is required for team administration.</div> : null}
       {workspace === "financial-ledgers" ? <><ExecutiveKpiBar revenueContext={revenueContext} /><CleanerPayablesPanel revenueContext={revenueContext} /><ServiceOSFinanceWorkspace session={session} revenueContext={revenueContext} /></> : null}
     </Suspense>
   </section>;

@@ -48,7 +48,7 @@ test("administrative cockpit composes four governed lanes and actions", () => {
 });
 
 test("cockpit exposes persistent commercial workspaces without a secondary drawer", () => {
-  for (const label of ["AdminWorkspaceNavigation", "PipelineDispatchWorkspace", "ServiceOSStaffAdminWorkspace", "CleanerPayablesPanel"]) assert.match(cockpit, new RegExp(label));
+  for (const label of ["AdminWorkspaceNavigation", "PipelineDispatchWorkspace", "TeamHiringWorkspace", "CleanerPayablesPanel"]) assert.match(cockpit, new RegExp(label));
   for (const action of ["AssignmentQuickAction", "QaEvidenceDrawer", "SettlementQuickAction"]) assert.match(board, new RegExp(action));
   assert.match(cockpit, /data-admin-default-view="flight-control"/);
   assert.doesNotMatch(cockpit, /SecondaryWorkspaceDrawer/);
