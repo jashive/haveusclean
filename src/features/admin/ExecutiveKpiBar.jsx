@@ -16,7 +16,7 @@ function percentage(numerator, denominator) {
   return `${((top / bottom) * 100).toFixed(1)}%`;
 }
 
-export default function ExecutiveKpiBar({ revenueContext }) {
+export default function ExecutiveKpiBar({ revenueContext, financialData, outstandingAmount, externalLoading, externalError }) {
   const organizationId = revenueContext?.orgId;
   const businessUnitId = revenueContext?.primaryBusinessUnitId;
   const marketCode = revenueContext?.activeBusinessUnitCode;
@@ -29,7 +29,9 @@ export default function ExecutiveKpiBar({ revenueContext }) {
     end: new Date().toISOString(),
   }), [businessUnitId]);
 
+  const managed = financialData !== undefined;
   const load = useCallback(async () => {
+    if (managed) return;
     if (!organizationId || !businessUnitId || !currencyCode) return;
     setLoading(true);
     setError("");
@@ -41,7 +43,7 @@ export default function ExecutiveKpiBar({ revenueContext }) {
     } finally {
       setLoading(false);
     }
-  }, [organizationId, businessUnitId, currencyCode, period]);
+  }, [organizationId, businessUnitId, currencyCode, period, managed]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -54,16 +56,20 @@ export default function ExecutiveKpiBar({ revenueContext }) {
     };
   }, [businessUnitId, load]);
 
-  const kpis = data?.kpis;
+  const visibleData = managed ? financialData : data;
+  const visibleLoading = managed ? externalLoading : loading;
+  const visibleError = managed ? externalError : error;
+  const kpis = visibleData?.kpis;
+  const outstanding = outstandingAmount ?? Number(kpis?.payroll_pending || 0) + Number(kpis?.payroll_approved || 0);
   const cards = [
     ["Gross Booking Value", formatFinancialAmount(kpis?.gross_bookings, currencyCode), "Accepted value · tax excluded"],
     ["Cleaner Labor Accrual %", percentage(kpis?.cleaner_labor_accrued, kpis?.recognized_revenue), `${formatFinancialAmount(kpis?.cleaner_labor_accrued, currencyCode)} accrued`],
     ["Net Realized Margin %", formatContributionMargin(kpis?.contribution_margin_percent), `${formatFinancialAmount(kpis?.net_contribution, currencyCode)} contribution`],
-    ["Completed Jobs", Number.isFinite(Number(kpis?.jobs_count)) ? String(Number(kpis.jobs_count)) : "No governed data", "Governed profitability snapshots"],
+    ["Outstanding Payables", formatFinancialAmount(outstanding, currencyCode), "Pending + approved contractor liability"],
   ];
 
   return <section className="executive-kpi-bar" aria-labelledby="executive-kpi-title" data-market-code={marketCode}>
-    <header><div><p className="admin-eyebrow">Executive unit economics · last 30 days</p><h2 id="executive-kpi-title">{marketCode} flight metrics</h2></div><StatusBadge tone={error ? "danger" : "success"}>{currencyCode || "Market required"}</StatusBadge></header>
-    {error ? <div className="financial-alert" role="alert">{error}</div> : <div className="executive-kpi-bar__grid" aria-busy={loading}>{cards.map(([label, value, hint]) => <article key={label}><span>{label}</span><strong>{loading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
+    <header><div><p className="admin-eyebrow">Executive unit economics · last 30 days</p><h2 id="executive-kpi-title">{marketCode} flight metrics</h2></div><StatusBadge tone={visibleError ? "danger" : "success"}>{currencyCode || "Market required"}</StatusBadge></header>
+    {visibleError ? <div className="financial-alert" role="alert">{visibleError}</div> : <div className="executive-kpi-bar__grid" aria-busy={visibleLoading}>{cards.map(([label, value, hint]) => <article key={label}><span>{label}</span><strong>{visibleLoading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
   </section>;
 }
