@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { completeServiceOSTour, hasCompletedServiceOSTour, SERVICEOS_TOUR_STEPS, WORKSPACE_HELP } from "../src/lib/serviceosLearnability.js";
+import { completeServiceOSTour, hasCompletedServiceOSTour, persistServiceOSTips, positionServiceOSTip, SERVICEOS_TOUR_STEPS, serviceOSTipsEnabled, WORKSPACE_HELP } from "../src/lib/serviceosLearnability.js";
 
 const layout = fs.readFileSync(new URL("../src/features/admin/AdminCockpitLayout.jsx", import.meta.url), "utf8");
 const tour = fs.readFileSync(new URL("../src/features/admin/TourOverlay.jsx", import.meta.url), "utf8");
 const help = fs.readFileSync(new URL("../src/features/admin/HelpPanel.jsx", import.meta.url), "utf8");
+const tips = fs.readFileSync(new URL("../src/features/admin/TipLayer.jsx", import.meta.url), "utf8");
+const dispatch = fs.readFileSync(new URL("../src/features/admin/DispatchCalendar.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/UnscheduledWorkQueue.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/DispatchJobBadge.jsx", import.meta.url), "utf8");
+const team = fs.readFileSync(new URL("../src/features/admin/ApplicantPipelineBoard.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/ApplicantReviewModal.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/ActiveContractorDirectory.jsx", import.meta.url), "utf8");
+const financials = fs.readFileSync(new URL("../src/features/admin/ExecutiveKpiBar.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/PayableSettlementBoard.jsx", import.meta.url), "utf8") + fs.readFileSync(new URL("../src/features/admin/JobProfitabilityTable.jsx", import.meta.url), "utf8");
 const css = fs.readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
 
 function countApiFiles(directory) { return fs.readdirSync(directory, { withFileTypes: true }).reduce((count, entry) => count + (entry.isDirectory() ? countApiFiles(new URL(`${entry.name}/`, directory)) : Number(entry.name.endsWith(".js"))), 0); }
@@ -24,9 +28,28 @@ test("tour dismissal is versioned and persists without a backend write", () => {
   assert.equal(hasCompletedServiceOSTour(storage), false); completeServiceOSTour(storage); assert.equal(hasCompletedServiceOSTour(storage), true);
 });
 
+test("hover-tip preference defaults on and persists an explicit dismissal", () => {
+  const values = new Map(); const storage = { getItem: (key) => values.get(key), setItem: (key, value) => values.set(key, value) };
+  assert.equal(serviceOSTipsEnabled(storage), true); persistServiceOSTips(false, storage); assert.equal(serviceOSTipsEnabled(storage), false); persistServiceOSTips(true, storage); assert.equal(serviceOSTipsEnabled(storage), true);
+  assert.equal(values.get("serviceos_tips_enabled"), "true");
+});
+
+test("hover tips cover dispatch, team, and financial workspaces", () => {
+  for (const phrase of ["Click or drag to schedule onto calendar", "Drop zone for dispatch allocation", "Commercial facility walkthrough inquiry"]) assert.match(dispatch, new RegExp(phrase));
+  for (const phrase of ["5-stage screening pipeline", "Promote applicant to next onboarding milestone", "Toggle active dispatch eligibility", "Assigned operating jurisdiction"]) assert.match(team, new RegExp(phrase));
+  for (const phrase of ["Real-time gross booking volume and realized margin", "Trigger governed ledger payout disburse", "Healthy ≥50%, Watch ≥30%, At Risk <30%"] ) assert.ok(financials.includes(phrase));
+  assert.match(tips, /Don’t show tips again/);
+});
+
+test("tooltip collision logic stays inside the viewport and flips above", () => {
+  assert.deepEqual(positionServiceOSTip({ left: 980, width: 40, top: 700, bottom: 740 }, { width: 300, height: 60 }, { width: 1024, height: 768 }), { left: 712, top: 630, width: 300 });
+  assert.deepEqual(positionServiceOSTip({ left: 0, width: 20, top: 20, bottom: 40 }, { width: 300, height: 60 }, { width: 1024, height: 768 }), { left: 12, top: 50, width: 300 });
+});
+
 test("admin shell exposes replayable help and route-aware tour composition", () => {
   for (const contract of ["HelpPanel", "TourOverlay", "hasCompletedServiceOSTour", "completeServiceOSTour", "onWorkspaceChange"]) assert.match(layout + tour, new RegExp(contract));
   assert.match(layout, />Help<\/button>/); assert.doesNotMatch(layout + tour + help, /\/api\//);
+  assert.match(layout, /TipsToggle/); assert.match(layout, /TipLayer/); assert.match(tips, /closest\?\.\("\[data-tip\]"\)/);
 });
 
 test("help and tour implement keyboard and dialog accessibility", () => {

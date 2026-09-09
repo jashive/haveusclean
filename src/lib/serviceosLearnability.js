@@ -1,4 +1,5 @@
 export const SERVICEOS_TOUR_STORAGE_KEY = "serviceos:admin-tour:v1";
+export const SERVICEOS_TIPS_STORAGE_KEY = "serviceos_tips_enabled";
 
 export const SERVICEOS_TOUR_STEPS = Object.freeze([
   { id: "flight-control", workspace: "flight-control", selector: '[data-tour="flight-control-cards"]', title: "Run today from Flight Control", body: "Track accepted work through dispatch, field execution, QA, and cleaner settlement from one board." },
@@ -20,4 +21,20 @@ export function hasCompletedServiceOSTour(storage = globalThis?.localStorage) {
 
 export function completeServiceOSTour(storage = globalThis?.localStorage) {
   try { storage?.setItem(SERVICEOS_TOUR_STORAGE_KEY, "completed"); } catch { /* Browser storage may be unavailable. */ }
+}
+
+export function serviceOSTipsEnabled(storage = globalThis?.localStorage) {
+  try { return storage?.getItem(SERVICEOS_TIPS_STORAGE_KEY) !== "false"; } catch { return true; }
+}
+
+export function persistServiceOSTips(enabled, storage = globalThis?.localStorage) {
+  try { storage?.setItem(SERVICEOS_TIPS_STORAGE_KEY, String(Boolean(enabled))); } catch { /* Browser storage may be unavailable. */ }
+}
+
+export function positionServiceOSTip(rect, size, viewport, gap = 10) {
+  const width = Math.min(size.width, viewport.width - 24);
+  const left = Math.max(12, Math.min(rect.left + rect.width / 2 - width / 2, viewport.width - width - 12));
+  const below = rect.bottom + gap + size.height <= viewport.height - 12;
+  const top = below ? rect.bottom + gap : Math.max(12, rect.top - gap - size.height);
+  return { left, top, width };
 }
