@@ -62,14 +62,14 @@ export default function ExecutiveKpiBar({ revenueContext, financialData, outstan
   const kpis = visibleData?.kpis;
   const outstanding = outstandingAmount ?? Number(kpis?.payroll_pending || 0) + Number(kpis?.payroll_approved || 0);
   const cards = [
-    ["Gross Booking Value", formatFinancialAmount(kpis?.gross_bookings, currencyCode), "Accepted value · tax excluded"],
-    ["Cleaner Labor Accrual %", percentage(kpis?.cleaner_labor_accrued, kpis?.recognized_revenue), `${formatFinancialAmount(kpis?.cleaner_labor_accrued, currencyCode)} accrued`],
-    ["Net Realized Margin %", formatContributionMargin(kpis?.contribution_margin_percent), `${formatFinancialAmount(kpis?.net_contribution, currencyCode)} contribution`],
-    ["Outstanding Payables", formatFinancialAmount(outstanding, currencyCode), "Pending + approved contractor liability"],
+    ["Gross Booking Value", formatFinancialAmount(kpis?.gross_bookings, currencyCode), "Accepted value · tax excluded", "Total gross contract value scheduled and realized across active territories."],
+    ["Cleaner Labor Accrual %", percentage(kpis?.cleaner_labor_accrued, kpis?.recognized_revenue), `${formatFinancialAmount(kpis?.cleaner_labor_accrued, currencyCode)} accrued`, "Contractor labor liability accrued against completed and active work orders."],
+    ["Net Realized Margin %", formatContributionMargin(kpis?.contribution_margin_percent), `${formatFinancialAmount(kpis?.net_contribution, currencyCode)} contribution`, "Operating margin retained after direct contractor payouts and supplies."],
+    ["Outstanding Payables", formatFinancialAmount(outstanding, currencyCode), "Pending + approved contractor liability", "Pending and approved contractor earnings awaiting disbursement batching."],
   ];
 
   return <section className="executive-kpi-bar" aria-labelledby="executive-kpi-title" data-market-code={marketCode}>
     <header><div><p className="admin-eyebrow">Executive unit economics · last 30 days</p><h2 id="executive-kpi-title">{marketCode} flight metrics</h2></div><StatusBadge tone={visibleError ? "danger" : "success"}>{currencyCode || "Market required"}</StatusBadge></header>
-    {visibleError ? <div className="financial-alert" role="alert">{visibleError}</div> : <div className="executive-kpi-bar__grid" aria-busy={visibleLoading}>{cards.map(([label, value, hint]) => <article key={label} data-tip="Real-time gross booking volume and realized margin"><span>{label}</span><strong>{visibleLoading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
+    {visibleError ? <div className="financial-alert" role="alert">{visibleError}</div> : <div className="executive-kpi-bar__grid" aria-busy={visibleLoading}>{cards.map(([label, value, hint, tip]) => <article key={label} data-tip={tip}><span>{label}</span><strong>{visibleLoading ? "Refreshing…" : value}</strong><small>{hint}</small></article>)}</div>}
   </section>;
 }
